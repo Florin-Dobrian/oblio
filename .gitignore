@@ -1,0 +1,24 @@
+# Build artifacts
+*.o
+*.a
+*.so
+*.dylib
+
+# Executables (no extension)
+test_smoke_real
+test_smoke_complex
+test_extended_real
+test_extended_complex
+
+# macOS
+.DS_Store
+._*
+
+# Editors
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+*.pdf

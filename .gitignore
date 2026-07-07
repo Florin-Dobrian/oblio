@@ -4,6 +4,10 @@
 *.so
 *.dylib
 
+# CMake out-of-source build
+build/
+cmake-build-*/
+
 # Executables (no extension)
 test_smoke_real
 test_smoke_complex

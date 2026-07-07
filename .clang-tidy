@@ -1,0 +1,25 @@
+# Static checks aligned with the coding invariants. Starting point — tune as noise appears.
+#
+# Roles:
+#   modernize-*                     catch leftover pre-C++11 idioms during the port
+#                                   (NULL, typedef, bare enum, private copy-ctor, ...)
+#   *-narrowing-conversions         catch signed -> size_t narrowing (index-signedness
+#                                   invariant). NOTE: no check fully covers descending-loop
+#                                   underflow — that one still needs a human eye.
+#
+# Caution during the port: `clang-tidy --fix` rewrites the WHOLE file, not just the unit
+# you are porting. Prefer running it as a *catch* (report, no --fix) per unit, or as a
+# deliberate sweep — not blindly mid-port, or it blurs one-unit-at-a-time diffs.
+Checks: >
+  -*,
+  modernize-*,
+  bugprone-narrowing-conversions,
+  cppcoreguidelines-narrowing-conversions,
+  bugprone-integer-division,
+  bugprone-misplaced-widening-cast,
+  bugprone-too-small-loop-variable,
+  readability-braces-around-statements,
+  -modernize-use-trailing-return-type,
+  -modernize-avoid-c-arrays
+WarningsAsErrors: ''
+HeaderFilterRegex: 'include/oblio/.*'

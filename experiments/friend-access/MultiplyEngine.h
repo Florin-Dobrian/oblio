@@ -1,16 +1,19 @@
 #pragma once
 
-// MultiplyEngine.h — computes y = A*x two ways, to contrast access patterns:
+// MultiplyEngine.h — computes y = A*x three ways, to contrast access patterns:
 //
 //   multiplyByApi    — through the public operator()/operator[]. Readable, but each
-//                      element is a (non-inlined, cross-TU) call with a bounds-check
-//                      assert, and the compiler can't vectorize across the calls.
+//                      element is a non-inlined, cross-TU call, so the compiler can't
+//                      vectorize across the calls. (Bounds-check asserts add little;
+//                      the cost is the calls, not the checks — see the README timing.)
 //   multiplyDirectly — `friend` access to the contiguous storage: fetch the raw
-//                      pointers once and walk them. No per-element calls, no asserts,
-//                      and the inner loop vectorizes. This is the performance path.
+//                      pointers once and walk them. No per-element calls, so the inner
+//                      loop vectorizes. Hand-written fast path.
+//   multiplyWithBlas — same `friend` access to get the raw block, then hand it to BLAS
+//                      gemv (dgemv_/zgemv_). This is what `friend` ultimately enables,
+//                      and the real solver's fast path.
 //
-// Both compute the same result. (No BLAS yet — a later step hands the raw block to
-// dgemv/dgemm, which is faster still; friend access is what enables that handoff.)
+// All three compute the same result.
 
 #include "Matrix.h"
 #include "Vector.h"
@@ -27,6 +30,9 @@ public:
     template<class Val>
     Vector<Val> multiplyDirectly(const Matrix<Val>& A, const Vector<Val>& x) const;
 
+    template<class Val>
+    Vector<Val> multiplyWithBlas(const Matrix<Val>& A, const Vector<Val>& x) const;
+
 private:
     MultiplyEngine(const MultiplyEngine&) = delete;
     MultiplyEngine& operator=(const MultiplyEngine&) = delete;
@@ -41,6 +47,11 @@ extern template Vector<double>
     MultiplyEngine::multiplyDirectly(const Matrix<double>&, const Vector<double>&) const;
 extern template Vector<std::complex<double>>
     MultiplyEngine::multiplyDirectly(const Matrix<std::complex<double>>&,
+                                     const Vector<std::complex<double>>&) const;
+extern template Vector<double>
+    MultiplyEngine::multiplyWithBlas(const Matrix<double>&, const Vector<double>&) const;
+extern template Vector<std::complex<double>>
+    MultiplyEngine::multiplyWithBlas(const Matrix<std::complex<double>>&,
                                      const Vector<std::complex<double>>&) const;
 
 } // namespace Oblio

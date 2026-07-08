@@ -119,3 +119,6 @@ Linux: replace `-framework Accelerate` with `-lblas -llapack -lm`.
 - **archive/** — history: `oblio-new-devlog.md`, `oblio_modernization_notes.md`,
   `oblio_modernization_appendix.md`. These describe 0.9/10.12 and the PoC;
   rationale, not current guidance.
+- **experiments/** — runnable design studies, one self-contained folder each
+  (`template-instantiation/`, `friend-access/`). Each validates a coding standard;
+  build standalone with `make test`. Not part of the main build. See DESIGN_DECISIONS.

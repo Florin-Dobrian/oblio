@@ -3,6 +3,59 @@
 Durable record of structural choices, newest first. Each entry: date, decision,
 why. This is the file to open after a gap to reconstruct the project's shape.
 
+## 2026-07-08 — `experiments/` convention (runnable design studies)
+
+`experiments/<name>/` holds self-contained, runnable studies that establish or
+validate a coding standard before it is applied in the main tree. Each is its own
+folder with its own sources, `Makefile`, and `README.md`; builds standalone
+(`make test`); and is reference/teaching material — **not** part of the main Oblio
+build. Executables carry the `_cpp` suffix and are gitignored.
+
+Distinct from its two neighbors:
+- `archive/` — frozen history (superseded PoC devlog, 0.9-analysis notes, old
+  harnesses). Not maintained, not built.
+- `examples/` — usage samples showing how to *call* the library (`examples/basic.cpp`).
+
+An experiment answers a design question with code you can run and measure, then feeds
+a decision here. Current studies: `template-instantiation/` (how to instantiate the
+`Val` template — implicit vs plain/guarded explicit) and `friend-access/` (public API
+vs `friend`-direct access, with timing). Experiments use the already-settled standards
+(guarded explicit, `.cpp`, `mFoo`, `Oblio` namespace), so they double as worked
+references for those standards.
+
+## 2026-07-08 — Engines access data via `friend` (carried from 0.9)
+
+Data classes (`Matrix`, `Vector`, `Factors`, `Symbolic`) expose a public,
+bounds-checked API (`operator()`, `operator[]`) for readable / non-hot-path use, and
+additionally declare the compute engines (`MultiplyEngine`, `FactorEngine`,
+`SolveEngine`) as `friend`s, so those engines reach the contiguous storage directly on
+hot paths. **This is a long-standing 0.9 design, not a new choice** — the factorization
+depends on it. 0.9 already grants `FactorEngine` friend access into `Matrix`,
+`Factors`, `Symbolic`; the port must preserve it. (The PoC data classes don't carry
+the friend declarations yet — they get (re)introduced as each engine is ported. The
+`experiments/friend-access/` study re-demonstrates the pattern.)
+
+Why (performance): the public-operator path is one non-inlined, cross-translation-unit
+call per element (data-class body in its `.cpp`, loop in the engine's), which blocks
+vectorization. Direct `friend` access fetches the raw block pointer once and walks
+contiguous memory, which vectorizes — measured ~6× on Apple Silicon (M4/AppleClang),
+~3× on x86/g++, for a plain hand loop. More importantly, `friend` is what lets an
+engine hand a supernode's raw contiguous block straight to BLAS (dgemv/dgemm/dpotrf),
+the actual fast path in the real solver.
+
+Why `friend`, not public getters: `friend` is *tighter* encapsulation, not looser — it
+grants access to exactly the named engine classes, where a public `data()`/getter
+exposes internals to the whole program. It honestly encodes that a data class and its
+engines are one subsystem split for organization, not two modules talking through a
+narrow API. Deliberate pragmatic choice over OO-purist accessors — and it's faster.
+
+Consequence for porting: `friend` couples a data class to its engines, so the natural
+port/verify unit is the *cluster* (e.g. `Factors` + `FactorEngine`), not the data class
+in isolation — the friend boundary sets porting granularity.
+
+Measured note: the gap is structural (non-inlined calls / vectorization), not assertion
+overhead — toggling bounds-check asserts barely moves it. See `experiments/friend-access/`.
+
 ## 2026-07-08 — Source extension: `.cpp` (headers stay `.h`)
 
 Switch Oblio source files from `.cc` to `.cpp`; headers remain `.h`. All
@@ -16,9 +69,9 @@ world (`.cc` is mainly the Google-style corner). Done now because the tree is st
 scaffold + PoC with no ported units yet, so the rename is at its cheapest.
 
 Blast radius (all mechanical, filename-level, no semantics): `git mv *.cc → *.cpp`
-across `src/`, `tests/`, `examples/`, `archive/`; the CMake source and executable
-lists; the manual build glob in CLAUDE.md / README (`src/*.cpp`); `.clang-format`;
-`archive/Makefile` and the build-command comments in the example files. Headers and
+across `src/`, `tests/`, `examples/`, `archive/`, `experiments/`; the CMake source and
+executable lists; the manual build glob in CLAUDE.md / README (`src/*.cpp`); `.clang-format`;
+the example `Makefile`s and the build-command comments in the example files. Headers and
 object files are untouched — `#include`s point at `.h`, and `Foo.o` derives from the
 source basename regardless of extension, so no `.o` reference changes. This makes
 the rename strictly safer than the `exp`→`ext` one, which touched `#include`s.
@@ -26,7 +79,7 @@ the rename strictly safer than the `exp`→`ext` one, which touched `#include`s.
 ## 2026-07-08 — Explicit instantiation over header-only templates (rationale)
 
 Decision (already active in CLAUDE.md; this entry records *why*, which otherwise
-lives only in the archive template-instantiation example comments): Val-dependent classes keep a single
+lives only in the `experiments/template-instantiation/` example comments): Val-dependent classes keep a single
 `Val` template, but their definitions live in `.cpp` files with explicit
 instantiation for the supported scalar types, and headers carry declarations plus
 `extern template`. Fuller treatments: `archive/oblio_modernization_notes.md` §"Why

@@ -45,12 +45,17 @@ void check(const char* name,
     Vector<Val> x = makeVector(xVals);
 
     MultiplyEngine mul;
-    Vector<Val> yApi = mul.multiplyByApi(A, x);
-    Vector<Val> yDir = mul.multiplyDirectly(A, x);
+    Vector<Val> yApi  = mul.multiplyByApi(A, x);
+    Vector<Val> yDir  = mul.multiplyDirectly(A, x);
+    Vector<Val> yBlas = mul.multiplyWithBlas(A, x);
 
-    bool ok = (yApi.size() == yExpect.size()) && (yDir.size() == yExpect.size());
+    bool ok = (yApi.size() == yExpect.size())
+           && (yDir.size() == yExpect.size())
+           && (yBlas.size() == yExpect.size());
     for (std::size_t i = 0; ok && i < yExpect.size(); ++i)
-        ok = close(yApi[i], yExpect[i]) && close(yDir[i], yExpect[i]);
+        ok = close(yApi[i], yExpect[i])
+          && close(yDir[i], yExpect[i])
+          && close(yBlas[i], yExpect[i]);
 
     std::cout << "  " << name << (ok ? "  PASS" : "  FAIL") << std::endl;
     if (ok) ++gPass; else ++gFail;
@@ -97,10 +102,12 @@ int main() {
         return ms;
     };
 
-    double tApi = timed("multiplyByApi   ", [&] { return mul.multiplyByApi(A, x); });
-    double tDir = timed("multiplyDirectly", [&] { return mul.multiplyDirectly(A, x); });
-    if (tDir > 0.0)
-        std::cout << "  speedup (api / direct): " << (tApi / tDir) << "x" << std::endl;
+    double tApi  = timed("multiplyByApi   ", [&] { return mul.multiplyByApi(A, x); });
+    double tDir  = timed("multiplyDirectly", [&] { return mul.multiplyDirectly(A, x); });
+    double tBlas = timed("multiplyWithBlas", [&] { return mul.multiplyWithBlas(A, x); });
+    if (tDir  > 0.0) std::cout << "  speedup (api / direct): " << (tApi / tDir)  << "x" << std::endl;
+    if (tBlas > 0.0) std::cout << "  speedup (api / blas)  : " << (tApi / tBlas) << "x" << std::endl;
+    if (tBlas > 0.0) std::cout << "  speedup (direct / blas): " << (tDir / tBlas) << "x" << std::endl;
 
     return gFail == 0 ? 0 : 1;
 }

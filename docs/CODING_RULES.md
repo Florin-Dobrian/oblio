@@ -26,6 +26,14 @@ softer layer: conventions for consistency, not correctness.
 
 ## C++
 
+- **Member naming: `mFoo` prefix** — house style, consistent with 0.9 (`mRows`,
+  `mCols`, `mVals`). Arguments and locals are bare by default: they can't collide
+  with each other, and `mFoo` already separates them from members. If marking an
+  argument genuinely aids clarity, use `aFoo` — *not* `foo_` (reads as "member" in
+  Google/LLVM style) and *not* leading `_foo` (brushes the reserved-identifier
+  rules). *Provisional:* may switch to the more common trailing-underscore `foo_`
+  for members; if so, this rule and every existing `mFoo` change together (a
+  mechanical rename), and `aFoo` for arguments still stands.
 - Mechanical modernization (`nullptr`, `using` over `typedef`, `enum class`,
   `= delete`, `.data()`) is handled by `.clang-tidy` (`modernize-*`) and
   `.clang-format`. Rely on the tools; don't hand-police these.

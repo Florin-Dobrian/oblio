@@ -13,17 +13,18 @@
 //                                guard. Link the three _GuardedExplicit.cpp.
 //
 // Build & run (from the example folder), e.g.:
-//   implicit: g++ -std=c++17 -DOBLIO_TI_IMPLICIT test_multiply.cpp -o test_multiply_implicit_cpp
-//   plain:    g++ -std=c++17 -DOBLIO_TI_PLAIN_EXPLICIT test_multiply.cpp
-//             MatrixPlainExplicit.cpp VectorPlainExplicit.cpp MultiplyEnginePlainExplicit.cpp
-//             -o test_multiply_plain_explicit_cpp
-//   guarded:  g++ -std=c++17 -DOBLIO_TI_GUARDED_EXPLICIT test_multiply.cpp
-//             MatrixGuardedExplicit.cpp VectorGuardedExplicit.cpp MultiplyEngineGuardedExplicit.cpp
-//             -o test_multiply_guarded_explicit_cpp
+//   implicit:        g++ -std=c++17 -DOBLIO_TI_IMPLICIT test_multiply.cpp -o test_multiply_implicit_cpp
+//   plain explicit:  g++ -std=c++17 -DOBLIO_TI_PLAIN_EXPLICIT test_multiply.cpp
+//                    MatrixPlainExplicit.cpp VectorPlainExplicit.cpp MultiplyEnginePlainExplicit.cpp
+//                    -o test_multiply_plain_explicit_cpp
+//   guarded explicit: g++ -std=c++17 -DOBLIO_TI_GUARDED_EXPLICIT test_multiply.cpp
+//                    MatrixGuardedExplicit.cpp VectorGuardedExplicit.cpp MultiplyEngineGuardedExplicit.cpp
+//                    -o test_multiply_guarded_explicit_cpp
 // Or just: make test   (builds and runs all three)
 //
-// Bonus check: build the plain or guarded variant WITHOUT its .cpp files. Both must
-// fail at link with undefined references — proof the bodies live only in the .o files.
+// Bonus check: build the plain explicit or guarded explicit variant WITHOUT its
+// .cpp files. Both must fail at link with undefined references — proof the bodies
+// live only in the .o files.
 
 #include <complex>
 #include <cmath>

@@ -43,7 +43,7 @@ std::size_t Matrix<Val>::cols() const { return mCols; }
 // ── Explicit instantiations ───────────────────────────────────────────────
 // Compiled once. All other .cpp files link against these.
 // To add float support: append one line below. Nothing else changes — unlike
-// the guarded-explicit variant, there is no extern template line in the header to keep in sync.
+// the guarded explicit variant has no extern template line in the header to keep in sync.
 
 template class Matrix<double>;
 template class Matrix<std::complex<double>>;

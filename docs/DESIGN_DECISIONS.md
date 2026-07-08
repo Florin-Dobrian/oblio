@@ -115,7 +115,7 @@ declaration-only, the build win is really Case 2's (definition-hiding + forcing)
 `extern template` lines suppress nothing here (no visible header body to instantiate),
 so they are documentation, not mechanism — a header annotation of intent, latent
 unless a body is later (wrongly) added to a header. See the naming note below for the
-full plain-vs-guarded framing. So Oblio's pattern was achievable in C++98; C++11 was
+full implicit / plain explicit / guarded explicit framing. So Oblio's pattern was achievable in C++98; C++11 was
 not strictly required.
 
 Template-instantiation example — naming (one algorithm — dense mat-vec — built
@@ -156,7 +156,7 @@ Conceptual framing (two axes):
 
 All three are built and tested together via the example's `Makefile` (`make test`)
 against one shared source, `test_multiply.cpp` — they must produce identical
-results, and the plain/guarded variants share the same link-failure behaviour when
+results, and the plain explicit and guarded explicit variants share the same link-failure behaviour when
 their `.cpp` files are omitted (empirical confirmation that with declaration-only
 headers `extern template` suppresses nothing — it is documentation, not mechanism).
 Selector macros: `OBLIO_TI_IMPLICIT` / `OBLIO_TI_PLAIN_EXPLICIT` /

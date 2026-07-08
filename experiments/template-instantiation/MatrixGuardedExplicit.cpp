@@ -1,12 +1,11 @@
-// Matrix_exp.cpp — Case 2: explicit instantiation (forcing only)
+// MatrixGuardedExplicit.cpp — Guarded explicit: plain explicit + extern template guard
 //
 // Full template implementation lives here, not in the header. This translation
-// unit is compiled once. The two explicit instantiations at the bottom force the
-// compiler to emit object code for double and complex<double>. Other translation
-// units see only declarations in Matrix_exp.h, so they cannot implicitly
-// instantiate — they pick up these symbols at link time via Matrix_exp.o.
+// unit is compiled once. The two explicit instantiations at the bottom cause
+// the compiler to emit object code for double and complex<double>. All other
+// translation units pick up those symbols at link time via MatrixGuardedExplicit.o.
 
-#include "Matrix_exp.h"
+#include "MatrixGuardedExplicit.h"
 #include <cassert>
 
 namespace Oblio {
@@ -42,8 +41,8 @@ std::size_t Matrix<Val>::cols() const { return mCols; }
 
 // ── Explicit instantiations ───────────────────────────────────────────────
 // Compiled once. All other .cpp files link against these.
-// To add float support: append one line below. Nothing else changes — unlike
-// Case 3, there is no extern template line in the header to keep in sync.
+// To add float support: append one line below and one extern template in
+// MatrixGuardedExplicit.h. No other files need to change.
 
 template class Matrix<double>;
 template class Matrix<std::complex<double>>;

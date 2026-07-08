@@ -1,15 +1,15 @@
 #pragma once
 
-// MultiplyEngine_tpl.h — Case 1: template inclusion (header-only)
+// MultiplyEngineImplicit.h — Implicit: template inclusion (body in header)
 //
-// The Multiply member function template is defined entirely here. Any .cc
+// The Multiply member function template is defined entirely here. Any .cpp
 // that includes this header and calls Multiply<double>() or
 // Multiply<complex<double>>() will compile its own copy of the function body.
 // With N translation units and 2 scalar types, that is up to 2*N compilations
 // of the same code.
 
-#include "Matrix_tpl.h"
-#include "Vector_tpl.h"
+#include "MatrixImplicit.h"
+#include "VectorImplicit.h"
 
 namespace Oblio {
 

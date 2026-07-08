@@ -47,6 +47,19 @@ Conventions (style preferences) are imported below from docs/CODING_RULES.md.
   pointer offsets.
 - **Contiguous storage to BLAS via `.data()`.** Never reintroduce the
   `(size==0) ? NULL : &v[0]` guard; `.data()` is well-defined for empty vectors.
+- **Template definitions live in `.cpp`, never in headers.** Value-templated
+  classes are declaration-only in the header; member bodies and the explicit
+  instantiations (`template class Foo<double>;`) go in the `.cpp`. Moving a body
+  into a header silently reintroduces per-translation-unit instantiation — the
+  build cost the whole design exists to avoid, with no error to catch it. The
+  `extern template` lines in the headers are the in-place *reminder* of this rule
+  (they'd suppress the regression if it happened), but they don't enforce it — the
+  rule does. Rationale: the explicit-instantiation entry in DESIGN_DECISIONS.
+  *Deliberate exception:* a trivial accessor (e.g. `size()`) may be inlined in the
+  header for performance — but only if the class stays explicitly instantiated with
+  `extern template` present, which is exactly what stops that inline from being
+  emitted per-TU. An accidental inline without that guard is the bug; a chosen
+  inline under the guard is fine.
 
 ## Active design constraints
 

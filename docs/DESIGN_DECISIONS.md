@@ -18,7 +18,7 @@ scaffold + PoC with no ported units yet, so the rename is at its cheapest.
 Blast radius (all mechanical, filename-level, no semantics): `git mv *.cc → *.cpp`
 across `src/`, `tests/`, `examples/`, `archive/`; the CMake source and executable
 lists; the manual build glob in CLAUDE.md / README (`src/*.cpp`); `.clang-format`;
-`archive/Makefile` and the build-command comments in the spike files. Headers and
+`archive/Makefile` and the build-command comments in the example files. Headers and
 object files are untouched — `#include`s point at `.h`, and `Foo.o` derives from the
 source basename regardless of extension, so no `.o` reference changes. This makes
 the rename strictly safer than the `exp`→`ext` one, which touched `#include`s.
@@ -26,13 +26,13 @@ the rename strictly safer than the `exp`→`ext` one, which touched `#include`s.
 ## 2026-07-08 — Explicit instantiation over header-only templates (rationale)
 
 Decision (already active in CLAUDE.md; this entry records *why*, which otherwise
-lives only in archive spike-file comments): Val-dependent classes keep a single
+lives only in the archive template-instantiation example comments): Val-dependent classes keep a single
 `Val` template, but their definitions live in `.cpp` files with explicit
 instantiation for the supported scalar types, and headers carry declarations plus
 `extern template`. Fuller treatments: `archive/oblio_modernization_notes.md` §"Why
 explicit instantiation still works" (the Val-surface table) and
 `archive/oblio-new-devlog.md` Session 3 (adoption + the link-failure proof). The
-`_tpl` / `_ext` spike files are the compact head-to-head (see Spike naming below).
+`_tpl` / `_ext` example files are the compact head-to-head (see naming below).
 
 Mental model: a template is a recipe, not code — it generates code once a type is
 plugged in. Header-only templates plug in *late and everywhere*: every translation
@@ -112,24 +112,60 @@ refactor applies matured portability; it does not correct a 0.9 error.
 Where oblio sits: current `ext` code is **Case 3** — bodies in `.cpp` (declaration-only
 headers) *plus* `extern template`. But because the headers are already
 declaration-only, the build win is really Case 2's (definition-hiding + forcing); the
-`extern template` lines are belt-and-suspenders (intent-documenting, guarding against
-a definition leaking back into a header). So oblio's pattern was achievable in C++98;
-C++11 was not strictly required.
+`extern template` lines suppress nothing here (no visible header body to instantiate),
+so they are documentation, not mechanism — a header annotation of intent, latent
+unless a body is later (wrongly) added to a header. See the naming note below for the
+full plain-vs-guarded framing. So oblio's pattern was achievable in C++98; C++11 was
+not strictly required.
 
-Spike naming (archive reference trio — one algorithm, dense mat-vec, built three ways):
-- `_tpl` — template inclusion (Case 1); stands in for what 0.9 effectively was.
-- `_exp` — explicit instantiation, forcing only (Case 2).
-- `_ext` — explicit instantiation + `extern template` (Case 3); the current pattern.
+Template-instantiation example — naming (one algorithm — dense mat-vec — built
+three ways). File names are `<Class><Variant>` with no separator — e.g.
+`MatrixImplicit.h`, `MatrixPlainExplicit.{h,cpp}`, `MatrixGuardedExplicit.{h,cpp}`
+(same for `Vector`, `MultiplyEngine`). The three variants:
+- `Implicit` — body in the header; instantiated implicitly per TU. Stands in for
+  what 0.9 effectively was.
+- `PlainExplicit` — bodies in the `.cpp`, header signatures only (explicit
+  instantiation, forcing only).
+- `GuardedExplicit` — plain explicit + `extern template` in the header. The
+  pattern used in the real tree.
 
-All three are built and tested together via `archive/Makefile` (`make test`) against
-one shared source, `archive/test_multiply.cpp` — they must produce identical
-results, and `_exp`/`_ext` also share the same link-failure behaviour when their
-`.cpp` files are omitted (empirical confirmation that with declaration-only headers
-`extern template` is belt-and-suspenders).
+Conceptual framing (two axes):
 
-Renamed from the earlier `_exp` = Case 3 labeling, which was inaccurate: bare
-"explicit instantiation" *is* Case 2; Case 3's distinctive ingredient is `extern
-template`, hence `_ext`. This freed `_exp` to mean Case 2.
+- **Axis 1 — where the body lives (implicit vs explicit).** *implicit* = body in
+  the header (`.h`), instantiated implicitly per translation unit → `Implicit`.
+  *explicit* = body outside the header, forced in the `.cpp`; header carries
+  signatures only → `PlainExplicit` and `GuardedExplicit`.
+- **Axis 2 — applies only within explicit; guarded vs plain.** *plain explicit* =
+  `.cpp` bodies, declaration-only header, nothing more → `PlainExplicit`.
+  *guarded explicit* = same, plus `extern template` in the header → `GuardedExplicit`.
+
+  The three named layers:
+  - **implicit** — body in `.h` (`Implicit`)
+  - **plain explicit** — bodies in `.cpp`, header signatures only (`PlainExplicit`)
+  - **guarded explicit** — same as plain explicit, plus the guard (`GuardedExplicit`)
+
+  Important: the guard is NOT a sub-kind of "more correct" explicit — plain explicit
+  is a complete, valid design. `extern template` only ever acts on *visible* header
+  bodies (the implicit failure mode); in a declaration-only design there is nothing
+  for it to suppress, so it is pure documentation — a header annotation reading
+  "instantiated elsewhere," aimed back at the implicit branch it guards against. It
+  gains mechanical effect only if someone reintroduces a header body (which the
+  "definitions live in `.cpp`" invariant in CLAUDE.md forbids). So "guarded" (a
+  reminder/guard), not "suppressed" or "enforced" — in this design it suppresses
+  nothing and enforces nothing; the invariant does the enforcing.
+
+All three are built and tested together via the example's `Makefile` (`make test`)
+against one shared source, `test_multiply.cpp` — they must produce identical
+results, and the plain/guarded variants share the same link-failure behaviour when
+their `.cpp` files are omitted (empirical confirmation that with declaration-only
+headers `extern template` suppresses nothing — it is documentation, not mechanism).
+Selector macros: `OBLIO_TI_IMPLICIT` / `OBLIO_TI_PLAIN_EXPLICIT` /
+`OBLIO_TI_GUARDED_EXPLICIT`.
+
+Naming history: suffixes were once `_tpl`/`_exp`/`_ext`, where `_exp` inaccurately
+labeled the extern-template variant. Renamed in two steps — first `_exp`→`_ext` to
+free `_exp` for the genuine forcing-only variant, then all three to the conceptual
+`Implicit`/`PlainExplicit`/`GuardedExplicit` once the two-axis framing settled.
 
 ## 2026-07-08 — Matrix naming: explicit `SparseMatrix` / `DenseMatrix`
 

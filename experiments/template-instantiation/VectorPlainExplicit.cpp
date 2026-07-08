@@ -1,6 +1,6 @@
-// Vector_ext.cpp — Case 3: explicit instantiation + extern template
+// VectorPlainExplicit.cpp — Plain explicit: bodies in .cpp, header signatures only
 
-#include "Vector_ext.h"
+#include "VectorPlainExplicit.h"
 #include <cassert>
 
 namespace Oblio {

@@ -13,6 +13,7 @@ test_smoke_real
 test_smoke_complex
 test_extended_real
 test_extended_complex
+*_cpp
 
 # macOS
 .DS_Store

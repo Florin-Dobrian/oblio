@@ -1,9 +1,9 @@
 #pragma once
 
-// Vector_tpl.h — Case 1: template inclusion (header-only)
+// VectorImplicit.h — Implicit: template inclusion (body in header)
 //
-// Same pattern as Matrix_tpl.h. Full implementation in the header.
-// Implicitly instantiated for every Val type in every .cc that includes this.
+// Same pattern as MatrixImplicit.h. Full implementation in the header.
+// Implicitly instantiated for every Val type in every .cpp that includes this.
 
 #include <vector>
 #include <complex>

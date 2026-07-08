@@ -1,6 +1,6 @@
-// Vector_exp.cpp — Case 2: explicit instantiation (forcing only)
+// VectorGuardedExplicit.cpp — Guarded explicit: plain explicit + extern template guard
 
-#include "Vector_exp.h"
+#include "VectorGuardedExplicit.h"
 #include <cassert>
 
 namespace Oblio {

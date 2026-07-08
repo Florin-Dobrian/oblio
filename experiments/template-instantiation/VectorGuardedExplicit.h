@@ -1,8 +1,8 @@
 #pragma once
 
-// Vector_ext.h — Case 3: explicit instantiation + extern template
+// VectorGuardedExplicit.h — Guarded explicit: plain explicit + extern template guard
 //
-// Declaration only. Implementation in Vector_ext.cc.
+// Declaration only. Implementation in VectorGuardedExplicit.cpp.
 // extern template lines suppress implicit instantiation everywhere else.
 
 #include <vector>

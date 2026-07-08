@@ -1,10 +1,10 @@
 #pragma once
 
-// Vector_exp.h — Case 2: explicit instantiation (forcing only)
+// VectorPlainExplicit.h — Plain explicit: bodies in .cpp, header signatures only
 //
-// Declaration only; implementation in Vector_exp.cc. No member bodies are visible
+// Declaration only; implementation in VectorPlainExplicit.cpp. No member bodies are visible
 // here, so other translation units cannot implicitly instantiate Vector<Val> —
-// they link the explicit instantiations forced in the .cc. No extern template.
+// they link the explicit instantiations forced in the .cpp. No extern template.
 
 #include <vector>
 #include <complex>

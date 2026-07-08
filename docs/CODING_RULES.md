@@ -13,6 +13,10 @@ softer layer: conventions for consistency, not correctness.
 - Symmetric naming for paired files (`*_real` / `*_complex`, not asymmetric pairs).
 - Flat source layout — no per-category subdirectories.
 - Consistent capitalization across filenames.
+- Compiled executables carry a language suffix indicating what built them: `_cpp`
+  for C++ (`_rs` for Rust, etc.). E.g. `test_smoke_real_cpp`, `test_multiply_implicit_cpp`.
+  Applies to the executable's output name, not source files. Keep `.gitignore`, the
+  CMake target/output names, and any Makefile targets in sync when adding one.
 
 ## C++
 

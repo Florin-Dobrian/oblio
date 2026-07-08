@@ -1,11 +1,11 @@
-// MultiplyEngine_exp.cpp — Case 2: explicit instantiation (forcing only)
+// MultiplyEngineGuardedExplicit.cpp — Guarded explicit: plain explicit + extern template guard
 //
-// The Multiply function body is defined here and compiled once per scalar type.
-// Other translation units that call Multiply<double>() or Multiply<complex<double>>()
-// see only the declaration in the header, so they cannot implicitly instantiate —
-// they resolve the symbol from this object file at link time.
+// The Multiply function body is defined here and compiled once per scalar
+// type. Other translation units that call Multiply<double>() or
+// Multiply<complex<double>>() resolve the symbol from this object file at
+// link time — they never compile the function body themselves.
 
-#include "MultiplyEngine_exp.h"
+#include "MultiplyEngineGuardedExplicit.h"
 #include <cassert>
 
 namespace Oblio {
@@ -26,9 +26,8 @@ Vector<Val> MultiplyEngine::Multiply(const Matrix<Val>& A,
 }
 
 // ── Explicit instantiations ───────────────────────────────────────────────
-// Each line forces a complete, linkable definition of Multiply for that scalar
-// type. This is the only place it is compiled. Adding float support = one more
-// line here; nothing changes in the header.
+// Each line below causes the compiler to emit a complete, linkable definition
+// of Multiply for that scalar type. This is the only place it is compiled.
 
 template Vector<double>
     MultiplyEngine::Multiply(const Matrix<double>&,

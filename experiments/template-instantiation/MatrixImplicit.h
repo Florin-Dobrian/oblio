@@ -1,11 +1,11 @@
 #pragma once
 
-// Matrix_tpl.h — Case 1: template inclusion (header-only)
+// MatrixImplicit.h — Implicit: template inclusion (body in header)
 //
 // The full implementation lives here in the header. Every translation unit
 // that includes this file will implicitly instantiate the template for every
 // Val type it uses. For a two-type library (double, complex<double>) compiled
-// across many .cc files, this means the same code is compiled repeatedly.
+// across many .cpp files, this means the same code is compiled repeatedly.
 
 #include <vector>
 #include <complex>

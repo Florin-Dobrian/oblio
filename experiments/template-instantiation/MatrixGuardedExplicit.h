@@ -1,15 +1,15 @@
 #pragma once
 
-// Matrix_ext.h — Case 3: explicit instantiation + extern template
+// MatrixGuardedExplicit.h — Guarded explicit: plain explicit + extern template guard
 //
 // The header contains only the class declaration. The implementation lives in
-// Matrix_ext.cc, which is compiled exactly once. extern template tells every
+// MatrixGuardedExplicit.cpp, which is compiled exactly once. extern template tells every
 // other translation unit not to instantiate these specialisations themselves;
-// they will be resolved at link time from Matrix_ext.o.
+// they will be resolved at link time from MatrixGuardedExplicit.o.
 //
 // Adding a new scalar type (e.g. float) requires:
 //   1. One new extern template line here.
-//   2. One new explicit instantiation line in Matrix_ext.cc.
+//   2. One new explicit instantiation line in MatrixGuardedExplicit.cpp.
 //   Nothing else changes.
 
 #include <vector>
@@ -37,7 +37,7 @@ private:
 };
 
 // Suppress implicit instantiation in all other translation units.
-// The definitions are provided by Matrix_ext.cc.
+// The definitions are provided by MatrixGuardedExplicit.cpp.
 extern template class Matrix<double>;
 extern template class Matrix<std::complex<double>>;
 

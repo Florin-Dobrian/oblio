@@ -1,6 +1,6 @@
-// Vector_ext.cc — Case 3: explicit instantiation + extern template
+// Vector_exp.cc — Case 2: explicit instantiation (forcing only)
 
-#include "Vector_ext.h"
+#include "Vector_exp.h"
 #include <cassert>
 
 namespace Oblio {

@@ -1,6 +1,6 @@
 #pragma once
 
-// Matrix_tpl.h — header-only template style
+// Matrix_tpl.h — Case 1: template inclusion (header-only)
 //
 // The full implementation lives here in the header. Every translation unit
 // that includes this file will implicitly instantiate the template for every

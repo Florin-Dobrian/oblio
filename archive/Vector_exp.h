@@ -1,9 +1,10 @@
 #pragma once
 
-// Vector_ext.h — Case 3: explicit instantiation + extern template
+// Vector_exp.h — Case 2: explicit instantiation (forcing only)
 //
-// Declaration only. Implementation in Vector_ext.cc.
-// extern template lines suppress implicit instantiation everywhere else.
+// Declaration only; implementation in Vector_exp.cc. No member bodies are visible
+// here, so other translation units cannot implicitly instantiate Vector<Val> —
+// they link the explicit instantiations forced in the .cc. No extern template.
 
 #include <vector>
 #include <complex>
@@ -26,8 +27,5 @@ private:
     std::size_t      mSize;
     std::vector<Val> mVals;
 };
-
-extern template class Vector<double>;
-extern template class Vector<std::complex<double>>;
 
 } // namespace Oblio

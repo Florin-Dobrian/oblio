@@ -1,17 +1,17 @@
 #pragma once
 
-// MultiplyEngine_exp.h — explicit instantiation style
+// MultiplyEngine_ext.h — Case 3: explicit instantiation + extern template
 //
 // MultiplyEngine itself is a non-templated class. Only its Multiply member
 // function is a template, so extern template applies at the function level
-// rather than the class level. The function body lives in MultiplyEngine_exp.cc.
+// rather than the class level. The function body lives in MultiplyEngine_ext.cc.
 //
 // Note: this is the pattern that applies to most of Oblio's engine classes —
 // the class itself does not need to be templated, only the methods that touch
 // Val-typed data.
 
-#include "Matrix_exp.h"
-#include "Vector_exp.h"
+#include "Matrix_ext.h"
+#include "Vector_ext.h"
 
 namespace Oblio {
 

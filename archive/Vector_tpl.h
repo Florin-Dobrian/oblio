@@ -1,6 +1,6 @@
 #pragma once
 
-// Vector_tpl.h — header-only template style
+// Vector_tpl.h — Case 1: template inclusion (header-only)
 //
 // Same pattern as Matrix_tpl.h. Full implementation in the header.
 // Implicitly instantiated for every Val type in every .cc that includes this.

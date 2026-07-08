@@ -1,6 +1,6 @@
 #pragma once
 
-// MultiplyEngine_tpl.h — header-only template style
+// MultiplyEngine_tpl.h — Case 1: template inclusion (header-only)
 //
 // The Multiply member function template is defined entirely here. Any .cc
 // that includes this header and calls Multiply<double>() or

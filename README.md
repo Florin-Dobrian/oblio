@@ -15,7 +15,7 @@ traversal strategies.
 - **Scalar types**: `double`, `std::complex<double>` (via explicit instantiation).
   Cholesky requires Hermitian input for complex; LDL^T variants handle complex
   symmetric (non-Hermitian) matrices.
-- **C++17**, header-declaration / `.cc`-definition pattern for fast builds
+- **C++17**, header-declaration / `.cpp`-definition pattern for fast builds
 
 ## Quick Start
 
@@ -49,14 +49,14 @@ eng.solve(B, X);
 ```bash
 # macOS (Accelerate provides BLAS/LAPACK):
 g++ -std=c++17 -O3 -DOBLIO_BLAS_UNDERSCORE -I include \
-    tests/test_smoke_real.cc src/*.cc -framework Accelerate -o test_smoke_real
+    tests/test_smoke_real.cpp src/*.cpp -framework Accelerate -o test_smoke_real
 
 # Linux (system BLAS/LAPACK):
 g++ -std=c++17 -O3 -DOBLIO_BLAS_UNDERSCORE -I include \
-    tests/test_smoke_real.cc src/*.cc -lblas -llapack -lm -o test_smoke_real
+    tests/test_smoke_real.cpp src/*.cpp -lblas -llapack -lm -o test_smoke_real
 ```
 
-All source files live flat in `src/`, so `src/*.cc` catches everything.
+All source files live flat in `src/`, so `src/*.cpp` catches everything.
 Replace the test file to build each of the four test suites.
 
 ## Structure
@@ -76,13 +76,13 @@ include/oblio/       — public headers (declarations only)
   SolveEngine.h      — single and multi-RHS triangular solves
   OblioEngine.h      — top-level driver (the only header users need)
 src/                 — method bodies + explicit instantiations
-  Mmd.cc             — MMD ordering (Liu/Sparspak via oblio 0.9)
-  Amd.cc             — AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
+  Mmd.cpp             — MMD ordering (Liu/Sparspak via oblio 0.9)
+  Amd.cpp             — AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
 tests/               — test suite
-  test_smoke_real.cc           18 tests — real tridiagonal, quick sanity
-  test_smoke_complex.cc        18 tests — complex tridiagonal, quick sanity
-  test_extended_real.cc       123 tests — Laplacians, edge cases, all orderings
-  test_extended_complex.cc    102 tests — complex Laplacians, all orderings
+  test_smoke_real.cpp           18 tests — real tridiagonal, quick sanity
+  test_smoke_complex.cpp        18 tests — complex tridiagonal, quick sanity
+  test_extended_real.cpp       123 tests — Laplacians, edge cases, all orderings
+  test_extended_complex.cpp    102 tests — complex Laplacians, all orderings
 examples/            — usage examples
 ```
 

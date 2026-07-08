@@ -3,11 +3,31 @@
 Durable record of structural choices, newest first. Each entry: date, decision,
 why. This is the file to open after a gap to reconstruct the project's shape.
 
+## 2026-07-08 — Source extension: `.cpp` (headers stay `.h`)
+
+Switch oblio source files from `.cc` to `.cpp`; headers remain `.h`. All
+extensions (`.cc`, `.cpp`, `.cxx`, `.C`) are identical to the compiler, so this is
+convention, not correctness.
+
+Why `.cpp`: cross-project consistency. The matching codebase uses `.cpp` (alongside
+`.rs`, `.py`) — one extension per language across the ecosystem — so oblio being
+`.cc` made it the odd one out. `.cpp` is also the more common choice in the wider
+world (`.cc` is mainly the Google-style corner). Done now because the tree is still
+scaffold + PoC with no ported units yet, so the rename is at its cheapest.
+
+Blast radius (all mechanical, filename-level, no semantics): `git mv *.cc → *.cpp`
+across `src/`, `tests/`, `examples/`, `archive/`; the CMake source and executable
+lists; the manual build glob in CLAUDE.md / README (`src/*.cpp`); `.clang-format`;
+`archive/Makefile` and the build-command comments in the spike files. Headers and
+object files are untouched — `#include`s point at `.h`, and `Foo.o` derives from the
+source basename regardless of extension, so no `.o` reference changes. This makes
+the rename strictly safer than the `exp`→`ext` one, which touched `#include`s.
+
 ## 2026-07-08 — Explicit instantiation over header-only templates (rationale)
 
 Decision (already active in CLAUDE.md; this entry records *why*, which otherwise
 lives only in archive spike-file comments): Val-dependent classes keep a single
-`Val` template, but their definitions live in `.cc` files with explicit
+`Val` template, but their definitions live in `.cpp` files with explicit
 instantiation for the supported scalar types, and headers carry declarations plus
 `extern template`. Fuller treatments: `archive/oblio_modernization_notes.md` §"Why
 explicit instantiation still works" (the Val-surface table) and
@@ -20,7 +40,7 @@ unit that includes the header re-runs the recipe for each type it uses, and the
 linker discards the duplicates (N files × 2 types → the same bodies compiled 2N
 times). That was the real cost of 0.9's header-heavy templating — not the templates,
 but the repeated late instantiation. Explicit instantiation is "one template,
-applied early, once per type": the recipe runs exactly twice, in one `.cc`, at
+applied early, once per type": the recipe runs exactly twice, in one `.cpp`, at
 library-build time, and every other file links the existing result instead of
 re-running the recipe. (Two mechanisms achieve that "instead of re-running" —
 declaration-only headers and/or `extern template` — see History below; they are
@@ -35,7 +55,7 @@ include time. Explicit instantiation removes the accident and keeps the capabili
 
 The tradeoff, and why it's nearly free here: explicit instantiation gives up
 instantiating *arbitrary* types at use sites — a consumer can't spin up
-`Matrix<long double>` unless that line exists in the `.cc`. For a maximally-generic
+`Matrix<long double>` unless that line exists in the `.cpp`. For a maximally-generic
 header library (Eigen) that's a real loss. For oblio it isn't, because the scalar
 world is closed and tiny: a type only makes sense if a dense BLAS/LAPACK kernel
 exists for it, which bounds the space to BLAS's four — `float`, `double`,
@@ -58,7 +78,7 @@ tools, three natures, three dates:
 - **Suppressing** — `extern template class Foo<double>;` — do *not* implicitly
   instantiate here; link it from elsewhere. C++11 (GCC extension earlier).
 - **Definition-hiding** — not a keyword but a code-organization move: put member
-  bodies in a `.cc`, leave declarations in the header. A TU that can't *see* a body
+  bodies in a `.cpp`, leave declarations in the header. A TU that can't *see* a body
   can't implicitly instantiate it. Works in every era.
 
 Definition-hiding is the hinge, and it pairs with forcing. The three configurations:
@@ -66,13 +86,13 @@ Definition-hiding is the hinge, and it pairs with forcing. The three configurati
 | Case | Available | Approach | Build cost |
 |---|---|---|---|
 | 1 | neither forcing nor suppressing | Inclusion model: all definitions in headers, every TU re-instantiates what it uses, linker merges duplicates. No way to move bodies out and still get symbols. | High (~2N), unavoidable |
-| 2 | forcing only (C++98) | Definition-hiding + forcing: bodies to `.cc`, declaration-only headers, `template class Foo<double>;` in the `.cc`. Other TUs see declarations only → can't implicitly instantiate → link the forced symbols. | Low |
+| 2 | forcing only (C++98) | Definition-hiding + forcing: bodies to `.cpp`, declaration-only headers, `template class Foo<double>;` in the `.cpp`. Other TUs see declarations only → can't implicitly instantiate → link the forced symbols. | Low |
 | 3 | forcing + suppressing (C++11) | Case 2 still works and stays the choice; *additionally* you may keep bodies in headers and use `extern template` to suppress re-instantiation — needed only when definitions must stay header-visible. | Low |
 
 Key insight: the big jump is **1 → 2, not 2 → 3**. Forcing is what unlocks the whole
 technique (hide a definition, still guarantee the symbol). Suppressing is the
 incremental step that only adds a second route for the case where you insist on
-header-visible definitions. If you move bodies to the `.cc` (oblio does), you never
+header-visible definitions. If you move bodies to the `.cpp` (oblio does), you never
 need it.
 
 Precondition for all of it: an **enumerable** type set. For genuinely arbitrary
@@ -89,7 +109,7 @@ need it) but because template separate-compilation was a portability minefield t
 inclusion-vs-separation). Header-only-everything was the safe default. The modern
 refactor applies matured portability; it does not correct a 0.9 error.
 
-Where oblio sits: current `ext` code is **Case 3** — bodies in `.cc` (declaration-only
+Where oblio sits: current `ext` code is **Case 3** — bodies in `.cpp` (declaration-only
 headers) *plus* `extern template`. But because the headers are already
 declaration-only, the build win is really Case 2's (definition-hiding + forcing); the
 `extern template` lines are belt-and-suspenders (intent-documenting, guarding against
@@ -98,8 +118,14 @@ C++11 was not strictly required.
 
 Spike naming (archive reference trio — one algorithm, dense mat-vec, built three ways):
 - `_tpl` — template inclusion (Case 1); stands in for what 0.9 effectively was.
-- `_exp` — explicit instantiation, forcing only (Case 2). [to be generated]
+- `_exp` — explicit instantiation, forcing only (Case 2).
 - `_ext` — explicit instantiation + `extern template` (Case 3); the current pattern.
+
+All three are built and tested together via `archive/Makefile` (`make test`) against
+one shared source, `archive/test_multiply.cpp` — they must produce identical
+results, and `_exp`/`_ext` also share the same link-failure behaviour when their
+`.cpp` files are omitted (empirical confirmation that with declaration-only headers
+`extern template` is belt-and-suspenders).
 
 Renamed from the earlier `_exp` = Case 3 labeling, which was inaccurate: bare
 "explicit instantiation" *is* Case 2; Case 3's distinctive ingredient is `extern
@@ -267,7 +293,7 @@ rather than inheriting it unquestioned.
   pairs. Cholesky treated as Hermitian input; LDL^T as complex-symmetric.
 - **`std::vector` storage** instead of the hand-rolled `Array`.
 - **Explicit template instantiation** for `double` and `std::complex<double>` —
-  headers declare, `.cc` files define and instantiate. Faster builds; `float` /
+  headers declare, `.cpp` files define and instantiate. Faster builds; `float` /
   `long double` remain one line away.
 - **Namespaced `include/oblio/` headers**, declarations only.
-- **Flat `src/`** — all sources, including `Mmd.cc` / `Amd.cc`, directly in `src/`.
+- **Flat `src/`** — all sources, including `Mmd.cpp` / `Amd.cpp`, directly in `src/`.

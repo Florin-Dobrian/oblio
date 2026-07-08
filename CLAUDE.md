@@ -56,8 +56,8 @@ these are the always-on summary.
 - **One `Val` template** for scalar type — `double` and `std::complex<double>`.
   Cholesky assumes Hermitian input; LDL^T variants assume complex-symmetric. No
   separate `*Real.h` / `*Complex.h` file pairs.
-- **Explicit instantiation.** Headers declare; `.cc` files define and instantiate
-  for `double` and `std::complex<double>`. Adding a scalar type is one line per `.cc`.
+- **Explicit instantiation.** Headers declare; `.cpp` files define and instantiate
+  for `double` and `std::complex<double>`. Adding a scalar type is one line per `.cpp`.
 - **Namespaced headers** under `include/oblio/`, declarations only.
 - **Flat `src/`** — all sources directly in `src/`, no per-category subdirectories.
 
@@ -75,7 +75,7 @@ macOS (alpamayo, Apple Silicon; Accelerate provides BLAS/LAPACK):
 
 ```
 g++ -std=c++17 -O3 -DOBLIO_BLAS_UNDERSCORE -I include \
-    tests/<test>.cc src/*.cc -framework Accelerate -o <test>
+    tests/<test>.cpp src/*.cpp -framework Accelerate -o <test>
 ```
 
 Linux: replace `-framework Accelerate` with `-lblas -llapack -lm`.

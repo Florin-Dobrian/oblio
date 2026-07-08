@@ -1,6 +1,6 @@
 # Starting point — NOT yet calibrated to the existing tree.
 # Before mass-applying: run on a COPY and inspect the diff
-#   clang-format --style=file --dry-run -Werror src/*.cc include/oblio/*.h
+#   clang-format --style=file --dry-run -Werror src/*.cpp include/oblio/*.h
 # then tune the options below until the churn against existing code is small.
 # Goal is minimal reformatting noise so real port diffs stay readable.
 BasedOnStyle: LLVM

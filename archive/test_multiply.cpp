@@ -1,22 +1,22 @@
-// test_multiply.cc — exercises the Matrix / Vector / MultiplyEngine spike.
+// test_multiply.cpp — exercises the Matrix / Vector / MultiplyEngine spike.
 //
 // ONE source, THREE build configurations selected by macro. The point of the
 // spike is that the variants differ only in HOW the code is compiled, never in
 // WHAT it computes — so all builds must produce identical results.
 //
 //   -DOBLIO_SPIKE_TPL : Case 1 — header-only template inclusion. Nothing to link.
-//   -DOBLIO_SPIKE_EXP : Case 2 — explicit instantiation, forcing only. Link _exp.cc.
-//   -DOBLIO_SPIKE_EXT : Case 3 — explicit instantiation + extern template. Link _ext.cc.
+//   -DOBLIO_SPIKE_EXP : Case 2 — explicit instantiation, forcing only. Link _exp.cpp.
+//   -DOBLIO_SPIKE_EXT : Case 3 — explicit instantiation + extern template. Link _ext.cpp.
 //
 // Build & run (from archive/), e.g.:
-//   tpl:  g++ -std=c++17 -DOBLIO_SPIKE_TPL test_multiply.cc -o test_multiply_tpl
-//   exp:  g++ -std=c++17 -DOBLIO_SPIKE_EXP test_multiply.cc
-//         Matrix_exp.cc Vector_exp.cc MultiplyEngine_exp.cc -o test_multiply_exp
-//   ext:  g++ -std=c++17 -DOBLIO_SPIKE_EXT test_multiply.cc
-//         Matrix_ext.cc Vector_ext.cc MultiplyEngine_ext.cc -o test_multiply_ext
+//   tpl:  g++ -std=c++17 -DOBLIO_SPIKE_TPL test_multiply.cpp -o test_multiply_tpl
+//   exp:  g++ -std=c++17 -DOBLIO_SPIKE_EXP test_multiply.cpp
+//         Matrix_exp.cpp Vector_exp.cpp MultiplyEngine_exp.cpp -o test_multiply_exp
+//   ext:  g++ -std=c++17 -DOBLIO_SPIKE_EXT test_multiply.cpp
+//         Matrix_ext.cpp Vector_ext.cpp MultiplyEngine_ext.cpp -o test_multiply_ext
 // Or just: make test   (builds and runs all three)
 //
-// Bonus check: build exp or ext WITHOUT their .cc files. Both must fail at link
+// Bonus check: build exp or ext WITHOUT their .cpp files. Both must fail at link
 // with undefined references — proof the bodies live only in the .o files.
 
 #include <complex>

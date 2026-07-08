@@ -22,20 +22,20 @@ check_c_source_compiles("
 " OBLIO_BLAS_UNDERSCORE)
 
 # ----- Library ---------------------------------------------------------------
-# Source list matches REPO_MAP src/*.cc. Amd.cc and Mmd.cc hold the ordering
-# implementations that OrderEngine.cc dispatches to — omitting them link-fails
+# Source list matches REPO_MAP src/*.cpp. Amd.cpp and Mmd.cpp hold the ordering
+# implementations that OrderEngine.cpp dispatches to — omitting them link-fails
 # on mmd_order / amd_order.
 add_library(oblio STATIC
-    src/OrderEngine.cc
-    src/Mmd.cc
-    src/Amd.cc
-    src/Matrix.cc
-    src/Vector.cc
-    src/DenseMatrix.cc
-    src/Factors.cc
-    src/FactorEngine.cc
-    src/SolveEngine.cc
-    src/OblioEngine.cc
+    src/OrderEngine.cpp
+    src/Mmd.cpp
+    src/Amd.cpp
+    src/Matrix.cpp
+    src/Vector.cpp
+    src/DenseMatrix.cpp
+    src/Factors.cpp
+    src/FactorEngine.cpp
+    src/SolveEngine.cpp
+    src/OblioEngine.cpp
 )
 
 # Users #include "oblio/OblioEngine.h" (namespaced). PUBLIC so tests/examples
@@ -53,11 +53,11 @@ enable_testing()
 # The four suites in tests/ (real/complex × smoke/extended). Each is a standalone
 # executable linking oblio.
 foreach(t test_smoke_real test_smoke_complex test_extended_real test_extended_complex)
-    add_executable(${t} tests/${t}.cc)
+    add_executable(${t} tests/${t}.cpp)
     target_link_libraries(${t} PRIVATE oblio)
     add_test(NAME ${t} COMMAND ${t})
 endforeach()
 
 # ----- Examples --------------------------------------------------------------
-add_executable(example_basic examples/basic.cc)
+add_executable(example_basic examples/basic.cpp)
 target_link_libraries(example_basic PRIVATE oblio)

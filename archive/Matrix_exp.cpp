@@ -1,4 +1,4 @@
-// Matrix_exp.cc — Case 2: explicit instantiation (forcing only)
+// Matrix_exp.cpp — Case 2: explicit instantiation (forcing only)
 //
 // Full template implementation lives here, not in the header. This translation
 // unit is compiled once. The two explicit instantiations at the bottom force the
@@ -41,7 +41,7 @@ template<class Val>
 std::size_t Matrix<Val>::cols() const { return mCols; }
 
 // ── Explicit instantiations ───────────────────────────────────────────────
-// Compiled once. All other .cc files link against these.
+// Compiled once. All other .cpp files link against these.
 // To add float support: append one line below. Nothing else changes — unlike
 // Case 3, there is no extern template line in the header to keep in sync.
 

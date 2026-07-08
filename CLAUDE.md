@@ -18,7 +18,7 @@ modern style. They are not two passes.
   done.
 - **oblio 10.12** — a partial, unfinished refactor of 0.9. Reference only; do
   not build on it.
-- **PoC tree** (built in one day, ~2026-03) — a proof of concept. Learn from it;
+- **PoC tree** (built in one day, 2026-03-07) — a proof of concept. Learn from it;
   do not assume its code is correct.
 
 ## Process (every session)

@@ -3,6 +3,160 @@
 Durable record of structural choices, newest first. Each entry: date, decision,
 why. This is the file to open after a gap to reconstruct the project's shape.
 
+## 2026-07-08 — Explicit instantiation over header-only templates (rationale)
+
+Decision (already active in CLAUDE.md; this entry records *why*, which otherwise
+lives only in archive spike-file comments): Val-dependent classes keep a single
+`Val` template, but their definitions live in `.cc` files with explicit
+instantiation for the supported scalar types, and headers carry declarations plus
+`extern template`. Fuller treatments: `archive/oblio_modernization_notes.md` §"Why
+explicit instantiation still works" (the Val-surface table) and
+`archive/oblio-new-devlog.md` Session 3 (adoption + the link-failure proof). The
+`_tpl` / `_ext` spike files are the compact head-to-head (see Spike naming below).
+
+Mental model: a template is a recipe, not code — it generates code once a type is
+plugged in. Header-only templates plug in *late and everywhere*: every translation
+unit that includes the header re-runs the recipe for each type it uses, and the
+linker discards the duplicates (N files × 2 types → the same bodies compiled 2N
+times). That was the real cost of 0.9's header-heavy templating — not the templates,
+but the repeated late instantiation. Explicit instantiation is "one template,
+applied early, once per type": the recipe runs exactly twice, in one `.cc`, at
+library-build time, and every other file links the existing result instead of
+re-running the recipe. (Two mechanisms achieve that "instead of re-running" —
+declaration-only headers and/or `extern template` — see History below; they are
+not the same feature and have different dates.) Generality is preserved (adding `float` is one
+early application), but instantiation collapses from scattered-2N to centralized-2.
+
+Key framing: build cost that scales with the number of scalar types is *incidental*
+to the C++ compilation model, not *inherent* to supporting real and complex.
+Nothing about "a matrix can hold real or complex" requires recompiling matrix code
+in every includer — that only happens because header-only defers instantiation to
+include time. Explicit instantiation removes the accident and keeps the capability.
+
+The tradeoff, and why it's nearly free here: explicit instantiation gives up
+instantiating *arbitrary* types at use sites — a consumer can't spin up
+`Matrix<long double>` unless that line exists in the `.cc`. For a maximally-generic
+header library (Eigen) that's a real loss. For oblio it isn't, because the scalar
+world is closed and tiny: a type only makes sense if a dense BLAS/LAPACK kernel
+exists for it, which bounds the space to BLAS's four — `float`, `double`,
+`complex<float>`, `complex<double>` (s/d/c/z). We use two, might add the others.
+Enumerating even all four is a handful of lines, far below the build cost of keeping
+them implicit. So the one thing explicit instantiation costs is something a
+closed-world numerical solver doesn't want anyway.
+
+Bonus, and it matters for a verification-focused port: the `template class Foo<...>;`
+lines *are* the list of supported types, in one place. Support becomes a declared,
+reviewable fact rather than an emergent property of whatever anyone happened to
+instantiate, and adding a type is a deliberate act that forces confronting whether
+kernels and tests exist for it — exactly the gap the appendix flagged when complex
+was "a new code path with zero test coverage."
+
+Three mechanisms (not two — this frame makes the history click). Three distinct
+tools, three natures, three dates:
+- **Forcing** — `template class Foo<double>;` — emit all of `Foo<double>` in this
+  TU. C++98.
+- **Suppressing** — `extern template class Foo<double>;` — do *not* implicitly
+  instantiate here; link it from elsewhere. C++11 (GCC extension earlier).
+- **Definition-hiding** — not a keyword but a code-organization move: put member
+  bodies in a `.cc`, leave declarations in the header. A TU that can't *see* a body
+  can't implicitly instantiate it. Works in every era.
+
+Definition-hiding is the hinge, and it pairs with forcing. The three configurations:
+
+| Case | Available | Approach | Build cost |
+|---|---|---|---|
+| 1 | neither forcing nor suppressing | Inclusion model: all definitions in headers, every TU re-instantiates what it uses, linker merges duplicates. No way to move bodies out and still get symbols. | High (~2N), unavoidable |
+| 2 | forcing only (C++98) | Definition-hiding + forcing: bodies to `.cc`, declaration-only headers, `template class Foo<double>;` in the `.cc`. Other TUs see declarations only → can't implicitly instantiate → link the forced symbols. | Low |
+| 3 | forcing + suppressing (C++11) | Case 2 still works and stays the choice; *additionally* you may keep bodies in headers and use `extern template` to suppress re-instantiation — needed only when definitions must stay header-visible. | Low |
+
+Key insight: the big jump is **1 → 2, not 2 → 3**. Forcing is what unlocks the whole
+technique (hide a definition, still guarantee the symbol). Suppressing is the
+incremental step that only adds a second route for the case where you insist on
+header-visible definitions. If you move bodies to the `.cc` (oblio does), you never
+need it.
+
+Precondition for all of it: an **enumerable** type set. For genuinely arbitrary
+types you can't force or suppress anything (you don't know the list), so you're in
+Case 1 regardless of language version. Forcing/suppressing are tools for closed type
+sets — which oblio's is (BLAS s/d/c/z), the same fact that makes the tradeoff above
+nearly free.
+
+Dates and 0.9: forcing is C++98, suppressing is C++11, so when 0.9 was written (late
+90s) only Case 1 was portably reachable — header-only, inclusion model. That was the
+*correct* choice for the era, and not because suppressing was missing (Case 2 doesn't
+need it) but because template separate-compilation was a portability minefield then
+(the `export` saga, inconsistent two-phase lookup, compilers disagreeing on
+inclusion-vs-separation). Header-only-everything was the safe default. The modern
+refactor applies matured portability; it does not correct a 0.9 error.
+
+Where oblio sits: current `ext` code is **Case 3** — bodies in `.cc` (declaration-only
+headers) *plus* `extern template`. But because the headers are already
+declaration-only, the build win is really Case 2's (definition-hiding + forcing); the
+`extern template` lines are belt-and-suspenders (intent-documenting, guarding against
+a definition leaking back into a header). So oblio's pattern was achievable in C++98;
+C++11 was not strictly required.
+
+Spike naming (archive reference trio — one algorithm, dense mat-vec, built three ways):
+- `_tpl` — template inclusion (Case 1); stands in for what 0.9 effectively was.
+- `_exp` — explicit instantiation, forcing only (Case 2). [to be generated]
+- `_ext` — explicit instantiation + `extern template` (Case 3); the current pattern.
+
+Renamed from the earlier `_exp` = Case 3 labeling, which was inaccurate: bare
+"explicit instantiation" *is* Case 2; Case 3's distinctive ingredient is `extern
+template`, hence `_ext`. This freed `_exp` to mean Case 2.
+
+## 2026-07-08 — Matrix naming: explicit `SparseMatrix` / `DenseMatrix`
+
+Rename the sparse matrix type from `Matrix` to **`SparseMatrix`**; keep
+**`DenseMatrix`**. Both are plain concrete types with **no shared base class**.
+
+Why: the old `Matrix` (implicitly sparse) + `DenseMatrix` (explicitly marked) is a
+half-committed convention — it privileges sparse as the unmarked default but marks
+dense as the exception, so a reader must already know "unmarked = sparse" to parse
+it. Going fully explicit removes that. It also makes matrix naming consistent with
+the graph naming used elsewhere (`GeneralGraph` / `BipartiteGraph`, no bare
+`Graph`). Note the typed-library mainstream (Eigen, scipy) actually defaults the
+*other* way — unmarked = dense, `SparseMatrix` marked — so `Matrix` = sparse
+actively misleads anyone arriving from there. The sparse-first precedent
+(CSparse/SuiteSparse `cs`) is the one respectable counter-argument, but explicit
+wins on cross-codebase consistency and reader-independence.
+
+No speculative base `Matrix` interface. If something ever needs to consume sparse
+and dense polymorphically, add the interface then, on top of the two concrete
+types — not before a caller forces it.
+
+Scope: this is a rename (wrapping/API), not an algorithm change — it's on the
+port-and-modernize track, not the rewrite track. Do it as one deliberate
+mechanical pass **before** porting proper, since it's cross-cutting (every `friend`
+decl, FactorEngine, SolveEngine, tests name `Matrix`) and only gets more expensive
+as code solidifies around the name. **Oracle mapping: 0.9 `Matrix` ↔ modern
+`SparseMatrix`** — record this so output comparisons against 0.9 stay unambiguous.
+
+## 2026-07-08 — Minimal abstraction; containers are the structure that matters
+
+Design stance for the port: concrete types, minimal OO ceremony, `std::vector` as
+the spine. Don't build base classes, single-implementation interfaces, or
+inheritance ahead of an actual polymorphic caller (YAGNI). A direct solver is a
+pipeline of concrete transforms, not a class hierarchy.
+
+One guard against a tempting over-correction: "AI makes code cheap to generate, so
+structure matters less" is only half true. Generation got cheap; **verification did
+not** — and this project is the proof (every PoC bug was cheap to write, expensive
+to trust, and fixed only by slow comparison against the 0.9 oracle). Structure's
+real job was never to save typing; it's to keep code readable and checkable and to
+localize where a bug can hide. That matters *more* when code is machine-generated,
+because the bottleneck shifts onto review. So: drop OO flavor that only served
+human writing time; keep the structure that serves verification (clear module
+boundaries, one concern per unit, the friend seams that let a supernode block be
+diffed against 0.9).
+
+This is why "proper containers everywhere" (`std::vector` over `Array`) is not a
+style preference but the load-bearing invariant: a vector carries its own size (no
+drifting length variables), self-frees (no leak/double-free surface), bounds-checks
+under sanitizers, and hands clean pointers to BLAS via `.data()`. Each removes a
+bug class you'd otherwise verify the absence of by hand. For this codebase, the
+container discipline *is* the architecture that matters.
+
 ## 2026-07-07 — Align with standard project files; adopt clang tooling
 
 The doc set maps to established conventions rather than being bespoke:
@@ -104,7 +258,7 @@ Candidates:
 The stated plan ("port carefully from 0.9, one function at a time, replace Array
 gradually") reads as (a). Confirm.
 
-## ~2026-03 (PoC) — Choices carried from the proof of concept
+## 2026-03-07 (PoC) — Choices carried from the proof of concept
 
 Recorded for continuity. The PoC was exploratory, so revisit each on its merits
 rather than inheriting it unquestioned.

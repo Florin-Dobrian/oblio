@@ -1,4 +1,4 @@
-# oblio
+# Oblio
 
 A sparse direct solver library for symmetric matrices. Implements supernodal
 Cholesky and LDL^T factorization with multiple fill-reducing orderings and
@@ -76,7 +76,7 @@ include/oblio/       — public headers (declarations only)
   SolveEngine.h      — single and multi-RHS triangular solves
   OblioEngine.h      — top-level driver (the only header users need)
 src/                 — method bodies + explicit instantiations
-  Mmd.cpp             — MMD ordering (Liu/Sparspak via oblio 0.9)
+  Mmd.cpp             — MMD ordering (Liu/Sparspak via Oblio 0.9)
   Amd.cpp             — AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
 tests/               — test suite
   test_smoke_real.cpp           18 tests — real tridiagonal, quick sanity
@@ -88,7 +88,7 @@ examples/            — usage examples
 
 ## History
 
-This codebase is a C++17 modernization of oblio 0.9, a sparse direct solver
+This codebase is a C++17 modernization of Oblio 0.9, a sparse direct solver
 written circa 2003–2005. The algorithmic core — symbolic factorization,
 numerical factorization kernels, custom BLAS routines, solve engines — is
 ported directly from the 0.9 source, not reimplemented. What is new is the
@@ -132,5 +132,5 @@ All orchestrated by `OblioEngine<Val>`, the only header users need to include.
 - [x] Namespaced headers (`include/oblio/`), explicit instantiation throughout
 - [x] Complex arithmetic (`std::complex<double>`, Hermitian Cholesky + symmetric LDL)
 - [x] Extended test suite: 2D Laplacian, n=1, block diagonal, indefinite, perturbation
-- [x] Validated against oblio 0.9 reference implementation
+- [x] Validated against Oblio 0.9 reference implementation
 - [x] Complex extended tests (Hermitian Cholesky + symmetric LDL on Laplacians, all orderings)

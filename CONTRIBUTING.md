@@ -12,7 +12,7 @@ For now, the working docs are canonical; this file only points at them:
   mechanical style enforced by `.clang-format` / `.clang-tidy`.
 - **Design rationale & history** — docs/DESIGN_DECISIONS.md, and archive/ for the
   development history.
-- **Porting workflow** — one unit at a time, verified against oblio 0.9; status
+- **Porting workflow** — one unit at a time, verified against Oblio 0.9; status
   tracked in docs/PORTING_LEDGER.md.
 
 ## When this goes public (checklist for later)

@@ -17,6 +17,12 @@ softer layer: conventions for consistency, not correctness.
   for C++ (`_rs` for Rust, etc.). E.g. `test_smoke_real_cpp`, `test_multiply_implicit_cpp`.
   Applies to the executable's output name, not source files. Keep `.gitignore`, the
   CMake target/output names, and any Makefile targets in sync when adding one.
+- **Package name is `Oblio`** (capital O) — in prose, documentation, and the C++
+  namespace (`namespace Oblio`, `Oblio::`). Lowercase `oblio` is reserved for path
+  and artifact identifiers only: the `include/oblio/` directory and `#include
+  "oblio/…"` paths, `liboblio`, the CMake target, and existing lowercase filenames
+  (`oblio-new-devlog.md`, etc.). Macros are `OBLIO_`. Never write bare `oblio` as
+  the package name in running text.
 
 ## C++
 

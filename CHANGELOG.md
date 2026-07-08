@@ -8,7 +8,7 @@ intent is [Semantic Versioning](https://semver.org/).
 > versioned entries. Start real entries at the first tagged version.
 >
 > **Open — version identity of the modern tree.** Undecided whether this continues
-> the old line (e.g. oblio 11) or restarts (e.g. 1.0). The first release entry
+> the old line (e.g. Oblio 11) or restarts (e.g. 1.0). The first release entry
 > can't be written until this is settled; it ties to the working-tree question in
 > DESIGN_DECISIONS.md. Record the choice there and seed the first entry here.
 
@@ -20,8 +20,8 @@ here only when cutting a release.
 
 ### Lineage (historical, for context)
 
-- **oblio 0.9** — original, complete, correct sparse direct solver (circa
+- **Oblio 0.9** — original, complete, correct sparse direct solver (circa
   2003–2005). Reference and oracle.
-- **oblio 10.12** — partial, unfinished refactor of 0.9.
+- **Oblio 10.12** — partial, unfinished refactor of 0.9.
 - **modern refactor** (this tree) — port of 0.9 into modern C++17: `Array` →
   `std::vector`, modernized idioms, one function at a time.

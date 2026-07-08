@@ -5,12 +5,12 @@ why. This is the file to open after a gap to reconstruct the project's shape.
 
 ## 2026-07-08 — Source extension: `.cpp` (headers stay `.h`)
 
-Switch oblio source files from `.cc` to `.cpp`; headers remain `.h`. All
+Switch Oblio source files from `.cc` to `.cpp`; headers remain `.h`. All
 extensions (`.cc`, `.cpp`, `.cxx`, `.C`) are identical to the compiler, so this is
 convention, not correctness.
 
 Why `.cpp`: cross-project consistency. The matching codebase uses `.cpp` (alongside
-`.rs`, `.py`) — one extension per language across the ecosystem — so oblio being
+`.rs`, `.py`) — one extension per language across the ecosystem — so Oblio being
 `.cc` made it the odd one out. `.cpp` is also the more common choice in the wider
 world (`.cc` is mainly the Google-style corner). Done now because the tree is still
 scaffold + PoC with no ported units yet, so the rename is at its cheapest.
@@ -56,7 +56,7 @@ include time. Explicit instantiation removes the accident and keeps the capabili
 The tradeoff, and why it's nearly free here: explicit instantiation gives up
 instantiating *arbitrary* types at use sites — a consumer can't spin up
 `Matrix<long double>` unless that line exists in the `.cpp`. For a maximally-generic
-header library (Eigen) that's a real loss. For oblio it isn't, because the scalar
+header library (Eigen) that's a real loss. For Oblio it isn't, because the scalar
 world is closed and tiny: a type only makes sense if a dense BLAS/LAPACK kernel
 exists for it, which bounds the space to BLAS's four — `float`, `double`,
 `complex<float>`, `complex<double>` (s/d/c/z). We use two, might add the others.
@@ -92,13 +92,13 @@ Definition-hiding is the hinge, and it pairs with forcing. The three configurati
 Key insight: the big jump is **1 → 2, not 2 → 3**. Forcing is what unlocks the whole
 technique (hide a definition, still guarantee the symbol). Suppressing is the
 incremental step that only adds a second route for the case where you insist on
-header-visible definitions. If you move bodies to the `.cpp` (oblio does), you never
+header-visible definitions. If you move bodies to the `.cpp` (Oblio does), you never
 need it.
 
 Precondition for all of it: an **enumerable** type set. For genuinely arbitrary
 types you can't force or suppress anything (you don't know the list), so you're in
 Case 1 regardless of language version. Forcing/suppressing are tools for closed type
-sets — which oblio's is (BLAS s/d/c/z), the same fact that makes the tradeoff above
+sets — which Oblio's is (BLAS s/d/c/z), the same fact that makes the tradeoff above
 nearly free.
 
 Dates and 0.9: forcing is C++98, suppressing is C++11, so when 0.9 was written (late
@@ -109,13 +109,13 @@ need it) but because template separate-compilation was a portability minefield t
 inclusion-vs-separation). Header-only-everything was the safe default. The modern
 refactor applies matured portability; it does not correct a 0.9 error.
 
-Where oblio sits: current `ext` code is **Case 3** — bodies in `.cpp` (declaration-only
+Where Oblio sits: current `ext` code is **Case 3** — bodies in `.cpp` (declaration-only
 headers) *plus* `extern template`. But because the headers are already
 declaration-only, the build win is really Case 2's (definition-hiding + forcing); the
 `extern template` lines suppress nothing here (no visible header body to instantiate),
 so they are documentation, not mechanism — a header annotation of intent, latent
 unless a body is later (wrongly) added to a header. See the naming note below for the
-full plain-vs-guarded framing. So oblio's pattern was achievable in C++98; C++11 was
+full plain-vs-guarded framing. So Oblio's pattern was achievable in C++98; C++11 was
 not strictly required.
 
 Template-instantiation example — naming (one algorithm — dense mat-vec — built
@@ -241,7 +241,7 @@ Stubbed ahead of need (deliberate, not yet load-bearing): CONTRIBUTING.md and
 CHANGELOG.md ("Keep a Changelog" format). CONTRIBUTING fills out on going public
 (and becomes the canonical build/test source then); CHANGELOG gets its first real
 entry at the first tagged release — which requires settling the tree's version
-identity (oblio 11 vs a fresh 1.0), tied to the working-tree question below. Still
+identity (Oblio 11 vs a fresh 1.0), tied to the working-tree question below. Still
 outstanding: LICENSE (bundled AMD is BSD-3-clause, so a project license decision is
 eventually needed).
 

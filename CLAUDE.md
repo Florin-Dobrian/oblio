@@ -1,22 +1,22 @@
 # CLAUDE.md
 
-Operating contract for the oblio refactoring effort. Auto-loaded by Claude Code
+Operating contract for the Oblio refactoring effort. Auto-loaded by Claude Code
 each session — keep it lean. Rationale lives in docs/DESIGN_DECISIONS.md, not here.
 
 ## What this is
 
-oblio is a sparse direct solver (supernodal Cholesky / LDL^T). This effort is a
-careful refactor of **oblio 0.9** into modern C++17: migrate the hand-rolled
+Oblio is a sparse direct solver (supernodal Cholesky / LDL^T). This effort is a
+careful refactor of **Oblio 0.9** into modern C++17: migrate the hand-rolled
 `Array` container to `std::vector`, modernize idioms, one function at a time.
 Porting and modernizing are the same act — a good algorithm re-expressed in
 modern style. They are not two passes.
 
 ## Source of truth
 
-- **oblio 0.9** — complete, correct, fully functional. The reference and the
+- **Oblio 0.9** — complete, correct, fully functional. The reference and the
   oracle. Every ported unit is verified against 0.9's output before it counts as
   done.
-- **oblio 10.12** — a partial, unfinished refactor of 0.9. Reference only; do
+- **Oblio 10.12** — a partial, unfinished refactor of 0.9. Reference only; do
   not build on it.
 - **PoC tree** (built in one day, 2026-03-07) — a proof of concept. Learn from it;
   do not assume its code is correct.

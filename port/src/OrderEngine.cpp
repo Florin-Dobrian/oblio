@@ -22,24 +22,22 @@ bool OrderEngine::order(const SparseMatrix<Val>& A, Permutation& p) const {
     p.mNewToOld.assign(n, 0);
 
     if (mMethod == OrderMethod::AMD)
-        // AMD takes the lower-triangle CSC directly (forms A+A' internally).
+        // A is full-symmetric; AMD ignores the diagonal and symmetrizes internally,
+        // so its structure can be passed directly.
         return orderAMD(n, A.mColPtr, A.mRowIdx, p);
 
-    // MMD needs the full-symmetric, off-diagonal-only CSC — expand the lower triangle.
+    // A is stored full-symmetric; MMD wants the off-diagonal structure only.
+    // Strip the diagonal (no expansion needed — A already holds both triangles).
     std::vector<std::size_t> colPtr(n + 1, 0);
     for (std::size_t j = 0; j < n; ++j)
-        for (std::size_t sp = A.mColPtr[j]; sp < A.mColPtr[j + 1]; ++sp) {
-            std::size_t i = A.mRowIdx[sp];
-            if (i != j) { colPtr[j + 1]++; colPtr[i + 1]++; }
-        }
+        for (std::size_t sp = A.mColPtr[j]; sp < A.mColPtr[j + 1]; ++sp)
+            if (A.mRowIdx[sp] != j) colPtr[j + 1]++;
     for (std::size_t j = 0; j < n; ++j) colPtr[j + 1] += colPtr[j];
     std::vector<std::size_t> rowIdx(colPtr[n]);
     std::vector<std::size_t> cur(colPtr.begin(), colPtr.end());
     for (std::size_t j = 0; j < n; ++j)
-        for (std::size_t sp = A.mColPtr[j]; sp < A.mColPtr[j + 1]; ++sp) {
-            std::size_t i = A.mRowIdx[sp];
-            if (i != j) { rowIdx[cur[j]++] = i; rowIdx[cur[i]++] = j; }
-        }
+        for (std::size_t sp = A.mColPtr[j]; sp < A.mColPtr[j + 1]; ++sp)
+            if (A.mRowIdx[sp] != j) rowIdx[cur[j]++] = A.mRowIdx[sp];
     return orderMMD(n, colPtr, rowIdx, p);
 }
 

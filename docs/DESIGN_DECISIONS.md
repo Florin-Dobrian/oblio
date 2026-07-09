@@ -3,37 +3,46 @@
 Durable record of structural choices, newest first. Each entry: date, decision,
 why. This is the file to open after a gap to reconstruct the project's shape.
 
-## 2026-07-09 — Sparse matrix storage: flat CSC (not vector-of-vectors)
+## 2026-07-09 — Sparse matrix storage: flat CSC, stored FULLY (both triangles)
 
 `Matrix` (input A) stores its structure and values as flat **compressed sparse column
 (CSC)**: three contiguous `std::vector`s — `colPtr` (size+1), `rowIdx` (nnz), `val`
-(nnz) — lower triangle for the symmetric case, diagonal included, row indices sorted
-ascending per column. This is the PoC's layout, and it's the target.
+(nnz) — row indices sorted ascending per column. A symmetric matrix is stored **fully
+(both triangles)**, each column holding its complete neighbour list plus the diagonal.
 
-Rationale, and how the three generations differ:
-- **0.9** stored CSC via four manually `new`/`delete`d `Array*` pointers
-  (`columnPointer_`, `diagonalPointer_`, `rowIndex_`, `entry_`) with `allocated_`/
-  `valid_` flags — the manual memory management the port removes.
-- **10.12** modernized the *memory management* to `std::vector` but chose
-  **vector-of-vectors** (`std::vector<std::vector<…>>`, one inner vector per column).
-  That's RAII but the wrong *layout*: columns scatter across the heap, defeating
-  cache-friendly traversal and any contiguous-block use. Modernizing the container
-  isn't the same as modernizing the layout.
-- **PoC** uses flat CSC (`mColPtr`/`mRowIdx`/`mVal`) — vectors *and* contiguous. This
-  is correct and satisfies the "contiguous storage to BLAS via `.data()`" invariant.
+Storage layout (flat CSC vs vector-of-vectors) and triangle (full vs lower) are two
+separate decisions:
 
-Why CSC for A specifically (see the friend/BLAS entry for the A-vs-factors split): A
-is read by column, structure-first — the ordering and symbolic phases stream through
-`colPtr`/`rowIdx`; the numerical phase reads `val` once to scatter into the factor.
-Flat CSC gives cheap sequential traversal and is the standard interchange format AMD/
-MMD expect. (A is *not* where supernode blocks go to BLAS — that's `Factors`.)
+**Layout — flat CSC**, across the three generations:
+- **0.9** stored CSC via four manually `new`/`delete`d `Array*` pointers — the manual
+  memory management the port removes.
+- **10.12** modernized to `std::vector` but chose **vector-of-vectors** (one inner
+  vector per column) — RAII but the wrong layout: columns scatter across the heap.
+- **PoC / port** use flat CSC (`mColPtr`/`mRowIdx`/`mVal`) — vectors *and* contiguous,
+  satisfying the "contiguous storage to BLAS via `.data()`" invariant.
+
+**Triangle — full, not lower.** Both 0.9 and 10.12 store A **fully**: 0.9's
+`getNumberOfNonzeroEntries() = size + 2*numOffDiagonals` (each off-diagonal in both
+triangles) and its "storing A within the structure of A+Aᵀ"; 10.12 has `SymmetrizeStrc`
+and its etree reads full per-column neighbour lists. The **PoC diverged**, storing the
+lower triangle only ("stored as lower triangle in CSC"). That divergence is what forced
+every structural consumer to expand lower→full first (the MMD path in `OrderEngine`, the
+etree in `ElmForestEngine`) — and the etree bug where lower-triangle input silently
+produced an empty tree until expansion was added. **The port matches the oracle: A is
+stored fully.** Consequences: structural phases (ordering, elimination forest, symbolic)
+read each column's neighbours directly with no expansion (the etree's diagonal
+self-skips via `lc1 < lc2`; MMD just strips the diagonal; AMD ignores it); it's the
+faithful port (lower-triangle was a rewrite of the data structure); and it's the natural
+substrate for a future **unsymmetric extension** — factor the symmetrized structure
+A+Aᵀ while carrying asymmetric values. Cost: ~2× off-diagonal storage for A, and the
+numeric phase carries a redundant triangle. Accepted, matching 0.9/10.12; A is the input
+and is far smaller than the factors, where the real memory lives.
 
 Open for the port: the PoC exposed this as a public `struct` with a `fromCOO` builder
-and a weak `isValid`. The modern `SparseMatrix` keeps the flat-CSC layout but is
-expected to become a `class` with `friend` engines (per the friend-access decision)
-and a real structural interface; 0.9 is the oracle for the COO→CSC assembly details
-(zero-diagonal insertion, duplicate merging), 10.12 shows which operations the solver
-actually calls.
+and a weak `isValid`. The modern `SparseMatrix` keeps the flat-CSC layout but is a
+`class` with `friend` engines and a structural interface; 0.9 is the oracle for the
+COO→CSC assembly details (zero-diagonal insertion, duplicate merging, symmetrization),
+10.12 shows which operations the solver actually calls.
 
 ## 2026-07-09 — Two layers of modernization: rules prevent, clang-tidy catches
 

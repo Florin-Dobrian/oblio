@@ -7,8 +7,12 @@
 //   colPtr — size numCols()+1; column j occupies rowIdx/val[colPtr[j] .. colPtr[j+1]-1]
 //   rowIdx — size nnz(); row indices, sorted ascending within each column
 //   val    — size nnz(); the corresponding values
-// For the symmetric case this is the lower triangle, diagonal included. Values are
-// carried but unused by the structural (ordering/symbolic) phases.
+// A symmetric matrix is stored FULLY (both triangles), matching Oblio 0.9/10.12:
+// each column holds its complete neighbour list plus the diagonal. Full storage
+// lets the structural phases (ordering, elimination forest, symbolic) read each
+// column's neighbours directly, with no lower->full expansion, and is the natural
+// substrate for a future unsymmetric extension (factor the symmetrized structure).
+// Values are carried but unused by the structural phases.
 //
 // Construction here is the single basic path: hand it arrays already in CSC form.
 // Other builders (e.g. from COO triplets, with sorting / duplicate merging / zero-

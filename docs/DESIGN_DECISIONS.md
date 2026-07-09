@@ -3,6 +3,59 @@
 Durable record of structural choices, newest first. Each entry: date, decision,
 why. This is the file to open after a gap to reconstruct the project's shape.
 
+## 2026-07-09 — Sparse matrix storage: flat CSC (not vector-of-vectors)
+
+`Matrix` (input A) stores its structure and values as flat **compressed sparse column
+(CSC)**: three contiguous `std::vector`s — `colPtr` (size+1), `rowIdx` (nnz), `val`
+(nnz) — lower triangle for the symmetric case, diagonal included, row indices sorted
+ascending per column. This is the PoC's layout, and it's the target.
+
+Rationale, and how the three generations differ:
+- **0.9** stored CSC via four manually `new`/`delete`d `Array*` pointers
+  (`columnPointer_`, `diagonalPointer_`, `rowIndex_`, `entry_`) with `allocated_`/
+  `valid_` flags — the manual memory management the port removes.
+- **10.12** modernized the *memory management* to `std::vector` but chose
+  **vector-of-vectors** (`std::vector<std::vector<…>>`, one inner vector per column).
+  That's RAII but the wrong *layout*: columns scatter across the heap, defeating
+  cache-friendly traversal and any contiguous-block use. Modernizing the container
+  isn't the same as modernizing the layout.
+- **PoC** uses flat CSC (`mColPtr`/`mRowIdx`/`mVal`) — vectors *and* contiguous. This
+  is correct and satisfies the "contiguous storage to BLAS via `.data()`" invariant.
+
+Why CSC for A specifically (see the friend/BLAS entry for the A-vs-factors split): A
+is read by column, structure-first — the ordering and symbolic phases stream through
+`colPtr`/`rowIdx`; the numerical phase reads `val` once to scatter into the factor.
+Flat CSC gives cheap sequential traversal and is the standard interchange format AMD/
+MMD expect. (A is *not* where supernode blocks go to BLAS — that's `Factors`.)
+
+Open for the port: the PoC exposed this as a public `struct` with a `fromCOO` builder
+and a weak `isValid`. The modern `SparseMatrix` keeps the flat-CSC layout but is
+expected to become a `class` with `friend` engines (per the friend-access decision)
+and a real structural interface; 0.9 is the oracle for the COO→CSC assembly details
+(zero-diagonal insertion, duplicate merging), 10.12 shows which operations the solver
+actually calls.
+
+## 2026-07-09 — Two layers of modernization: rules prevent, clang-tidy catches
+
+The coding rules and `.clang-tidy` are complementary layers catching different
+failures at different times — not redundant work:
+- **Coding rules** (CODING_RULES + CLAUDE invariants) — preventive and broad. They
+  shape code as it's written and cover what no tool can judge: port-verbatim
+  discipline, friend→BLAS, when to split a header, `.cpp`, `mFoo`, `std::size_t`.
+- **`.clang-tidy` `modernize-*`** — a mechanical safety net, narrow but certain. It
+  can't reason about intent, but within scope it catches the idiom slips that get
+  through (a stray `NULL`, a `typedef`) and can auto-fix them.
+
+So a `NULL` written by mistake is exactly what the rules *say* and the tool
+*guarantees* — belt and braces, each doing what the other can't.
+
+`modernize-*` is aligned with this project's purpose at the concept level: porting 0.9
+(late-90s C++) forward *is* turning `typedef`→`using`, `NULL`→`nullptr`, raw loops→
+range-for, and so on across old code — exactly what that checkset does. So it can do
+part of the mechanical modernization *for* you on each ported file (`--fix`), leaving
+your attention on the algorithmic faithfulness no tool can verify. Hence the per-unit
+workflow (in CLAUDE.md Process): port faithfully → `clang-tidy --fix` → verify vs 0.9.
+
 ## 2026-07-08 — `experiments/` convention (runnable design studies)
 
 `experiments/<name>/` holds self-contained, runnable studies that establish or
@@ -23,25 +76,54 @@ vs `friend`-direct access, with timing). Experiments use the already-settled sta
 (guarded explicit, `.cpp`, `mFoo`, `Oblio` namespace), so they double as worked
 references for those standards.
 
-## 2026-07-08 — Engines access data via `friend` (carried from 0.9)
+## 2026-07-08 — Numerical hot path: `friend` access, then BLAS (carried from 0.9)
+
+The 0.9 design for numerical work, which the port preserves: **an engine reaches the
+data's contiguous block via `friend`, then hands that raw block to BLAS** wherever
+BLAS applies (gemv/gemm/syrk/trsm/potrf, via Accelerate on macOS). Not a new choice —
+this two-step (`friend` → BLAS) is how 0.9 does dense numerics.
+
+This *is* supernodal numerical factorization: supernodes are dense blocks embedded in
+the sparse structure, and the numerical phase is a long sequence of dense BLAS calls on
+them — `syrk`/`gemm` for Schur-complement updates, `potrf`/`getrf` to factor the pivot
+block, `trsm` for the off-diagonal solve — repeated per supernode across the whole
+elimination. `FactorEngine` reaches each supernode's contiguous storage via `friend`
+and passes the pointer straight to BLAS, no copy, thousands of times per factorization.
+So `friend` isn't an optimization detail; it's the access mechanism the entire numerical
+phase is built on. The `experiments/friend-access/` mat-vec is the single-block toy of
+this pattern.
+
+Important distinction — **the supernode blocks live in the factors, not in A.** `A`
+(the input `Matrix`) is never handed to BLAS block-by-block; it's *read* — its structure
+by the ordering and symbolic phases, its values once when they're scattered into the
+factor. The dense blocks that BLAS operates on are created during factorization and
+stored in `Factors`. So the `friend`→BLAS hot path is specifically a `Factors` /
+`FactorEngine` story. `A`'s storage (CSC) is chosen for a different reason: cheap,
+cache-friendly *sequential column traversal* by the structural phases, plus being the
+standard interchange format (what AMD/MMD expect). Both `A` and the factors favor flat,
+contiguous storage over 10.12's vector-of-vectors — but for `A` the reason is streaming
+structural reads, and for the factors it's the contiguous block BLAS needs.
 
 Data classes (`Matrix`, `Vector`, `Factors`, `Symbolic`) expose a public,
 bounds-checked API (`operator()`, `operator[]`) for readable / non-hot-path use, and
 additionally declare the compute engines (`MultiplyEngine`, `FactorEngine`,
 `SolveEngine`) as `friend`s, so those engines reach the contiguous storage directly on
-hot paths. **This is a long-standing 0.9 design, not a new choice** — the factorization
-depends on it. 0.9 already grants `FactorEngine` friend access into `Matrix`,
-`Factors`, `Symbolic`; the port must preserve it. (The PoC data classes don't carry
-the friend declarations yet — they get (re)introduced as each engine is ported. The
+hot paths. 0.9 already grants `FactorEngine` friend access into `Matrix`, `Factors`,
+`Symbolic`; the port must preserve it. (The PoC data classes don't carry the friend
+declarations yet — they get (re)introduced as each engine is ported. The
 `experiments/friend-access/` study re-demonstrates the pattern.)
 
 Why (performance): the public-operator path is one non-inlined, cross-translation-unit
 call per element (data-class body in its `.cpp`, loop in the engine's), which blocks
 vectorization. Direct `friend` access fetches the raw block pointer once and walks
 contiguous memory, which vectorizes — measured ~6× on Apple Silicon (M4/AppleClang),
-~3× on x86/g++, for a plain hand loop. More importantly, `friend` is what lets an
-engine hand a supernode's raw contiguous block straight to BLAS (dgemv/dgemm/dpotrf),
-the actual fast path in the real solver.
+~3× on x86/g++, over the API path. But the raw block should then go to **BLAS**, not a
+hand loop: on the M4, Accelerate's `dgemv` ran the 2000×2000 mat-vec ~6× faster than
+the vectorized hand loop (and ~36× over the API path), because it breaks past a single
+core's bandwidth ceiling (multithreading + prefetch/blocking) that a hand loop can't.
+The advantage only grows for the compute-bound O(n³) kernels (`dgemm`/`syrk`/`trsm`/
+`dpotrf`) the factorization leans on. So the hand loop is a fallback/baseline; where
+BLAS applies, use it.
 
 Why `friend`, not public getters: `friend` is *tighter* encapsulation, not looser — it
 grants access to exactly the named engine classes, where a public `data()`/getter

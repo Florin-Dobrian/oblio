@@ -1,0 +1,99 @@
+#include "oblio/OrderEngine.h"
+
+#include <vector>
+
+// Entry points of the vendored ordering codes (raw int CSC arrays).
+extern void mmd_order(int n, const int colPtr[], const int rowIdx[],
+                      int perm[], int invp[]);                         // src/Mmd.cpp
+extern "C" int amd_order(int n, const int Ap[], const int Ai[],
+                         int P[], double Control[], double Info[]);    // src/Amd.cpp
+
+namespace Oblio {
+
+template<class Val>
+bool OrderEngine::order(const SparseMatrix<Val>& A, Permutation& p) const {
+    const std::size_t n = A.mNumCols;
+
+    if (mMethod == OrderMethod::Natural)
+        return orderNatural(n, p);
+
+    // Non-natural: size the maps; the algorithms fill them by index below.
+    p.mOldToNew.assign(n, 0);
+    p.mNewToOld.assign(n, 0);
+
+    if (mMethod == OrderMethod::AMD)
+        // AMD takes the lower-triangle CSC directly (forms A+A' internally).
+        return orderAMD(n, A.mColPtr, A.mRowIdx, p);
+
+    // MMD needs the full-symmetric, off-diagonal-only CSC — expand the lower triangle.
+    std::vector<std::size_t> colPtr(n + 1, 0);
+    for (std::size_t j = 0; j < n; ++j)
+        for (std::size_t sp = A.mColPtr[j]; sp < A.mColPtr[j + 1]; ++sp) {
+            std::size_t i = A.mRowIdx[sp];
+            if (i != j) { colPtr[j + 1]++; colPtr[i + 1]++; }
+        }
+    for (std::size_t j = 0; j < n; ++j) colPtr[j + 1] += colPtr[j];
+    std::vector<std::size_t> rowIdx(colPtr[n]);
+    std::vector<std::size_t> cur(colPtr.begin(), colPtr.end());
+    for (std::size_t j = 0; j < n; ++j)
+        for (std::size_t sp = A.mColPtr[j]; sp < A.mColPtr[j + 1]; ++sp) {
+            std::size_t i = A.mRowIdx[sp];
+            if (i != j) { rowIdx[cur[j]++] = i; rowIdx[cur[i]++] = j; }
+        }
+    return orderMMD(n, colPtr, rowIdx, p);
+}
+
+bool OrderEngine::orderNatural(std::size_t n, Permutation& p) const {
+    p.setIdentity(n);
+    return true;
+}
+
+bool OrderEngine::orderMMD(std::size_t n,
+                           const std::vector<std::size_t>& colPtr,
+                           const std::vector<std::size_t>& rowIdx,
+                           Permutation& p) const {
+    if (n == 0) { p.setIdentity(0); return true; }
+    const int N   = static_cast<int>(n);
+    const int nnz = static_cast<int>(rowIdx.size());
+
+    std::vector<int> cp(N + 1), ri(nnz);
+    for (int j = 0; j <= N; ++j) cp[j] = static_cast<int>(colPtr[j]);
+    for (int k = 0; k < nnz; ++k) ri[k] = static_cast<int>(rowIdx[k]);
+
+    std::vector<int> perm(N), invp(N);
+    mmd_order(N, cp.data(), ri.data(), perm.data(), invp.data());
+
+    for (int j = 0; j < N; ++j) {
+        p.mOldToNew[j] = static_cast<std::size_t>(invp[j]);
+        p.mNewToOld[j] = static_cast<std::size_t>(perm[j]);
+    }
+    return true;
+}
+
+bool OrderEngine::orderAMD(std::size_t n,
+                           const std::vector<std::size_t>& colPtr,
+                           const std::vector<std::size_t>& rowIdx,
+                           Permutation& p) const {
+    if (n == 0) { p.setIdentity(0); return true; }
+    const int N  = static_cast<int>(n);
+    const int nz = static_cast<int>(colPtr[n]);
+
+    std::vector<int> Ap(N + 1), Ai(nz);
+    for (int j = 0; j <= N; ++j) Ap[j] = static_cast<int>(colPtr[j]);
+    for (int k = 0; k < nz; ++k) Ai[k] = static_cast<int>(rowIdx[k]);
+
+    std::vector<int> P(N);
+    const int status = amd_order(N, Ap.data(), Ai.data(), P.data(), nullptr, nullptr);
+    if (status < 0) return false;
+
+    for (int k = 0; k < N; ++k) {
+        p.mNewToOld[k]    = static_cast<std::size_t>(P[k]);
+        p.mOldToNew[P[k]] = static_cast<std::size_t>(k);
+    }
+    return true;
+}
+
+template bool OrderEngine::order(const SparseMatrix<double>&, Permutation&) const;
+template bool OrderEngine::order(const SparseMatrix<std::complex<double>>&, Permutation&) const;
+
+} // namespace Oblio

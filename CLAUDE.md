@@ -25,8 +25,12 @@ modern style. They are not two passes.
 
 1. **One unit at a time.** One function or small function-group per step. Verify,
    record in the ledger, then advance.
-2. **Verify against 0.9.** Same inputs through both codebases; compare outputs.
-   Don't advance a unit that hasn't been checked.
+2. **Port, then modernize, then verify.** (a) Carry 0.9's algorithm over faithfully —
+   human judgment, no tool checks this. (b) Run `clang-tidy --fix` to sweep the
+   mechanical idioms (`modernize-*`: `NULL`→`nullptr`, `typedef`→`using`, …). (c)
+   Verify output against 0.9 — same inputs through both codebases; don't advance a
+   unit that hasn't been checked. The machine does the mechanical modernization; the
+   human does the correctness verification.
 
 ## Invariants (breaking one is a bug)
 
@@ -110,7 +114,9 @@ Linux: replace `-framework Accelerate` with `-lblas -llapack -lm`.
   always loaded. Language-general.
 - **docs/DESIGN_DECISIONS.md** — full rationale, history, dates, open questions. Read on
   demand; the code-shaping subset is summarized above under Active design
-  constraints.
+  constraints. When adding an entry, date it with **today's actual date read from
+  context** (never copied from the entry above); the git commit date is the
+  authoritative record.
 - **`.clang-format` / `.clang-tidy`** — mechanical style + modernization,
   tool-enforced (not context). See Tooling above.
 - **CONTRIBUTING.md / CHANGELOG.md** — stubs, ahead of need. Fill CONTRIBUTING on

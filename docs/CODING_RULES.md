@@ -17,6 +17,10 @@ softer layer: conventions for consistency, not correctness.
   for C++ (`_rs` for Rust, etc.). E.g. `test_smoke_real_cpp`, `test_multiply_implicit_cpp`.
   Applies to the executable's output name, not source files. Keep `.gitignore`, the
   CMake target/output names, and any Makefile targets in sync when adding one.
+- **Optimization level: `-O3`.** Manual builds and Makefiles use `-O3` (the highest
+  standard level). Use it consistently across every build file. (CMake derives its
+  own level from the build type — Release is `-O3`; see the CMake note when that tree
+  is set up.)
 - **Package name is `Oblio`** (capital O) — in prose, documentation, and the C++
   namespace (`namespace Oblio`, `Oblio::`). Lowercase `oblio` is reserved for path
   and artifact identifiers only: the `include/oblio/` directory and `#include
@@ -26,6 +30,26 @@ softer layer: conventions for consistency, not correctness.
 
 ## C++
 
+- **Modern spellings — pin one per historical variation** (check this list before
+  reintroducing an old form):
+  - source files: **`.cpp`**, not `.cc` (headers `.h`)
+  - size/index type: **`std::size_t`**, not bare `size_t` — see the std-types rule below
+  - aliases: **`using`**, not `typedef`
+  - null pointer: **`nullptr`**, not `NULL`
+  - enums: **`enum class`**, not bare `enum`
+  - deleted members: **`= delete`**, not private-undeclared
+
+  The last four are auto-enforced by `.clang-tidy` (`modernize-*`); `.cpp` is
+  convention; `std::size_t` needs the header detail below. This list is the single
+  place to settle "which spelling" so it doesn't resurface per file.
+
+  Note: `.clang-tidy` does **not** read this document — the tool works from its own
+  `Checks:` config (running `modernize-*` AST rewrites), and the two are independent
+  records of the same intent. Nothing detects a disagreement between them, so keep
+  this list and `.clang-tidy` in sync by hand. "Auto-enforced" also assumes something
+  actually runs `clang-tidy` (editor, pre-commit, or CI) against a compilation
+  database; until that's wired up, the checks fire only when run manually.
+
 - **Member naming: `mFoo` prefix** — house style, consistent with 0.9 (`mRows`,
   `mCols`, `mVals`). Arguments and locals are bare by default: they can't collide
   with each other, and `mFoo` already separates them from members. If marking an
@@ -34,8 +58,18 @@ softer layer: conventions for consistency, not correctness.
   rules). *Provisional:* may switch to the more common trailing-underscore `foo_`
   for members; if so, this rule and every existing `mFoo` change together (a
   mechanical rename), and `aFoo` for arguments still stands.
-- Mechanical modernization (`nullptr`, `using` over `typedef`, `enum class`,
-  `= delete`, `.data()`) is handled by `.clang-tidy` (`modernize-*`) and
-  `.clang-format`. Rely on the tools; don't hand-police these.
+- **Standard-library types: use the `std::`-qualified name, from the C++ header that
+  declares it** — not the bare name and not the C-style `<*.h>` header. Include only
+  the header for the type you actually use (one header per need):
+  - `<cstddef>` → `std::size_t`, `std::ptrdiff_t`, `std::nullptr_t`, `std::byte`
+  - `<cstdint>` → fixed-width ints: `std::int32_t`, `std::uint64_t`, `std::int8_t`, …
+
+  e.g. `std::size_t` comes from `<cstddef>` (which is all Permutation needs). The
+  bare forms (`size_t`) rely on a global-namespace leak that isn't guaranteed by the
+  C++ headers. This is the correct spelling even where a matching codebase uses the
+  bare form — that codebase is the one to fix, not this one.
+- Beyond the spellings above, `.clang-tidy` (`modernize-*`) and `.clang-format` also
+  handle idiom cleanups (e.g. `.data()` over raw-pointer extraction) and formatting.
+  Rely on the tools; don't hand-police these.
 - The judgment calls tools can't make are invariants, in CLAUDE.md: port-verbatim,
   container choice, index signedness, don't-flatten-mid-port.

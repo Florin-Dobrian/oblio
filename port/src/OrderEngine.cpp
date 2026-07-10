@@ -46,7 +46,9 @@ bool OrderEngine::order(const SparseMatrix<Val>& A, Permutation& p) const {
 }
 
 bool OrderEngine::orderNatural(std::size_t n, Permutation& p) const {
-    p.setIdentity(n);
+    p.mOldToNew.assign(n, 0);
+    p.mNewToOld.assign(n, 0);
+    p.setIdentity();
     return true;
 }
 
@@ -54,7 +56,7 @@ bool OrderEngine::orderMMD(std::size_t n,
                            const std::vector<std::size_t>&  colPtr,
                            const std::vector<std::int32_t>& rowIdx,
                            Permutation& p) const {
-    if (n == 0) { p.setIdentity(0); return true; }
+    if (n == 0) return true;   // maps already sized to 0 by order()
     const int N   = static_cast<int>(n);
     const int nnz = static_cast<int>(rowIdx.size());
 
@@ -76,7 +78,7 @@ bool OrderEngine::orderAMD(std::size_t n,
                            const std::vector<std::size_t>&  colPtr,
                            const std::vector<std::int32_t>& rowIdx,
                            Permutation& p) const {
-    if (n == 0) { p.setIdentity(0); return true; }
+    if (n == 0) return true;   // maps already sized to 0 by order()
     const int N  = static_cast<int>(n);
     const int nz = static_cast<int>(colPtr[n]);
 

@@ -28,7 +28,7 @@ public:
     const std::vector<std::int32_t>& newToOld() const { return mNewToOld; }
 
     // Reset to the identity permutation of the given size.
-    void setIdentity(std::size_t size);
+    void setIdentity();   // fill the existing maps (size fixed at construction) to identity
 
     // Rebuild newToOld as the inverse of oldToNew. An ordering engine fills oldToNew,
     // then calls this to complete the other direction consistently.

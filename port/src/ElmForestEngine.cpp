@@ -17,31 +17,31 @@ bool ElmForestEngine::compute(const SparseMatrix<Val>& A, const Permutation& p,
 }
 
 void ElmForestEngine::computeParent(std::size_t n,
-        const std::vector<std::size_t>& colPtr,
-        const std::vector<std::size_t>& rowIdx,
-        const std::vector<std::size_t>& oldToNew,
-        const std::vector<std::size_t>& newToOld,
-        std::vector<std::size_t>& parent) const {
-    parent.assign(n, ElmForest::cNoParent);
-    std::vector<std::size_t> ancestor(n, ElmForest::cNoParent);
+        const std::vector<std::size_t>&  colPtr,
+        const std::vector<std::int32_t>& rowIdx,
+        const std::vector<std::int32_t>& oldToNew,
+        const std::vector<std::int32_t>& newToOld,
+        std::vector<std::int32_t>& parent) const {
+    parent.assign(n, NIL);
+    std::vector<std::int32_t> ancestor(n, NIL);
 
     // For each factor column lc2 (increasing), look at its neighbours mapping to
     // earlier columns lc1 < lc2; path-compress to attach lc1's subtree under lc2.
     for (std::size_t lc2 = 0; lc2 < n; ++lc2) {
-        const std::size_t ac2 = newToOld[lc2];
+        const std::size_t ac2 = static_cast<std::size_t>(newToOld[lc2]);
         for (std::size_t sp = colPtr[ac2]; sp < colPtr[ac2 + 1]; ++sp) {
-            const std::size_t lc1 = oldToNew[rowIdx[sp]];
+            const std::size_t lc1 = static_cast<std::size_t>(oldToNew[static_cast<std::size_t>(rowIdx[sp])]);
             if (lc1 >= lc2)
                 continue;   // later column or the diagonal itself
             std::size_t lc3 = lc1;
-            while (ancestor[lc3] != ElmForest::cNoParent && ancestor[lc3] != lc2) {
-                const std::size_t lc4 = ancestor[lc3];
-                ancestor[lc3] = lc2;
+            while (ancestor[lc3] != NIL && static_cast<std::size_t>(ancestor[lc3]) != lc2) {
+                const std::size_t lc4 = static_cast<std::size_t>(ancestor[lc3]);
+                ancestor[lc3] = static_cast<std::int32_t>(lc2);
                 lc3 = lc4;
             }
-            if (ancestor[lc3] == ElmForest::cNoParent) {
-                ancestor[lc3] = lc2;
-                parent[lc3] = lc2;
+            if (ancestor[lc3] == NIL) {
+                ancestor[lc3] = static_cast<std::int32_t>(lc2);
+                parent[lc3] = static_cast<std::int32_t>(lc2);
             }
         }
     }

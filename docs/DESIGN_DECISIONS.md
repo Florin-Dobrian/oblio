@@ -3,6 +3,90 @@
 Durable record of structural choices, newest first. Each entry: date, decision,
 why. This is the file to open after a gap to reconstruct the project's shape.
 
+## 2026-07-09 — Index types: `std::int32_t` IDs (NIL = -1), `std::size_t` offsets
+
+Two kinds of integer, two types:
+
+- **IDs** — a value that *names* a vertex/row/column/supernode, and may need a "none"
+  marker — are **`std::int32_t`**, with sentinel **`NIL = -1`** (`constexpr std::int32_t`).
+  E.g. `SparseMatrix::rowIdx`, the permutation maps, and the forest's parent / child /
+  sibling / supernode-map arrays.
+- **Offsets / counts / sizes** — row-pointers, `nnz`, dimensions, anything that indexes
+  into or measures — are **`std::size_t`**. E.g. `SparseMatrix::colPtr`, `numCols()`.
+
+**Why signed int32 for IDs.** The forcing function was the sentinel. The forest needs a
+"no parent"/"no child" marker; on an unsigned `std::size_t` that can only be the max
+value, spelled `static_cast<std::size_t>(-1)` — defined behaviour but an ugly wraparound
+smell, and easy to misuse in arithmetic. A signed `std::int32_t` gives a clean, obvious
+`-1`. This also matches (a) the graph code, which already uses `int32_t` vertex IDs with
+`static const int NIL = -1;` so companion arrays like `mate` hold `-1` naturally, and (b)
+the vendored AMD/MMD, which are `int`-based — so `rowIdx` as `int32_t` largely removes the
+`size_t→int` conversion at that boundary. The cost is a ~2.1-billion index cap (int32 vs
+size_t's range). Accepted deliberately: cleaner and more agile, and Oblio isn't targeting
+matrices past 2^31 structural indices for now. If that changes, widen the ID type to
+`std::int64_t` in one place.
+
+**Why `size_t` stays for offsets.** Offsets are never negative and can legitimately
+exceed 2^31 even when the ID *count* doesn't (a row-pointer indexes into `nnz`-length
+arrays). So they keep the full unsigned range and never carry a sentinel. This mirrors the
+graph's `GeneralGraph` exactly: `idx` (row-pointer) is `size_t`, `adj` (neighbour IDs) is
+`int32_t`.
+
+**No signed/unsigned friction, because loop counters stay `std::size_t`.** g2_csr
+demonstrates the discipline: counters that enumerate positions are `size_t` (so they
+compare against `.size()` cleanly), and `int32_t` appears only as *stored values* that
+may be `NIL` — never as a loop variable. `size_t` is a safe superset of the non-negative
+`int32_t` range, so viewing an index as `size_t` in a bounded, non-negative loop loses
+nothing. The two types reconcile with explicit casts at exactly two crossings:
+`static_cast<std::int32_t>(counter)` when storing a counter into an ID array (the
+narrowing where the 2^31 cap lives), and `static_cast<std::size_t>(id)` when an ID
+subscripts an array (widening; guard against `NIL` first if it could be a sentinel). Casts
+are few and mark the ID↔offset boundary.
+
+Spelling: `std::int32_t` from `<cstdint>`, `std::size_t` from `<cstddef>` — std-qualified,
+C++ headers, same rule as every other stdlib type. Applied first to `SparseMatrix`
+(`rowIdx`→`int32_t`, `colPtr`→`size_t`); `Permutation` (maps→`int32_t`) and `ElmForest`
+(parent/etc.→`int32_t` with a shared `NIL`) follow. The graph code uses bare `int32_t`;
+it's the code to bring in line later, like the matching codebase was for `size_t`.
+
+## 2026-07-09 — Friend grants write access; reads are public
+
+The engine↔data access rule:
+
+- **`friend` = write access.** An engine befriends exactly the data class(es) it
+  *produces/mutates*. There is no public mutation API for those internals — only the
+  producing engine reaches the private members. E.g. `OrderEngine` writes
+  `Permutation`; `ElmForestEngine` writes `ElmForest`. Friendship is declared by the
+  data class (`friend class FooEngine;`), not by the engine.
+- **Reads are public — everywhere, including hot paths.** Engines, tests, and users
+  all read via the public const API. `friend` is *not* needed for reading.
+- **This corrects an earlier overstatement** (the friend/BLAS entry below implied
+  friend was needed for hot-path reads). The `experiments/friend-access/` study
+  measured a *per-element, cross-translation-unit accessor call* — which can't inline,
+  so it blocks vectorization — against direct friend member access; friend won ~6×.
+  But that gap comes from calling the accessor *per element*, not from using a public
+  accessor at all. Two public-accessor patterns match friend's performance exactly:
+  (a) hand BLAS the block via a single `.data()` call — BLAS then owns the O(n³) loop,
+  so the one call is free; (b) for a hand-written element loop, bind the returned
+  container once (`const auto& v = A.val();`) and loop over *that* — one non-inlined
+  call total, then a vectorizable loop over contiguous memory. So the hot-path
+  discipline is **"bind-once / pass the pointer," not "be a friend."**
+- **Consequence for `SparseMatrix`:** A is input and nothing writes it (its
+  construction path is TBD), so it needs *no* friends. Its earlier
+  `friend class OrderEngine` is removed; `OrderEngine` reads A via
+  `colPtr()`/`rowIdx()`/`numCols()` and remains a friend only of `Permutation` (which
+  it writes). `ElmForestEngine` already followed this (friend of `ElmForest` only).
+- **Numerical data classes** (`Factors`, …) still befriend their producing engines for
+  *writes*; their hot-path reads also go through public accessors with the
+  bind-once/pointer discipline.
+- **Exposure stance (pragmatic, not purist):** exposing internals read-only is fine;
+  we don't design curated "won't-break" read APIs up front. A representation change
+  already forces editing the friends (writers); public read exposure adds only the
+  *tests* to that blast radius — cheap, and tests *should* feel a rep change. Curate a
+  narrower public API later only if a structure's representation proves unstable. For
+  the canonical structures we have (CSC, etree `parent[]`), the representation is the
+  settled standard form, so exposing it by reference is low-risk.
+
 ## 2026-07-09 — Sparse matrix storage: flat CSC, stored FULLY (both triangles)
 
 `Matrix` (input A) stores its structure and values as flat **compressed sparse column
@@ -114,13 +198,12 @@ contiguous storage over 10.12's vector-of-vectors — but for `A` the reason is 
 structural reads, and for the factors it's the contiguous block BLAS needs.
 
 Data classes (`Matrix`, `Vector`, `Factors`, `Symbolic`) expose a public,
-bounds-checked API (`operator()`, `operator[]`) for readable / non-hot-path use, and
-additionally declare the compute engines (`MultiplyEngine`, `FactorEngine`,
-`SolveEngine`) as `friend`s, so those engines reach the contiguous storage directly on
-hot paths. 0.9 already grants `FactorEngine` friend access into `Matrix`, `Factors`,
-`Symbolic`; the port must preserve it. (The PoC data classes don't carry the friend
-declarations yet — they get (re)introduced as each engine is ported. The
-`experiments/friend-access/` study re-demonstrates the pattern.)
+bounds-checked API (`operator()`, `operator[]`) for reads — by all callers, on hot
+paths too (see the "friend = write access" entry above: reads are public; the hot-path
+discipline is bind-once / pass `.data()` to BLAS, not friendship). Engines befriend a
+data class only to *write* it. 0.9 grants `FactorEngine` friend access into `Matrix`,
+`Factors`, `Symbolic`; in the port that friendship is retained only where the engine
+writes (the factor storage), and reads go through the public API.
 
 Why (performance): the public-operator path is one non-inlined, cross-translation-unit
 call per element (data-class body in its `.cpp`, loop in the engine's), which blocks

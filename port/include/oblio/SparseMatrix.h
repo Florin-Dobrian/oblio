@@ -14,6 +14,12 @@
 // substrate for a future unsymmetric extension (factor the symmetrized structure).
 // Values are carried but unused by the structural phases.
 //
+// Index types (see the "index types" design decision):
+//   colPtr — OFFSETS into rowIdx/val -> std::size_t (never negative, may exceed 2^31).
+//   rowIdx — row IDS -> std::int32_t (IDs may carry a -1/NIL sentinel elsewhere and
+//            must match the graph/ordering convention). Loop counters are std::size_t;
+//            an ID is cast to std::size_t only where it subscripts an array.
+//
 // Construction here is the single basic path: hand it arrays already in CSC form.
 // Other builders (e.g. from COO triplets, with sorting / duplicate merging / zero-
 // diagonal insertion) are deliberately not included yet — 0.9 is the oracle for those.
@@ -21,6 +27,7 @@
 #include <vector>
 #include <complex>
 #include <cstddef>
+#include <cstdint>
 
 namespace Oblio {
 
@@ -34,26 +41,26 @@ public:
     // Take arrays already in CSC form (moved in). colPtr has numCols+1 entries;
     // rowIdx and val each have colPtr[numCols] entries.
     SparseMatrix(std::size_t numCols,
-                 std::vector<std::size_t> colPtr,
-                 std::vector<std::size_t> rowIdx,
-                 std::vector<Val>         val);
+                 std::vector<std::size_t>  colPtr,
+                 std::vector<std::int32_t> rowIdx,
+                 std::vector<Val>          val);
 
     std::size_t numCols() const;   // matrix dimension (number of columns)
     std::size_t nnz()     const;   // number of stored entries
 
-    // Structural read access for non-hot-path callers. Engines that traverse the
-    // structure on hot paths use friend access to the members directly.
-    const std::vector<std::size_t>& colPtr() const;
-    const std::vector<std::size_t>& rowIdx() const;
-    const std::vector<Val>&         val()    const;
+    // Structural read access. All callers (engines, tests, users) read A through
+    // these; A is input and has no writer, so there is no friend. Bulk traversals
+    // bind the returned container once and loop over it (vectorizes; no per-element
+    // call), and a BLAS call takes .data() directly.
+    const std::vector<std::size_t>&  colPtr() const;
+    const std::vector<std::int32_t>& rowIdx() const;
+    const std::vector<Val>&          val()    const;
 
 private:
-    std::size_t              mNumCols = 0;
-    std::vector<std::size_t> mColPtr;   // size mNumCols + 1
-    std::vector<std::size_t> mRowIdx;   // size nnz
-    std::vector<Val>         mVal;      // size nnz
-
-    friend class OrderEngine;   // reads structure directly; add engines as needed
+    std::size_t               mNumCols = 0;
+    std::vector<std::size_t>  mColPtr;   // size mNumCols + 1 (offsets)
+    std::vector<std::int32_t> mRowIdx;   // size nnz (row IDs)
+    std::vector<Val>          mVal;      // size nnz
 };
 
 extern template class SparseMatrix<double>;

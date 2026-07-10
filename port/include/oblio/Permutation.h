@@ -13,6 +13,7 @@
 
 #include <vector>
 #include <cstddef>
+#include <cstdint>
 
 namespace Oblio {
 
@@ -23,8 +24,8 @@ public:
 
     std::size_t size() const { return mOldToNew.size(); }
 
-    const std::vector<std::size_t>& oldToNew() const { return mOldToNew; }
-    const std::vector<std::size_t>& newToOld() const { return mNewToOld; }
+    const std::vector<std::int32_t>& oldToNew() const { return mOldToNew; }
+    const std::vector<std::int32_t>& newToOld() const { return mNewToOld; }
 
     // Reset to the identity permutation of the given size.
     void setIdentity(std::size_t size);
@@ -38,8 +39,8 @@ public:
     bool validate() const;
 
 private:
-    std::vector<std::size_t> mOldToNew;
-    std::vector<std::size_t> mNewToOld;
+    std::vector<std::int32_t> mOldToNew;
+    std::vector<std::int32_t> mNewToOld;
 
     friend class OrderEngine;   // fills the maps; add other engine friends as needed
 };

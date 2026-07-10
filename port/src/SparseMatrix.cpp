@@ -6,9 +6,9 @@ namespace Oblio {
 
 template<class Val>
 SparseMatrix<Val>::SparseMatrix(std::size_t numCols,
-                                std::vector<std::size_t> colPtr,
-                                std::vector<std::size_t> rowIdx,
-                                std::vector<Val>         val)
+                                std::vector<std::size_t>  colPtr,
+                                std::vector<std::int32_t> rowIdx,
+                                std::vector<Val>          val)
     : mNumCols(numCols),
       mColPtr(std::move(colPtr)),
       mRowIdx(std::move(rowIdx)),
@@ -30,7 +30,7 @@ const std::vector<std::size_t>& SparseMatrix<Val>::colPtr() const {
 }
 
 template<class Val>
-const std::vector<std::size_t>& SparseMatrix<Val>::rowIdx() const {
+const std::vector<std::int32_t>& SparseMatrix<Val>::rowIdx() const {
     return mRowIdx;
 }
 

@@ -49,7 +49,7 @@ $(OBLIO_OBJS): %.o: %.cpp $(LIB_HDRS)
 $(VENDOR_OBJS): %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -w -c $< -o $@
 
-%_cpp: tests/%.cpp $(LIB_OBJS) $(LIB_HDRS)
+%_cpp: tests/%.cpp $(LIB_OBJS) $(LIB_HDRS) $(wildcard tests/*.h)
 	$(CXX) $(CXXFLAGS) tests/$*.cpp $(LIB_OBJS) -o $@
 
 test: all

@@ -15,6 +15,7 @@
 #include <vector>
 #include <complex>
 #include <cstddef>
+#include <cstdint>
 
 namespace Oblio {
 
@@ -29,11 +30,11 @@ private:
     // Parent links (etree) via Liu's path-compression construction, on the
     // full-symmetric structure, in the permuted (factor) order.
     void computeParent(std::size_t n,
-                       const std::vector<std::size_t>& colPtr,
-                       const std::vector<std::size_t>& rowIdx,
-                       const std::vector<std::size_t>& oldToNew,
-                       const std::vector<std::size_t>& newToOld,
-                       std::vector<std::size_t>& parent) const;
+                       const std::vector<std::size_t>&  colPtr,
+                       const std::vector<std::int32_t>& rowIdx,
+                       const std::vector<std::int32_t>& oldToNew,
+                       const std::vector<std::int32_t>& newToOld,
+                       std::vector<std::int32_t>& parent) const;
 };
 
 extern template bool ElmForestEngine::compute(const SparseMatrix<double>&, const Permutation&, ElmForest&) const;

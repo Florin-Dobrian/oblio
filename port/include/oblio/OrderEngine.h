@@ -16,6 +16,7 @@
 #include <vector>
 #include <complex>
 #include <cstddef>
+#include <cstdint>
 
 namespace Oblio {
 
@@ -38,12 +39,12 @@ private:
 
     bool orderNatural(std::size_t n, Permutation& p) const;
     bool orderMMD(std::size_t n,
-                  const std::vector<std::size_t>& colPtr,
-                  const std::vector<std::size_t>& rowIdx,
+                  const std::vector<std::size_t>&  colPtr,
+                  const std::vector<std::int32_t>& rowIdx,
                   Permutation& p) const;
     bool orderAMD(std::size_t n,
-                  const std::vector<std::size_t>& colPtr,
-                  const std::vector<std::size_t>& rowIdx,
+                  const std::vector<std::size_t>&  colPtr,
+                  const std::vector<std::int32_t>& rowIdx,
                   Permutation& p) const;
 };
 

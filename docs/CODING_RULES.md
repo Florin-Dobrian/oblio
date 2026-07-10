@@ -33,7 +33,8 @@ softer layer: conventions for consistency, not correctness.
 - **Modern spellings — pin one per historical variation** (check this list before
   reintroducing an old form):
   - source files: **`.cpp`**, not `.cc` (headers `.h`)
-  - size/index type: **`std::size_t`**, not bare `size_t` — see the std-types rule below
+  - size/index type: **`std::size_t`** for offsets/counts, **`std::int32_t`** for IDs,
+    never bare `size_t`/`int32_t` — see the std-types and index-type rules below
   - aliases: **`using`**, not `typedef`
   - null pointer: **`nullptr`**, not `NULL`
   - enums: **`enum class`**, not bare `enum`
@@ -68,6 +69,26 @@ softer layer: conventions for consistency, not correctness.
   bare forms (`size_t`) rely on a global-namespace leak that isn't guaranteed by the
   C++ headers. This is the correct spelling even where a matching codebase uses the
   bare form — that codebase is the one to fix, not this one.
+- **Index types — IDs vs offsets** (the graph/matrix convention; see the design
+  decision for the full rationale):
+  - **IDs** — values that name a vertex/row/column/supernode and may carry a "none"
+    sentinel → **`std::int32_t`**. E.g. `SparseMatrix::rowIdx`, permutation maps,
+    `ElmForest` parent/child/sibling/supernode-map arrays. Sentinel is
+    **`NIL = -1`** (a `constexpr std::int32_t`), never `static_cast<std::size_t>(-1)`.
+    Cost: ~2.1 billion index cap — accepted for a clean signed sentinel, matching the
+    graph code and the vendored `int`-based AMD/MMD.
+  - **Offsets / counts / sizes** — row-pointers, `nnz`, dimensions, anything that
+    indexes-into or measures → **`std::size_t`**. Never negative, may exceed 2^31.
+    E.g. `SparseMatrix::colPtr`, `numCols()`, `nnz()`.
+  - **Loop counters are `std::size_t`.** A counter enumerates real positions (never
+    negative, never the sentinel), so the unsigned view is safe and avoids
+    signed/unsigned comparison against `.size()`. Do **not** loop with an `int32_t`
+    counter compared to a container size.
+  - **Cast explicitly at the two crossings, and only there:**
+    `static_cast<std::int32_t>(counter)` when storing a counter into an ID array
+    (narrowing — this is where the 2^31 cap lives); `static_cast<std::size_t>(id)`
+    when an ID subscripts an array (widening — guard against `NIL` first if the ID
+    could be a sentinel). These casts mark the ID↔offset boundary; they should be few.
 - Beyond the spellings above, `.clang-tidy` (`modernize-*`) and `.clang-format` also
   handle idiom cleanups (e.g. `.data()` over raw-pointer extraction) and formatting.
   Rely on the tools; don't hand-police these.

@@ -567,7 +567,7 @@ computeForest(A) -> parent:
     for k = 1 .. n:
         parent[k] = NIL
     for k = 1 .. n: # current column k
-        for each j < k with A[j][k] != 0: # earlier neighbour j
+        for each j < k with A[k][j] != 0: # earlier neighbour j
             r = j
             while parent[r] != NIL: # climb j's subtree to its root
                 r = parent[r]
@@ -629,17 +629,17 @@ exactly why `L` is not needed.
 
 **Lemma B (which roots attach).** Let `r` be a root of `F_{k-1}`. Then
 `parent_{F_k}(r) = k` **iff** `r`'s subtree in `F_{k-1}` contains some `j` with
-`A[j][k] != 0`.
+`A[k][j] != 0`.
 
-**Proof.** (if) Let `j` in `r`'s subtree have `A[j][k] != 0`. Then `k` is in
+**Proof.** (if) Let `j` in `r`'s subtree have `A[k][j] != 0`. Then `k` is in
 `Struct_{A_k}(j)`, so by Corollary 1 (in `A_k`) `k` is a proper ancestor of `j`. Climbing
 `j`'s ancestor chain follows `F_{k-1}` while below `k` (consequence 1), reaching `r`;
 since `k` must be an ancestor of `j`, the chain continues past `r`, forcing
 `parent_{F_k}(r) = k`. (only if) If `parent_{F_k}(r) = k` then `k` is in `Struct_{A_k}(r)`;
-apply Corollary 2 in `A_k` repeatedly — `k` in `Struct(x)` means either `A[x][k] != 0`
+apply Corollary 2 in `A_k` repeatedly — `k` in `Struct(x)` means either `A[k][x] != 0`
 (an `A`-neighbour in `r`'s subtree) or `k` in `Struct(c) \ {x}` for a child `c`, and
 descending to `c` stays in `r`'s subtree. The descent terminates at some `d` in `r`'s
-subtree with `A[d][k] != 0`. QED
+subtree with `A[k][d] != 0`. QED
 
 So the children of `k` in `F_k` are exactly the roots of `F_{k-1}` whose subtrees touch
 `k` in `A`. The algorithm realizes precisely this: assuming `P[1:k-1] = F_{k-1}` before
@@ -667,7 +667,7 @@ computeForest(A) -> parent:
         parent[k]   = NIL
         ancestor[k] = NIL
     for k = 1 .. n: # current column k
-        for each j < k with A[j][k] != 0: # earlier neighbour j
+        for each j < k with A[k][j] != 0: # earlier neighbour j
             r = j
             while ancestor[r] != NIL and ancestor[r] != k:
                 t = ancestor[r]

@@ -199,11 +199,15 @@ affected column is reached — the gather at column `k` replays, all at once, th
 that pivots `j < k` would have made. Same eliminations, same fill; scatter does them
 eagerly, gather does them lazily.
 
-**Fill = the outer product connecting a pivot's neighbors.** Entry `(i,k)` of
-`a_j a_j^T` is nonzero iff `a_j[i]` and `a_j[k]` are both nonzero — iff `i` and `k` are
-*both neighbors of `j`*. If `B[i][k]` was zero (i and k were not connected), it becomes
-nonzero: a **fill** edge. So eliminating `j` makes all of `j`'s still-uneliminated
-neighbors mutually adjacent — a clique — and each new clique edge is a fill entry.
+**Fill = the outer product connecting a pivot's neighbors.** The rule in one line: when
+`j` is eliminated, if column `j` has nonzeros in both rows `i` and `k` (both `> j`), then
+`L[i][k]` fills — equivalently, in the graph `j` is connected to both `i` and `k`, and
+eliminating it adds a fill edge between `i` and `k`. This is the `a_j a_j^T` outer
+product read entrywise: entry `(i,k)` is `a_j[i] * a_j[k]`, nonzero iff `a_j[i]` and
+`a_j[k]` are both nonzero — iff `i` and `k` are *both neighbors of `j`*. If `B[i][k]` was
+zero (i and k were not connected), it becomes nonzero: a **fill** edge. Do this for every
+pair of `j`'s still-uneliminated neighbors and they all become mutually adjacent — a
+clique — and each new clique edge is a fill entry.
 
 **The dot-product term is that same fill, observed later.** In the left-looking view,
 the term `L[i][j] * L[k][j]` is nonzero iff both `i` and `k` descend from pivot `j`'s
@@ -354,3 +358,851 @@ The elimination tree for this ordering is the single path
 `1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7` (each `parent[k] = k+1`), which is exactly the chain
 along which the fill propagates: column `k`'s update indices flow to its parent `k+1`,
 carrying the accumulated fill forward — the etree union rule of the symbolic phase.
+
+### 1.8 The fill-path theorem
+
+Section 1.6 described fill mechanically — eliminating a vertex cliques its neighbours.
+The **fill-path theorem** (Rose-Tarjan-Lueker 1976) turns that into an exact,
+value-free test for *which* entries fill, stated purely on the graph of `A`. It is the
+tool the later proofs (2.4, 2.5) rest on, so it is worth establishing once here.
+
+Model elimination as a sequence of graphs. Let `G = G_0` be the graph of `A`, and form
+`G_k` from `G_{k-1}` by making the neighbourhood of vertex `k` a clique and then deleting
+`k`; so `G_k` lives on `{k+1, ..., n}`. Cliquing `k`'s neighbours is precisely the fill
+`k` creates (1.6). One observation links this sequence to `L`: for `i > j`,
+
+```
+L[i][j] != 0   iff   (i,j) is an edge of G_{j-1}
+```
+
+the graph just before `j` is eliminated — because `1..j-1` are already gone, `j`'s
+neighbours there are exactly its higher-numbered neighbours, i.e. the below-diagonal
+nonzeros of column `j` of `L`.
+
+**Lemma (reachability).** For `u, v > k`, `(u,v)` is an edge of `G_k` if and only if `G`
+has a path `u - ... - v` whose interior vertices are all `<= k`.
+
+**Proof (induction on `k`).** Base `k = 0`: `G_0 = G` and "interior vertices `<= 0`"
+means no interior vertices, i.e. a direct edge — so the claim is `(u,v) in E(G)` iff the
+edge exists. Step: assume the claim for `k-1`. `G_k` is `G_{k-1}` with `N(k)` cliqued and
+`k` deleted. For `u, v > k`, `(u,v)` is an edge of `G_k` iff either `(u,v)` was already an
+edge of `G_{k-1}`, or both `(u,k)` and `(v,k)` were edges of `G_{k-1}` (cliquing joins two
+neighbours of `k`). In the first case the hypothesis gives a `u - v` path with interior
+`<= k-1 <= k`. In the second, the hypothesis gives a `u - k` path and a `k - v` path each
+with interior `<= k-1`; concatenating them yields a `u - v` path whose interior is those
+vertices (`<= k-1`) together with the join vertex `k`, so `<= k`. Conversely, take a
+`u - v` path in `G` with interior `<= k`. If it avoids `k`, its interior is `<= k-1`, so
+`(u,v)` is an edge of `G_{k-1}`, and it survives into `G_k` (elimination only adds edges
+among survivors, never removes one). If it uses `k`, split the path at `k` into `u - k`
+and `k - v`; each half has interior `<= k-1`, so by hypothesis `(u,k)` and `(v,k)` are
+edges of `G_{k-1}`, and cliquing puts `(u,v)` into `G_k`. QED
+
+**Theorem (fill path).** For `i > j`, `L[i][j] != 0` if and only if `G(A)` has a path
+`i - ... - j` whose interior vertices are all `< j`.
+
+**Proof.** Specialize the lemma to `k = j - 1`: for `i, j > j-1` (both `>= j`, and `i > j`
+so `i, j` are distinct survivors of `G_{j-1}`), `(i,j)` is an edge of `G_{j-1}` iff `G`
+has a path `i - ... - j` with interior `<= j-1`, i.e. `< j`. Combined with the observation
+`L[i][j] != 0` iff `(i,j)` is an edge of `G_{j-1}`, this is the claim. QED
+
+The reachability lemma is the same "reach through lower-numbered vertices" relation that
+reappears in 2.5 as the edges of the update DAG — the fill-path theorem, that
+characterization, and the elimination-graph sequence are three views of one fact: **an
+edge of the filled graph is a path in `A` that dips only through already-eliminated
+vertices.**
+
+
+## 2. The elimination forest
+
+The elimination forest (elimination tree, "etree") is the combinatorial backbone of
+sparse factorization: an `O(n)` structure — one parent pointer per column — that encodes
+the entire dependency structure of `L`. Which columns update which, where fill lands,
+and what can run in parallel all read off it. Every later phase (symbolic factorization,
+supernode detection, scheduling) is a walk over this forest.
+
+### 2.1 Definition
+
+Vertices, rows, and columns coincide (the matrix is square with symmetric structure), so
+"vertex `j`", "row `j`", and "column `j`" name the same object. Write a column's
+below-diagonal pattern as
+
+```
+Struct(j) = { i : i > j and L[i][j] != 0 }
+```
+
+the rows where column `j` of the factor has nonzeros beneath the diagonal. The **parent**
+of `j` is the first of them:
+
+```
+parent(j) = min Struct(j)          (NIL if Struct(j) is empty)
+```
+
+That single array `parent[1..n]` *is* the forest. A column with no below-diagonal
+nonzero is a **root**. Why *forest* and not *tree*: if `A` is structurally reducible —
+its graph has several connected components — each component contributes its own tree, so
+the general object is a forest; an irreducible matrix gives a single tree. Read off `L`,
+`parent(j)` is simply the row of the topmost off-diagonal nonzero in column `j`, and the
+height of the forest is the length of the longest child-to-parent chain.
+
+### 2.2 Computed from A, used to build L
+
+If you already had `L`, the forest would be trivial — one scan per column for its first
+below-diagonal nonzero. But that is backwards in practice: computing `L` is the expensive
+numeric factorization, and you want the forest *first*, precisely so you can build `L`
+cheaply — allocate its pattern, drive the symbolic phase, schedule the numerics. Reading
+`parent(j)` off `L` needs the very thing it is meant to help produce.
+
+The escape is that `parent(j)` never depends on the *values* in `L`, only on where its
+nonzeros are — and that structure is recoverable from `A`'s structure alone, without ever
+forming `L`. So the dependency runs one way, not in a circle:
+
+```
+A (structure)  --climb-->  forest  --union up the tree-->  Struct(L)  -->  numeric L
+```
+
+The forest is the pivot of the whole architecture: derivable from `A` cheaply
+(near-linear), and once you have it, `L`'s pattern is a tree walk (symbolic
+factorization) and the numeric values are scheduled along it. The deeper statement is
+
+```
+Struct(L) is a function of Struct(A) alone
+```
+
+independent of the numeric values (assuming no lucky cancellation — the "structural, not
+numerical" principle of 1.6). The forest is the compact `O(n)` witness of that function.
+This is what lets the ordering phase score fill and the symbolic phase allocate storage
+before a single floating-point operation.
+
+### 2.3 The containment theorem
+
+One theorem justifies both computing the forest and using it. It is the clique fact of
+1.6, restated for columns.
+
+**Theorem (column containment).** If `Struct(j)` is nonempty, let `k = parent(j)` (so
+`k > j`). Then
+
+```
+Struct(j) \ {k}   is a subset of   Struct(k)
+```
+
+equivalently `Struct(j)` is a subset of `{k} union Struct(k)`: a column's pattern is
+contained in its parent, together with the parent's pattern.
+
+**Proof.** The elements of `Struct(j)` are `j`'s higher-numbered neighbours, and
+eliminating `j` makes them pairwise adjacent (the clique of 1.6). Since `k` is the
+smallest of them, every other `i` in `Struct(j)` has `i > k` and becomes a neighbour of
+`k` — so `L[i][k] != 0`, i.e. `i` is in `Struct(k)`. QED
+
+Two corollaries — the two ways the theorem is used:
+
+**Corollary 1 (nonzeros are ancestors).** `Struct(j)` is a subset of `j`'s proper
+ancestors — every below-diagonal nonzero of column `j` lies on the path from
+`parent(j)` to the root.
+
+**Proof (induction up the tree).** The theorem is a single hop: `Struct(j) \ {k}` is a
+subset of `Struct(k)` for `k = parent(j)`. Chain the hops. Process columns from the
+roots downward, so that `k = parent(j)` is handled before `j`; this is well-founded
+because `parent(j) > j` strictly, so the recursion always moves to a higher-numbered
+column and terminates at the roots. Base case: if `Struct(j)` is empty, `j` is a root
+and the claim holds vacuously. Inductive step: assume the claim for `k = parent(j)`.
+Every `i` in `Struct(j)` with `i != k` lies in `Struct(k)` by the theorem, hence is a
+proper ancestor of `k` by the hypothesis; since `k` is an ancestor of `j` and ancestry
+is transitive, `i` is a proper ancestor of `j`. The remaining element `i = k` is
+`parent(j)`, a proper ancestor of `j` by definition. QED
+
+So a column's pattern can only ever point at ancestors, which is why the forest can be
+*computed by climbing* (2.4): to place a column's connections you walk upward, never
+sideways or down.
+
+**Corollary 2 (the symbolic union recurrence).** Read the other direction — a column
+absorbs its children's patterns:
+
+```
+Struct(j) = { i > j : A[i][j] != 0 }
+            union, over each child c of j, ( Struct(c) \ {j} )
+```
+
+column `j`'s structure is `A`'s column `j` unioned with each child's structure minus that
+child's own entry. This is the recurrence symbolic factorization runs — the
+"union-with-marks" loop — in one bottom-up pass over the forest.
+
+**Proof.** Write `Acol(j) = { i > j : A[i][j] != 0 }` for the original below-diagonal
+entries of column `j`, and let `RHS = Acol(j) union ( over children c of j: Struct(c) \
+{j} )` be the whole right-hand side of the recurrence. The claim is `Struct(j) = RHS`;
+prove the two inclusions `RHS is a subset of Struct(j)` and `Struct(j) is a subset of
+RHS`.
+
+*`RHS is a subset of Struct(j)`.* Each original nonzero is a nonzero of `L`, so
+`Acol(j)` is a subset of `Struct(j)`. For a child `c` of `j`, `parent(c) = j`, so the
+containment theorem gives `Struct(c) \ {j}` a subset of `Struct(j)`. Every set making up
+`RHS` therefore lies in `Struct(j)`, so their union does too.
+
+*`Struct(j) is a subset of RHS`.* Take `i` in `Struct(j)`, so `i > j` and
+`L[i][j] != 0`. If `A[i][j] != 0` then `i` is in `Acol(j)`, done. Otherwise `(i,j)` is
+fill: by the elimination mechanism of 1.6 a fill edge `(i,j)` is created by eliminating
+some pivot `c < j` whose later-neighbours include both `i` and `j` — that is, some `c < j`
+with both `i` and `j` in `Struct(c)`. Since `j` is in `Struct(c)`, Corollary 1 makes `j`
+a proper ancestor of `c`, so the tree path from `c` upward reaches `j`; let `c'` be the
+child of `j` on that path (`parent(c') = j`, with `c, ..., c'` all `< j` and strictly
+increasing up the path). Carry `i` up from `c` to `c'` with the theorem: at each vertex
+`x` on the path `parent(x) <= j < i`, so `i != parent(x)`, hence `i` is in
+`Struct(x) \ {parent(x)}` and therefore in `Struct(parent(x))`; iterating lands `i` in
+`Struct(c')`. As `i > j` we have `i != j`, so `i` is in `Struct(c') \ {j}`, one of the
+sets in `RHS`. QED
+
+Same theorem: Corollary 1 climbs (justifies the algorithm below), Corollary 2 accumulates
+(drives symbolic factorization).
+
+### 2.4 Computing the forest from A
+
+Sweep columns left to right; for each earlier neighbour, climb to the root of its subtree
+and attach. The forest is *defined* from `L`, but this reads only `A` and the partial
+forest — the justification (that the sweep still yields the `L`-defined forest) is the
+incremental argument below. Conventions: 1-indexed, `NIL` = root.
+
+**Plain climb** — `parent[]` is the forest; each climb walks it.
+
+```
+computeForest(A) -> parent:
+    for k = 1 .. n:
+        parent[k] = NIL
+    for k = 1 .. n: # current column k
+        for each j < k with A[j][k] != 0: # earlier neighbour j
+            r = j
+            while parent[r] != NIL: # climb j's subtree to its root
+                r = parent[r]
+            if r != k:
+                parent[r] = k # attach that root under k
+```
+
+Correct and transparent, but the climb is `O(height)` per neighbour; a long chain (a
+path-shaped forest) makes it `O(n * nnz)` worst case, re-walking the same lengthening
+chain at every step.
+
+**Why sweeping A gives the L-defined forest.** The forest is *defined* from `L`
+(`parent(j) = min Struct(j)`), yet the algorithm reads only `A` and the partial forest.
+Two arguments justify this; the first is Liu's and is shorter but leans on an external
+theorem, the second is self-contained within this document.
+
+*Proof 1 (path characterization; Liu 1990, on the fill-path theorem of 1.8).* The
+fill-path theorem (1.8) states: for `i > j`, `L[i][j] != 0` iff there is a path
+`i - ... - j` in `G(A)` whose interior vertices are all numbered `< j`. Substitute this
+into the definition:
+
+```
+parent(j) = min { i > j : G(A) has a path i - ... - j with all interior vertices < j }
+```
+
+The right-hand side mentions only the edges of `A` and the vertex numbering — no `L`, no
+fill. So the forest is manifestly a function of `Struct(A)` alone, and the sweep computes
+it directly. In this light the algorithm is disjoint-set union: adding `k` merges the
+subtrees (components) of `k`'s lower-numbered `A`-neighbours and makes `k` their root —
+which is exactly the climb-and-attach, and is why the `ancestor[]` shortcut below is a
+union-find with the `alpha(n)` bound. This is clean, but it *cites* the fill-path theorem
+rather than proving it. QED
+
+*Proof 2 (incremental; self-contained, using Corollaries 1-2).* Here the fill-path
+theorem is not assumed; only this document's own results are used. Let `A_k = A(1:k, 1:k)`
+be the leading `k x k` submatrix and `F_k` its elimination forest (defined from *its own*
+factor); the full forest is `F_n`. Write `P` for the array the algorithm produces.
+
+**Lemma A (Cholesky factors nest).** The top-left `(k-1) x (k-1)` block of the factor of
+`A_k` equals the factor of `A_{k-1}`.
+
+**Proof.** Partition `A_k = [[A_{k-1}, b], [b^T, a]]`. Its Cholesky factor is
+`[[L_{k-1}, 0], [c^T, d]]` with `L_{k-1} c = b` and `d = sqrt(a - c^T c)` — forced by the
+block product — and its top-left block is `L_{k-1}`, the factor of `A_{k-1}`. QED
+
+So passing from `A_{k-1}` to `A_k` adds vertex `k` (the largest index), and for every
+`j < k` the only possible new nonzero in column `j` is at row `k`:
+
+```
+Struct_{A_k}(j) = Struct_{A_{k-1}}(j), possibly with k added,   for j < k.
+```
+
+Two consequences for parents. (1) If `j` was **not** a root of `F_{k-1}`, its
+`min Struct(j)` is already `< k`, so adding the larger `k` cannot change it: existing
+parent pointers never move. (2) A **root** `r` of `F_{k-1}` either stays a root or gets
+`parent_{F_k}(r) = k` (the only larger index available). Growing the matrix by one vertex
+can only hang former roots under `k` — the forest is built once, never rewritten. This is
+exactly why `L` is not needed.
+
+**Lemma B (which roots attach).** Let `r` be a root of `F_{k-1}`. Then
+`parent_{F_k}(r) = k` **iff** `r`'s subtree in `F_{k-1}` contains some `j` with
+`A[j][k] != 0`.
+
+**Proof.** (if) Let `j` in `r`'s subtree have `A[j][k] != 0`. Then `k` is in
+`Struct_{A_k}(j)`, so by Corollary 1 (in `A_k`) `k` is a proper ancestor of `j`. Climbing
+`j`'s ancestor chain follows `F_{k-1}` while below `k` (consequence 1), reaching `r`;
+since `k` must be an ancestor of `j`, the chain continues past `r`, forcing
+`parent_{F_k}(r) = k`. (only if) If `parent_{F_k}(r) = k` then `k` is in `Struct_{A_k}(r)`;
+apply Corollary 2 in `A_k` repeatedly — `k` in `Struct(x)` means either `A[x][k] != 0`
+(an `A`-neighbour in `r`'s subtree) or `k` in `Struct(c) \ {x}` for a child `c`, and
+descending to `c` stays in `r`'s subtree. The descent terminates at some `d` in `r`'s
+subtree with `A[d][k] != 0`. QED
+
+So the children of `k` in `F_k` are exactly the roots of `F_{k-1}` whose subtrees touch
+`k` in `A`. The algorithm realizes precisely this: assuming `P[1:k-1] = F_{k-1}` before
+step `k`, it climbs from each `A`-neighbour `j < k` to the root of `j`'s subtree and sets
+`P[r] = k`. Every attached root is Lemma-B-certified (some neighbour lies in its subtree),
+every such root is reached, and duplicates climb to the same root and attach once (the
+`r != k` guard); all other pointers stay put (consequence 1). Hence `P[1:k] = F_k`. The
+base case `k = 1` is the empty forest, so by induction `P = F_n`. The sweep needs only
+`k`'s `A`-neighbours and the partial forest — fill is never consulted, because the
+re-rooting rule depends on `A`'s edges and the tree so far, not on `L`. QED
+
+Both proofs are now self-contained within this document; they differ in which prior
+result they lean on. Proof 1 is short because it stands on the fill-path theorem of 1.8
+(itself one induction), which makes the `A`-only dependence immediate. Proof 2 is longer
+but needs only the containment corollaries of 2.3. They agree, and either certifies that
+the plain-climb sweep — and Liu's path-compressed version below — computes the true
+elimination forest from `A`.
+
+**Liu's algorithm (path compression)** — keep the true forest in `parent[]`, but climb
+along a second array `ancestor[]`, a union-find shortcut flattened toward `k` each pass.
+
+```
+computeForest(A) -> parent:
+    for k = 1 .. n:
+        parent[k]   = NIL
+        ancestor[k] = NIL
+    for k = 1 .. n: # current column k
+        for each j < k with A[j][k] != 0: # earlier neighbour j
+            r = j
+            while ancestor[r] != NIL and ancestor[r] != k:
+                t = ancestor[r]
+                ancestor[r] = k # compress: point r straight at k
+                r = t
+            if ancestor[r] == NIL:
+                ancestor[r] = k
+                parent[r] = k # true forest edge
+```
+
+The two arrays do different jobs: `parent[]` is the forest you keep, `ancestor[]` is
+scratch you discard. Path compression drops the cost to near-linear,
+`O(nnz * alpha(n))`. Both algorithms produce the identical `parent[]` — the plain form
+is the one to reason about for correctness, Liu's is what production code runs.
+
+### 2.5 The forest as transitive reduction of the update DAG
+
+A clean characterization ties the forest to the factorization dependencies of 1.6. Direct
+the "who-updates-whom" relation: an edge `j -> k` whenever eliminating `j` sends a
+contribution to `k`, i.e. for every `k` in `Struct(j)`. Every edge points forward in the
+elimination order (`j < k`), so this is a **DAG** — the filled graph, directed by
+elimination order. Its edges are the *reach* relation: `j -> k` iff `k` is reachable from
+`j` through lower-numbered vertices (the fill paths).
+
+The forest keeps only the minimal out-edge of each node, `j -> parent(j)`; every other
+edge is transitively implied:
+
+```
+j -> k in the DAG   <=>   k is an ancestor of j in the forest
+```
+
+and each dropped edge `j -> k` is recovered by climbing from `parent(j)` up to `k` —
+exactly the containment theorem. That is the definition of **transitive reduction**: the
+unique minimal edge set with the same reachability. So
+
+```
+elimination forest = transitive reduction of the filled (update) DAG
+                   = Hasse diagram of the elimination-reach order
+```
+
+The reduction is unique because the filled graph is a DAG. Two directions close the
+circle: the plain-climb algorithm *computes* the reduction (climbing past
+transitively-implied edges to the minimal one); symbolic factorization *inverts* it
+(unioning up the tree to reconstruct the full reach, `Struct(L)`). Reduction to store,
+closure to use. The DAG must be the *filled* graph, not `A`'s graph — the reach relation
+runs over paths through eliminated vertices, so fill edges are essential.
+
+### 2.6 Worked example: nested dissection of a grid
+
+A 3x3 grid — small enough to trace, rich enough to branch, and a real sparse pattern.
+Nine nodes with grid adjacency; the ordering is the whole story, so take the good one,
+**nested dissection**: cut the grid with its middle column as a separator, number the
+left block first (1,2,3), the right block second (4,5,6), the separator last (7,8,9).
+
+```
+   left   sep   right
+    1  --  7  --  4
+    |      |      |
+    2  --  8  --  5
+    |      |      |
+    3  --  9  --  6
+```
+
+Structure of `A` (`X` = nonzero; full symmetric):
+
+```
+     1 2 3 4 5 6 7 8 9
+  1  X X . . . . X . .
+  2  X X X . . . . X .
+  3  . X X . . . . . X
+  4  . . . X X . X . .
+  5  . . . X X X . X .
+  6  . . . . X X . . X
+  7  X . . X . . X X .
+  8  . X . . X . X X X
+  9  . . X . . X . X X
+```
+
+The two subdomains `{1,2,3}` and `{4,5,6}` are the diagonal blocks; they have **no
+coupling** (the `4:6 x 1:3` block is empty), interacting only through the separator band
+`{7,8,9}`.
+
+Compute the forest by the climb of 2.4 — the multi-hop climbs are fill reconstructed from
+`A` without forming `L`:
+
+```
+k=2: neighbour 1                        -> parent[1]=2
+k=3: neighbour 2                        -> parent[2]=3
+k=5: neighbour 4                        -> parent[4]=5
+k=6: neighbour 5                        -> parent[5]=6
+k=7: neighbour 1, climb 1->2->3, attach -> parent[3]=7   (left chain rolled up)
+k=7: neighbour 4, climb 4->5->6, attach -> parent[6]=7   (right chain rolled up)
+k=8: neighbour 2, climb 2->3->7, attach -> parent[7]=8
+k=9: neighbour 3, climb 3->7->8, attach -> parent[8]=9
+```
+
+The same fill, seen as the elimination game of 1.6 run in label order: eliminating `k`
+cliques its higher-numbered neighbours (the still-uneliminated ones), and any clique edge
+not already present is fill.
+
+```
+eliminate | higher neighbours | new fill edges  | total fill
+----------+-------------------+-----------------+-----------
+    1     | {2,7}             | (2,7)           |   1
+    2     | {3,7,8}           | (3,7) (3,8)     |   3
+    3     | {7,8,9}           | (7,9)           |   4
+    4     | {5,7}             | (5,7)           |   5
+    5     | {6,7,8}           | (6,7) (6,8)     |   7
+    6     | {7,8,9}           | -               |   7
+    7     | {8,9}             | -               |   7
+    8     | {9}               | -               |   7
+    9     | {}                | -               |   7
+```
+
+The higher-neighbour set already reflects prior fill — e.g. at vertex 3 the neighbours are
+`{7,8,9}`, where `7` and `8` arrived as fill from eliminating 2. Three things this makes
+visible:
+
+- **Fill is created only at vertices 1-5** (the subdomain columns); eliminating 6-9 adds
+  nothing. Every fill lands in the separator rows 7-9 — in the "new fill edges" column all
+  endpoints are `>= 7` except the smaller endpoints 2,3,5,6, which are the subdomain
+  vertices reaching up into the separator.
+- **The two subtrees are independent and merely interleave by label.** Fills from
+  `{1,2,3}` (rows 1-3: `(2,7),(3,7),(3,8),(7,9)`) and from `{4,5,6}` (rows 4-5:
+  `(5,7),(6,7),(6,8)`) never interact — no fill edge joins a `{1,2,3}` vertex to a
+  `{4,5,6}` vertex. That is the sibling independence, seen dynamically.
+- **`(7,9)` is second-order fill.** Eliminating 3 creates `(7,9)`, but 3 only became
+  adjacent to 7 through the earlier fill `(3,7)` (from eliminating 2). So it is fill
+  begetting fill, confined to the separator.
+
+giving `parent = [2, 3, 7, 5, 6, 7, 8, 9, NIL]` — a forest that branches:
+
+```
+              9            separator top (root)
+              |
+              8
+              |
+              7            the two blocks MERGE here
+            /   \
+           3     6
+           |     |
+           2     5
+           |     |
+           1     4
+        (left)  (right)
+```
+
+Structure of the factor `L` (`F` = fill), 7 fills:
+
+```
+     1 2 3 4 5 6 7 8 9
+  1  X
+  2  X X
+  3  . X X
+  4  . . . X
+  5  . . . X X
+  6  . . . . X X
+  7  X F F X F F X
+  8  . X F . X F X X
+  9  . . X . . X F X X
+```
+
+Everything reads off this one figure:
+
+- **It branches -> parallelism.** The subtrees `{1,2,3}` and `{4,5,6}` are disjoint —
+  neither an ancestor of the other — so by sibling independence they factor completely in
+  **parallel**, meeting only at the separator `7`. In the matrix this is the empty
+  `4:6 x 1:3` block: the two halves never write into each other. That branch is the
+  divide-and-conquer of nested dissection made visible.
+- **Chains -> supernodes.** Each straight run (`1->2->3`, `4->5->6`, `7->8->9`) is a chain
+  of single-child nodes whose patterns nest — the raw material for fundamental supernodes.
+- **Climbs -> fill, localized.** All 7 fills land in the separator rows 7-9; the subdomain
+  blocks stay clean. The good ordering shows up as fill *quarantined* into the separator
+  corner — the entire point of nested dissection.
+- **First nonzero = parent.** Each column's topmost below-diagonal entry is its parent:
+  col 3 -> row 7 (fill), col 6 -> row 7 (fill), col 7 -> row 8 — reproducing `parent[]`
+  straight from the matrix.
+
+Finally, mark each forest edge as original or fill. A forest edge is `j -> parent(j)`; it
+is **original** if `A[parent(j)][j] != 0`, otherwise **fill**:
+
+```
+forest edge | A[parent][j] | kind
+------------+--------------+----------
+  1 -> 2    | A[2][1] = X  | original
+  2 -> 3    | A[3][2] = X  | original
+  3 -> 7    | A[7][3] = .  | fill
+  4 -> 5    | A[5][4] = X  | original
+  5 -> 6    | A[6][5] = X  | original
+  6 -> 7    | A[7][6] = .  | fill
+  7 -> 8    | A[8][7] = X  | original
+  8 -> 9    | A[9][8] = X  | original
+  9 -> root |     -        | (root)
+
+original: 1-2, 2-3, 4-5, 5-6, 7-8, 8-9   fill: 3-7, 6-7
+```
+
+- **The two fill forest edges `3-7` and `6-7` are exactly the merge edges** where the left
+  and right chains roll up into the separator — the two multi-hop climbs at `k=7` in the
+  trace. The within-subdomain chain edges (`1-2, 2-3, 4-5, 5-6`) and the separator chain
+  edges (`7-8, 8-9`) are all original. So the forest's original edges follow `A`'s actual
+  chains, and its fill edges are precisely where independent subtrees join.
+- **A forest edge is fill only when a column's first below-diagonal nonzero is itself
+  fill** — here only columns 3 and 6, the subtree roots whose smallest separator-neighbour
+  (`7`) is reached through fill rather than an original edge. For every other column the
+  minimum of its pattern is an original neighbour.
+- **Most fill is not on the tree.** Of the 7 fill entries in `L`, only 2 are forest edges
+  (`3-7`, `6-7`); the other 5 — `(2,7), (3,8), (5,7), (6,8), (7,9)` — are non-tree fill,
+  higher entries in a column, above its parent. This is the transitive-reduction fact of
+  2.5 made concrete: the forest keeps one edge per column (the minimal one), so a column's
+  other fills are transitively implied by climbing. The 7 fill entries collapse to 2 fill
+  tree-edges.
+
+That last note is a nice payoff — it makes "forest = transitive reduction" (2.5)
+concrete: 7 fill entries collapse to 2 fill tree-edges.
+
+Contrast: the *row-major* numbering of the same grid collapses the forest to a single
+**path** `1->2->...->9` (`parent = [2,3,4,5,6,7,8,9,NIL]`) — height 8, no parallelism,
+fill spread across the whole band. Nested dissection turns that path into a balanced tree
+of height 6 with two independent halves. Same matrix, same theory, better tree — the
+ordering is what the forest sees.
+
+### 2.7 A lighter ordering of the same grid
+
+The 2.6 ordering numbered each subdomain column top to bottom (`1,2,3` down the left),
+making each a chain. A better choice numbers the two *ends* of every column before its
+*middle*, so the middle vertex separates the two ends — a nested dissection applied once
+more, inside each line. Relabel the same grid this way (`3`, `6`, `9` are the per-column
+sub-separators):
+
+```
+    1 -- 7 -- 4
+    |    |    |
+    3 -- 9 -- 6
+    |    |    |
+    2 -- 8 -- 5
+```
+
+`A` under the new labels:
+
+```
+     1 2 3 4 5 6 7 8 9
+  1  X . X . . . X . .
+  2  . X X . . . . X .
+  3  X X X . . . . . X
+  4  . . . X . X X . .
+  5  . . . . X X . X .
+  6  . . . X X X . . X
+  7  X . . X . . X . X
+  8  . X . . X . . X X
+  9  . . X . . X X X X
+```
+
+Compute the forest by the climb of 2.4:
+
+```
+k=3: neighbour 1                        -> parent[1]=3
+k=3: neighbour 2                        -> parent[2]=3
+k=6: neighbour 4                        -> parent[4]=6
+k=6: neighbour 5                        -> parent[5]=6
+k=7: neighbour 1, climb 1->3, attach    -> parent[3]=7
+k=7: neighbour 4, climb 4->6, attach    -> parent[6]=7
+k=8: neighbour 2, climb 2->3->7, attach -> parent[7]=8
+k=9: neighbour 3, climb 3->7->8, attach -> parent[8]=9
+```
+
+The elimination game (label order) — each subdomain column's two ends fill into its
+sub-separator, which then fills into the main separator:
+
+```
+eliminate | higher neighbours | new fill edges | total fill
+----------+-------------------+----------------+-----------
+    1     | {3,7}             | (3,7)          |   1
+    2     | {3,8}             | (3,8)          |   2
+    3     | {7,8,9}           | (7,8)          |   3
+    4     | {6,7}             | (6,7)          |   4
+    5     | {6,8}             | (6,8)          |   5
+    6     | {7,8,9}           | -              |   5
+    7     | {8,9}             | -              |   5
+    8     | {9}               | -              |   5
+    9     | {}                | -              |   5
+```
+
+The forest `parent = [3, 3, 7, 6, 6, 7, 8, 9, NIL]`:
+
+```
+          9
+          |
+          8
+          |
+          7
+        /   \
+       3     6
+      / \   / \
+     1   2 4   5
+```
+
+`L` structure (`F` = fill), **5 fills**:
+
+```
+     1 2 3 4 5 6 7 8 9
+  1  X
+  2  . X
+  3  X X X
+  4  . . . X
+  5  . . . . X
+  6  . . . X X X
+  7  X . F X . F X
+  8  . X F . X F F X
+  9  . . X . . X X X X
+```
+
+Forest edges, original vs fill:
+
+```
+forest edge | A[parent][j] | kind
+------------+--------------+----------
+  1 -> 3    | A[3][1] = X  | original
+  2 -> 3    | A[3][2] = X  | original
+  3 -> 7    | A[7][3] = .  | fill
+  4 -> 6    | A[6][4] = X  | original
+  5 -> 6    | A[6][5] = X  | original
+  6 -> 7    | A[7][6] = .  | fill
+  7 -> 8    | A[8][7] = .  | fill
+  8 -> 9    | A[9][8] = X  | original
+
+original: 1-3, 2-3, 4-6, 5-6, 8-9   fill: 3-7, 6-7, 7-8
+```
+
+Against 2.6, the same matrix under this ordering gives **5 fills instead of 7**, and a
+shorter, bushier forest (height 5 rather than 6). The reason is exactly the
+sub-separators: 2.6's left block was the chain `1 -> 2 -> 3`, whereas here `1` and `2` are
+independent leaves under `3`, so the column that was a path becomes a two-leaf fork — one
+fewer coupling to fill, per subdomain. The sub-separator shows in the elimination box:
+eliminating the two ends `1, 2` creates `(3,7), (3,8)`, and their meeting point `3` then
+creates `(7,8)`, confining each subdomain's interaction to a single vertex. Numbering the
+separators last, recursively, is the whole idea of nested dissection — this subsection is
+one more level of it applied to 2.6.
+
+One subtlety is worth drawing out: 2.7 has *fewer* fill entries (5 vs 7) yet *more* fill
+forest edges (3 vs 2). These count different things — total nonzeros created in `L`,
+versus columns whose parent edge (first below-diagonal nonzero) is fill. Split the fill
+into on-tree (a column's minimal entry, so a forest edge) and off-tree (higher entries,
+above the parent) and they reconcile:
+
+```
+            on-tree fill    off-tree fill    total
+2.6              2                5            7
+2.7              3                2            5
+```
+
+2.6's chains produce mostly off-tree fill — each chain column fills into several separator
+rows, most of them above its parent, redundant climbs high in the band. 2.7's
+sub-separators cut those columns to near-single below-diagonal entries, concentrating fill
+at the parent. So a tighter ordering does two things at once: it lowers total fill, and it
+pushes the remaining fill toward the forest's transitive reduction (2.5) — a larger share
+of it becomes minimal (on-tree), leaving fewer transitively-implied off-tree entries. Fill
+forest edges going up while total fill goes down is a signature of that.
+
+### 2.8 Connection to the traversals
+
+The two schedules of 1.3-1.4 are tree motions. Left-looking column `k` gathers from its
+**descendants** — exactly the columns whose scatters reach `k` (the subtree below it).
+Right-looking column `j` pushes to its **ancestors**, `parent(j)` first. "Descendants
+feed a column; the column feeds its ancestors" is the forest restatement of
+gather-versus-scatter. And because siblings are independent, any topological order of the
+forest is a valid elimination order — the freedom the ordering phase exploits.
+
+From here two roads leave the forest, both walks already visible above: **symbolic
+factorization** (Corollary 2's union up the tree, producing `Struct(L)`) and
+**supernodes** (the nesting chains, grouped into dense blocks). Both are consumers of
+`parent[]`.
+
+
+## 3. Symbolic factorization
+
+Symbolic factorization is Corollary 2 turned into a loop. Given the forest, it builds
+`Struct(L)` — the nonzero pattern of every column of `L` — in one bottom-up pass, unioning
+each column's original entries with its children's patterns. No arithmetic, no explicit
+fill formation; the output is the storage map the numeric phase allocates and fills.
+
+### 3.1 The algorithm
+
+Corollary 2 is the recurrence:
+
+```
+Struct(j) = { i > j : A[i][j] != 0 }
+            union, over each child c of j, ( Struct(c) \ {j} )
+```
+
+Turn it into code. Process columns in increasing order `1 .. n`; because `parent(c) > c`,
+every child is finished before its parent, so the natural column order is already a valid
+bottom-up (topological) order of the forest — no separate tree traversal is needed. Each
+child's pattern is enumerated through the forest's child links.
+
+```
+symbolicFactor(A, forest) -> Struct:
+    for j = 1 .. n: # increasing order = children before parents
+        Struct(j) = { i > j : A[i][j] != 0 } # start from column j of A
+        for each child c of j: # absorb each child's pattern
+            Struct(j) = Struct(j) union ( Struct(c) \ {j} )
+```
+
+**Cost — union-with-marks.** Done naively the set unions would be expensive, but a mark
+array (a timestamp per row) makes each union a linear scan with `O(1)` duplicate
+rejection: to build column `j`, append a row and stamp `mark[i] = j`; a row already
+stamped `j` is a duplicate and is skipped.
+
+```
+symbolicFactor(A, forest) -> Struct: # with marks
+    for r = 1 .. n:
+        mark[r] = 0
+    for j = 1 .. n:
+        for each i > j with A[i][j] != 0: # column j of A
+            append i to Struct(j); mark[i] = j
+        for each child c of j:
+            for each i in Struct(c) with i != j: # scan child pattern
+                if mark[i] != j:
+                    append i to Struct(j); mark[i] = j
+```
+
+The whole phase is `O(nnz(L))`, optimal — proportional to the output it produces. The key
+accounting: each column `c` is a child of exactly one parent, so its pattern `Struct(c)`
+is scanned exactly once (when its parent is built). Summed over all columns that is
+`nnz(L)`, plus one pass over `A`. So the total is `O(nnz(A) + nnz(L)) = O(nnz(L))`.
+
+What it touches: `A`'s structure (each column once) and the forest. It never forms fill
+explicitly, never does arithmetic, never looks at a numeric value. This is the claim of
+2.2 — `Struct(L)` is a function of `Struct(A)` alone — made operational: `Struct(A)` and
+the forest go in, `Struct(L)` comes out.
+
+### 3.2 Worked example: the grid
+
+Take the grid of 2.6, forest `parent = [2, 3, 7, 5, 6, 7, 8, 9, NIL]`. First read each
+column's original below-diagonal entries `Acol(j) = { i > j : A[i][j] != 0 }` off `A`, and
+the children off `parent[]`:
+
+```
+col j:    1     2     3     4     5     6     7     8     9
+Acol(j): {2,7} {3,8} {9}   {5,7} {6,8} {9}   {8}   {9}   {}
+children: -     1     2     -     4     5     3,6   7     8
+```
+
+Now run the recurrence bottom-up. Each line is `Struct(j) = Acol(j)  union  (child terms
+Struct(c) \ {j})`; the child term drops `j` itself, since a child's edge to its parent is
+not part of the parent's below-diagonal pattern:
+
+```
+j=1  children -      Struct(1) = {2,7}                    = {2,7}
+j=2  children 1      Struct(2) = {3,8} + {7}              = {3,7,8}
+j=3  children 2      Struct(3) = {9}   + {7,8}            = {7,8,9}
+j=4  children -      Struct(4) = {5,7}                    = {5,7}
+j=5  children 4      Struct(5) = {6,8} + {7}              = {6,7,8}
+j=6  children 5      Struct(6) = {9}   + {7,8}            = {7,8,9}
+j=7  children 3,6    Struct(7) = {8}   + {8,9} + {8,9}    = {8,9}
+j=8  children 7      Struct(8) = {9}   + {9}              = {9}
+j=9  children 8      Struct(9) = {}    + {}               = {}
+```
+
+(`+` denotes set union; the child terms are `Struct(c) \ {j}`.) These column patterns are
+exactly the `X`/`F` positions of `L` in 2.6 — column 2 gains row 7 as fill from its child
+1, column 3 inherits `{7,8}` from column 2, and at column 7 the two subtrees (children 3
+and 6) merge, each contributing `{8,9}`. The recurrence reconstructs the entire fill
+pattern from `A` and the forest, with no arithmetic.
+
+Two features of the forest show through the trace. Fill enters exactly at the multi-hop
+climbs of 2.6: a column's pattern grows only where a child hands up rows that were not in
+`A`'s column. And the two independent subtrees `{1,2,3}` and `{4,5,6}` are built without
+reference to each other — column 7 is the first to see both — which is the sibling
+independence of 2.8: the symbolic pass over disjoint subtrees is itself independent work.
+
+### 3.3 Output and storage
+
+The product is `Struct(1..n)`, stored **flat** as compressed-sparse-column (CSC-of-L): one
+row-index array holding the columns' patterns back to back, and a column-pointer array
+marking where each column begins. That flat pattern is the allocation the numeric phase
+fills — it fixes where every nonzero of `L` lives before a single floating-point operation
+runs, which is the whole purpose of computing it ahead of time.
+
+One structural fact carries into the next section. By the containment theorem a child's
+pattern is nearly its parent's (`Struct(c) \ {parent(c)}` is a subset of
+`Struct(parent(c))`), so along a chain of single-child columns the patterns *nest* — each
+is the next with one fewer row. Storing and processing such a chain column by column
+repeats almost identical patterns. Grouping the chain into one unit with a shared pattern
+— a **supernode** — removes that redundancy, and is the subject of Section 4.
+
+
+## References
+
+The material above is standard sparse-matrix theory; the grouping below points to the
+primary sources for each, roughly section by section. Citation details are given from
+knowledge and are worth a spot-check against the originals.
+
+**Cholesky; left- and right-looking (Section 1).**
+
+- G. H. Golub and C. F. Van Loan, *Matrix Computations*, 4th ed., Johns Hopkins
+  University Press, 2013. Dense Cholesky, the left-/right-looking schedules, and the
+  block (`dsyrk` / `dgemm`) kernels of 1.4.
+
+**Fill and vertex elimination (Sections 1.6, 2).**
+
+- D. J. Rose, "A graph-theoretic study of the numerical solution of sparse positive
+  definite systems of linear equations", in *Graph Theory and Computing*, R. C. Read,
+  ed., Academic Press, 1972, pp. 183-217. The elimination graph, chordal fill, and the
+  clique view of a pivot's neighbours.
+- D. J. Rose, R. E. Tarjan, and G. S. Lueker, "Algorithmic aspects of vertex elimination
+  on graphs", *SIAM J. Comput.* 5(2):266-283, 1976. The fill-path theorem (proved in 1.8
+  via the elimination-graph reachability lemma) and the graph theory of elimination.
+
+**The elimination tree / forest (Section 2).**
+
+- R. Schreiber, "A new implementation of sparse Gaussian elimination", *ACM Trans. Math.
+  Software* 8(3):256-276, 1982. Formalizes the elimination tree.
+- J. W. H. Liu, "A compact row storage scheme for Cholesky factors using elimination
+  trees", *ACM Trans. Math. Software* 12(2):127-148, 1986. The path-compressed etree
+  computation (Liu's algorithm in 2.4) and compact factor storage.
+- J. W. H. Liu, "The role of elimination trees in sparse factorization", *SIAM J. Matrix
+  Anal. Appl.* 11(1):134-172, 1990. The survey: the containment property, the symbolic
+  union recurrence, and subtree independence / parallelism.
+- R. E. Tarjan, "Efficiency of a good but not linear set union algorithm", *J. ACM*
+  22(2):215-225, 1975. The union-find bound behind the `alpha(n)` in Liu's algorithm.
+
+**Symbolic factorization, ordering, sparse direct methods (Section 3; general).**
+
+- A. George and J. W. H. Liu, *Computer Solution of Large Sparse Positive Definite
+  Systems*, Prentice-Hall, 1981. Symbolic factorization, ordering, and the classic
+  treatment of the whole pipeline.
+- A. George, "Nested dissection of a regular finite element mesh", *SIAM J. Numer. Anal.*
+  10(2):345-363, 1973. Nested dissection — the ordering of the grid example in 2.6.
+- T. A. Davis, *Direct Methods for Sparse Linear Systems*, SIAM, 2006. A modern,
+  code-level reference for the entire order / symbolic / numeric pipeline.
+
+**On the framing.** Two presentational choices here are expository, not lifted from a
+single source: casting the forest as the *transitive reduction of the update DAG* (2.5)
+is a folklore-standard restatement rather than any one paper's language, and structuring
+the 2.4 correctness proof around the "Cholesky factors nest" lemma (Lemma A) is this
+document's packaging of the incremental argument. Both are consistent with the sources
+above; the specific wording is ours.

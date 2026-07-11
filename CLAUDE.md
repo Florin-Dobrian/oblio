@@ -35,7 +35,8 @@ modern style. They are not two passes.
 ## Invariants (breaking one is a bug)
 
 These live here, not behind a link, because only this file loads every session.
-Conventions (style preferences) are imported below from docs/CODING_RULES.md.
+Conventions (style preferences) are imported below from docs/CODING_RULES.md
+(code) and docs/WRITING_RULES.md (prose).
 
 - **Port, don't rewrite.** Carry 0.9's algorithm over unchanged. Changing *what*
   is computed is a rewrite — a separate, opt-in track, not part of a port. Every
@@ -86,6 +87,15 @@ the import is `@docs/CODING_RULES.md` — a wrong path imports nothing, silently
 
 @docs/CODING_RULES.md
 
+## Writing rules (imported)
+
+Loaded every session via import so prose conventions stay consistent across the
+documentation. Edit the file, not this line. (Path is relative to this file;
+WRITING_RULES.md lives in docs/, so the import is `@docs/WRITING_RULES.md`; a wrong
+path imports nothing, silently.)
+
+@docs/WRITING_RULES.md
+
 ## Build
 
 macOS (alpamayo, Apple Silicon; Accelerate provides BLAS/LAPACK):
@@ -112,6 +122,9 @@ Linux: replace `-framework Accelerate` with `-lblas -llapack -lm`.
 - **docs/PORTING_LEDGER.md** — per-unit porting status. Read first after a context gap.
 - **docs/CODING_RULES.md** — conventions a linter can't enforce. Imported above, so
   always loaded. Language-general.
+- **docs/WRITING_RULES.md**, prose and documentation conventions (no em-dashes,
+  ASCII only, American spelling, minimal formatting). Imported above, so always
+  loaded. The prose counterpart to CODING_RULES.md.
 - **docs/DESIGN_DECISIONS.md** — full rationale, history, dates, open questions. Read on
   demand; the code-shaping subset is summarized above under Active design
   constraints. When adding an entry, date it with **today's actual date read from

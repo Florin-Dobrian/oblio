@@ -18,7 +18,8 @@ OBLIO_SRCS = \
   src/SparseMatrix.cpp \
   src/Permutation.cpp \
   src/OrderEngine.cpp \
-  src/ElmForestEngine.cpp
+  src/ElmForestEngine.cpp \
+  src/SymFactEngine.cpp
 
 # Vendored ordering codes (SuiteSparse AMD, Sparspak MMD) — copied verbatim, not
 # maintained here, so warnings are silenced (-w) for these two files only.

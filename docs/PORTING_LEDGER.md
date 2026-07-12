@@ -1,55 +1,71 @@
 # Porting Ledger
 
 Tracks the migration of each 0.9 unit into the modern tree. After a context gap,
-read this first — it turns "refresh my context" into a two-minute scan.
+read this first, it turns "refresh my context" into a two-minute scan.
 
 ## How to use
 
 - One row per unit (a class or a small function-group).
-- Status: `not started` → `ported` (translated, compiles) → `verified` (output
-  checked against 0.9 on real input).
-- Notes: Array→vector boundary, index-signedness fixes, open questions — anything
-  a future session needs.
-- Advance to `verified` only after comparing output against 0.9.
-
-## Needs reconciliation
-
-The inventory below is inferred from the three-month-old notes, **not** from a
-fresh read of the 0.9 tree. Reconcile against the actual 0.9 source before
-relying on it — names and groupings may differ.
+- Status, in increasing order of confidence:
+  - `not started`
+  - `ported`, translated and compiles, but nothing checks that it is right.
+  - `checked`, verified against an independent oracle: an implementation that
+    shares no code path with the unit, so agreement is evidence rather than
+    tautology. For the structural units this is a dense simulation of Cholesky
+    fill, which checks the mathematical property directly.
+  - `verified`, output compared against 0.9 itself on real input, buffer for
+    buffer.
+- `checked` and `verified` are different kinds of evidence, not merely different
+  amounts. An oracle says the unit computes the right thing; a 0.9 comparison says
+  it computes the same thing 0.9 does. A unit can be `checked` and still differ
+  from 0.9 in a way that matters downstream (index order within a block, say), so
+  `verified` remains the bar before numeric factorization consumes a unit.
+- Notes: index-signedness fixes, departures from 0.9 or 10.12, open questions,
+  anything a future session needs.
 
 ## Pipeline
 
-`OrderEngine → ElmForestEngine → SymbolicEngine → FactorEngine → SolveEngine`,
+`OrderEngine -> ElmForestEngine -> SymFactEngine -> FactorEngine -> SolveEngine`,
 orchestrated by `OblioEngine`.
+
+Naming note: the modern tree renames as it ports. 0.9's `Matrix` is `SparseMatrix`
+(a `DenseMatrix` will follow), and 0.9's `Symbolic` / `SymbolicEngine` pair is
+`SymFact` / `SymFactEngine`. The table gives the modern name, with the 0.9 name in
+the notes where they differ.
 
 ## Units
 
 | Unit | Uses Val? | Status | Notes |
 |---|---|---|---|
-| Types | no | not started | typedefs, enums, sentinels |
-| Utility | no | not started | helpers; `ResizeVector` etc. — removal candidates |
-| Functional | no | not started | pre-C++11 comparators; likely deletable |
-| Permutation | no | not started | index-only |
-| Matrix | yes | not started | largest unit; storage + build + I/O |
+| Types | no | ported | sentinels (`NIL`), index typedefs |
+| Permutation | no | checked | index-only. Ported: `set` (as `setOldToNew`/`setNewToOld`, replacing 0.9's direction flag) and `compose`. Not yet ported from 0.9: `get`, `read`/`write` (persist an ordering), `initialize2dGrid`/`initialize3dGrid` (structured orderings, useful as test inputs with hand-computable fill) |
+| SparseMatrix | yes | checked | 0.9 `Matrix`; flat CSC, stored fully (both triangles). Build and structural symmetry tested |
+| OrderEngine | no | checked | AMD (SuiteSparse) and MMD (Sparspak) vendored verbatim; output checked for validity as a permutation, not against 0.9's ordering |
+| ElmForest | no | checked | data; supernodal shape, trivial supernodes for now |
+| ElmForestEngine | no | checked | parent links, child/sibling links, roots, height, front/update sizes. Links and height recomputed independently; sizes against the dense oracle, natural and AMD ordered |
+| SymFact | no | checked | 0.9 `Symbolic`; flat index sets with per-supernode offsets |
+| SymFactEngine | no | checked | 0.9 `SymbolicEngine`; index sets against the dense oracle, natural and AMD ordered. 10.12's design, 0.9's behavior (see DESIGN_DECISIONS) |
 | Vector | yes | not started | |
 | MultiplyEngine | yes | not started | |
-| OrderEngine | no | not started | index-only |
-| ElmForestEngine | no | not started | elimination forest; index-only |
-| SymbolicEngine | no | not started | etree, col counts, index sets; index-only |
-| Symbolic | no | not started | data struct |
 | BlasLapack | yes | not started | traits + underscore handling |
-| FactorEngine | yes | not started | most complex; friend access into Matrix/Factors/Symbolic |
+| DenseMatrix | yes | not started | fronts and update blocks |
+| FactorEngine | yes | not started | most complex; friend access into SparseMatrix/Factors/SymFact. Dynamic LDL pivoting is what forces the storage question (see DESIGN_DECISIONS) |
 | SolveEngine | yes | not started | watch backward-solve index signedness |
 | OblioEngine | yes | not started | top-level driver |
 
-`Array → std::vector` is the cross-cutting migration, not a unit — it lands unit
-by unit as each row is ported, and the boundary between converted and
-un-converted code creeps up the call graph. Track that boundary in the Notes
-column as it moves.
+Units from 0.9 deliberately not carried over: `Utility` (`ResizeVector` and
+friends, obviated by `std::vector`) and `Functional` (pre-C++11 comparators,
+obviated by lambdas).
 
-## Suggested start
+## Owed
 
-Non-numeric, leaf-first: Types, Utility, Functional, Permutation. These carry no
-`Val` and the fewest dependencies, so the Array→vector boundary starts small and
-grows outward from stable ground.
+- **Nothing is `verified` yet.** Every structural unit is `checked` against the
+  dense oracle, which is real evidence, but none has been compared against 0.9
+  buffer for buffer. That comparison is owed before numeric factorization starts
+  consuming these structures, because a difference the oracle cannot see (index
+  order within a supernode's block, say) is exactly the kind that surfaces as a
+  numeric bug much later.
+- **Fundamental-supernode compression** is not implemented. Supernodes are trivial
+  (one column each) throughout, so the supernodal machinery is real but untested at
+  supernode granularity: the symbolic union's multi-front-column generality runs
+  with exactly one front column per supernode.

@@ -4,7 +4,7 @@
 //
 // Minimal on purpose: enough structure for an ordering engine to compute a
 // Permutation. Stored as three flat, contiguous vectors:
-//   colPtr — size numCols()+1; column j occupies rowIdx/val[colPtr[j] .. colPtr[j+1]-1]
+//   colPtr — length size()+1; column j occupies rowIdx/val[colPtr[j] .. colPtr[j+1]-1]
 //   rowIdx — size nnz(); row indices, sorted ascending within each column
 //   val    — size nnz(); the corresponding values
 // A symmetric matrix is stored FULLY (both triangles), matching Oblio 0.9/10.12:
@@ -38,15 +38,15 @@ class SparseMatrix {
 public:
     SparseMatrix() = default;
 
-    // Take arrays already in CSC form (moved in). colPtr has numCols+1 entries;
-    // rowIdx and val each have colPtr[numCols] entries.
-    SparseMatrix(std::size_t numCols,
+    // Take arrays already in CSC form (moved in). colPtr has size+1 entries;
+    // rowIdx and val each have colPtr[size] entries.
+    SparseMatrix(std::size_t size,
                  std::vector<std::size_t>  colPtr,
                  std::vector<std::int32_t> rowIdx,
                  std::vector<Val>          val);
 
-    std::size_t numCols() const;   // matrix dimension (number of columns)
-    std::size_t nnz()     const;   // number of stored entries
+    std::size_t size() const;   // matrix dimension (number of rows / columns)
+    std::size_t nnz()  const;   // number of stored entries
 
     // Structural read access. All callers (engines, tests, users) read A through
     // these; A is input and has no writer, so there is no friend. Bulk traversals
@@ -57,8 +57,8 @@ public:
     const std::vector<Val>&          val()    const;
 
 private:
-    std::size_t               mNumCols = 0;
-    std::vector<std::size_t>  mColPtr;   // size mNumCols + 1 (offsets)
+    std::size_t               mSize = 0;
+    std::vector<std::size_t>  mColPtr;   // size mSize + 1 (offsets)
     std::vector<std::int32_t> mRowIdx;   // size nnz (row IDs)
     std::vector<Val>          mVal;      // size nnz
 };

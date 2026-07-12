@@ -3,24 +3,226 @@
 Durable record of structural choices, newest first. Each entry: date, decision,
 why. This is the file to open after a gap to reconstruct the project's shape.
 
-## 2026-07-09 — Index types: `std::int32_t` IDs (NIL = -1), `std::size_t` offsets
+## 2026-07-11, Choice objects are constructible; derived-fact objects are engine-filled
+
+**The pipeline holds two kinds of object, and they deserve opposite rules.** A permutation
+is a choice. Given a matrix there are n! valid permutations, and which one is wanted is
+policy: AMD, MMD, nested dissection, the problem's own numbering, an ordering read back from
+a file, an ordering composed from two others. An elimination forest is not a choice. Given a
+matrix and a permutation there is exactly one correct forest, one correct symbolic
+factorization, one correct numeric factor. They are derived facts, and any value other than
+the derived one is simply wrong.
+
+**So: choice objects are freely constructible, derived-fact objects are engine-filled only.**
+`SparseMatrix` and `Permutation` are inputs in the sense that matters, they encode decisions
+the caller is entitled to make, so they take a full public interface for building and setting
+them. `ElmForest`, `SymFact` and the numeric factor to come are written only by their engine,
+through friend access, and expose read-only accessors. A caller-supplied elimination forest
+is meaningless at best and silently wrong at worst, so nothing is gained by permitting one,
+while a whole class of bugs is prevented by forbidding it.
+
+**Input versus output is the wrong test, and would have misled us here.** A permutation is
+`OrderEngine`'s output and `ElmForestEngine`'s input, so that framing gives no answer. The
+question that does give an answer is whether the object is determined by what precedes it.
+Determinacy, not position in the pipeline.
+
+**A consequence worth stating: an ordering engine is optional.** `OrderEngine` is a
+convenience for computing a good permutation; it is not the sole authority on what a
+permutation may be, which is why `setOldToNew`/`setNewToOld` are public API rather than a
+testing backdoor. This is not an innovation, 0.9 had `set`, `get`, `read`, `write`, `compose`
+and the grid orderings, all public. We had merely under-ported the class, and the missing
+setter first showed up as an inability to test the permutation maps against a known answer.
+The friend grant to `OrderEngine` survives, but only as an optimization (it can skip
+re-checking a bijection it just built), not as the mechanism by which a permutation gets
+filled.
+
+## 2026-07-11, Symbolic factorization: 10.12's design, 0.9's behavior
+
+**The source-of-truth rule got its first real test here, and both halves of it fired.** The
+union recurrence at the heart of symbolic factorization is identical in 0.9 and 10.12: the
+same two-part union (the sparsity patterns of a supernode's own front columns, then the
+update indices of its children), the same two skip tests, the same marker array. There was
+no behavioral choice to make. Every difference between the two references was a matter of
+shape, and in one case a matter of one of them being wrong.
+
+**We took 10.12's naming, and it is a real improvement.** `s1`/`s2` for a child and parent
+supernode, `lc`/`lr` for a local (factor-order) column and row, `ac`/`ar` for their
+counterparts in the original matrix. 0.9 uses `jj`/`kk`/`i`/`di_`, which is hard to read and
+harder to review. The 10.12 vocabulary also lines up with the `lc1`/`lc2` names already in
+our `computeParent`, so the port reads consistently across engines.
+
+**Front size is computed by counting the map, not by filling ones.** 10.12's
+`rComputeNumIdxs` fills the front sizes with 1 unconditionally, which is correct only
+because it runs while supernodes are still trivial (compression happens afterward). We
+compute `frontSize[s]` as the number of columns mapping to `s`. On trivial input this gives
+the same all-ones answer, but it stays correct once fundamental-supernode compression merges
+columns, so the function covers both regimes rather than one. This is not really a departure
+from 0.9 either: 0.9's symbolic factorization recomputes the front sizes from the map with
+exactly this loop. We simply compute them one stage earlier, on the forest, where they
+belong as an attribute.
+
+**SymFact stores its index sets flat, as 0.9 does, not as a vector of vectors.** This
+follows directly from the flat-vs-VV decision below: the symbolic factor is written once
+into a structure whose size the forest already knows (`frontSize + updateSize` per
+supernode), so a flat buffer with per-supernode offsets is the right shape and stays
+comparable to 0.9 buffer-for-buffer. 10.12 uses a vector of vectors here and we do not
+follow it. One modernization within the flat layout: 0.9's `pointerToIndex` holds absolute
+pointers into the index array, while we hold `std::size_t` offsets. Same layout, but the
+offsets bracket each supernode's block as `[s]`/`[s + 1]` and match the convention already
+used by `SparseMatrix`.
+
+**SymFact copies three links, not five.** The forest is doubly linked (parent, first and
+last child, next and previous sibling), because `computeHeight` walks it backward. Symbolic
+factorization only ever walks a child list forward, so it needs parent, first child and next
+sibling, and that is exactly what both 0.9 and 10.12 store in their symbolic object. We
+follow. The other two are cheap to add later if numeric factorization wants a backward walk.
+
+**10.12's symbolic engine has a bug, and finding it is the point.** It builds its sibling
+vector with `std::copy(elmForest.mLstChldVec.begin(), ..., nxtSblgVec.begin())`, copying the
+last-child links into the next-sibling links. The factorization itself still comes out right,
+because the recurrence reads the sibling links straight off the forest rather than off the
+copy, but the sibling links stored in the resulting symbolic object are corrupt, and those
+are what numeric factorization would later traverse. This is the concrete reason the rule is
+"favor 10.12's design, verify against 0.9's behavior" and not "follow 10.12". We took 0.9's
+correct three-link copy.
+
+**The generality for compression is written but currently dead.** The recurrence unions the
+patterns of every front column of a supernode, not just the first, because threshold-based
+compression groups columns whose patterns are merely similar rather than identical. While
+supernodes are trivial every supernode has exactly one front column, so that loop runs once
+and the generality is untested. It is deliberately kept (both references keep it) and will
+get its first real exercise when fundamental-supernode compression lands.
+
+**Verification is against an independent oracle, not against ourselves.** The tests compare
+every supernode's index set to a dense simulation of Cholesky fill (eliminate a column, make
+its subdiagonal rows pairwise adjacent), which shares no code path with the forest or the
+symbolic factorization. Agreement is therefore evidence rather than tautology. It runs under
+both the natural ordering and AMD, so the permutation maps are exercised too, and it
+incidentally reconfirms the forest's update sizes on the same matrices.
+
+## 2026-07-11, Flat vs vector-of-vectors storage, and the descriptor view that spans both
+
+*Provisional in part: the symfact/static decisions are settled; the dynamic-numfact
+storage is a brainstorm recorded ahead of having 0.9's numfact code (see Status).*
+
+**Not an API question, a data-structure question.** Flat storage (one contiguous buffer
+plus a per-column/per-supernode offset array, CSC style) versus vector-of-vectors (VV, one
+inner `std::vector` per column/supernode) is not about the public interface. A clean API
+could wrap either; that part is cosmetic. What matters is the friend algorithms: they reach
+into the internals directly for speed (the friend-access decision), so the storage layout
+is part of each algorithm's contract. Change the layout and the friends adapt; they cannot
+go through a high-level per-element accessor in a hot loop.
+
+**The dividing line is mutability.** VV earns its keep only when the structure is mutable
+and edits must stay local: inserting into one column without reflowing every downstream
+offset in a flat buffer. Flat wins everywhere the structure is write-once with sizes known
+up front: one allocation, contiguous streaming, cheap offsets to hand to BLAS. The cost of
+flat is that each column's size must be known before filling; the cost of VV is scattered
+heap allocations (a cache miss at every column boundary) plus per-vector overhead.
+
+**Symfact and static numfact are flat.** Symbolic never grows: the elimination forest
+supplies `frontSize + updateSize` per supernode, so the flat buffer is sized exactly and
+each supernode's block is written once with a local cursor. This is what 0.9 does:
+`pointerToIndex` from the known sizes, then the union loop fills. A mutable symfact would be
+overkill; nobody patches a symbolic factor in place, one recomputes it after the matrix
+structure changes. Static numeric factorization is likewise write-once into a known
+structure. Both stay directly comparable to 0.9 buffer-for-buffer.
+
+**Dynamic numfact is why VV matters.** Dynamic LDL pivoting delays an unstable pivot and
+passes it up to an ancestor, so that ancestor's front acquires columns symbolic never
+predicted; its index set and value block grow at runtime by an amount unknowable until the
+numerics run. That is genuine mutability, arriving through the numerics rather than through
+matrix edits, and it is local, independent growth (one ancestor grows, its siblings do
+not), which is precisely what VV does cheaply. Flat for dynamic needs contortions:
+preallocate every front to its worst case (mostly wasted memory), or reflow the buffer on
+each delay (O(nnz) per delay). Flat for dynamic is overkill; VV is the natural structure.
+
+**A hybrid can keep the stored object flat.** The dynamic structure is unpredictable only
+*during* elimination; once numfact finishes, every delay has resolved and the factor is a
+fixed structure with known counts, so it is flattenable, we just cannot size the flat
+buffer until the numerics have run. The option on the table: dynamic (growable) working
+storage inside the numfact engine, then one flatten pass into the persistent flat factor.
+The persistent factor is then uniformly flat whether it came from static or dynamic
+numfact, so the solve phase and the verification against 0.9 are identical either way, and
+dynamism becomes an implementation detail of the engine's scratch. The copy is O(nnz(L)),
+one pass, noise against numfact's O(flops), and we factor once and solve many. Two honest
+caveats: the flat factor is sized from the numfact *result*, not from symbolic (delayed
+pivoting adds fill, so symbolic stays the static lower bound and the dynamic flat factor is
+a separate, post-hoc-sized object); and the flatten canonicalizes, it is copy-and-order
+into the fixed front-then-update sorted layout the solve expects, not a pure memcpy. An
+incremental flatten, supernode by supernode, releasing each dynamic front as it is copied,
+avoids a peak that holds both representations at once.
+
+**The descriptor view unifies the code across both layouts.** A VV is, in essence, an array
+of (base pointer, length) pairs, one per column/supernode; flat presents the identical
+shape by handing out pointers into its one buffer plus the counts. Write each friend against
+that view (`{std::int32_t* ptr; std::size_t len}` for an index run, `{std::int32_t* rowIdx;
+Val* val; std::size_t len}` for a matrix column) and the algorithm does not know which
+layout produced the base pointer. 0.9 is already in this shape: `pointerToIndex[kk]` is an
+absolute pointer into the flat index buffer and the consumer walks `(base, len)`. This is
+the friend-access decision generalized from "member access" to "a layout-agnostic view over
+members," and it applies to any CSC-style object, the matrix included.
+
+**The view must be monomorphic, or it costs what it is meant to save.** The unifier is free
+only as a compile-time abstraction: a plain `{ptr, len}` struct, or a `template<class
+Storage>` exposing `span(s) -> {ptr, len}`, so the inner loop compiles to the same machine
+code as hand-written flat. A runtime-polymorphic per-element accessor (`virtual get(s, k)`)
+reintroduces exactly the non-inlinable cost the friend-access measurement clocked at ~6x,
+the thing the hot path cannot afford. So: one algorithm source, instantiated per layout
+(two monomorphizations, not one binary switching layout at runtime inside the loop). It
+stays optimal on flat, correct-but-scatter-bound on VV. The write side unifies too: because
+sizes are known up front for the flat cases, both flat and a pre-sized VV inner accept the
+same `base[cursor++] = i` fill.
+
+**One VV-only hazard: growth invalidates descriptors.** When a VV inner vector reallocates
+on growth its base pointer moves, so any cached `{ptr, len}` goes stale. For flat and
+symfact this never happens (read-only after fill), so the view is stable. For dynamic the
+rule is grow, then fetch the descriptor, then stream; never hold a descriptor across a
+growth event. A `reserve()` per front to a symbolic-size-plus-margin reduces reallocations
+but cannot guarantee zero, so the fetch-after-growth discipline still governs. Delays land
+at assembly and the BLAS streaming comes after, so the ordering is natural.
+
+**An `experiments/` study should prove the abstraction is free before it spreads.**
+Following the `experiments/` convention (self-contained, validates a standard, not in the
+main build): one column-streaming kernel written hand-flat, templated-descriptor over flat,
+and templated-descriptor over VV, plus a runtime-virtual version as the cautionary
+baseline. It must show hand-flat and templated-over-flat match to noise (zero abstraction
+penalty), virtual is the ~6x hit (why the view stays monomorphic), and VV-over-descriptor
+is correct but slower purely from scatter. Keep the storages equal-content so it measures
+layout and abstraction, not two different structures.
+
+**Status and the open question.** Settled for now: flat for the matrix (mutability not
+assumed yet), flat for symfact, flat for static numfact. Provisional: dynamic numfact wants
+growable working storage, with the flatten-to-flat hybrid as the leading candidate for the
+persistent object. The blocker on finalizing is that we do not have 0.9's numeric
+factorization code; none of the numfact sources are in the reference set, so how 0.9 stores
+dynamic fronts is unverified. It is entirely possible 0.9 does not do dynamic with flat, in
+which case 0.9 supports this split rather than contradicting it, but that is a prediction to
+check against the code. When the numfact code surfaces: see whether the dynamic path uses
+growable per-front storage, worst-case preallocation, or reflow, and whether static and
+dynamic share a front representation. If 0.9 already runs dynamic scratch into a flat
+result, the hybrid is a port; if 0.9 keeps a dynamic factor object, the hybrid is a
+modernization on the rewrite track, and we verify the flat result matches 0.9's factor
+content, not its storage.
+
+## 2026-07-09, Index types: `std::int32_t` IDs (NIL = -1), `std::size_t` offsets
 
 Two kinds of integer, two types:
 
-- **IDs** — a value that *names* a vertex/row/column/supernode, and may need a "none"
-  marker — are **`std::int32_t`**, with sentinel **`NIL = -1`** (`constexpr std::int32_t`).
+- **IDs**, a value that *names* a vertex/row/column/supernode, and may need a "none"
+  marker, are **`std::int32_t`**, with sentinel **`NIL = -1`** (`constexpr std::int32_t`).
   E.g. `SparseMatrix::rowIdx`, the permutation maps, and the forest's parent / child /
   sibling / supernode-map arrays.
-- **Offsets / counts / sizes** — row-pointers, `nnz`, dimensions, anything that indexes
-  into or measures — are **`std::size_t`**. E.g. `SparseMatrix::colPtr`, `numCols()`.
+- **Offsets / counts / sizes**, row-pointers, `nnz`, dimensions, anything that indexes
+  into or measures, are **`std::size_t`**. E.g. `SparseMatrix::colPtr`, `size()`.
 
 **Why signed int32 for IDs.** The forcing function was the sentinel. The forest needs a
 "no parent"/"no child" marker; on an unsigned `std::size_t` that can only be the max
-value, spelled `static_cast<std::size_t>(-1)` — defined behaviour but an ugly wraparound
+value, spelled `static_cast<std::size_t>(-1)`, defined behaviour but an ugly wraparound
 smell, and easy to misuse in arithmetic. A signed `std::int32_t` gives a clean, obvious
 `-1`. This also matches (a) the graph code, which already uses `int32_t` vertex IDs with
 `static const int NIL = -1;` so companion arrays like `mate` hold `-1` naturally, and (b)
-the vendored AMD/MMD, which are `int`-based — so `rowIdx` as `int32_t` largely removes the
+the vendored AMD/MMD, which are `int`-based, so `rowIdx` as `int32_t` largely removes the
 `size_t→int` conversion at that boundary. The cost is a ~2.1-billion index cap (int32 vs
 size_t's range). Accepted deliberately: cleaner and more agile, and Oblio isn't targeting
 matrices past 2^31 structural indices for now. If that changes, widen the ID type to
@@ -35,7 +237,7 @@ graph's `GeneralGraph` exactly: `idx` (row-pointer) is `size_t`, `adj` (neighbou
 **No signed/unsigned friction, because loop counters stay `std::size_t`.** g2_csr
 demonstrates the discipline: counters that enumerate positions are `size_t` (so they
 compare against `.size()` cleanly), and `int32_t` appears only as *stored values* that
-may be `NIL` — never as a loop variable. `size_t` is a safe superset of the non-negative
+may be `NIL`, never as a loop variable. `size_t` is a safe superset of the non-negative
 `int32_t` range, so viewing an index as `size_t` in a bounded, non-negative loop loses
 nothing. The two types reconcile with explicit casts at exactly two crossings:
 `static_cast<std::int32_t>(counter)` when storing a counter into an ID array (the
@@ -43,38 +245,38 @@ narrowing where the 2^31 cap lives), and `static_cast<std::size_t>(id)` when an 
 subscripts an array (widening; guard against `NIL` first if it could be a sentinel). Casts
 are few and mark the ID↔offset boundary.
 
-Spelling: `std::int32_t` from `<cstdint>`, `std::size_t` from `<cstddef>` — std-qualified,
+Spelling: `std::int32_t` from `<cstdint>`, `std::size_t` from `<cstddef>`, std-qualified,
 C++ headers, same rule as every other stdlib type. Applied first to `SparseMatrix`
 (`rowIdx`→`int32_t`, `colPtr`→`size_t`); `Permutation` (maps→`int32_t`) and `ElmForest`
 (parent/etc.→`int32_t` with a shared `NIL`) follow. The graph code uses bare `int32_t`;
 it's the code to bring in line later, like the matching codebase was for `size_t`.
 
-## 2026-07-09 — Friend grants write access; reads are public
+## 2026-07-09, Friend grants write access; reads are public
 
 The engine↔data access rule:
 
 - **`friend` = write access.** An engine befriends exactly the data class(es) it
-  *produces/mutates*. There is no public mutation API for those internals — only the
+  *produces/mutates*. There is no public mutation API for those internals, only the
   producing engine reaches the private members. E.g. `OrderEngine` writes
   `Permutation`; `ElmForestEngine` writes `ElmForest`. Friendship is declared by the
   data class (`friend class FooEngine;`), not by the engine.
-- **Reads are public — everywhere, including hot paths.** Engines, tests, and users
+- **Reads are public, everywhere, including hot paths.** Engines, tests, and users
   all read via the public const API. `friend` is *not* needed for reading.
 - **This corrects an earlier overstatement** (the friend/BLAS entry below implied
   friend was needed for hot-path reads). The `experiments/friend-access/` study
-  measured a *per-element, cross-translation-unit accessor call* — which can't inline,
-  so it blocks vectorization — against direct friend member access; friend won ~6×.
+  measured a *per-element, cross-translation-unit accessor call*, which can't inline,
+  so it blocks vectorization, against direct friend member access; friend won ~6×.
   But that gap comes from calling the accessor *per element*, not from using a public
   accessor at all. Two public-accessor patterns match friend's performance exactly:
-  (a) hand BLAS the block via a single `.data()` call — BLAS then owns the O(n³) loop,
+  (a) hand BLAS the block via a single `.data()` call, BLAS then owns the O(n³) loop,
   so the one call is free; (b) for a hand-written element loop, bind the returned
-  container once (`const auto& v = A.val();`) and loop over *that* — one non-inlined
+  container once (`const auto& v = A.val();`) and loop over *that*, one non-inlined
   call total, then a vectorizable loop over contiguous memory. So the hot-path
   discipline is **"bind-once / pass the pointer," not "be a friend."**
 - **Consequence for `SparseMatrix`:** A is input and nothing writes it (its
   construction path is TBD), so it needs *no* friends. Its earlier
   `friend class OrderEngine` is removed; `OrderEngine` reads A via
-  `colPtr()`/`rowIdx()`/`numCols()` and remains a friend only of `Permutation` (which
+  `colPtr()`/`rowIdx()`/`size()` and remains a friend only of `Permutation` (which
   it writes). `ElmForestEngine` already followed this (friend of `ElmForest` only).
 - **Numerical data classes** (`Factors`, …) still befriend their producing engines for
   *writes*; their hot-path reads also go through public accessors with the
@@ -82,42 +284,42 @@ The engine↔data access rule:
 - **Exposure stance (pragmatic, not purist):** exposing internals read-only is fine;
   we don't design curated "won't-break" read APIs up front. A representation change
   already forces editing the friends (writers); public read exposure adds only the
-  *tests* to that blast radius — cheap, and tests *should* feel a rep change. Curate a
+  *tests* to that blast radius, cheap, and tests *should* feel a rep change. Curate a
   narrower public API later only if a structure's representation proves unstable. For
   the canonical structures we have (CSC, etree `parent[]`), the representation is the
   settled standard form, so exposing it by reference is low-risk.
 
-## 2026-07-09 — Sparse matrix storage: flat CSC, stored FULLY (both triangles)
+## 2026-07-09, Sparse matrix storage: flat CSC, stored FULLY (both triangles)
 
 `Matrix` (input A) stores its structure and values as flat **compressed sparse column
-(CSC)**: three contiguous `std::vector`s — `colPtr` (size+1), `rowIdx` (nnz), `val`
-(nnz) — row indices sorted ascending per column. A symmetric matrix is stored **fully
+(CSC)**: three contiguous `std::vector`s, `colPtr` (size+1), `rowIdx` (nnz), `val`
+(nnz), row indices sorted ascending per column. A symmetric matrix is stored **fully
 (both triangles)**, each column holding its complete neighbour list plus the diagonal.
 
 Storage layout (flat CSC vs vector-of-vectors) and triangle (full vs lower) are two
 separate decisions:
 
-**Layout — flat CSC**, across the three generations:
-- **0.9** stored CSC via four manually `new`/`delete`d `Array*` pointers — the manual
+**Layout, flat CSC**, across the three generations:
+- **0.9** stored CSC via four manually `new`/`delete`d `Array*` pointers, the manual
   memory management the port removes.
 - **10.12** modernized to `std::vector` but chose **vector-of-vectors** (one inner
-  vector per column) — RAII but the wrong layout: columns scatter across the heap.
-- **PoC / port** use flat CSC (`mColPtr`/`mRowIdx`/`mVal`) — vectors *and* contiguous,
+  vector per column), RAII but the wrong layout: columns scatter across the heap.
+- **PoC / port** use flat CSC (`mColPtr`/`mRowIdx`/`mVal`), vectors *and* contiguous,
   satisfying the "contiguous storage to BLAS via `.data()`" invariant.
 
-**Triangle — full, not lower.** Both 0.9 and 10.12 store A **fully**: 0.9's
+**Triangle, full, not lower.** Both 0.9 and 10.12 store A **fully**: 0.9's
 `getNumberOfNonzeroEntries() = size + 2*numOffDiagonals` (each off-diagonal in both
 triangles) and its "storing A within the structure of A+Aᵀ"; 10.12 has `SymmetrizeStrc`
 and its etree reads full per-column neighbour lists. The **PoC diverged**, storing the
 lower triangle only ("stored as lower triangle in CSC"). That divergence is what forced
 every structural consumer to expand lower→full first (the MMD path in `OrderEngine`, the
-etree in `ElmForestEngine`) — and the etree bug where lower-triangle input silently
+etree in `ElmForestEngine`), and the etree bug where lower-triangle input silently
 produced an empty tree until expansion was added. **The port matches the oracle: A is
 stored fully.** Consequences: structural phases (ordering, elimination forest, symbolic)
 read each column's neighbours directly with no expansion (the etree's diagonal
 self-skips via `lc1 < lc2`; MMD just strips the diagonal; AMD ignores it); it's the
 faithful port (lower-triangle was a rewrite of the data structure); and it's the natural
-substrate for a future **unsymmetric extension** — factor the symmetrized structure
+substrate for a future **unsymmetric extension**, factor the symmetrized structure
 A+Aᵀ while carrying asymmetric values. Cost: ~2× off-diagonal storage for A, and the
 numeric phase carries a redundant triangle. Accepted, matching 0.9/10.12; A is the input
 and is far smaller than the factors, where the real memory lives.
@@ -128,77 +330,77 @@ and a weak `isValid`. The modern `SparseMatrix` keeps the flat-CSC layout but is
 COO→CSC assembly details (zero-diagonal insertion, duplicate merging, symmetrization),
 10.12 shows which operations the solver actually calls.
 
-## 2026-07-09 — Two layers of modernization: rules prevent, clang-tidy catches
+## 2026-07-09, Two layers of modernization: rules prevent, clang-tidy catches
 
 The coding rules and `.clang-tidy` are complementary layers catching different
-failures at different times — not redundant work:
-- **Coding rules** (CODING_RULES + CLAUDE invariants) — preventive and broad. They
+failures at different times, not redundant work:
+- **Coding rules** (CODING_RULES + CLAUDE invariants), preventive and broad. They
   shape code as it's written and cover what no tool can judge: port-verbatim
   discipline, friend→BLAS, when to split a header, `.cpp`, `mFoo`, `std::size_t`.
-- **`.clang-tidy` `modernize-*`** — a mechanical safety net, narrow but certain. It
+- **`.clang-tidy` `modernize-*`**, a mechanical safety net, narrow but certain. It
   can't reason about intent, but within scope it catches the idiom slips that get
   through (a stray `NULL`, a `typedef`) and can auto-fix them.
 
 So a `NULL` written by mistake is exactly what the rules *say* and the tool
-*guarantees* — belt and braces, each doing what the other can't.
+*guarantees*, belt and braces, each doing what the other can't.
 
 `modernize-*` is aligned with this project's purpose at the concept level: porting 0.9
 (late-90s C++) forward *is* turning `typedef`→`using`, `NULL`→`nullptr`, raw loops→
-range-for, and so on across old code — exactly what that checkset does. So it can do
+range-for, and so on across old code, exactly what that checkset does. So it can do
 part of the mechanical modernization *for* you on each ported file (`--fix`), leaving
 your attention on the algorithmic faithfulness no tool can verify. Hence the per-unit
 workflow (in CLAUDE.md Process): port faithfully → `clang-tidy --fix` → verify vs 0.9.
 
-## 2026-07-08 — `experiments/` convention (runnable design studies)
+## 2026-07-08, `experiments/` convention (runnable design studies)
 
 `experiments/<name>/` holds self-contained, runnable studies that establish or
 validate a coding standard before it is applied in the main tree. Each is its own
 folder with its own sources, `Makefile`, and `README.md`; builds standalone
-(`make test`); and is reference/teaching material — **not** part of the main Oblio
+(`make test`); and is reference/teaching material, **not** part of the main Oblio
 build. Executables carry the `_cpp` suffix and are gitignored.
 
 Distinct from its two neighbors:
-- `archive/` — frozen history (superseded PoC devlog, 0.9-analysis notes, old
+- `archive/`, frozen history (superseded PoC devlog, 0.9-analysis notes, old
   harnesses). Not maintained, not built.
-- `examples/` — usage samples showing how to *call* the library (`examples/basic.cpp`).
+- `examples/`, usage samples showing how to *call* the library (`examples/basic.cpp`).
 
 An experiment answers a design question with code you can run and measure, then feeds
 a decision here. Current studies: `template-instantiation/` (how to instantiate the
-`Val` template — implicit vs plain/guarded explicit) and `friend-access/` (public API
+`Val` template, implicit vs plain/guarded explicit) and `friend-access/` (public API
 vs `friend`-direct access, with timing). Experiments use the already-settled standards
 (guarded explicit, `.cpp`, `mFoo`, `Oblio` namespace), so they double as worked
 references for those standards.
 
-## 2026-07-08 — Numerical hot path: `friend` access, then BLAS (carried from 0.9)
+## 2026-07-08, Numerical hot path: `friend` access, then BLAS (carried from 0.9)
 
 The 0.9 design for numerical work, which the port preserves: **an engine reaches the
 data's contiguous block via `friend`, then hands that raw block to BLAS** wherever
-BLAS applies (gemv/gemm/syrk/trsm/potrf, via Accelerate on macOS). Not a new choice —
+BLAS applies (gemv/gemm/syrk/trsm/potrf, via Accelerate on macOS). Not a new choice,
 this two-step (`friend` → BLAS) is how 0.9 does dense numerics.
 
 This *is* supernodal numerical factorization: supernodes are dense blocks embedded in
 the sparse structure, and the numerical phase is a long sequence of dense BLAS calls on
-them — `syrk`/`gemm` for Schur-complement updates, `potrf`/`getrf` to factor the pivot
-block, `trsm` for the off-diagonal solve — repeated per supernode across the whole
+them, `syrk`/`gemm` for Schur-complement updates, `potrf`/`getrf` to factor the pivot
+block, `trsm` for the off-diagonal solve, repeated per supernode across the whole
 elimination. `FactorEngine` reaches each supernode's contiguous storage via `friend`
 and passes the pointer straight to BLAS, no copy, thousands of times per factorization.
 So `friend` isn't an optimization detail; it's the access mechanism the entire numerical
 phase is built on. The `experiments/friend-access/` mat-vec is the single-block toy of
 this pattern.
 
-Important distinction — **the supernode blocks live in the factors, not in A.** `A`
-(the input `Matrix`) is never handed to BLAS block-by-block; it's *read* — its structure
+Important distinction, **the supernode blocks live in the factors, not in A.** `A`
+(the input `Matrix`) is never handed to BLAS block-by-block; it's *read*, its structure
 by the ordering and symbolic phases, its values once when they're scattered into the
 factor. The dense blocks that BLAS operates on are created during factorization and
 stored in `Factors`. So the `friend`→BLAS hot path is specifically a `Factors` /
 `FactorEngine` story. `A`'s storage (CSC) is chosen for a different reason: cheap,
 cache-friendly *sequential column traversal* by the structural phases, plus being the
 standard interchange format (what AMD/MMD expect). Both `A` and the factors favor flat,
-contiguous storage over 10.12's vector-of-vectors — but for `A` the reason is streaming
+contiguous storage over 10.12's vector-of-vectors, but for `A` the reason is streaming
 structural reads, and for the factors it's the contiguous block BLAS needs.
 
 Data classes (`Matrix`, `Vector`, `Factors`, `Symbolic`) expose a public,
-bounds-checked API (`operator()`, `operator[]`) for reads — by all callers, on hot
+bounds-checked API (`operator()`, `operator[]`) for reads, by all callers, on hot
 paths too (see the "friend = write access" entry above: reads are public; the hot-path
 discipline is bind-once / pass `.data()` to BLAS, not friendship). Engines befriend a
 data class only to *write* it. 0.9 grants `FactorEngine` friend access into `Matrix`,
@@ -208,7 +410,7 @@ writes (the factor storage), and reads go through the public API.
 Why (performance): the public-operator path is one non-inlined, cross-translation-unit
 call per element (data-class body in its `.cpp`, loop in the engine's), which blocks
 vectorization. Direct `friend` access fetches the raw block pointer once and walks
-contiguous memory, which vectorizes — measured ~6× on Apple Silicon (M4/AppleClang),
+contiguous memory, which vectorizes, measured ~6× on Apple Silicon (M4/AppleClang),
 ~3× on x86/g++, over the API path. But the raw block should then go to **BLAS**, not a
 hand loop: on the M4, Accelerate's `dgemv` ran the 2000×2000 mat-vec ~6× faster than
 the vectorized hand loop (and ~36× over the API path), because it breaks past a single
@@ -217,27 +419,27 @@ The advantage only grows for the compute-bound O(n³) kernels (`dgemm`/`syrk`/`t
 `dpotrf`) the factorization leans on. So the hand loop is a fallback/baseline; where
 BLAS applies, use it.
 
-Why `friend`, not public getters: `friend` is *tighter* encapsulation, not looser — it
+Why `friend`, not public getters: `friend` is *tighter* encapsulation, not looser, it
 grants access to exactly the named engine classes, where a public `data()`/getter
 exposes internals to the whole program. It honestly encodes that a data class and its
 engines are one subsystem split for organization, not two modules talking through a
-narrow API. Deliberate pragmatic choice over OO-purist accessors — and it's faster.
+narrow API. Deliberate pragmatic choice over OO-purist accessors, and it's faster.
 
 Consequence for porting: `friend` couples a data class to its engines, so the natural
 port/verify unit is the *cluster* (e.g. `Factors` + `FactorEngine`), not the data class
-in isolation — the friend boundary sets porting granularity.
+in isolation, the friend boundary sets porting granularity.
 
 Measured note: the gap is structural (non-inlined calls / vectorization), not assertion
-overhead — toggling bounds-check asserts barely moves it. See `experiments/friend-access/`.
+overhead, toggling bounds-check asserts barely moves it. See `experiments/friend-access/`.
 
-## 2026-07-08 — Source extension: `.cpp` (headers stay `.h`)
+## 2026-07-08, Source extension: `.cpp` (headers stay `.h`)
 
 Switch Oblio source files from `.cc` to `.cpp`; headers remain `.h`. All
 extensions (`.cc`, `.cpp`, `.cxx`, `.C`) are identical to the compiler, so this is
 convention, not correctness.
 
 Why `.cpp`: cross-project consistency. The matching codebase uses `.cpp` (alongside
-`.rs`, `.py`) — one extension per language across the ecosystem — so Oblio being
+`.rs`, `.py`), one extension per language across the ecosystem, so Oblio being
 `.cc` made it the odd one out. `.cpp` is also the more common choice in the wider
 world (`.cc` is mainly the Google-style corner). Done now because the tree is still
 scaffold + PoC with no ported units yet, so the rename is at its cheapest.
@@ -246,11 +448,11 @@ Blast radius (all mechanical, filename-level, no semantics): `git mv *.cc → *.
 across `src/`, `tests/`, `examples/`, `archive/`, `experiments/`; the CMake source and
 executable lists; the manual build glob in CLAUDE.md / README (`src/*.cpp`); `.clang-format`;
 the example `Makefile`s and the build-command comments in the example files. Headers and
-object files are untouched — `#include`s point at `.h`, and `Foo.o` derives from the
+object files are untouched, `#include`s point at `.h`, and `Foo.o` derives from the
 source basename regardless of extension, so no `.o` reference changes. This makes
 the rename strictly safer than the `exp`→`ext` one, which touched `#include`s.
 
-## 2026-07-08 — Explicit instantiation over header-only templates (rationale)
+## 2026-07-08, Explicit instantiation over header-only templates (rationale)
 
 Decision (already active in CLAUDE.md; this entry records *why*, which otherwise
 lives only in the `experiments/template-instantiation/` example comments): Val-dependent classes keep a single
@@ -261,31 +463,31 @@ explicit instantiation still works" (the Val-surface table) and
 `archive/oblio-new-devlog.md` Session 3 (adoption + the link-failure proof). The
 `_tpl` / `_ext` example files are the compact head-to-head (see naming below).
 
-Mental model: a template is a recipe, not code — it generates code once a type is
+Mental model: a template is a recipe, not code, it generates code once a type is
 plugged in. Header-only templates plug in *late and everywhere*: every translation
 unit that includes the header re-runs the recipe for each type it uses, and the
 linker discards the duplicates (N files × 2 types → the same bodies compiled 2N
-times). That was the real cost of 0.9's header-heavy templating — not the templates,
+times). That was the real cost of 0.9's header-heavy templating, not the templates,
 but the repeated late instantiation. Explicit instantiation is "one template,
 applied early, once per type": the recipe runs exactly twice, in one `.cpp`, at
 library-build time, and every other file links the existing result instead of
-re-running the recipe. (Two mechanisms achieve that "instead of re-running" —
-declaration-only headers and/or `extern template` — see History below; they are
+re-running the recipe. (Two mechanisms achieve that "instead of re-running",
+declaration-only headers and/or `extern template`, see History below; they are
 not the same feature and have different dates.) Generality is preserved (adding `float` is one
 early application), but instantiation collapses from scattered-2N to centralized-2.
 
 Key framing: build cost that scales with the number of scalar types is *incidental*
 to the C++ compilation model, not *inherent* to supporting real and complex.
 Nothing about "a matrix can hold real or complex" requires recompiling matrix code
-in every includer — that only happens because header-only defers instantiation to
+in every includer, that only happens because header-only defers instantiation to
 include time. Explicit instantiation removes the accident and keeps the capability.
 
 The tradeoff, and why it's nearly free here: explicit instantiation gives up
-instantiating *arbitrary* types at use sites — a consumer can't spin up
+instantiating *arbitrary* types at use sites, a consumer can't spin up
 `Matrix<long double>` unless that line exists in the `.cpp`. For a maximally-generic
 header library (Eigen) that's a real loss. For Oblio it isn't, because the scalar
 world is closed and tiny: a type only makes sense if a dense BLAS/LAPACK kernel
-exists for it, which bounds the space to BLAS's four — `float`, `double`,
+exists for it, which bounds the space to BLAS's four, `float`, `double`,
 `complex<float>`, `complex<double>` (s/d/c/z). We use two, might add the others.
 Enumerating even all four is a handful of lines, far below the build cost of keeping
 them implicit. So the one thing explicit instantiation costs is something a
@@ -295,16 +497,16 @@ Bonus, and it matters for a verification-focused port: the `template class Foo<.
 lines *are* the list of supported types, in one place. Support becomes a declared,
 reviewable fact rather than an emergent property of whatever anyone happened to
 instantiate, and adding a type is a deliberate act that forces confronting whether
-kernels and tests exist for it — exactly the gap the appendix flagged when complex
+kernels and tests exist for it, exactly the gap the appendix flagged when complex
 was "a new code path with zero test coverage."
 
-Three mechanisms (not two — this frame makes the history click). Three distinct
+Three mechanisms (not two, this frame makes the history click). Three distinct
 tools, three natures, three dates:
-- **Forcing** — `template class Foo<double>;` — emit all of `Foo<double>` in this
+- **Forcing**, `template class Foo<double>;`, emit all of `Foo<double>` in this
   TU. C++98.
-- **Suppressing** — `extern template class Foo<double>;` — do *not* implicitly
+- **Suppressing**, `extern template class Foo<double>;`, do *not* implicitly
   instantiate here; link it from elsewhere. C++11 (GCC extension earlier).
-- **Definition-hiding** — not a keyword but a code-organization move: put member
+- **Definition-hiding**, not a keyword but a code-organization move: put member
   bodies in a `.cpp`, leave declarations in the header. A TU that can't *see* a body
   can't implicitly instantiate it. Works in every era.
 
@@ -314,7 +516,7 @@ Definition-hiding is the hinge, and it pairs with forcing. The three configurati
 |---|---|---|---|
 | 1 | neither forcing nor suppressing | Inclusion model: all definitions in headers, every TU re-instantiates what it uses, linker merges duplicates. No way to move bodies out and still get symbols. | High (~2N), unavoidable |
 | 2 | forcing only (C++98) | Definition-hiding + forcing: bodies to `.cpp`, declaration-only headers, `template class Foo<double>;` in the `.cpp`. Other TUs see declarations only → can't implicitly instantiate → link the forced symbols. | Low |
-| 3 | forcing + suppressing (C++11) | Case 2 still works and stays the choice; *additionally* you may keep bodies in headers and use `extern template` to suppress re-instantiation — needed only when definitions must stay header-visible. | Low |
+| 3 | forcing + suppressing (C++11) | Case 2 still works and stays the choice; *additionally* you may keep bodies in headers and use `extern template` to suppress re-instantiation, needed only when definitions must stay header-visible. | Low |
 
 Key insight: the big jump is **1 → 2, not 2 → 3**. Forcing is what unlocks the whole
 technique (hide a definition, still guarantee the symbol). Suppressing is the
@@ -325,103 +527,103 @@ need it.
 Precondition for all of it: an **enumerable** type set. For genuinely arbitrary
 types you can't force or suppress anything (you don't know the list), so you're in
 Case 1 regardless of language version. Forcing/suppressing are tools for closed type
-sets — which Oblio's is (BLAS s/d/c/z), the same fact that makes the tradeoff above
+sets, which Oblio's is (BLAS s/d/c/z), the same fact that makes the tradeoff above
 nearly free.
 
 Dates and 0.9: forcing is C++98, suppressing is C++11, so when 0.9 was written (late
-90s) only Case 1 was portably reachable — header-only, inclusion model. That was the
+90s) only Case 1 was portably reachable, header-only, inclusion model. That was the
 *correct* choice for the era, and not because suppressing was missing (Case 2 doesn't
 need it) but because template separate-compilation was a portability minefield then
 (the `export` saga, inconsistent two-phase lookup, compilers disagreeing on
 inclusion-vs-separation). Header-only-everything was the safe default. The modern
 refactor applies matured portability; it does not correct a 0.9 error.
 
-Where Oblio sits: current `ext` code is **Case 3** — bodies in `.cpp` (declaration-only
+Where Oblio sits: current `ext` code is **Case 3**, bodies in `.cpp` (declaration-only
 headers) *plus* `extern template`. But because the headers are already
 declaration-only, the build win is really Case 2's (definition-hiding + forcing); the
 `extern template` lines suppress nothing here (no visible header body to instantiate),
-so they are documentation, not mechanism — a header annotation of intent, latent
+so they are documentation, not mechanism, a header annotation of intent, latent
 unless a body is later (wrongly) added to a header. See the naming note below for the
 full implicit / plain explicit / guarded explicit framing. So Oblio's pattern was achievable in C++98; C++11 was
 not strictly required.
 
-Template-instantiation example — naming (one algorithm — dense mat-vec — built
-three ways). File names are `<Class><Variant>` with no separator — e.g.
+Template-instantiation example, naming (one algorithm, dense mat-vec, built
+three ways). File names are `<Class><Variant>` with no separator, e.g.
 `MatrixImplicit.h`, `MatrixPlainExplicit.{h,cpp}`, `MatrixGuardedExplicit.{h,cpp}`
 (same for `Vector`, `MultiplyEngine`). The three variants:
-- `Implicit` — body in the header; instantiated implicitly per TU. Stands in for
+- `Implicit`, body in the header; instantiated implicitly per TU. Stands in for
   what 0.9 effectively was.
-- `PlainExplicit` — bodies in the `.cpp`, header signatures only (explicit
+- `PlainExplicit`, bodies in the `.cpp`, header signatures only (explicit
   instantiation, forcing only).
-- `GuardedExplicit` — plain explicit + `extern template` in the header. The
+- `GuardedExplicit`, plain explicit + `extern template` in the header. The
   pattern used in the real tree.
 
 Conceptual framing (two axes):
 
-- **Axis 1 — where the body lives (implicit vs explicit).** *implicit* = body in
+- **Axis 1, where the body lives (implicit vs explicit).** *implicit* = body in
   the header (`.h`), instantiated implicitly per translation unit → `Implicit`.
   *explicit* = body outside the header, forced in the `.cpp`; header carries
   signatures only → `PlainExplicit` and `GuardedExplicit`.
-- **Axis 2 — applies only within explicit; guarded vs plain.** *plain explicit* =
+- **Axis 2, applies only within explicit; guarded vs plain.** *plain explicit* =
   `.cpp` bodies, declaration-only header, nothing more → `PlainExplicit`.
   *guarded explicit* = same, plus `extern template` in the header → `GuardedExplicit`.
 
   The three named layers:
-  - **implicit** — body in `.h` (`Implicit`)
-  - **plain explicit** — bodies in `.cpp`, header signatures only (`PlainExplicit`)
-  - **guarded explicit** — same as plain explicit, plus the guard (`GuardedExplicit`)
+  - **implicit**, body in `.h` (`Implicit`)
+  - **plain explicit**, bodies in `.cpp`, header signatures only (`PlainExplicit`)
+  - **guarded explicit**, same as plain explicit, plus the guard (`GuardedExplicit`)
 
-  Important: the guard is NOT a sub-kind of "more correct" explicit — plain explicit
+  Important: the guard is NOT a sub-kind of "more correct" explicit, plain explicit
   is a complete, valid design. `extern template` only ever acts on *visible* header
   bodies (the implicit failure mode); in a declaration-only design there is nothing
-  for it to suppress, so it is pure documentation — a header annotation reading
+  for it to suppress, so it is pure documentation, a header annotation reading
   "instantiated elsewhere," aimed back at the implicit branch it guards against. It
   gains mechanical effect only if someone reintroduces a header body (which the
   "definitions live in `.cpp`" invariant in CLAUDE.md forbids). So "guarded" (a
-  reminder/guard), not "suppressed" or "enforced" — in this design it suppresses
+  reminder/guard), not "suppressed" or "enforced", in this design it suppresses
   nothing and enforces nothing; the invariant does the enforcing.
 
 All three are built and tested together via the example's `Makefile` (`make test`)
-against one shared source, `test_multiply.cpp` — they must produce identical
+against one shared source, `test_multiply.cpp`, they must produce identical
 results, and the plain explicit and guarded explicit variants share the same link-failure behaviour when
 their `.cpp` files are omitted (empirical confirmation that with declaration-only
-headers `extern template` suppresses nothing — it is documentation, not mechanism).
+headers `extern template` suppresses nothing, it is documentation, not mechanism).
 Selector macros: `OBLIO_TI_IMPLICIT` / `OBLIO_TI_PLAIN_EXPLICIT` /
 `OBLIO_TI_GUARDED_EXPLICIT`.
 
 Naming history: suffixes were once `_tpl`/`_exp`/`_ext`, where `_exp` inaccurately
-labeled the extern-template variant. Renamed in two steps — first `_exp`→`_ext` to
+labeled the extern-template variant. Renamed in two steps, first `_exp`→`_ext` to
 free `_exp` for the genuine forcing-only variant, then all three to the conceptual
 `Implicit`/`PlainExplicit`/`GuardedExplicit` once the two-axis framing settled.
 
-## 2026-07-08 — Matrix naming: explicit `SparseMatrix` / `DenseMatrix`
+## 2026-07-08, Matrix naming: explicit `SparseMatrix` / `DenseMatrix`
 
 Rename the sparse matrix type from `Matrix` to **`SparseMatrix`**; keep
 **`DenseMatrix`**. Both are plain concrete types with **no shared base class**.
 
 Why: the old `Matrix` (implicitly sparse) + `DenseMatrix` (explicitly marked) is a
-half-committed convention — it privileges sparse as the unmarked default but marks
+half-committed convention, it privileges sparse as the unmarked default but marks
 dense as the exception, so a reader must already know "unmarked = sparse" to parse
 it. Going fully explicit removes that. It also makes matrix naming consistent with
 the graph naming used elsewhere (`GeneralGraph` / `BipartiteGraph`, no bare
 `Graph`). Note the typed-library mainstream (Eigen, scipy) actually defaults the
-*other* way — unmarked = dense, `SparseMatrix` marked — so `Matrix` = sparse
+*other* way (unmarked = dense, `SparseMatrix` marked), so `Matrix` = sparse
 actively misleads anyone arriving from there. The sparse-first precedent
 (CSparse/SuiteSparse `cs`) is the one respectable counter-argument, but explicit
 wins on cross-codebase consistency and reader-independence.
 
 No speculative base `Matrix` interface. If something ever needs to consume sparse
 and dense polymorphically, add the interface then, on top of the two concrete
-types — not before a caller forces it.
+types, not before a caller forces it.
 
-Scope: this is a rename (wrapping/API), not an algorithm change — it's on the
+Scope: this is a rename (wrapping/API), not an algorithm change, it's on the
 port-and-modernize track, not the rewrite track. Do it as one deliberate
 mechanical pass **before** porting proper, since it's cross-cutting (every `friend`
 decl, FactorEngine, SolveEngine, tests name `Matrix`) and only gets more expensive
 as code solidifies around the name. **Oracle mapping: 0.9 `Matrix` ↔ modern
-`SparseMatrix`** — record this so output comparisons against 0.9 stay unambiguous.
+`SparseMatrix`**, record this so output comparisons against 0.9 stay unambiguous.
 
-## 2026-07-08 — Minimal abstraction; containers are the structure that matters
+## 2026-07-08, Minimal abstraction; containers are the structure that matters
 
 Design stance for the port: concrete types, minimal OO ceremony, `std::vector` as
 the spine. Don't build base classes, single-implementation interfaces, or
@@ -430,7 +632,7 @@ pipeline of concrete transforms, not a class hierarchy.
 
 One guard against a tempting over-correction: "AI makes code cheap to generate, so
 structure matters less" is only half true. Generation got cheap; **verification did
-not** — and this project is the proof (every PoC bug was cheap to write, expensive
+not**, and this project is the proof (every PoC bug was cheap to write, expensive
 to trust, and fixed only by slow comparison against the 0.9 oracle). Structure's
 real job was never to save typing; it's to keep code readable and checkable and to
 localize where a bug can hide. That matters *more* when code is machine-generated,
@@ -446,14 +648,14 @@ under sanitizers, and hands clean pointers to BLAS via `.data()`. Each removes a
 bug class you'd otherwise verify the absence of by hand. For this codebase, the
 container discipline *is* the architecture that matters.
 
-## 2026-07-07 — Align with standard project files; adopt clang tooling
+## 2026-07-07, Align with standard project files; adopt clang tooling
 
 The doc set maps to established conventions rather than being bespoke:
 CODING_RULES.md ≈ a style/conventions guide, DESIGN_DECISIONS.md ≈ a lightweight ADR log
 (single-file variant of the Nygard/ADR pattern), CLAUDE.md ≈ the agent-instructions
-file (AGENTS.md is the emerging cross-tool equivalent — if we ever run more than
+file (AGENTS.md is the emerging cross-tool equivalent, if we ever run more than
 Claude Code, keep content in AGENTS.md and make CLAUDE.md a one-line `@AGENTS.md`).
-PORTING_LEDGER.md stays bespoke — it's specific to a port, no standard analog.
+PORTING_LEDGER.md stays bespoke, it's specific to a port, no standard analog.
 
 Renamed CPP_RULES.md → **CODING_RULES.md** and made it language-general (Rust is a
 likely future scope), with per-language sections.
@@ -467,64 +669,64 @@ check.
 Stubbed ahead of need (deliberate, not yet load-bearing): CONTRIBUTING.md and
 CHANGELOG.md ("Keep a Changelog" format). CONTRIBUTING fills out on going public
 (and becomes the canonical build/test source then); CHANGELOG gets its first real
-entry at the first tagged release — which requires settling the tree's version
+entry at the first tagged release, which requires settling the tree's version
 identity (Oblio 11 vs a fresh 1.0), tied to the working-tree question below. Still
 outstanding: LICENSE (bundled AMD is BSD-3-clause, so a project license decision is
 eventually needed).
 
 Tension worth remembering: canonical ADR is many small numbered files, which suits
-humans browsing history but fights the "always in context" goal — a growing pile
+humans browsing history but fights the "always in context" goal, a growing pile
 can't all stay loaded. The single-file log + distilled always-on layer is a
 deliberate adaptation of the standard, not an oversight.
 
-## 2026-07-07 — What stays always in context vs on demand
+## 2026-07-07, What stays always in context vs on demand
 
 Goal: coding rules and active design constraints present in every session, without
 letting context grow unbounded.
 
 Mechanism: only CLAUDE.md and its `@`-imports load every session; everything else
-is read on demand. `@import` costs the same context as inlining — it just keeps
+is read on demand. `@import` costs the same context as inlining, it just keeps
 the file separate and editable.
 
 Split:
 - **Always-on** (in CLAUDE.md or imported): invariants (inline), conventions
   (`@docs/CODING_RULES.md`), and a distilled *Active design constraints* summary.
-- **On demand**: the full DECISIONS log (this file — grows over time, so importing
+- **On demand**: the full DECISIONS log (this file, grows over time, so importing
   it would erode context), PORTING_LEDGER (porting-specific; read after a gap),
   README, archive history.
 
 Rule of thumb: the always-on set is the distilled essence; narrative, dates,
-history, and open questions stay here. Keep CLAUDE.md well under ~200 lines — past
+history, and open questions stay here. Keep CLAUDE.md well under ~200 lines, past
 that, adherence drops. If the always-on set grows, distill harder rather than
 importing the growing logs.
 
-## 2026-07-07 — Invariants live in CLAUDE.md, not CODING_RULES.md
+## 2026-07-07, Invariants live in CLAUDE.md, not CODING_RULES.md
 
 The C++ **invariants** (port-verbatim, `std::vector` default, no signed→unsigned
 index slips, `.data()` to BLAS) are written directly in CLAUDE.md. Only the
 **conventions** (style preferences) stay in CODING_RULES.md.
 
 Why: Claude Code auto-loads CLAUDE.md every session (directory walk up to repo
-root, concatenated) but does **not** auto-load other files — a pointer from
+root, concatenated) but does **not** auto-load other files, a pointer from
 CLAUDE.md to CODING_RULES.md does not pull its contents in. So a rule meant to be
 active every session must physically live in CLAUDE.md, or it isn't loaded until
 Claude happens to read the file it's in. Invariants are always-on; conventions
 are fine to read on demand.
 
-Do not "consolidate" the invariants back into CODING_RULES.md — that silently
+Do not "consolidate" the invariants back into CODING_RULES.md, that silently
 disables them.
 
-## 2026-07-07 — Documentation structure
+## 2026-07-07, Documentation structure
 
 Established this doc set: CLAUDE.md (operating contract + index),
 PORTING_LEDGER.md (per-unit status), CODING_RULES.md (conventions a linter can't
 enforce), DESIGN_DECISIONS.md (this log), plus `.clang-format` / `.clang-tidy` for
-tool-enforced mechanical style. The existing md files — devlog, modernization
-notes, appendix, README — are kept as history/rationale for now; decide later
+tool-enforced mechanical style. The existing md files, devlog, modernization
+notes, appendix, README, are kept as history/rationale for now; decide later
 whether to fence or retire them.
 
 Why: after a multi-month gap the project needs to be reconstructable from three
-things — history, layout, decisions — without re-deriving them. CLAUDE.md holds
+things (history, layout, decisions) without re-deriving them. CLAUDE.md holds
 the operational index (it's what Claude Code loads each session); the reasoning
 lives here so CLAUDE.md stays lean. The two live in different files on purpose and
 should not duplicate each other.
@@ -532,22 +734,22 @@ should not duplicate each other.
 (This entry documents a list that includes DESIGN_DECISIONS.md itself. The self-reference
 is intentional, not an oversight.)
 
-## 2026-07-07 — OPEN: which tree is the working copy
+## 2026-07-07, OPEN: which tree is the working copy
 
 Unresolved; resolve before the first port step and record the outcome here.
 
 Candidates:
 - **(a) Fresh port from 0.9** into a new tree, treating the PoC the way 10.12 is
-  treated — learn from, don't build on. "Replacing Array gradually" only applies
+  treated, learn from, don't build on. "Replacing Array gradually" only applies
   to a tree that still has `Array` (0.9 or 10.12), which points here.
-- **(b) Continue the PoC tree**, where Array→vector is already done — in which
+- **(b) Continue the PoC tree**, where Array→vector is already done, in which
   case the remaining work is different (coverage, finishing, cleanup), and this
   is not really an Array migration.
 
 The stated plan ("port carefully from 0.9, one function at a time, replace Array
 gradually") reads as (a). Confirm.
 
-## 2026-03-07 (PoC) — Choices carried from the proof of concept
+## 2026-03-07 (PoC), Choices carried from the proof of concept
 
 Recorded for continuity. The PoC was exploratory, so revisit each on its merits
 rather than inheriting it unquestioned.
@@ -555,8 +757,8 @@ rather than inheriting it unquestioned.
 - **One `Val` template** instead of 0.9's separate `*Real.h` / `*Complex.h` file
   pairs. Cholesky treated as Hermitian input; LDL^T as complex-symmetric.
 - **`std::vector` storage** instead of the hand-rolled `Array`.
-- **Explicit template instantiation** for `double` and `std::complex<double>` —
+- **Explicit template instantiation** for `double` and `std::complex<double>`,
   headers declare, `.cpp` files define and instantiate. Faster builds; `float` /
   `long double` remain one line away.
 - **Namespaced `include/oblio/` headers**, declarations only.
-- **Flat `src/`** — all sources, including `Mmd.cpp` / `Amd.cpp`, directly in `src/`.
+- **Flat `src/`**, all sources, including `Mmd.cpp` / `Amd.cpp`, directly in `src/`.

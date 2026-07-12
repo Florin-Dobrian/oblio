@@ -37,12 +37,12 @@ public:
 private:
     OrderMethod mMethod = OrderMethod::MMD;
 
-    bool orderNatural(std::size_t n, Permutation& p) const;
-    bool orderMMD(std::size_t n,
+    bool orderNatural(std::size_t size, Permutation& p) const;
+    bool orderMMD(std::size_t size,
                   const std::vector<std::size_t>&  colPtr,
                   const std::vector<std::int32_t>& rowIdx,
                   Permutation& p) const;
-    bool orderAMD(std::size_t n,
+    bool orderAMD(std::size_t size,
                   const std::vector<std::size_t>&  colPtr,
                   const std::vector<std::int32_t>& rowIdx,
                   Permutation& p) const;

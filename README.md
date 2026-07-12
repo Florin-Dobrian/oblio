@@ -39,7 +39,7 @@ eng.analyzeAndFactor(A);
 Vector<double> b(n, 1.0), x;
 eng.solve(b, x);
 
-// Multiple RHS — B is n×nRHS column-major, X is filled on output.
+// Multiple RHS, B is n×nRHS column-major, X is filled on output.
 DenseMatrix<double> B(n, nRHS), X;
 eng.solve(B, X);
 ```
@@ -62,35 +62,35 @@ Replace the test file to build each of the four test suites.
 ## Structure
 
 ```
-include/oblio/       — public headers (declarations only)
-  Types.h            — primitive typedefs, enums
-  Matrix.h           — sparse symmetric CSC (lower triangle)
-  Vector.h           — dense vector
-  DenseMatrix.h      — dense column-major matrix
-  Permutation.h      — bidirectional index map
-  Symbolic.h         — supernodal elimination structure (data)
-  BlasLapack.h       — BLAS/LAPACK trait wrappers + custom kernels
-  OrderEngine.h      — fill-reducing ordering (MMD, Natural)
-  SymbolicEngine.h   — etree, column counts, supernode amalgamation
-  FactorEngine.h     — 9 factorization combinations
-  SolveEngine.h      — single and multi-RHS triangular solves
-  OblioEngine.h      — top-level driver (the only header users need)
-src/                 — method bodies + explicit instantiations
-  Mmd.cpp             — MMD ordering (Liu/Sparspak via Oblio 0.9)
-  Amd.cpp             — AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
-tests/               — test suite
-  test_smoke_real.cpp           18 tests — real tridiagonal, quick sanity
-  test_smoke_complex.cpp        18 tests — complex tridiagonal, quick sanity
-  test_extended_real.cpp       123 tests — Laplacians, edge cases, all orderings
-  test_extended_complex.cpp    102 tests — complex Laplacians, all orderings
-examples/            — usage examples
+include/oblio/      , public headers (declarations only)
+  Types.h           , primitive typedefs, enums
+  Matrix.h          , sparse symmetric CSC (lower triangle)
+  Vector.h          , dense vector
+  DenseMatrix.h     , dense column-major matrix
+  Permutation.h     , bidirectional index map
+  Symbolic.h        , supernodal elimination structure (data)
+  BlasLapack.h      , BLAS/LAPACK trait wrappers + custom kernels
+  OrderEngine.h     , fill-reducing ordering (MMD, Natural)
+  SymbolicEngine.h  , etree, column counts, supernode amalgamation
+  FactorEngine.h    , 9 factorization combinations
+  SolveEngine.h     , single and multi-RHS triangular solves
+  OblioEngine.h     , top-level driver (the only header users need)
+src/                , method bodies + explicit instantiations
+  Mmd.cpp            , MMD ordering (Liu/Sparspak via Oblio 0.9)
+  Amd.cpp            , AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
+tests/              , test suite
+  test_smoke_real.cpp           18 tests, real tridiagonal, quick sanity
+  test_smoke_complex.cpp        18 tests, complex tridiagonal, quick sanity
+  test_extended_real.cpp       123 tests, Laplacians, edge cases, all orderings
+  test_extended_complex.cpp    102 tests, complex Laplacians, all orderings
+examples/           , usage examples
 ```
 
 ## History
 
 This codebase is a C++17 modernization of Oblio 0.9, a sparse direct solver
-written circa 2003–2005. The algorithmic core — symbolic factorization,
-numerical factorization kernels, custom BLAS routines, solve engines — is
+written circa 2003–2005. The algorithmic core, symbolic factorization,
+numerical factorization kernels, custom BLAS routines, solve engines, is
 ported directly from the 0.9 source, not reimplemented. What is new is the
 wrapping: `enum class` instead of bare enums, a single `Val` template parameter
 instead of separate `*Real.h` / `*Complex.h` file pairs, `std::vector` storage
@@ -101,14 +101,14 @@ Early development attempted to rewrite some algorithms from first principles
 (elimination tree, column counts, supernodal index sets). Every rewrite
 introduced subtle bugs that only appeared on non-trivial matrices. The bugs
 were found and fixed by compiling the original 0.9 code and using it as a
-ground-truth oracle — running the same test matrices through both codebases
+ground-truth oracle, running the same test matrices through both codebases
 and comparing outputs entry-by-entry. In each case, the fix was to replace
 the rewritten algorithm with a direct port of the 0.9 code. The lesson was
 clear: the 0.9 algorithms were correct and well-tested over years of use;
 reimplementing them from scratch added risk with no benefit.
 
-The one genuine bug in 0.9 — complex Cholesky using `zsyrk` (symmetric rank-k
-update) instead of `zherk` (Hermitian rank-k update) — was identified and
+The one genuine bug in 0.9, complex Cholesky using `zsyrk` (symmetric rank-k
+update) instead of `zherk` (Hermitian rank-k update), was identified and
 fixed in the modern code, along with the related conjugate-transpose issues
 in the factor and solve paths.
 

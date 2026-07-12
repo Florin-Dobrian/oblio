@@ -10,14 +10,14 @@ static int pass=0, fail=0;
 static void ck(bool ok,const std::string& n){ std::cout<<"  "<<(ok?"PASS  ":"FAIL  ")<<n<<"\n"; ok?++pass:++fail; }
 template<class Val> static void checkOrder(const SparseMatrix<Val>& A, OrderMethod m, const std::string& lbl){
     OrderEngine e(m); Permutation p; bool ok=e.order(A,p);
-    ck(ok && p.size()==A.numCols() && p.validate(), lbl); }
+    ck(ok && p.size()==A.size() && p.validate(), lbl); }
 template<class Val> static void reqSym(const SparseMatrix<Val>& A, const std::string& lbl){
     ck(OblioTest::isStructurallySymmetric(A), lbl); }
-static SparseMatrix<double> tridiagFull(std::size_t n){
-    std::vector<std::size_t> cp(n+1,0); std::vector<std::int32_t> ri; std::vector<double> v;
-    for(std::size_t j=0;j<n;++j){ if(j>0){ri.push_back(static_cast<std::int32_t>(j-1));v.push_back(-1);} ri.push_back(static_cast<std::int32_t>(j));v.push_back(2);
-        if(j+1<n){ri.push_back(static_cast<std::int32_t>(j+1));v.push_back(-1);} cp[j+1]=ri.size(); }
-    return SparseMatrix<double>(n,cp,ri,v); }
+static SparseMatrix<double> tridiagFull(std::size_t size){
+    std::vector<std::size_t> cp(size+1,0); std::vector<std::int32_t> ri; std::vector<double> v;
+    for(std::size_t j=0;j<size;++j){ if(j>0){ri.push_back(static_cast<std::int32_t>(j-1));v.push_back(-1);} ri.push_back(static_cast<std::int32_t>(j));v.push_back(2);
+        if(j+1<size){ri.push_back(static_cast<std::int32_t>(j+1));v.push_back(-1);} cp[j+1]=ri.size(); }
+    return SparseMatrix<double>(size,cp,ri,v); }
 int main(){
     std::cout<<"=== OrderEngine tests (AMD / MMD), full-symmetric A ===\n";
     { std::vector<std::size_t> cp={0,6,8,10,12,14,16};
@@ -26,13 +26,13 @@ int main(){
       reqSym(A,"arrow 6x6      : symmetric");
       checkOrder(A,OrderMethod::AMD,"arrow 6x6      : AMD valid");
       checkOrder(A,OrderMethod::MMD,"arrow 6x6      : MMD valid"); }
-    for(std::size_t n : {1u,2u,10u,100u}){ auto A=tridiagFull(n);
-      reqSym(A,"tridiag n="+std::to_string(n)+" : symmetric");
-      checkOrder(A,OrderMethod::AMD,"tridiag n="+std::to_string(n)+" : AMD valid");
-      checkOrder(A,OrderMethod::MMD,"tridiag n="+std::to_string(n)+" : MMD valid"); }
-    { std::size_t n=5; std::vector<std::size_t> cp(n+1); std::vector<std::int32_t> ri(n); std::vector<double> v(n,1.0);
-      for(std::size_t j=0;j<n;++j){cp[j]=j; ri[j]=static_cast<std::int32_t>(j);} cp[n]=n;
-      SparseMatrix<double> A(n,cp,ri,v);
+    for(std::size_t size : {1u,2u,10u,100u}){ auto A=tridiagFull(size);
+      reqSym(A,"tridiag n="+std::to_string(size)+" : symmetric");
+      checkOrder(A,OrderMethod::AMD,"tridiag n="+std::to_string(size)+" : AMD valid");
+      checkOrder(A,OrderMethod::MMD,"tridiag n="+std::to_string(size)+" : MMD valid"); }
+    { std::size_t size=5; std::vector<std::size_t> cp(size+1); std::vector<std::int32_t> ri(size); std::vector<double> v(size,1.0);
+      for(std::size_t j=0;j<size;++j){cp[j]=j; ri[j]=static_cast<std::int32_t>(j);} cp[size]=size;
+      SparseMatrix<double> A(size,cp,ri,v);
       reqSym(A,"diagonal 5x5   : symmetric");
       checkOrder(A,OrderMethod::AMD,"diagonal 5x5   : AMD valid");
       checkOrder(A,OrderMethod::MMD,"diagonal 5x5   : MMD valid"); }

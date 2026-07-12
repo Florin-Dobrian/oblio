@@ -30,6 +30,27 @@ public:
     // Reset to the identity permutation of the given size.
     void setIdentity();   // fill the existing maps (size fixed at construction) to identity
 
+    // Adopt a chosen permutation, given in either direction, and complete the other
+    // direction from it. The size is taken from the map. Returns false, leaving the
+    // permutation unchanged (so still valid), if the map is not a bijection of
+    // 0..size-1. This is 0.9's set(), whose direction flag becomes two named methods.
+    //
+    // Ordering is not always ours to compute: an ordering may come from a file, from
+    // an external tool, or from the problem's own numbering. This is also the only way
+    // to test the permutation maps against a known answer rather than against whatever
+    // an ordering engine happened to produce.
+    bool setOldToNew(const std::vector<std::int32_t>& map);
+    bool setNewToOld(const std::vector<std::int32_t>& map);
+
+    // Compose with p, applying this permutation first and p second: p reorders the
+    // indices this one has already produced, so afterwards
+    //     oldToNew[i] == p.oldToNew[oldToNew[i]]   (with the old value on the right)
+    // The usual case is refining an ordering: AMD, then a post-order of the resulting
+    // elimination forest. Returns false, leaving this permutation unchanged, if the
+    // sizes differ. No revalidation is needed, the composition of two bijections is a
+    // bijection.
+    bool compose(const Permutation& p);
+
     // Rebuild newToOld as the inverse of oldToNew. An ordering engine fills oldToNew,
     // then calls this to complete the other direction consistently.
     void rebuildInverse();
@@ -39,6 +60,14 @@ public:
     bool validate() const;
 
 private:
+    // Is the map a bijection of 0..map.size()-1? (Range and duplicate check, as in
+    // 0.9's validate. Does not look at the opposite direction.)
+    static bool isBijection(const std::vector<std::int32_t>& map);
+
+    // Fill inv with the inverse of map. Assumes map is a bijection.
+    static void invert(const std::vector<std::int32_t>& map,
+                       std::vector<std::int32_t>& inv);
+
     std::vector<std::int32_t> mOldToNew;
     std::vector<std::int32_t> mNewToOld;
 

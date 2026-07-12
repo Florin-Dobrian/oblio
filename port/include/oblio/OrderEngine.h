@@ -30,9 +30,20 @@ public:
     void        setMethod(OrderMethod method) { mMethod = method; }
     OrderMethod method() const                { return mMethod; }
 
-    // Order A into p. Reads only A's structure (colPtr/rowIdx); values unused.
+    // Order A into p.
+    //
+    // An ordering is a pure graph operation: AMD and MMD read the sparsity pattern and
+    // would not know what to do with a value. So the implementation is the non-templated
+    // overload, taking colPtr and rowIdx, and it is compiled once. The templated overload
+    // is an adapter over it, for the common case of holding a matrix. The pattern overload
+    // is public: a caller holding a graph with no numbers attached can order it without
+    // inventing a scalar type to satisfy the signature.
     template<class Val>
-    bool order(const SparseMatrix<Val>& A, Permutation& p) const;
+    bool compute(const SparseMatrix<Val>& A, Permutation& p) const;
+
+    bool compute(const std::vector<std::size_t>&  colPtr,
+                 const std::vector<std::int32_t>& rowIdx,
+                 Permutation& p) const;
 
 private:
     OrderMethod mMethod = OrderMethod::MMD;
@@ -48,7 +59,7 @@ private:
                   Permutation& p) const;
 };
 
-extern template bool OrderEngine::order(const SparseMatrix<double>&, Permutation&) const;
-extern template bool OrderEngine::order(const SparseMatrix<std::complex<double>>&, Permutation&) const;
+extern template bool OrderEngine::compute(const SparseMatrix<double>&, Permutation&) const;
+extern template bool OrderEngine::compute(const SparseMatrix<std::complex<double>>&, Permutation&) const;
 
 } // namespace Oblio

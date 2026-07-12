@@ -28,6 +28,41 @@ softer layer: conventions for consistency, not correctness.
   (`oblio-new-devlog.md`, etc.). Macros are `OBLIO_`. Never write bare `oblio` as
   the package name in running text.
 
+- **Definition order follows declaration order.** The `.cpp` defines functions in the same
+  order the header declares them. The header is the table of contents; the source is the
+  book, and they should agree. A reader who has found something in the header knows where
+  to look for it, and a diff that reorders one without the other is a review hazard for no
+  gain. This is a convention, not a correctness rule, which is exactly why nothing enforces
+  it and it drifts unless stated.
+- **Keep an overload set together, in both files.** Declare the members of an overload set
+  adjacently in the header and define them adjacently in the `.cpp`, and do not bunch all
+  the adapters in one place and all the implementations in another. An overload pair is one
+  idea in two spellings; splitting it makes the reader hold the connection in their head
+  instead of seeing it. The pattern this most applies to:
+
+  - **A templated overload is an adapter; the implementation lives in the non-templated one
+    beneath it.** Where a function needs only part of a templated object, take the object at
+    the boundary and the part in the body. E.g. `OrderEngine::compute(const SparseMatrix<Val>&,
+    Permutation&)` forwards to `compute(colPtr, rowIdx, Permutation&)`, one line that inlines
+    away. The implementation stays free of `Val` and is compiled once instead of once per
+    scalar type, and a caller holding only a sparsity pattern can reach it without naming a
+    scalar type at all. See the DESIGN_DECISIONS entry for why the apparent tension between
+    short signatures and `Val`-freedom is not real.
+
+    **Adapt once, at the public boundary.** One adapter per engine, on the entry point, and
+    nothing templated below it. Do not repeat the pattern on each private helper: once the
+    entry point has unpacked the object, the helpers already have the part they need, and a
+    second layer of adapters would have no callers. All three engines (`OrderEngine`,
+    `ElmForestEngine`, `SymFactEngine`) have exactly one adapter, on `compute`, and interiors
+    entirely free of `Val`.
+
+- **Prefer passing the whole object over passing its pieces**, where doing so does not drag
+  in a template parameter the callee has no use for. Passing an object's fields to a function
+  that is already its `friend` restricts nothing, it only lengthens the signature, and a long
+  run of same-typed reference parameters (five `std::vector<std::int32_t>&` in a row) is a
+  transposition bug the compiler cannot catch. What a signature cannot say anyway (which
+  fields the callee leaves *stale*) belongs in the comment regardless. See DESIGN_DECISIONS.
+
 ## C++
 
 - **Modern spellings, pin one per historical variation** (check this list before
@@ -79,7 +114,7 @@ softer layer: conventions for consistency, not correctness.
     graph code and the vendored `int`-based AMD/MMD.
   - **Offsets / counts / sizes**, row-pointers, `nnz`, dimensions, anything that
     indexes-into or measures → **`std::size_t`**. Never negative, may exceed 2^31.
-    E.g. `SparseMatrix::colPtr`, `numCols()`, `nnz()`.
+    E.g. `SparseMatrix::colPtr`, `size()`, `nnz()`.
   - **Loop counters are `std::size_t`.** A counter enumerates real positions (never
     negative, never the sentinel), so the unsigned view is safe and avoids
     signed/unsigned comparison against `.size()`. Do **not** loop with an `int32_t`

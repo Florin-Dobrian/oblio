@@ -575,6 +575,17 @@ computeForest(A) -> parent:
                 parent[r] = k # attach that root under k
 ```
 
+`r` is the node the climb has reached. The name is for *root*, which is what it holds when
+the loop ends here, and the plain climb is where that reading is literally true. So it names
+a postcondition, not an invariant: mid-climb `r` is just the current node, and in the
+compressed form below it can finish on a node that is not a root at all. That is the right
+trade, and deliberately so. A variable named for the loop's goal (`result`, `best`, `min`
+are all false until the last iteration) keeps the purpose in view, while one named for its
+interior, `current` say, would be accurate at every step and tell the reader nothing. Where
+the postcondition fails, in the compressed form, the failure is a fact about the algorithm
+and not a defect in the name: it is exactly the point that path compression halts the climb
+short of the root, and a name that quietly throws that into relief is doing its job.
+
 Correct and transparent, but the climb is `O(height)` per neighbor; a long chain (a
 path-shaped forest) makes it `O(n * nnz)` worst case, re-walking the same lengthening
 chain at every step.
@@ -726,16 +737,20 @@ computeForest(A) -> parent:
 ```
 
 The two arrays do different jobs: `parent[]` is the forest we keep, `ancestor[]` is
-scratch we discard. Path compression drops the cost to near-linear,
-`O(nnz * alpha(n))`. Both algorithms produce the identical `parent[]`, the plain form
-is the one to reason about for correctness, Liu's is what production code runs.
+scratch we discard. `t` is a *temporary*, and it exists only because compression is
+destructive: `ancestor[r]` must be saved before it is overwritten with `k`, or the loop
+would lose the very hop it is about to follow. The plain climb needs no such variable
+(`r = parent[r]` suffices), so `t` is an artifact of compression rather than of climbing.
+Path compression drops the cost to near-linear, `O(nnz * alpha(n))`. Both algorithms
+produce the identical `parent[]`, the plain form is the one to reason about for
+correctness, Liu's is what production code runs.
 
 **The two end states, and four ways to test them.** Every climb finishes in one of two
 cases. Either `j` reaches a fresh subtree root, which then takes `k` as its parent
 (**attach**), or `j` already lies under `k` from an earlier neighbor this same pass, so
 nothing is added (**skip**). Detecting the skip can live either in the loop's exit or in
-the attach test, which yields four equivalent forms, two climbing `parent[]` (plain) and
-two climbing `ancestor[]` (compressed). Writing `X` for the climbed array:
+the attach test, which yields four forms, two climbing `parent[]` (plain) and two climbing
+`ancestor[]` (compressed). Writing `X` for the climbed array:
 
 ```
 form                        loop continues while         attach when
@@ -746,36 +761,89 @@ compress, single            ancestor[r] != NIL           r != k
 compress, double (classic)  ancestor[r] != NIL and != k  ancestor[r] == NIL
 ```
 
-All four are correct because `X[k]` is NIL throughout iteration `k`: a column is linked
-only by a later column, so its own slot is empty during its turn, and the walk may run
-onto `k` without corrupting it. Trace the two end states:
+The pairing is symmetric, and one sentence explains it. **The double-condition loop detects
+the skip in its own exit test, so the attach test merely reads that detection back
+(`X[r] == NIL`). The single-condition loop makes no such detection, so the attach test must
+derive it (`r != k`).** Loop form fixes the attach test, and the rule is the same whichever
+array is climbed. Trace the two end states:
 
 - **Attach** is identical in every form. The climb halts at a node with `X[r] == NIL` that
   is not `k`, and writes `parent[r] = k`.
 - **Skip** is where they differ. The single-condition loop climbs all the way to the
   subtree root, which on a skip *is* `k`, so it detects the skip as `r == k` and the attach
-  test `if r != k` rejects it. The double-condition loop stops one node short, at the vertex
-  already pointing at `k` (`X[r] == k`), so the skip becomes the loop's second exit and the
-  attach test `if X[r] == NIL`, false here, rejects it. In the double-condition form the
-  attach test is really reading back which exit fired.
+  test `if r != k` rejects it. This is why `X[k]` must stay NIL through iteration `k`: a
+  column is linked only by a later column, so its slot is empty during its own turn and the
+  walk may safely run onto it. (The double-condition loops never reach `k` at all, stopping
+  one node short at the vertex already pointing at `k`, so for them that fact is not
+  needed.) The double-condition loop turns the skip into its second exit, and the attach
+  test `if X[r] == NIL`, false there, rejects it.
 
-The tests cannot be swapped: `if r != k` after a double-condition loop would attach at a
-non-root and overwrite a real parent, and `if X[r] == NIL` after a single-condition loop is
-never true at `k`, so it would never skip. Loop form and attach test are one choice.
+**Correctness, and one asymmetry between the arrays.** The single-condition forms need
+`r != k`, since `X[r] == NIL` is the loop's own exit condition and would therefore always
+be true. The double-condition forms accept `X[r] == NIL`. What about `r != k` after a
+double-condition loop? It is correct on `parent[]` and **wrong** on `ancestor[]`, and the
+reason is the difference between the two arrays:
 
-The classic forms sit on the diagonal, plain with the single condition (the plain-climb
-pseudocode above) and compressed with the double (Liu, CSparse, Oblio). We follow that
-convention, but it may be historical more than principled. Each classic is the natural spelling
-of its own algorithm: plain reads as "climb to the root, then test whether it is `k`",
-while compressed is a union-find `find` with path compression, whose idiomatic early-out is
-"stop on reaching a node already linked to `k`" (`ancestor[r] == k`). There is one genuine
-but negligible asymmetry: the extra step a single-condition loop takes onto `k` is a
-redundant *write* in the compressed case (`ancestor[r] = k` again) and only a *read* in the
-plain case, so the double condition has marginally more to recover for compressed. That
-aside, the case for stopping one node short applies to both climbs equally and does not
-explain why only the compressed classic uses it. For exposition the symmetric pairing would
-be clearer, since the conventional split carries no lesson; the content is the 2x2 above
-and the loop-condition/attach-test coupling. Oblio ports the classic compressed form.
+- `parent[]` is a tree, so every edge joins **adjacent** levels. `parent[r] == k` therefore
+  says `r` is a *child* of `k`, which during pass `k` can only be a root attached this same
+  pass. "Already under `k`" and "is a root" coincide, so `r != k` still identifies an attach
+  target. It writes `parent[r] = k` over a slot that already holds `k`: redundant, but
+  harmless.
+- `ancestor[]` is a shortcut structure, and compression rewrites whole paths to point
+  straight at `k`, so an edge can span **arbitrarily many** levels. `ancestor[r] == k` then
+  says only "`r` lies somewhere under `k`", which is true of interior nodes as well as
+  roots. The two notions come apart, `r != k` can no longer tell them apart, and attaching
+  at an interior node overwrites a genuine forest edge. Only `ancestor[r] == NIL` still
+  identifies a root, because that is the one property compression never forges.
+
+So three of the four cells admit `r != k`; compressed with a double condition is the sole
+exception, and it is the form production code runs.
+
+**What optimality means here.** Correct is not the same as clean, and neither is quite the
+same as fast. Each single-condition form does one redundant thing on a skip, the price of
+keeping the loop condition simple: a redundant *read* in the plain case (stepping onto `k`
+to find `parent[k] == NIL`) and a redundant *write* in the compressed case (`ancestor[r] = k`
+onto a slot already holding `k`). The double-condition forms do nothing redundant, but their
+loop condition is itself twice the test, evaluated on every iteration, to save one iteration
+at the end. Which is faster is therefore not obvious, and it hardly matters: this pass is
+`O(nnz * alpha(n))` and vanishes beside the factorization it prepares. Trading a redundant
+operation for a simpler loop is an ordinary thing to do in code. For *exposition*, though,
+the choice is clear: the form with no redundancy is the one that explains itself, because
+every step in it has a reason.
+
+Read that way, the four cells are:
+
+- **Plain, single loop, `r != k`** *(classic; pedagogical).* Climb `parent[]` to the very
+  top, then ask whether the top is `k`. It is the mental model written out: a subtree has
+  one root, find it, and either it is already yours or you adopt it. The redundancy is a
+  single extra read, which costs essentially nothing. This is the form to reason about and
+  to prove things with, and it is why we introduced it first. It is not the form to run.
+- **Plain, double loop, `parent[r] == NIL`** *(the plain optimum, rarely written).* Stops
+  one node short, on `parent[r] == k`, and reads that stop back as the skip. No redundant
+  read, no redundant write, the only cell in the plain row that does no wasted work. It is
+  cleaner than the plain classic and is seldom seen, because plain climbing is the
+  pedagogical form and nobody optimizes the version they do not intend to run. Here
+  "historical" is the honest explanation.
+- **Compressed, single loop, `r != k`** *(the trap).* Legal, and it looks like the natural
+  companion to the plain classic: same attach test, same shape. But the extra step onto `k`
+  is no longer a free read, it is `ancestor[r] = k` written over a slot that already says
+  `k`. Compression turns the plain form's harmless overshoot into a redundant store, on
+  every skip, in the inner loop of the hot path. The cell that most tempts one to preserve
+  the symmetry is the one where the symmetry stops paying.
+- **Compressed, double loop, `ancestor[r] == NIL`** *(classic; principled, and forced).*
+  The only correct compressed form with an early exit, for the reason above: `ancestor[r] ==
+  NIL` is the one predicate compression cannot forge. The double condition detects the skip
+  and the NIL test reads that detection back, so nothing is read or written twice. This is
+  what Liu, CSparse, and Oblio run, and the reason is structural rather than conventional.
+
+The classics sit on the diagonal, and the diagonal turns out to hold two cells chosen for
+two different reasons wearing the same name. The compressed classic is **principled**: it is
+forced, being the only legal compressed form with the early exit, and it happens also to be
+the one with no redundancy, hence the cleanest to explain. The plain classic is
+**pedagogical**: it is not the plain row's optimum, merely its clearest statement, and since
+plain climbing is never what production code runs, nobody has had reason to prefer the
+tighter spelling. Oblio ports the classic compressed form, which is both the fast choice and
+the clean one.
 
 ### 2.5 The forest as transitive reduction of the update DAG
 
@@ -1401,17 +1469,22 @@ compress(forest, Struct) -> snode: # fundamental supernodes
     s = 0
     for k = 1 .. n: # increasing order = children before parents
         j = firstChild[k]
-        if j != NIL and j == lastChild[k] # condition 1: j is k's only child
-               and |Struct(k)| == |Struct(j)| - 1: # condition 2: one shared pattern
+        if j != NIL # k has a child at all
+               and j == lastChild[k] # condition 1: and only the one, j
+               and |Struct(k)| == |Struct(j)| - 1: # condition 2: sharing one pattern
             snode[k] = snode[j] # k continues j's supernode
         else:
             s = s + 1
             snode[k] = s # k starts a new supernode
 ```
 
-Both conditions of 4.1 are in that test. `j == lastChild[k]` says the child list of `k` has
-a single entry, which is why the forest keeps a last-child link and not only a first-child
-link. The size equality is the pattern test of 4.2.
+Both conditions of 4.1 are in that test, and the guard in front of them is not decoration.
+`firstChild[k] == lastChild[k]` says "the child list of `k` has a single entry", which is
+why the forest keeps a last-child link and not only a first-child link. But it is *also*
+true when both are NIL, that is, at every leaf, so without the `j != NIL` guard every leaf
+would report exactly one child and the pattern test would go on to ask for `Struct(NIL)`.
+The guard is what makes the idiom mean what it reads as. The size equality is then the
+pattern test of 4.2.
 
 That assigns every column to a supernode and counts them. The forest must then be rebuilt
 over supernodes rather than columns. A second pass, in *decreasing* order, does it:

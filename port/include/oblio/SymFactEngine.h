@@ -29,9 +29,20 @@ class SymFactEngine {
 public:
     SymFactEngine() = default;
 
+    // Compute the symbolic factorization of A under p, from the forest f.
+    //
+    // The factor's pattern depends on A's pattern alone, never on its values, so the
+    // implementation is the non-templated overload, taking colPtr and rowIdx, compiled
+    // once. The templated overload is an adapter over it. The pattern overload is public:
+    // a caller holding a graph with no numbers attached can compute the symbolic
+    // factorization without inventing a scalar type to satisfy the signature.
     template<class Val>
     bool compute(const SparseMatrix<Val>& A, const Permutation& p,
                  const ElmForest& f, SymFact& s) const;
+
+    bool compute(const std::vector<std::size_t>&  colPtr,
+                 const std::vector<std::int32_t>& rowIdx,
+                 const Permutation& p, const ElmForest& f, SymFact& s) const;
 
 private:
     // The front indices of each supernode, gathered contiguously. The map gives
@@ -39,9 +50,11 @@ private:
     // through it, and the union recurrence needs them contiguous to be efficient.
     // Counting sort by supernode: walking columns in increasing order leaves each
     // supernode's front indices sorted in increasing order.
-    void gatherFrontIdx(std::size_t size, std::size_t supSize,
-                        const std::vector<std::int32_t>& idxToSupIdx,
-                        const std::vector<std::size_t>&  frontSize,
+    //
+    //   reads:   s.mSize, s.mSupSize, s.mIdxToSupIdx, s.mFrontSize
+    // The two outputs are scratch for the union recurrence, not fields of s, so they stay
+    // out-parameters.
+    void gatherFrontIdx(const SymFact& s,
                         std::vector<std::size_t>&  frontIdxPtr,
                         std::vector<std::int32_t>& frontIdx) const;
 
@@ -51,9 +64,10 @@ private:
     // of factor indices. The indices need not be sorted for correctness (an entry
     // is reached by indirection anyway), but numeric factorization assembles the
     // original matrix values assuming sorted front indices.
-    void sortIdx(std::size_t size, std::size_t supSize,
-                 const std::vector<std::size_t>& idxPtr,
-                 std::vector<std::int32_t>& idx) const;
+    //
+    //   reads:   s.mSize, s.mSupSize, s.mIdxPtr
+    //   writes:  s.mIdx  (in place, permuted into sorted order)
+    void sortIdx(SymFact& s) const;
 };
 
 extern template bool SymFactEngine::compute(const SparseMatrix<double>&, const Permutation&, const ElmForest&, SymFact&) const;

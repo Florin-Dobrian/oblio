@@ -4,10 +4,20 @@
 
 namespace Oblio {
 
+// Adapter: the factor's pattern needs only A's pattern, so the matrix overload pulls it out
+// and forwards. The implementation below is free of Val and compiled once.
 template<class Val>
 bool SymFactEngine::compute(const SparseMatrix<Val>& A, const Permutation& p,
                             const ElmForest& f, SymFact& s) const {
-    const std::size_t size = A.size();
+    return compute(A.colPtr(), A.rowIdx(), p, f, s);
+}
+
+bool SymFactEngine::compute(const std::vector<std::size_t>&  colPtr,
+                            const std::vector<std::int32_t>& rowIdx,
+                            const Permutation& p, const ElmForest& f, SymFact& s) const {
+    if (colPtr.empty())
+        return false;
+    const std::size_t size = colPtr.size() - 1;
     if (p.size() != size || f.size() != size)
         return false;
 
@@ -39,10 +49,8 @@ bool SymFactEngine::compute(const SparseMatrix<Val>& A, const Permutation& p,
 
     std::vector<std::size_t>  frontIdxPtr;
     std::vector<std::int32_t> frontIdx;
-    gatherFrontIdx(size, supSize, s.mIdxToSupIdx, s.mFrontSize, frontIdxPtr, frontIdx);
+    gatherFrontIdx(s, frontIdxPtr, frontIdx);
 
-    const std::vector<std::size_t>&  aColPtr = A.colPtr();
-    const std::vector<std::int32_t>& aRowIdx = A.rowIdx();
     const std::vector<std::int32_t>& oldToNew = p.oldToNew();
     const std::vector<std::int32_t>& newToOld = p.newToOld();
 
@@ -65,8 +73,8 @@ bool SymFactEngine::compute(const SparseMatrix<Val>& A, const Permutation& p,
             const std::size_t ac = static_cast<std::size_t>(newToOld[lc]);
 
             // For every factor row lr with a structural nonzero in factor column lc.
-            for (std::size_t ai = aColPtr[ac]; ai < aColPtr[ac + 1]; ++ai) {
-                const std::size_t ar = static_cast<std::size_t>(aRowIdx[ai]);
+            for (std::size_t ai = colPtr[ac]; ai < colPtr[ac + 1]; ++ai) {
+                const std::size_t ar = static_cast<std::size_t>(rowIdx[ai]);
                 const std::size_t lr = static_cast<std::size_t>(oldToNew[ar]);
 
                 if (lr < lc)
@@ -98,61 +106,57 @@ bool SymFactEngine::compute(const SparseMatrix<Val>& A, const Permutation& p,
         }
     }
 
-    sortIdx(size, supSize, s.mIdxPtr, s.mIdx);
+    sortIdx(s);
 
     return true;
 }
 
-void SymFactEngine::gatherFrontIdx(std::size_t size, std::size_t supSize,
-        const std::vector<std::int32_t>& idxToSupIdx,
-        const std::vector<std::size_t>&  frontSize,
+void SymFactEngine::gatherFrontIdx(const SymFact& s,
         std::vector<std::size_t>&  frontIdxPtr,
         std::vector<std::int32_t>& frontIdx) const {
     // The offsets are the front sizes, accumulated.
-    frontIdxPtr.resize(supSize + 1);
+    frontIdxPtr.resize(s.mSupSize + 1);
     frontIdxPtr[0] = 0;
-    for (std::size_t s = 0; s < supSize; ++s)
-        frontIdxPtr[s + 1] = frontIdxPtr[s] + frontSize[s];
+    for (std::size_t k = 0; k < s.mSupSize; ++k)
+        frontIdxPtr[k + 1] = frontIdxPtr[k] + s.mFrontSize[k];
 
-    // Scatter each column into its supernode's slot. Columns are walked in
-    // increasing order, so each supernode's front indices come out sorted.
-    frontIdx.resize(size);
+    // Scatter each column into its supernode's slot. Columns are walked in increasing
+    // order, so each supernode's front indices come out sorted.
+    frontIdx.resize(s.mSize);
     std::vector<std::size_t> cursor(frontIdxPtr.begin(), frontIdxPtr.end() - 1);
-    for (std::size_t lc = 0; lc < size; ++lc) {
-        const std::size_t s = static_cast<std::size_t>(idxToSupIdx[lc]);
-        frontIdx[cursor[s]++] = static_cast<std::int32_t>(lc);
+    for (std::size_t lc = 0; lc < s.mSize; ++lc) {
+        const std::size_t k = static_cast<std::size_t>(s.mIdxToSupIdx[lc]);
+        frontIdx[cursor[k]++] = static_cast<std::int32_t>(lc);
     }
 }
 
-void SymFactEngine::sortIdx(std::size_t size, std::size_t supSize,
-        const std::vector<std::size_t>& idxPtr,
-        std::vector<std::int32_t>& idx) const {
-    const std::size_t numIdx = idx.size();
+void SymFactEngine::sortIdx(SymFact& s) const {
+    const std::size_t numIdx = s.mIdx.size();
 
-    // Count the supernodes each index appears in, then accumulate, giving the
-    // offsets of the transpose.
-    std::vector<std::size_t> supPtr(size + 1, 0);
-    for (std::size_t k = 0; k < numIdx; ++k)
-        ++supPtr[static_cast<std::size_t>(idx[k]) + 1];
-    for (std::size_t i = 0; i < size; ++i)
+    // Count the supernodes each index appears in, then accumulate, giving the offsets of
+    // the transpose.
+    std::vector<std::size_t> supPtr(s.mSize + 1, 0);
+    for (std::size_t t = 0; t < numIdx; ++t)
+        ++supPtr[static_cast<std::size_t>(s.mIdx[t]) + 1];
+    for (std::size_t i = 0; i < s.mSize; ++i)
         supPtr[i + 1] += supPtr[i];
 
     // First pass: build the transpose, the supernodes each index appears in.
     std::vector<std::int32_t> sup(numIdx);
     std::vector<std::size_t> cursor(supPtr.begin(), supPtr.end() - 1);
-    for (std::size_t s = 0; s < supSize; ++s)
-        for (std::size_t k = idxPtr[s]; k < idxPtr[s + 1]; ++k) {
-            const std::size_t i = static_cast<std::size_t>(idx[k]);
-            sup[cursor[i]++] = static_cast<std::int32_t>(s);
+    for (std::size_t k = 0; k < s.mSupSize; ++k)
+        for (std::size_t t = s.mIdxPtr[k]; t < s.mIdxPtr[k + 1]; ++t) {
+            const std::size_t i = static_cast<std::size_t>(s.mIdx[t]);
+            sup[cursor[i]++] = static_cast<std::int32_t>(k);
         }
 
-    // Second pass: read the transpose back, walking the indices in increasing
-    // order, which writes each supernode's index set sorted.
-    std::vector<std::size_t> writeCursor(idxPtr.begin(), idxPtr.end() - 1);
-    for (std::size_t i = 0; i < size; ++i)
-        for (std::size_t k = supPtr[i]; k < supPtr[i + 1]; ++k) {
-            const std::size_t s = static_cast<std::size_t>(sup[k]);
-            idx[writeCursor[s]++] = static_cast<std::int32_t>(i);
+    // Second pass: read the transpose back, walking the indices in increasing order, which
+    // writes each supernode's index set sorted.
+    std::vector<std::size_t> writeCursor(s.mIdxPtr.begin(), s.mIdxPtr.end() - 1);
+    for (std::size_t i = 0; i < s.mSize; ++i)
+        for (std::size_t t = supPtr[i]; t < supPtr[i + 1]; ++t) {
+            const std::size_t k = static_cast<std::size_t>(sup[t]);
+            s.mIdx[writeCursor[k]++] = static_cast<std::int32_t>(i);
         }
 }
 

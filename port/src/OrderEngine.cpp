@@ -10,16 +10,22 @@ extern "C" int amd_order(int n, const int Ap[], const int Ai[],
 
 namespace Oblio {
 
+// Adapter: an ordering needs only the sparsity pattern, so the matrix overload pulls it
+// out and forwards. The implementation below is free of Val and compiled once.
 template<class Val>
-bool OrderEngine::order(const SparseMatrix<Val>& A, Permutation& p) const {
-    const std::size_t size = A.size();
+bool OrderEngine::compute(const SparseMatrix<Val>& A, Permutation& p) const {
+    return compute(A.colPtr(), A.rowIdx(), p);
+}
+
+bool OrderEngine::compute(const std::vector<std::size_t>&  colPtr,
+                          const std::vector<std::int32_t>& rowIdx,
+                          Permutation& p) const {
+    if (colPtr.empty())
+        return false;
+    const std::size_t size = colPtr.size() - 1;
 
     if (mMethod == OrderMethod::Natural)
         return orderNatural(size, p);
-
-    // Read A's structure through the public API, bound once (no per-element call).
-    const std::vector<std::size_t>& colPtrA = A.colPtr();
-    const std::vector<std::int32_t>& rowIdxA = A.rowIdx();
 
     // Non-natural: size the maps; the algorithms fill them by index below.
     p.mOldToNew.assign(size, 0);
@@ -28,21 +34,21 @@ bool OrderEngine::order(const SparseMatrix<Val>& A, Permutation& p) const {
     if (mMethod == OrderMethod::AMD)
         // A is full-symmetric; AMD ignores the diagonal and symmetrizes internally,
         // so its structure can be passed directly.
-        return orderAMD(size, colPtrA, rowIdxA, p);
+        return orderAMD(size, colPtr, rowIdx, p);
 
     // A is stored full-symmetric; MMD wants the off-diagonal structure only.
-    // Strip the diagonal (no expansion needed — A already holds both triangles).
-    std::vector<std::size_t> colPtr(size + 1, 0);
+    // Strip the diagonal (no expansion needed, A already holds both triangles).
+    std::vector<std::size_t> colPtrOff(size + 1, 0);
     for (std::size_t j = 0; j < size; ++j)
-        for (std::size_t sp = colPtrA[j]; sp < colPtrA[j + 1]; ++sp)
-            if (static_cast<std::size_t>(rowIdxA[sp]) != j) colPtr[j + 1]++;
-    for (std::size_t j = 0; j < size; ++j) colPtr[j + 1] += colPtr[j];
-    std::vector<std::int32_t> rowIdx(colPtr[size]);
-    std::vector<std::size_t> cur(colPtr.begin(), colPtr.end());
+        for (std::size_t sp = colPtr[j]; sp < colPtr[j + 1]; ++sp)
+            if (static_cast<std::size_t>(rowIdx[sp]) != j) colPtrOff[j + 1]++;
+    for (std::size_t j = 0; j < size; ++j) colPtrOff[j + 1] += colPtrOff[j];
+    std::vector<std::int32_t> rowIdxOff(colPtrOff[size]);
+    std::vector<std::size_t> cur(colPtrOff.begin(), colPtrOff.end());
     for (std::size_t j = 0; j < size; ++j)
-        for (std::size_t sp = colPtrA[j]; sp < colPtrA[j + 1]; ++sp)
-            if (static_cast<std::size_t>(rowIdxA[sp]) != j) rowIdx[cur[j]++] = rowIdxA[sp];
-    return orderMMD(size, colPtr, rowIdx, p);
+        for (std::size_t sp = colPtr[j]; sp < colPtr[j + 1]; ++sp)
+            if (static_cast<std::size_t>(rowIdx[sp]) != j) rowIdxOff[cur[j]++] = rowIdx[sp];
+    return orderMMD(size, colPtrOff, rowIdxOff, p);
 }
 
 bool OrderEngine::orderNatural(std::size_t size, Permutation& p) const {
@@ -56,7 +62,7 @@ bool OrderEngine::orderMMD(std::size_t size,
                            const std::vector<std::size_t>&  colPtr,
                            const std::vector<std::int32_t>& rowIdx,
                            Permutation& p) const {
-    if (size == 0) return true;   // maps already sized to 0 by order()
+    if (size == 0) return true;   // maps already sized to 0 by compute()
     const int N   = static_cast<int>(size);
     const int nnz = static_cast<int>(rowIdx.size());
 
@@ -78,7 +84,7 @@ bool OrderEngine::orderAMD(std::size_t size,
                            const std::vector<std::size_t>&  colPtr,
                            const std::vector<std::int32_t>& rowIdx,
                            Permutation& p) const {
-    if (size == 0) return true;   // maps already sized to 0 by order()
+    if (size == 0) return true;   // maps already sized to 0 by compute()
     const int N  = static_cast<int>(size);
     const int nz = static_cast<int>(colPtr[size]);
 
@@ -97,7 +103,7 @@ bool OrderEngine::orderAMD(std::size_t size,
     return true;
 }
 
-template bool OrderEngine::order(const SparseMatrix<double>&, Permutation&) const;
-template bool OrderEngine::order(const SparseMatrix<std::complex<double>>&, Permutation&) const;
+template bool OrderEngine::compute(const SparseMatrix<double>&, Permutation&) const;
+template bool OrderEngine::compute(const SparseMatrix<std::complex<double>>&, Permutation&) const;
 
 } // namespace Oblio

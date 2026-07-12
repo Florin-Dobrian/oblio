@@ -3,6 +3,101 @@
 Durable record of structural choices, newest first. Each entry: date, decision,
 why. This is the file to open after a gap to reconstruct the project's shape.
 
+## 2026-07-12, Engine helpers take whole objects, except where that would drag in Val
+
+**Passing an object's pieces to a function that is already its friend restricts nothing.**
+The engine can reach every field regardless; unpacking the arrays into the signature does not
+narrow that access, it only spreads it across nine parameters. We had been writing helpers
+that took the forest apart, on the theory that a signature listing `const&` inputs and `&`
+outputs documents the data flow. It does not, and the cost of pretending otherwise was real.
+
+**The signature could not carry the contract that actually matters.** `compressFundamental`
+leaves `mFirstChild`, `mLastChild`, the sibling links and the roots **stale**: they still
+describe the nodal forest and are wrong for the compressed one until rebuilt. A `const&`
+parameter says "not written", which a reader takes as "still valid", which is exactly
+backwards. The read set, the write set and the stale set always lived in a comment. We were
+paying nine parameters for documentation we never received.
+
+**Meanwhile the parameters were manufacturing a bug class.** `finalizeLinks` took five
+`std::vector<std::int32_t>&` arguments in a row. Transposing `firstChild` and `lastChild`
+compiles silently and builds a subtly wrong forest. Same type, same reference-ness, no help
+from the compiler. `finalizeLinks(f)` cannot express that error at all.
+
+**So: helpers take the object.** Across `ElmForestEngine` this took the private helpers from
+38 parameters to 11 (`finalizeLinks` 9 to 1, `compressFundamental` 8 to 1, `computeHeight` 5
+to 1). The gain is not brevity. It is that `compute()` now shows the shape of the algorithm,
+parent links, child links, sizes, compress, child links again, height, instead of the
+plumbing, and a structurally interesting fact like `finalizeLinks` running twice is legible
+at a glance rather than buried in argument lists.
+
+**The read/write/stale sets move to the comment, where they can be said properly.** That is
+not a loss. A signature can express "I do not write this"; only prose can express "I leave
+this stale, and you must rebuild it before anything else reads it".
+
+**Three cases, and the third dissolves rather than trading off.**
+
+- **Objects we write through friendship** (`ElmForest`, `SymFact`): pass whole. This is what
+  the entry is about, and it is also 0.9's shape, whose `compress_()` is a member taking no
+  arguments at all. Our array-passing came from following 10.12.
+- **Objects we only read, and that are not templated** (`Permutation`): pass whole. No
+  friendship needed, the public accessors suffice, and it is free. This collapses
+  `oldToNew, newToOld` into one parameter with no downside whatever.
+- **Objects we only read, and that are templated** (`SparseMatrix<Val>`): pass whole *at the
+  boundary*, and unpack *beneath* it. See below.
+
+**A templated overload is an adapter; the implementation lives in the non-templated one
+beneath it.** The elimination forest and the symbolic factorization depend on the sparsity
+pattern alone, never on the values: they are free of `Val`, which is why the ledger records
+them as such. So does the ordering, which is a pure graph operation, AMD and MMD would not
+know what to do with a value. That reads at first like a reason to keep `SparseMatrix<Val>`
+out of their signatures, forcing every function to take `colPtr` and `rowIdx` and stay long.
+It is not. Two overloads settle it:
+
+```
+template<class Val>
+bool compute(const SparseMatrix<Val>& A, const Permutation& p, ElmForest& f) const
+{ return compute(A.colPtr(), A.rowIdx(), p, f); }         // adapter, one line
+
+bool compute(const std::vector<std::size_t>&  colPtr,
+             const std::vector<std::int32_t>& rowIdx,
+             const Permutation& p, ElmForest& f) const;   // the engine
+```
+
+The templated overload is a forwarding line that inlines away, so the duplicated
+instantiation costs essentially nothing (and instantiating more code is not in itself a
+problem, it is automated). The implementation stays free of `Val` and is compiled once. A
+caller holding a matrix passes the matrix; a caller holding only a pattern, a graph with no
+numbers attached, calls the lower overload and never has to invent a scalar type to run
+structural analysis. Both overloads are public, so that is a fact about the API and not
+merely about the compilation. The apparent tension between short signatures and `Val`-freedom
+was never real.
+
+**Adapt once, at the public boundary.** The adapter belongs on the entry point and nowhere
+else. We first tried it on the private helpers too, and those adapters immediately became
+dead code: once `compute` has unpacked the matrix, every helper below it already holds the
+pattern, and a second layer has no callers. All three engines now have exactly one adapter
+each, on `compute`, and interiors entirely free of `Val`. The whole structural pipeline,
+`OrderEngine -> ElmForestEngine -> SymFactEngine`, runs on a bare graph: no `SparseMatrix`, no
+scalar type, no numbers.
+
+This is not a new idea in the code, only a newly named one: `compute<Val>` already pulled
+`colPtr` and `rowIdx` out of `A` and handed them to non-templated helpers. We had simply not
+seen that the same move, applied at the entry point, makes the pattern a public capability.
+
+**A consequence: `SparsityPattern` becomes optional rather than a prerequisite.**
+`SparseMatrix<Val>` is two things under one name, a pattern (free of `Val`) and values indexed
+by it (not). A separate non-templated pattern type would shorten the lower overload from two
+array parameters to one. Worth doing, perhaps, but the layering above works without it, and
+introducing it later changes only that one parameter list, nothing above. Recorded as an
+improvement available, not a debt owed.
+
+**Entry points are named `compute`.** One verb across every engine, since an engine's job is
+to derive a fact from its inputs. `OrderEngine::order` was renamed to match. 0.9 calls them
+all `run`, which is uniform but says nothing; 10.12 uses `ComputeElmForest` and
+`ComputeSymbolic`, right about the verb but appending a noun the class already carries
+(`ElmForestEngine::ComputeElmForest` stutters). `ElmForestEngine::compute(A, p, f)` says what
+is computed three times over: in the class, in the arguments, and in the output.
+
 ## 2026-07-11, Choice objects are constructible; derived-fact objects are engine-filled
 
 **The pipeline holds two kinds of object, and they deserve opposite rules.** A permutation
@@ -52,14 +147,17 @@ harder to review. The 10.12 vocabulary also lines up with the `lc1`/`lc2` names 
 our `computeParent`, so the port reads consistently across engines.
 
 **Front size is computed by counting the map, not by filling ones.** 10.12's
-`rComputeNumIdxs` fills the front sizes with 1 unconditionally, which is correct only
-because it runs while supernodes are still trivial (compression happens afterward). We
-compute `frontSize[s]` as the number of columns mapping to `s`. On trivial input this gives
-the same all-ones answer, but it stays correct once fundamental-supernode compression merges
-columns, so the function covers both regimes rather than one. This is not really a departure
-from 0.9 either: 0.9's symbolic factorization recomputes the front sizes from the map with
-exactly this loop. We simply compute them one stage earlier, on the forest, where they
-belong as an attribute.
+`rComputeNumIdxs` fills the front sizes with 1 unconditionally. We count how many columns
+map to each supernode. Both run only on the nodal forest, where the map is the identity, so
+both give all ones and the choice is stylistic: counting derives the value from the map
+rather than asserting it. We originally justified this as generality, on the grounds that it
+would stay correct after compression. That was wrong, and worth recording as such:
+compression derives the merged front sizes itself, and the rest of the function is
+nodal-only anyway (its update-size walk indexes by column, which coincides with supernode
+only while supernodes are trivial), so it is never re-run afterwards. The map-count buys no
+capability. This is also not a departure from 0.9, whose symbolic factorization recomputes
+front sizes from the map with exactly this loop; we merely compute them one stage earlier,
+on the forest, where they belong as an attribute.
 
 **SymFact stores its index sets flat, as 0.9 does, not as a vector of vectors.** This
 follows directly from the flat-vs-VV decision below: the symbolic factor is written once

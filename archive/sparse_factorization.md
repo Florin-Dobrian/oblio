@@ -1322,6 +1322,211 @@ repeats almost identical patterns. Grouping the chain into one unit with a share
 a **supernode**, removes that redundancy, and is the subject of Section 4.
 
 
+## 4. Supernodes
+
+Section 3 ended on a redundancy. Along a chain of single-child columns the patterns nest,
+each is the next with one fewer row, so storing and processing such a chain column by
+column repeats nearly the same pattern over and over. A **supernode** is that chain,
+grouped into one unit with a single shared pattern. This section says exactly which
+columns may be grouped, how to find the grouping in one pass, and what it buys.
+
+### 4.1 Definition
+
+A **fundamental supernode** is a maximal set of columns `{j, j+1's successor, ..., k}`
+forming a path in the elimination forest, such that
+
+1. every column on the path except the bottom one has **exactly one child**, and
+2. the columns have **identical sparsity patterns**, in the sense that the pattern of each
+   column is the pattern of the next with that next column's index removed.
+
+Condition 2 is the point: the columns share one pattern, so the supernode needs one index
+list rather than one per column. Condition 1 is what makes them *contiguous* in the forest:
+if a column on the path had two children, the two subtrees would both feed it, and the
+column below it on the path would not carry the whole story.
+
+Fundamental supernodes are **unique** for a given forest. There is no choice to make and
+no heuristic to tune, unlike the threshold-based merging that trades explicit zeros for
+larger blocks. That uniqueness is why they are the natural default.
+
+Write `snode(j)` for the supernode containing column `j`. The supernode's columns are its
+**front indices**; the rows below them, common to all of them, are its **update indices**.
+
+### 4.2 The counting test
+
+Condition 2 looks like it needs a set comparison per candidate pair. It does not. Let `j`
+be the only child of `k`, so `j < k` and `parent(j) = k`. If they belong to one supernode,
+then by the containment theorem of 2.3 the rows below `j` are exactly `k` followed by the
+rows below `k`:
+
+```
+Struct(j) = {k} union Struct(k)
+```
+
+Take sizes of both sides. The union is disjoint (`k` is not in `Struct(k)`), so
+
+```
+|Struct(j)| = 1 + |Struct(k)|
+```
+
+and the test becomes arithmetic on numbers we already have from symbolic factorization, or
+from the column counts computed with the forest:
+
+```
+k joins j's supernode  <=>  j is k's only child  and  |Struct(k)| = |Struct(j)| - 1
+```
+
+No pattern is ever compared. This is the whole trick: containment guarantees `Struct(j)`
+is *at least* `{k} union Struct(k)`, so equality of the sizes forces equality of the sets.
+
+**The supernodal form.** Written for a forest whose vertices are already supernodes rather
+than single columns, the same identity reads
+
+```
+|update(j)| = |front(k)| + |update(k)|
+```
+
+because the rows below supernode `j` are the columns of `k` followed by the rows below `k`.
+For a nodal forest `|front(k)| = 1` and this collapses to the test above. The general form
+is worth keeping: it is what lets compression run on a forest that has already been
+compressed. Note it is the **parent's** front size that appears, not the child's.
+
+### 4.3 Compression
+
+One pass in increasing column order suffices. Because `parent(j) > j`, a column's child is
+always numbered before it, so when column `k` is reached its child's supernode is already
+decided.
+
+```
+compress(forest, Struct) -> snode: # fundamental supernodes
+    s = 0
+    for k = 1 .. n: # increasing order = children before parents
+        j = firstChild[k]
+        if j != NIL and j == lastChild[k] # condition 1: j is k's only child
+               and |Struct(k)| == |Struct(j)| - 1: # condition 2: one shared pattern
+            snode[k] = snode[j] # k continues j's supernode
+        else:
+            s = s + 1
+            snode[k] = s # k starts a new supernode
+```
+
+Both conditions of 4.1 are in that test. `j == lastChild[k]` says the child list of `k` has
+a single entry, which is why the forest keeps a last-child link and not only a first-child
+link. The size equality is the pattern test of 4.2.
+
+That assigns every column to a supernode and counts them. The forest must then be rebuilt
+over supernodes rather than columns. A second pass, in *decreasing* order, does it:
+
+```
+rebuild(forest, snode) -> supernodal forest:
+    for S = 1 .. s:
+        front(S) = 0
+        done[S] = false
+    for k = n .. 1: # decreasing order, so a supernode's topmost column comes first
+        S = snode[k]
+        front(S) = front(S) + 1 # every column of S adds to its front size
+        if not done[S]: # k is the topmost column of S
+            if parent(k) != NIL:
+                supParent(S) = snode[parent(k)]
+            else:
+                supParent(S) = NIL # S is a root
+            update(S) = |Struct(k)| # the rows below k are the rows below S
+            done[S] = true
+```
+
+The asymmetry between the two lines inside the `if` is worth reading twice. Front sizes
+**accumulate** over every column of the supernode, so that line sits outside the guard.
+The parent link and the update size are taken **once**, from the first column seen, which
+in decreasing order is the supernode's **topmost** column. That is the right column for
+both: its parent is the one link that leaves the supernode, and its rows below are exactly
+the supernode's update indices, the ones common to all of its columns.
+
+Finally the child and sibling links are rebuilt from the new parent links exactly as in
+2.4, and the height recomputed. Cost is `O(n)` beyond what we already have, so compression
+is free next to the factorization it accelerates.
+
+**Columns of a supernode need not be consecutive.** The forest is in topological order, not
+necessarily postorder, so a supernode can own scattered column indices. Consumers must
+gather its front indices through `snode[]` rather than assume a contiguous range. (A
+postordering of the forest would make them consecutive, and is worth doing for other
+reasons, but the algorithms above do not depend on it.)
+
+### 4.4 Worked example: the grid
+
+Take the grid of 2.6 again, with `parent = [2, 3, 7, 5, 6, 7, 8, 9, NIL]` and the patterns
+computed in 3.2. Tabulate what the test needs, the only child (if any) and the pattern
+sizes:
+
+```
+col k:        1     2     3     4     5     6     7     8     9
+Struct(k):   {2,7} {3,7,8} {7,8,9} {5,7} {6,7,8} {7,8,9} {8,9} {9} {}
+|Struct(k)|:  2     3     3     2     3     3     2     1     0
+children:     -     1     2     -     4     5     3,6   7     8
+only child:   -     1     2     -     4     5     -     7     8
+```
+
+Now run the test on each column with an only child:
+
+```
+k=2  j=1   |Struct(2)|=3, |Struct(1)|-1=1   3 != 1   no merge
+k=3  j=2   |Struct(3)|=3, |Struct(2)|-1=2   3 != 2   no merge
+k=5  j=4   |Struct(5)|=3, |Struct(4)|-1=1   3 != 1   no merge
+k=6  j=5   |Struct(6)|=3, |Struct(5)|-1=2   3 != 2   no merge
+k=7   -    two children (3 and 6)                    no merge
+k=8  j=7   |Struct(8)|=1, |Struct(7)|-1=1   1 == 1   merge, 8 joins 7
+k=9  j=8   |Struct(9)|=0, |Struct(8)|-1=0   0 == 0   merge, 9 joins 8
+```
+
+Nine columns collapse to **seven supernodes**: six trivial ones, and `{7, 8, 9}`.
+
+```
+snode:     1   2   3   4   5   6   7
+columns:  {1} {2} {3} {4} {5} {6} {7,8,9}
+front:     1   1   1   1   1   1   3
+update:    2   3   3   2   3   3   0
+```
+
+The one non-trivial supernode is exactly the **separator**. That is not a coincidence, it
+is nested dissection working as designed: the separator is eliminated last, by then it is
+completely filled in, and a completely filled-in block is precisely a set of columns with
+one shared pattern. Its index set is `{7,8,9}` with no update rows, a dense 3x3 trailing
+block.
+
+The left and right blocks do not compress at all, and the trace shows why. Column 2's
+pattern is `{3,7,8}` while its child column 1 has `{2,7}`: dropping the 2 leaves `{7}`,
+not `{7,8}`. The patterns differ, so the columns cannot share an index list. Column 2
+*acquires* row 8 from `A` that column 1 never had. Only once a column's pattern has stopped
+growing do the columns start agreeing, and in this ordering that happens only inside the
+separator.
+
+### 4.5 What changes downstream
+
+Symbolic factorization runs unchanged, at supernode granularity. The recurrence of 3.1 is
+the same union, with two adjustments. It reads the patterns of *every* front column of the
+supernode rather than a single column, and when absorbing a child it drops the child's
+front indices rather than a single index `j`:
+
+```
+symbolicFactor(A, supernodal forest) -> Idx:
+    for K = 1 .. numSupernodes: # increasing = children before parents
+        Idx(K) = union, over front columns k of K, { i >= k : A[i][k] != 0 }
+        for each child J of K: # absorb each child's update indices
+            Idx(K) = Idx(K) union ( Idx(J) \ front(J) )
+```
+
+For a nodal forest each supernode has one front column and `front(J) = {j}`, and this is
+exactly the algorithm of 3.1. The same code covers both regimes, which is a good reason to
+write the supernodal form even when the forest happens to be nodal.
+
+The payoff is not in the symbolic phase, which was already optimal, but in the numeric one.
+A supernode's columns share a pattern, so its nonzeros form a **dense rectangular block**,
+and the numeric factorization can update it with dense matrix kernels (BLAS level 3)
+instead of a scatter over individual columns. That is the entire motivation: supernodes
+convert sparse column operations into dense block operations, which run at a large multiple
+of the speed on real hardware. The larger the supernodes, the better the ratio, which is
+also why threshold-based merging exists, it accepts some explicitly stored zeros to buy
+bigger blocks. Fundamental supernodes are the free case: they introduce no zeros at all.
+
+
 ## References
 
 The material above is standard sparse-matrix theory; the grouping below points to the

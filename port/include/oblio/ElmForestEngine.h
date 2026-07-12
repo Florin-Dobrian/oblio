@@ -94,21 +94,19 @@ private:
 
     // Merge the trivial supernodes into fundamental supernodes: maximal paths in the
     // forest whose columns share one sparsity pattern, each vertex on the path (bar the
-    // bottom one) having exactly one child. Fundamental supernodes are unique for a
-    // given forest. Rewrites the map, the parent links, the sizes and the child/sibling
-    // links, and shrinks supSize. Reads the links and the sizes, so it runs after both.
+    // bottom one) having exactly one child. Fundamental supernodes are unique for a given
+    // forest. Rewrites the map, the parent links and the sizes, and shrinks supSize.
+    //
+    // Reads the child links (the merge test asks whether a supernode has exactly one
+    // child) and the sizes, so it runs after both. It leaves the child, sibling and root
+    // links describing the old forest, so the caller rebuilds them with finalizeLinks.
     void compressFundamental(std::size_t size, std::size_t& supSize,
                              std::vector<std::int32_t>& idxToSupIdx,
                              std::vector<std::int32_t>& parent,
-                             std::vector<std::int32_t>& firstChild,
-                             std::vector<std::int32_t>& lastChild,
-                             std::vector<std::int32_t>& nextSibling,
-                             std::vector<std::int32_t>& previousSibling,
+                             const std::vector<std::int32_t>& firstChild,
+                             const std::vector<std::int32_t>& lastChild,
                              std::vector<std::size_t>&  frontSize,
-                             std::vector<std::size_t>&  updateSize,
-                             std::size_t&  numTrees,
-                             std::int32_t& firstRoot,
-                             std::int32_t& lastRoot) const;
+                             std::vector<std::size_t>&  updateSize) const;
 };
 
 extern template bool ElmForestEngine::compute(const SparseMatrix<double>&, const Permutation&, ElmForest&) const;

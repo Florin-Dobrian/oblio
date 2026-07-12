@@ -37,15 +37,21 @@ bool ElmForestEngine::compute(const SparseMatrix<Val>& A, const Permutation& p,
                                f.mIdxToSupIdx, f.mFrontSize, f.mUpdateSize);
 
     // Merge the trivial supernodes into fundamental supernodes, unless asked to stay
-    // nodal. This rewrites the map, the parent links, the sizes and the child/sibling
-    // links; skipping it leaves the forest one supernode per column.
-    if (mSupernodes == Supernodes::Fundamental)
+    // nodal. This rewrites the map, the parent links and the sizes, leaving the
+    // child/sibling links stale, so they are rebuilt straight after over the merged
+    // supernodes. finalizeLinks therefore runs twice: once on the nodal forest, whose
+    // links the merge test reads, and once on the compressed one.
+    if (mSupernodes == Supernodes::Fundamental) {
         compressFundamental(size, f.mSupSize, f.mIdxToSupIdx, f.mParent,
-                            f.mFirstChild, f.mLastChild, f.mNextSibling, f.mPreviousSibling,
-                            f.mFrontSize, f.mUpdateSize,
-                            f.mNumTrees, f.mFirstRoot, f.mLastRoot);
+                            f.mFirstChild, f.mLastChild, f.mFrontSize, f.mUpdateSize);
+        finalizeLinks(f.mSupSize, f.mParent, f.mFirstChild, f.mLastChild,
+                      f.mNextSibling, f.mPreviousSibling, f.mNumTrees,
+                      f.mFirstRoot, f.mLastRoot);
+    }
 
-    // Height last, so it is computed once, on the final forest.
+    // Height last, so it is computed once, on the final forest. Compression shortens the
+    // trees, every merged chain collapsing to a single level, so this cannot be carried
+    // over from before the merge.
     f.mHeight = computeHeight(f.mSupSize, f.mLastRoot, f.mParent,
                               f.mLastChild, f.mPreviousSibling);
 
@@ -204,15 +210,10 @@ void ElmForestEngine::computeFrontAndUpdateSizes(std::size_t size, std::size_t s
 void ElmForestEngine::compressFundamental(std::size_t size, std::size_t& supSize,
         std::vector<std::int32_t>& idxToSupIdx,
         std::vector<std::int32_t>& parent,
-        std::vector<std::int32_t>& firstChild,
-        std::vector<std::int32_t>& lastChild,
-        std::vector<std::int32_t>& nextSibling,
-        std::vector<std::int32_t>& previousSibling,
+        const std::vector<std::int32_t>& firstChild,
+        const std::vector<std::int32_t>& lastChild,
         std::vector<std::size_t>&  frontSize,
-        std::vector<std::size_t>&  updateSize,
-        std::size_t&  numTrees,
-        std::int32_t& firstRoot,
-        std::int32_t& lastRoot) const {
+        std::vector<std::size_t>&  updateSize) const {
     // Merge each supernode into its child where they belong to one fundamental
     // supernode, that is, where they form a path in the forest whose factor columns
     // share one sparsity pattern. Two conditions, for child s1 of parent s2:
@@ -290,9 +291,8 @@ void ElmForestEngine::compressFundamental(std::size_t size, std::size_t& supSize
     frontSize.swap(newFrontSize);
     updateSize.swap(newUpdateSize);
 
-    // Rebuild the child, sibling and root links over the merged supernodes.
-    finalizeLinks(supSize, parent, firstChild, lastChild, nextSibling, previousSibling,
-                  numTrees, firstRoot, lastRoot);
+    // The child, sibling and root links now describe the old, nodal forest and are stale.
+    // The caller rebuilds them over the merged supernodes.
 }
 
 template bool ElmForestEngine::compute(const SparseMatrix<double>&, const Permutation&, ElmForest&) const;

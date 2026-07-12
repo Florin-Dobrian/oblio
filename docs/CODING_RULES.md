@@ -40,21 +40,18 @@ softer layer: conventions for consistency, not correctness.
   idea in two spellings; splitting it makes the reader hold the connection in their head
   instead of seeing it. The pattern this most applies to:
 
-  - **A templated overload is an adapter; the implementation lives in the non-templated one
-    beneath it.** Where a function needs only part of a templated object, take the object at
-    the boundary and the part in the body. E.g. `OrderEngine::compute(const SparseMatrix<Val>&,
-    Permutation&)` forwards to `compute(colPtr, rowIdx, Permutation&)`, one line that inlines
-    away. The implementation stays free of `Val` and is compiled once instead of once per
-    scalar type, and a caller holding only a sparsity pattern can reach it without naming a
-    scalar type at all. See the DESIGN_DECISIONS entry for why the apparent tension between
-    short signatures and `Val`-freedom is not real.
+  - **The overload taking less is the implementation; the one taking more is an adapter.**
+    Where a function needs only part of an object, take the part in the body and the object
+    at the boundary, as a one-line forward. E.g. `OrderEngine::compute(const SparseMatrix<Val>&,
+    Permutation&)` forwards to `compute(colPtr, rowIdx, Permutation&)`. The implementation
+    then states its real dependencies, and a caller who has only that part can reach it. See
+    the structural-part rule below for why this matters beyond signature length.
 
     **Adapt once, at the public boundary.** One adapter per engine, on the entry point, and
-    nothing templated below it. Do not repeat the pattern on each private helper: once the
-    entry point has unpacked the object, the helpers already have the part they need, and a
-    second layer of adapters would have no callers. All three engines (`OrderEngine`,
-    `ElmForestEngine`, `SymFactEngine`) have exactly one adapter, on `compute`, and interiors
-    entirely free of `Val`.
+    nothing below it takes more than it needs. Do not repeat the pattern on each private
+    helper: once the entry point has unpacked the object, the helpers already have the part
+    they need, and a second layer of adapters would have no callers. All three engines
+    (`OrderEngine`, `ElmForestEngine`, `SymFactEngine`) have exactly one adapter, on `compute`.
 
 - **Prefer passing the whole object over passing its pieces**, where doing so does not drag
   in a template parameter the callee has no use for. Passing an object's fields to a function
@@ -63,7 +60,67 @@ softer layer: conventions for consistency, not correctness.
   transposition bug the compiler cannot catch. What a signature cannot say anyway (which
   fields the callee leaves *stale*) belongs in the comment regardless. See DESIGN_DECISIONS.
 
+- **Access rule: friendship is a write grant.** Three cases, and they cover every argument an
+  engine takes.
+
+  - **Written -> friend, pass the object.** An engine is declared `friend` by exactly the
+    object it fills, and by no other. `ElmForestEngine` writes `ElmForest`, `SymFactEngine`
+    writes `SymFact`, `OrderEngine` writes `Permutation`. Pass the object, not its fields:
+    the engine can reach them anyway, so listing them only lengthens the signature. What a
+    signature cannot say (which fields the callee leaves *stale*) goes in the comment.
+  - **Read -> pass the object, public API, no friendship.** Reading needs no friend. The
+    accessors return `const&`, so there is no copy to avoid and no access to gain; friendship
+    would spend encapsulation for nothing. `SymFactEngine` reads a dozen fields of `ElmForest`
+    through its accessors and is not its friend.
+  - **Read, and only the structure is needed -> take only the structure.** See below.
+
+- **Pass only the structural part of a matrix when only structural work is done.** Ordering,
+  the elimination forest and the symbolic factorization are graph algorithms: they read a
+  sparsity pattern and never touch a value. So they take one, and `SparseMatrix` offers two
+  overloads, one taking the matrix and one taking `colPtr` and `rowIdx`, the second holding
+  the implementation and the first a one-line adapter over it.
+
+  This is about honest dependencies, not about C++. A function's parameters should say what it
+  actually consumes. A structural algorithm that demands a matrix is lying about what it needs,
+  and it forces a caller holding only a graph to fabricate numbers to satisfy a signature that
+  will ignore them. The rule would be right in any language.
+
+  The mechanism, in C++, is that the structural overload is not templated, which is also why
+  it is compiled once rather than once per scalar type. That is a consequence and not the
+  motive, and it should not be mistaken for one.
+
 ## C++
+
+- **Index naming: `j` and `k` are columns, `jj` and `kk` are their supernodes.** 0.9's
+  convention, and worth keeping. Two rules, and the second is the useful one:
+
+  - **`j` is the lower column, `k` the higher**, whichever the loop happens to scan. An
+    ascending loop scans `k` and looks down at its child `j` (`j = firstChild[k]`); a
+    descending loop scans `j` and looks up at its parent `k` (`k = parent[j]`). Either way
+    `j < k`, because a parent's column is numbered above its child's.
+  - **Doubling a letter applies the column-to-supernode map.** `jj` is the supernode of `j`,
+    `kk` the supernode of `k`. One rule, applied at both levels.
+
+  The payoff is that a statement reads as the fact it derives. In the compression rebuild,
+  `parent[jj] = kk` says: the supernode of `j`'s parent column is the parent of `j`'s
+  supernode. Both levels are visible, and the relation between them needs no lookup. The rule
+  holds even where no column is in scope: in `finalizeLinks` and `computeHeight`, which see
+  only supernodes, they are still `jj` and `kk`. A doubled letter means supernode, full stop.
+
+  Where both orderings are in play, prefix with `l` for the factor (permuted) ordering and `a`
+  for the original ordering of `A`: `lj`, `lk`, `aj`, `ak`. This keeps 10.12's ordering
+  distinction and 0.9's column roles at once, where each reference had only one of them.
+
+  The same prefix marks a **position** in the flat storage: `ap` is an offset into `A`'s
+  arrays, `lp` an offset into the factor's. This is 0.9's `p`, the name `p` being taken by the
+  `Permutation`. Positions measure rather than name, so they are `std::size_t`, cannot be
+  `NIL`, and may exceed 2^31; the ID rules above do not apply to them.
+
+  Row indices are `i`. Scratch is `r` for the node a climb has reached and `t` for a general
+  temporary.
+
+  See the index-type rules below for why `j`, `k`, `jj`, `kk` are `std::int32_t` and are used
+  to subscript without a cast.
 
 - **Modern spellings, pin one per historical variation** (check this list before
   reintroducing an old form):
@@ -119,11 +176,25 @@ softer layer: conventions for consistency, not correctness.
     negative, never the sentinel), so the unsigned view is safe and avoids
     signed/unsigned comparison against `.size()`. Do **not** loop with an `int32_t`
     counter compared to a container size.
-  - **Cast explicitly at the two crossings, and only there:**
-    `static_cast<std::int32_t>(counter)` when storing a counter into an ID array
-    (narrowing, this is where the 2^31 cap lives); `static_cast<std::size_t>(id)`
-    when an ID subscripts an array (widening, guard against `NIL` first if the ID
-    could be a sentinel). These casts mark the ID↔offset boundary; they should be few.
+  - **Cast only where information can be lost, which is one direction, not two:**
+    `static_cast<std::int32_t>(x)` when a `std::size_t` becomes an ID (**narrowing**; this is
+    where the 2^31 cap lives, and the compiler warns without it). The other direction needs
+    nothing: subscripting a container with an `std::int32_t` is legal, is silent under
+    `-Wall -Wextra`, and is correct for every value that is not `NIL`. Write `parent[jj]`, not
+    `parent[static_cast<std::size_t>(jj)]`.
+  - **A widening cast is not a NIL guard, and must not be mistaken for one.**
+    `static_cast<std::size_t>(NIL)` yields `SIZE_MAX` exactly as silently as the implicit
+    conversion would: the cast performs the mistake, it does not prevent it. What prevents it
+    is a branch, `if (kk != NIL)`, and that branch is required whether or not a cast is
+    written. Adding casts "for safety" buys nothing and costs a great deal of noise.
+  - **One name per entity.** `j`, `k`, `jj`, `kk` are `std::int32_t`, because they name things
+    and may carry `NIL`. Do not introduce a second variable holding the same value as a
+    `std::size_t`: a reader then has to check whether the two are really the same thing. Where
+    an ascending loop counts entities, the counter is that entity's type (`std::int32_t`) and
+    the *bound* is cast once in the loop header, rather than the counter being cast at every
+    use. Where a loop counts *positions* rather than entities (an offset into `colPtr`, or a
+    descending count-down), it is a `std::size_t` and names nothing.
+
 - Beyond the spellings above, `.clang-tidy` (`modernize-*`) and `.clang-format` also
   handle idiom cleanups (e.g. `.data()` over raw-pointer extraction) and formatting.
   Rely on the tools; don't hand-police these.

@@ -35,7 +35,7 @@ bool ElmForestEngine::compute(const std::vector<std::size_t>&  colPtr,
     // precede compression, whose merge test reads a column's only-child status from the
     // links and its sparsity pattern from the sizes.
     finalizeLinks(f);
-    computeFrontAndUpdateSizes(colPtr, rowIdx, p, f);
+    computeColumnSizes(colPtr, rowIdx, p, f);
 
     // Merge the columns into fundamental supernodes, unless asked to stay nodal. This
     // rewrites the map, the parent links and the sizes, leaving the child/sibling links
@@ -68,24 +68,34 @@ void ElmForestEngine::computeParent(
     f.mParent.assign(size, NIL);
     std::vector<std::int32_t> ancestor(size, NIL);
 
-    // For each factor column lc2 (increasing), look at its neighbours mapping to earlier
-    // columns lc1 < lc2; path-compress to attach lc1's subtree under lc2.
-    for (std::size_t lc2 = 0; lc2 < size; ++lc2) {
-        const std::size_t ac2 = static_cast<std::size_t>(newToOld[lc2]);
-        for (std::size_t sp = colPtr[ac2]; sp < colPtr[ac2 + 1]; ++sp) {
-            const std::size_t lc1 =
-                static_cast<std::size_t>(oldToNew[static_cast<std::size_t>(rowIdx[sp])]);
-            if (lc1 >= lc2)
+    // Naming: an l prefix is the factor (permuted) ordering, an a prefix the original
+    // ordering of A, and j and k carry the column roles, j the lower and k the higher. So lk
+    // is the factor column being processed, lj an earlier neighbour of it (lj < lk, enforced
+    // by the guard below), and ak is lk's column in A. The same prefix marks a position in
+    // the storage: ap is an offset into A's flat arrays, which is 0.9's p (the name p being
+    // taken here by the Permutation). Positions measure rather than name, so ap is a
+    // std::size_t and cannot be NIL, unlike the columns. Beyond those, r is the node the
+    // climb has reached and t the temporary that saves the next hop before compression
+    // overwrites it.
+    //
+    // For each factor column lk (increasing), look at its neighbours mapping to earlier
+    // columns lj < lk; path-compress to attach lj's subtree under lk.
+    const std::int32_t n = static_cast<std::int32_t>(size);
+    for (std::int32_t lk = 0; lk < n; ++lk) {
+        const std::int32_t ak = newToOld[lk];
+        for (std::size_t ap = colPtr[ak]; ap < colPtr[ak + 1]; ++ap) {
+            const std::int32_t lj = oldToNew[rowIdx[ap]];
+            if (lj >= lk)
                 continue;   // later column or the diagonal itself
-            std::size_t lc3 = lc1;
-            while (ancestor[lc3] != NIL && static_cast<std::size_t>(ancestor[lc3]) != lc2) {
-                const std::size_t lc4 = static_cast<std::size_t>(ancestor[lc3]);
-                ancestor[lc3] = static_cast<std::int32_t>(lc2);
-                lc3 = lc4;
+            std::int32_t r = lj;
+            while (ancestor[r] != NIL && ancestor[r] != lk) {
+                const std::int32_t t = ancestor[r];
+                ancestor[r] = lk;
+                r = t;
             }
-            if (ancestor[lc3] == NIL) {
-                ancestor[lc3] = static_cast<std::int32_t>(lc2);
-                f.mParent[lc3] = static_cast<std::int32_t>(lc2);
+            if (ancestor[r] == NIL) {
+                ancestor[r] = lk;
+                f.mParent[r] = lk;
             }
         }
     }
@@ -100,99 +110,113 @@ void ElmForestEngine::finalizeLinks(ElmForest& f) const {
     f.mFirstRoot = NIL;
     f.mLastRoot  = NIL;
 
-    // For each supernode in decreasing order, front-insert it into its f.mParent's
-    // child list, or into the root list if it has no f.mParent. Front-insertion of
-    // decreasing labels leaves both the child lists and the root list in
-    // increasing label order.
+    // For each supernode in decreasing order, front-insert it into its parent's child list,
+    // or into the root list if it has no parent. Front-insertion of decreasing labels leaves
+    // both the child lists and the root list in increasing label order.
+    //
+    // The loop counts down rather than indexing down. A std::size_t cannot express a negative
+    // guard, so `for (jj = supSize - 1; jj >= 0; --jj)` never terminates: jj wraps to SIZE_MAX
+    // instead of going below zero. Counting the supernodes remaining, from supSize down to 1,
+    // keeps the guard in a range std::size_t can represent, and the index jj = t - 1 is then
+    // always in bounds.
     for (std::size_t t = f.mSupSize; t > 0; --t) {
-        const std::int32_t s1 = static_cast<std::int32_t>(t - 1);
-        const std::int32_t s2 = f.mParent[t - 1];
-        if (s2 == NIL) {
-            // s1 is a tree root.
-            f.mNextSibling[t - 1] = f.mFirstRoot;
+        const std::int32_t jj = static_cast<std::int32_t>(t - 1);   // supernode inserted
+        const std::int32_t kk = f.mParent[jj];                      // its parent, or NIL
+
+        if (kk == NIL) {
+            // jj is a tree root.
+            f.mNextSibling[jj] = f.mFirstRoot;
             if (f.mFirstRoot == NIL)
-                f.mLastRoot = s1;
+                f.mLastRoot = jj;
             else
-                f.mPreviousSibling[static_cast<std::size_t>(f.mFirstRoot)] = s1;
-            f.mFirstRoot = s1;
+                f.mPreviousSibling[f.mFirstRoot] = jj;
+            f.mFirstRoot = jj;
             ++f.mNumTrees;
         } else {
-            // s1 becomes a child of s2.
-            const std::size_t us2 = static_cast<std::size_t>(s2);
-            f.mNextSibling[t - 1] = f.mFirstChild[us2];
-            if (f.mFirstChild[us2] == NIL)
-                f.mLastChild[us2] = s1;
+            // jj becomes a child of kk.
+            f.mNextSibling[jj] =
+                f.mFirstChild[kk];
+            if (f.mFirstChild[kk] == NIL)
+                f.mLastChild[kk] = jj;
             else
-                f.mPreviousSibling[static_cast<std::size_t>(f.mFirstChild[us2])] = s1;
-            f.mFirstChild[us2] = s1;
+                f.mPreviousSibling[f.mFirstChild[kk]] = jj;
+            f.mFirstChild[kk] = jj;
         }
     }
 }
 
 std::size_t ElmForestEngine::computeHeight(const ElmForest& f) const {
-    // Breadth-first from the roots: a supernode is processed after its f.parent(), so
-    // its depth is the f.parent()'s depth plus one, and the height is the largest
-    // depth plus one. The root chain and each child list are walked backward via
-    // f.previousSibling(); order is irrelevant to a maximum.
-    std::vector<std::size_t> depth(f.supSize(), 0);
+    // Breadth-first from the roots: a supernode is processed after its parent, so its depth
+    // is the parent's depth plus one, and the height is the largest depth plus one. The root
+    // chain and each child list are walked backward via previousSibling; order is irrelevant
+    // to a maximum.
+    //
+    // kk is the supernode being visited and jj each of its children, following the house
+    // convention that a doubled letter names a supernode.
+    std::vector<std::size_t> depth(f.mSupSize, 0);
     std::deque<std::int32_t> queue;
-    for (std::int32_t s = f.lastRoot(); s != NIL; s = f.previousSibling()[static_cast<std::size_t>(s)])
-        queue.push_back(s);
+    for (std::int32_t kk = f.mLastRoot; kk != NIL; kk = f.mPreviousSibling[kk])
+        queue.push_back(kk);
     while (!queue.empty()) {
-        const std::int32_t s2 = queue.front();
+        const std::int32_t kk = queue.front();
         queue.pop_front();
-        const std::size_t us2 = static_cast<std::size_t>(s2);
-        if (f.parent()[us2] != NIL)
-            depth[us2] = depth[static_cast<std::size_t>(f.parent()[us2])] + 1;
-        for (std::int32_t s1 = f.lastChild()[us2]; s1 != NIL;
-             s1 = f.previousSibling()[static_cast<std::size_t>(s1)])
-            queue.push_back(s1);
+        if (f.mParent[kk] != NIL)
+            depth[kk] = depth[f.mParent[kk]] + 1;
+        for (std::int32_t jj = f.mLastChild[kk]; jj != NIL; jj = f.mPreviousSibling[jj])
+            queue.push_back(jj);
     }
     std::size_t height = 0;
-    for (std::size_t s = 0; s < f.supSize(); ++s)
-        if (height < depth[s])
-            height = depth[s];
-    if (f.supSize() > 0)
+    for (std::size_t d : depth)
+        if (height < d)
+            height = d;
+    if (f.mSupSize > 0)
         ++height;
     return height;
 }
 
-void ElmForestEngine::computeFrontAndUpdateSizes(
+void ElmForestEngine::computeColumnSizes(
         const std::vector<std::size_t>&  colPtr,
         const std::vector<std::int32_t>& rowIdx,
         const Permutation& p,
         ElmForest& f) const {
     const std::size_t size = f.mSize;
+    const std::int32_t n = static_cast<std::int32_t>(size);
     const std::vector<std::int32_t>& oldToNew = p.oldToNew();
     const std::vector<std::int32_t>& newToOld = p.newToOld();
 
-    // Front size: the columns mapping to each supernode. The forest is nodal here, so the
-    // map is the identity and this is all 1s; counting derives that rather than asserting
-    // it, but buys no generality, since compression derives the merged front sizes itself.
-    f.mFrontSize.assign(f.mSupSize, 0);
-    for (std::size_t j = 0; j < size; ++j)
-        ++f.mFrontSize[static_cast<std::size_t>(f.mIdxToSupIdx[j])];
+    // Front size. The forest is nodal here, so a supernode is a column and owns exactly
+    // itself. Nothing to compute.
+    f.mFrontSize.assign(size, 1);
 
-    // Update size: the subdiagonal nonzero count of each L column, by the pruned-
-    // row-subtree walk. For factor column lc2, climb from each earlier neighbour
-    // lc1 up the etree toward lc2, marking to avoid double counting; every column
-    // passed below the root gains one update index. This is 0.9's columnSize with
-    // the diagonal left out, so it yields f.mUpdateSize directly (== columnSize - 1).
-    f.mUpdateSize.assign(f.mSupSize, 0);
+    // Update size: the subdiagonal nonzero count of each column of L, by the pruned-row-
+    // subtree walk. Fix a factor column lk. The columns holding a nonzero in row lk are
+    // exactly those on the forest paths climbing from each earlier neighbour lj of lk up
+    // to lk, so climb from each such lj and credit every column passed.
+    //
+    // The marker does two jobs. It prevents double counting, since two neighbours of lk may
+    // climb into a shared upper path and the second must not credit it twice. And it halts
+    // the climb: mark[lk] is set to lk before the neighbour loop, so a climb reaching lk
+    // stops there without a separate r == lk test. That is the same trick symbolic
+    // factorization uses to make a union idempotent, with the action reduced from storing
+    // an index to counting it.
+    //
+    // 0.9 counts the diagonal too, giving |Struct(j)|, then subtracts one per column to get
+    // the update size. Starting the count at zero yields the update size directly, which is
+    // what the forest wants, and saves both the array and the pass.
+    f.mUpdateSize.assign(size, 0);
     std::vector<std::int32_t> mark(size, NIL);
-    for (std::size_t lc2 = 0; lc2 < size; ++lc2) {
-        mark[lc2] = static_cast<std::int32_t>(lc2);
-        const std::size_t ac2 = static_cast<std::size_t>(newToOld[lc2]);
-        for (std::size_t sp = colPtr[ac2]; sp < colPtr[ac2 + 1]; ++sp) {
-            const std::size_t lc1 =
-                static_cast<std::size_t>(oldToNew[static_cast<std::size_t>(rowIdx[sp])]);
-            if (lc1 >= lc2)
+    for (std::int32_t lk = 0; lk < n; ++lk) {
+        mark[lk] = lk;
+        const std::int32_t ak = newToOld[lk];
+        for (std::size_t ap = colPtr[ak]; ap < colPtr[ak + 1]; ++ap) {
+            const std::int32_t lj = oldToNew[rowIdx[ap]];
+            if (lj >= lk)
                 continue;   // later column or the diagonal itself
-            std::size_t lc3 = lc1;
-            while (mark[lc3] != static_cast<std::int32_t>(lc2)) {
-                ++f.mUpdateSize[lc3];
-                mark[lc3] = static_cast<std::int32_t>(lc2);
-                lc3 = static_cast<std::size_t>(f.mParent[lc3]);
+            std::int32_t r = lj;
+            while (mark[r] != lk) {
+                ++f.mUpdateSize[r];   // column r gains row lk
+                mark[r] = lk;
+                r = f.mParent[r];
             }
         }
     }
@@ -203,13 +227,14 @@ void ElmForestEngine::compressFundamental(ElmForest& f) const {
     // columns they are, j and k. The map is the identity and every front size is 1.
     const std::size_t size = f.mSize;
 
-    // Assign every column to a supernode. Column k continues its child j's supernode when
-    // the two form a fundamental supernode, otherwise it starts a new one. Increasing
-    // order, so snode[j] is settled before k needs it: a child's column is numbered below
-    // its parent's.
-    std::vector<std::int32_t> snode(size, NIL);
-    std::size_t numSnodes = 0;
-    for (std::size_t k = 0; k < size; ++k) {
+    // Assign every column to a supernode. Column k continues its child j's supernode when the
+    // two form a fundamental supernode, otherwise it starts a new one. Increasing order, so
+    // idxToSupIdx[j] is settled before k needs it: a child's column is numbered below its
+    // parent's.
+    std::vector<std::int32_t> idxToSupIdx(size, NIL);
+    std::int32_t supSize = 0;
+    const std::int32_t n = static_cast<std::int32_t>(size);
+    for (std::int32_t k = 0; k < n; ++k) {
         const std::int32_t j = f.mFirstChild[k];
 
         // Does k merge into its child j? The two clauses after the guard are the
@@ -222,49 +247,66 @@ void ElmForestEngine::compressFundamental(ElmForest& f) const {
         // matters: the guard protects the clauses to its right, which is a property of
         // this expression, not something a later test could restore.
         //
-        // The pattern test is |update(j)| = |front(k)| + |update(k)|, written as an
-        // addition so the unsigned arithmetic cannot wrap. Every front size is 1 here, so
-        // it is 0.9's |update(k)| == |update(j)| - 1; we keep the identity in full because
-        // it is the form derived in the theory, and because a bare + 1 would go silently
-        // wrong if the precondition were ever broken.
+        // The pattern test is |update(j)| = |front(k)| + |update(k)|, written as an addition
+        // rather than a subtraction. A subtraction (0.9's |update(j)| - 1) is unsigned and
+        // would wrap if its right side ever exceeded its left; the addition has nothing to
+        // wrap. Nor can the addition overflow: the sum is the size of k's index set, which
+        // is a subset of the factor's rows, so it is at most size, a number we already hold.
+        //
+        // Every front size is 1 here, so this is 0.9's |update(k)| == |update(j)| - 1. We
+        // keep the identity in full because it is the form derived in the theory, and
+        // because a bare + 1 would go silently wrong if the precondition were ever broken.
         const bool merge = (j != NIL)
             && (j == f.mLastChild[k])
-            && (f.mUpdateSize[k] + f.mFrontSize[k]
-                    == f.mUpdateSize[static_cast<std::size_t>(j)]);
+            && (f.mFrontSize[k] + f.mUpdateSize[k]
+                    == f.mUpdateSize[j]);
 
         if (merge)
-            snode[k] = snode[static_cast<std::size_t>(j)];        // k continues j's supernode
+            idxToSupIdx[k] = idxToSupIdx[j];   // k continues j's
         else
-            snode[k] = static_cast<std::int32_t>(numSnodes++);    // k starts a new one
+            idxToSupIdx[k] = supSize++;                                  // k starts a new one
     }
 
     // The parent links and the sizes of the supernodes. Scanning columns in decreasing
     // order, the first column seen for a given supernode is its topmost: its parent link is
     // the one that leaves the supernode, and its rows below are the supernode's update
     // rows. Front sizes instead accumulate over every column, so that runs before the test.
-    std::vector<std::int32_t> parent(numSnodes, NIL);
-    std::vector<std::size_t>  frontSize(numSnodes, 0);
-    std::vector<std::size_t>  updateSize(numSnodes, 0);
-    std::vector<bool>         done(numSnodes, false);
+    const std::size_t numSup = static_cast<std::size_t>(supSize);
+    std::vector<std::int32_t> parent(numSup, NIL);
+    std::vector<std::size_t>  frontSize(numSup, 0);
+    std::vector<std::size_t>  updateSize(numSup, 0);
+    std::vector<bool>         seen(numSup, false);
 
+    // Counting down, not indexing down: see finalizeLinks for why a std::size_t descending
+    // loop must be written this way.
+    //
+    // Naming follows 0.9: a single letter is a column, a doubled one is that column's
+    // supernode, so the doubling is the map applied. Column j is the one being scanned and
+    // jj is its supernode; k is j's parent column and kk is the supernode that lands in.
+    // The column convention j < k survives, since a parent's column is numbered above its
+    // child's, and the assignment then reads as the fact it derives: the supernode of j's
+    // parent column is the parent of j's supernode.
     for (std::size_t t = size; t > 0; --t) {
-        const std::size_t k = t - 1;
-        const std::size_t s = static_cast<std::size_t>(snode[k]);
+        const std::int32_t j  = static_cast<std::int32_t>(t - 1);   // column scanned
+        const std::int32_t jj = idxToSupIdx[j];                     // its supernode
 
-        ++frontSize[s];   // every column of s adds one to its front size
+        ++frontSize[jj];   // every column of jj adds one to it
 
-        if (done[s])
-            continue;
+        if (seen[jj])
+            continue;      // jj's topmost column came earlier; the rest is taken from it
 
-        const std::int32_t p = f.mParent[k];
-        if (p != NIL)
-            parent[s] = snode[static_cast<std::size_t>(p)];
-        updateSize[s] = f.mUpdateSize[k];   // the rows below k are the rows below s
-        done[s] = true;
+        const std::int32_t k = f.mParent[j];
+        if (k != NIL) {
+            const std::int32_t kk = idxToSupIdx[k];
+            parent[jj] = kk;
+        }
+        // the rows below j are the rows below jj
+        updateSize[jj] = f.mUpdateSize[j];
+        seen[jj] = true;
     }
 
-    f.mSupSize = numSnodes;
-    f.mIdxToSupIdx.swap(snode);   // the map was the identity, and is now column -> supernode
+    f.mSupSize = numSup;
+    f.mIdxToSupIdx.swap(idxToSupIdx);   // was the identity, now column -> supernode
     f.mParent.swap(parent);
     f.mFrontSize.swap(frontSize);
     f.mUpdateSize.swap(updateSize);

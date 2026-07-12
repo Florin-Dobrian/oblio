@@ -3,7 +3,39 @@
 Durable record of structural choices, newest first. Each entry: date, decision,
 why. This is the file to open after a gap to reconstruct the project's shape.
 
-## 2026-07-12, Engine helpers take whole objects, except where that would drag in Val
+## 2026-07-12, Friendship is a write grant, and reading needs no friend
+
+**Every argument an engine takes falls into one of three cases, and the third is the only one
+that is subtle.**
+
+**Written: friend, and pass the object.** An engine is declared `friend` by exactly the object
+it fills, and by no other. `ElmForestEngine` writes `ElmForest`, `SymFactEngine` writes
+`SymFact`, `OrderEngine` writes `Permutation`. That is the complete list, and friendship exists
+for no other purpose. Having granted it, pass the object rather than its fields: the engine can
+reach them regardless, so enumerating them in the signature restricts nothing and only makes it
+long. This is the subject of the entry above.
+
+**Read: pass the object, through its public API, with no friendship.** We considered granting
+the engines read friendship on `SparseMatrix` and `Permutation`, on the theory that it would
+compact the signatures further. It compacts nothing. Every read already goes through an
+accessor returning a `const&`, so there is no copy to avoid and no access to gain: friendship
+would only let us write `A.mColPtr` where we write `A.colPtr()`, at the price of new friends on
+objects whose headers say plainly that they have no writer. `SymFactEngine` reads a dozen
+fields of `ElmForest` and is not its friend, which is exactly right.
+
+**Read, and only part of the object is needed: take that part.** `SparseMatrix` is the one
+object an engine does not simply take whole, and the reason is not access but need. Ordering,
+the elimination forest and the symbolic factorization are graph algorithms: they read a
+sparsity pattern and never touch a value. So they take one. `SparseMatrix` offers two overloads,
+one taking the matrix and one taking `colPtr` and `rowIdx`; the second is the implementation,
+the first a one-line adapter over it. See the entry below.
+
+**Friendship was never the constraint, and it is worth being precise about that.** The
+field-taking signatures are not there because access is blocked, it is not. They are there
+because a structural algorithm has no business asking for values. No amount of friendship would
+change that, and granting it would not have shortened a single signature.
+
+## 2026-07-12, Engine helpers take whole objects, or exactly the part they need
 
 **Passing an object's pieces to a function that is already its friend restricts nothing.**
 The engine can reach every field regardless; unpacking the arrays into the signature does not
@@ -39,19 +71,16 @@ this stale, and you must rebuild it before anything else reads it".
 - **Objects we write through friendship** (`ElmForest`, `SymFact`): pass whole. This is what
   the entry is about, and it is also 0.9's shape, whose `compress_()` is a member taking no
   arguments at all. Our array-passing came from following 10.12.
-- **Objects we only read, and that are not templated** (`Permutation`): pass whole. No
-  friendship needed, the public accessors suffice, and it is free. This collapses
-  `oldToNew, newToOld` into one parameter with no downside whatever.
-- **Objects we only read, and that are templated** (`SparseMatrix<Val>`): pass whole *at the
-  boundary*, and unpack *beneath* it. See below.
+- **Objects we only read, and take whole** (`Permutation`): pass whole. No friendship needed,
+  the public accessors suffice, and it is free. This collapses `oldToNew, newToOld` into one
+  parameter with no downside whatever.
+- **Objects we only read, and of which we need only a part** (`SparseMatrix`): take the part,
+  and adapt at the boundary. See below.
 
-**A templated overload is an adapter; the implementation lives in the non-templated one
-beneath it.** The elimination forest and the symbolic factorization depend on the sparsity
-pattern alone, never on the values: they are free of `Val`, which is why the ledger records
-them as such. So does the ordering, which is a pure graph operation, AMD and MMD would not
-know what to do with a value. That reads at first like a reason to keep `SparseMatrix<Val>`
-out of their signatures, forcing every function to take `colPtr` and `rowIdx` and stay long.
-It is not. Two overloads settle it:
+**Pass only the structural part of a matrix when only structural work is done.** Ordering, the
+elimination forest and the symbolic factorization are graph algorithms. They read a sparsity
+pattern; they never touch a value. So the implementation takes a pattern, and the overload
+taking a matrix is a one-line adapter over it:
 
 ```
 template<class Val>
@@ -63,33 +92,38 @@ bool compute(const std::vector<std::size_t>&  colPtr,
              const Permutation& p, ElmForest& f) const;   // the engine
 ```
 
-The templated overload is a forwarding line that inlines away, so the duplicated
-instantiation costs essentially nothing (and instantiating more code is not in itself a
-problem, it is automated). The implementation stays free of `Val` and is compiled once. A
-caller holding a matrix passes the matrix; a caller holding only a pattern, a graph with no
-numbers attached, calls the lower overload and never has to invent a scalar type to run
-structural analysis. Both overloads are public, so that is a fact about the API and not
-merely about the compilation. The apparent tension between short signatures and `Val`-freedom
-was never real.
+**This is about honest dependencies, not about C++.** A function's parameters should say what
+it actually consumes. A structural algorithm that demands a matrix is lying about what it needs,
+and it forces a caller holding only a graph to fabricate numbers to satisfy a signature that
+will ignore them. Both overloads are public for that reason: the lower one is not an internal
+shortcut, it is the **graph interface**. The whole structural pipeline,
+`OrderEngine -> ElmForestEngine -> SymFactEngine`, runs on a bare graph today: no `SparseMatrix`,
+no scalar type, no numbers. The rule would be right in any language, and we should not restate
+it as a fact about templates.
+
+**The template mechanics are a consequence, not the motive.** In C++ the structural overload
+happens to be non-templated, so it is compiled once rather than once per scalar type, and the
+adapter is a forwarding line that inlines away. Pleasant, and worth nothing on its own. We first
+wrote this entry as though `Val` were the reason, which inverted cause and effect and made an
+honest interface look like a workaround for a language wart. It is not: the pattern-taking
+overload would earn its place even if every type in the codebase were concrete.
 
 **Adapt once, at the public boundary.** The adapter belongs on the entry point and nowhere
-else. We first tried it on the private helpers too, and those adapters immediately became
-dead code: once `compute` has unpacked the matrix, every helper below it already holds the
-pattern, and a second layer has no callers. All three engines now have exactly one adapter
-each, on `compute`, and interiors entirely free of `Val`. The whole structural pipeline,
-`OrderEngine -> ElmForestEngine -> SymFactEngine`, runs on a bare graph: no `SparseMatrix`, no
-scalar type, no numbers.
+else. We first tried it on the private helpers too, and those adapters immediately became dead
+code: once `compute` has unpacked the matrix, every helper below it already holds the pattern,
+and a second layer has no callers. All three engines now have exactly one adapter each, on
+`compute`.
 
-This is not a new idea in the code, only a newly named one: `compute<Val>` already pulled
-`colPtr` and `rowIdx` out of `A` and handed them to non-templated helpers. We had simply not
-seen that the same move, applied at the entry point, makes the pattern a public capability.
+This is not a new idea in the code, only a newly named one: `compute` already pulled `colPtr`
+and `rowIdx` out of `A` and handed them to the helpers. We had simply not seen that the same
+move, applied at the entry point, makes the pattern a public capability rather than an internal
+convenience.
 
-**A consequence: `SparsityPattern` becomes optional rather than a prerequisite.**
-`SparseMatrix<Val>` is two things under one name, a pattern (free of `Val`) and values indexed
-by it (not). A separate non-templated pattern type would shorten the lower overload from two
-array parameters to one. Worth doing, perhaps, but the layering above works without it, and
-introducing it later changes only that one parameter list, nothing above. Recorded as an
-improvement available, not a debt owed.
+**`SparsityPattern` is a packaging question, not a design one.** `SparseMatrix` is two things
+under one name: a pattern, and values indexed by it. Since the interface already passes the
+pattern, introducing a type to name it would only replace two array parameters with one. The
+interface is already right; whether the pattern travels as a named type or as two arrays is a
+matter of convenience. Recorded as an improvement available, not a debt owed.
 
 **Entry points are named `compute`.** One verb across every engine, since an engine's job is
 to derive a fact from its inputs. `OrderEngine::order` was renamed to match. 0.9 calls them

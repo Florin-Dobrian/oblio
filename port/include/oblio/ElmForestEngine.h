@@ -88,27 +88,32 @@ private:
     // reference to say so.
     std::size_t computeHeight(const ElmForest& f) const;
 
-    // Per-supernode front and update sizes, for a nodal forest. This runs before
-    // compression and only before it: the update-size walk indexes by column, which
-    // coincides with supernode only while supernodes are trivial. compressFundamental
-    // derives the merged sizes itself, so this is never re-run afterwards.
+    // The column sizes of a nodal forest: how many nonzeros each column of L holds.
     //
-    // Front size counts the columns mapping to each supernode. On the nodal forest the map
-    // is the identity, so this is all 1s and a fixed fill (10.12's choice) would do as
-    // well. Counting derives the value from the map rather than asserting it, which is the
-    // only reason to prefer it; it buys no generality here.
+    // Two parts, of very different weight. The front size is trivial, a supernode is a column
+    // here and owns exactly itself, so it is 1. The update size is the real work: the
+    // subdiagonal nonzero count of each column, computed by the pruned-row-subtree walk
+    // without ever building the pattern it counts. We need the counts to size the symbolic
+    // factorization's storage before we know what goes in it.
     //
-    // Update size is the subdiagonal nonzero count of each L column, by the pruned-row-
-    // subtree walk. This is 0.9's columnSize with the diagonal dropped, so it equals
-    // columnSize - 1. Depends only on the map and the parent links, not on the
-    // child/sibling structure, so it could equally run before the links are built.
+    // Runs before compression and only before it: the walk indexes by column, which coincides
+    // with supernode only while the forest is nodal. compressFundamental derives the merged
+    // sizes itself, so this is never re-run afterwards.
     //
-    //   reads:   mSize, mSupSize, mParent, mIdxToSupIdx
+    // Row-oriented, like computeParent and unlike everything downstream, and for the same
+    // reason it reads A's columns above the diagonal rather than its rows: under full storage
+    // those are the same entries.
+    //
+    // Nodal throughout: it reads and writes nothing supernodal, and sizes its outputs by the
+    // column count, not the supernode count. The two coincide here, but leaning on that would
+    // be leaning on a coincidence.
+    //
+    //   reads:   mSize, mParent
     //   writes:  mFrontSize, mUpdateSize
-    void computeFrontAndUpdateSizes(const std::vector<std::size_t>&  colPtr,
-                                    const std::vector<std::int32_t>& rowIdx,
-                                    const Permutation& p,
-                                    ElmForest& f) const;
+    void computeColumnSizes(const std::vector<std::size_t>&  colPtr,
+                            const std::vector<std::int32_t>& rowIdx,
+                            const Permutation& p,
+                            ElmForest& f) const;
 
     // Merge the columns of a nodal forest into fundamental supernodes: maximal paths in
     // the forest whose columns share one sparsity pattern, each vertex on the path (bar

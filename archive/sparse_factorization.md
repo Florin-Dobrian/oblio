@@ -364,7 +364,7 @@ carrying the accumulated fill forward, the etree union rule of the symbolic phas
 Section 1.6 described fill mechanically, eliminating a vertex cliques its neighbors.
 The **fill-path theorem** (Rose-Tarjan-Lueker 1976) turns that into an exact,
 value-free test for *which* entries fill, stated purely on the graph of `A`. It is the
-tool the later proofs (2.4, 2.5) rest on, so it is worth establishing once here.
+tool the later proofs (2.4, 2.6) rest on, so it is worth establishing once here.
 
 Model elimination as a sequence of graphs. Let `G = G_0` be the graph of `A`, and form
 `G_k` from `G_{k-1}` by making the neighborhood of vertex `k` a clique and then deleting
@@ -406,7 +406,7 @@ has a path `i - ... - j` with interior `<= j-1`, i.e. `< j`. Combined with the o
 `L[i][j] != 0` iff `(i,j)` is an edge of `G_{j-1}`, this is the claim. QED
 
 The reachability lemma is the same "reach through lower-numbered vertices" relation that
-reappears in 2.5 as the edges of the update DAG, the fill-path theorem, that
+reappears in 2.6 as the edges of the update DAG, the fill-path theorem, that
 characterization, and the elimination-graph sequence are three views of one fact: **an
 edge of the filled graph is a path in `A` that dips only through already-eliminated
 vertices.**
@@ -845,7 +845,165 @@ plain climbing is never what production code runs, nobody has had reason to pref
 tighter spelling. Oblio ports the classic compressed form, which is both the fast choice and
 the clean one.
 
-### 2.5 The forest as transitive reduction of the update DAG
+### 2.5 Column counts of L, without computing L
+
+The forest gives the parent links. The next thing we want is `|Struct(j)|`, the number of
+nonzeros in each column of `L`, and we want it **without computing `Struct(j)` itself**.
+
+The reason is allocation. If the size of a structure can be computed before the structure
+itself, it is nearly always worth doing: allocate exactly once, fill, and never grow. Guessing
+and growing costs reallocation and copying, and over-allocating costs memory that a sparse
+solver does not have to spare. This is not a fact about any particular layout. One flat buffer
+needs the total length up front; a vector of vectors wants each column reserved to its exact
+size; either way the counts come first. And they are cheap: one extra pass and `O(n)` of
+scratch, against a structure whose size can run to many times `nnz(A)`.
+
+**The pruned row subtree.** Fix a row `k`. Which columns `j < k` have `L[k][j] != 0`? By the
+containment theorem (2.3), if `L[k][j] != 0` then `k` is in `Struct(j)`, so `k` is a proper
+ancestor of `j`, and moreover every column on the tree path from `j` up to `k` also has a
+nonzero in row `k`. Corollary 2 gives the converse direction: row `k`'s nonzeros are generated
+by the `A`-neighbors of `k` below it, and propagate upward along tree paths.
+
+So the columns holding a nonzero in row `k` are exactly
+
+```
+T(k) = the union of the tree paths from j up to k, over all j < k with A[k][j] != 0
+```
+
+a subtree of the elimination forest rooted at `k`. It is called the **pruned row subtree** of
+`k`: pruned, because it is not the whole subtree below `k`, only the part reachable upward
+from `k`'s own `A`-neighbors.
+
+Two readings of the same set, and both matter:
+
+- **By row:** `T(k)` is the sparsity pattern of row `k` of `L`.
+- **By column:** column `j` gains one nonzero for every `k > j` whose pruned row subtree
+  contains `j`. So `|Struct(j)|` is the number of subtrees `T(k)` that `j` belongs to.
+
+The second reading is the algorithm. Walk every `T(k)`, and each time a column is visited,
+credit it with one more nonzero.
+
+**The algorithm.**
+
+```
+columnCounts(A, parent) -> colSize:
+    for j = 1 .. n:
+        colSize[j] = 1 # the diagonal, which every column has
+        mark[j] = NIL
+
+    for k = 1 .. n: # k roots the current pruned row subtree
+        mark[k] = k # k is in its own subtree, and this halts every climb below
+        for each j < k with A[k][j] != 0: # an A-neighbor of k, below it
+            r = j
+            while mark[r] != k: # climb until we re-enter the part already marked
+                colSize[r] = colSize[r] + 1 # column r gains row k
+                mark[r] = k
+                r = parent[r]
+```
+
+The marker array does two jobs at once, and it is worth separating them. It **prevents double
+counting**: two different neighbors of `k` may climb into a shared upper path, and the second
+climb must not credit those columns twice. And it **terminates the climb**: since `mark[k]`
+was set to `k` before the neighbor loop, a climb that reaches `k` stops there, with no test
+for `r == k` needed. One array, one test, both problems.
+
+**This is a companion to 2.4, and it inherits 2.4's access pattern.** The two algorithms have
+the same shape: sweep `k` upward, and for each earlier `A`-neighbor `j < k` of `k`, climb the
+forest from `j`. In 2.4 the climb attaches a subtree root under `k`; here it credits every
+column it passes. Both read the same thing, the *earlier neighbors of row `k`*, and so both are
+**row-oriented**, which makes them the exception among the phases (symbolic and numeric
+factorization march over columns). The access-orientation argument of 2.4 therefore applies
+here unchanged: the pseudocode is written `A[k][j]` for exposition, but with `A` stored fully,
+row `k`'s earlier neighbors are exactly column `k`'s **above-diagonal** entries, so an
+implementation reads `A[j][k]` and one column-oriented access serves every phase. Full storage
+of `A` pays for itself twice here, once in 2.4 and once in 2.5.
+
+**The marker is doing what a union does.** The counting algorithm is a lightweight symbolic
+factorization: the same skeleton of *visit an index, mark it so it is handled exactly once,
+act on it*, with the action reduced from **store** to **count**. Symbolic factorization unions
+index sets, and its marker is what makes the union idempotent, an index already in the set is
+skipped. Here the marker makes the *count* idempotent, an index already counted is skipped.
+Detecting that two visits refer to the same index is the whole content of a union; the only
+difference is that we discard the index's identity and keep only the tally.
+
+That is exactly what makes the two-pass scheme work. Run the walk once to learn the sizes,
+allocate, then run it again to store the identities in the space just allocated. The second
+pass is the *row-oriented* symbolic factorization, and it is the natural partner of a count
+pass, since both traverse the pruned row subtrees. (The symbolic factorization of Section 3
+takes the other route: it fixes a column and gathers from that column's children, rather than
+fixing a row and climbing. Same object, same marker trick, opposite traversal. It is the one
+we implement, and it needs the counts of this section just the same, to size what it fills.)
+
+**The diagonal is a choice.** Initializing `colSize[j] = 1` counts the diagonal, giving
+`|Struct(j)|` in full. Initializing to `0` instead gives the count of *subdiagonal* entries,
+which is what a supernode's **update size** is (Section 4). The two differ by exactly one and
+either is a line's edit; which to compute is a matter of what the consumer wants, not of the
+algorithm.
+
+**Cost.** Every step of the inner climb either credits a column (a nonzero of `L` that is
+counted exactly once, thanks to the marker) or terminates. So the total work is proportional
+to the number of nonzeros of `L`, plus one terminating step per edge of `A`:
+
+```
+O(nnz(L) + nnz(A))  =  O(nnz(L))
+```
+
+That is optimal in the sense of being linear in what is counted, but note what it implies:
+counting `L` costs as much as touching `L` would. The saving is in **memory**, not time. We
+learn the size of a structure we never store, using `O(n)` scratch.
+
+There are asymptotically better algorithms. Gilbert, Ng and Peyton (1994) compute the same
+counts in nearly linear time in `nnz(A)`, not `nnz(L)`, using the skeleton matrix and least
+common ancestors, and never touching a fill entry. For a solver this matters when `L` is much
+denser than `A`, which is the usual case. We do not use it here; the point of this section is
+the pruned row subtree, and the simple walk makes it visible.
+
+**Worked example: the grid.** Take the grid of 2.7 again, with
+`parent = [2, 3, 7, 5, 6, 7, 8, 9, NIL]`. Trace two of the pruned row subtrees.
+
+`k = 7`. Its `A`-neighbors below it are `1` and `4` (grid edges `1-7` and `4-7`). Mark
+`mark[7] = 7`, then:
+
+```
+j = 1:  r = 1 -> credit column 1, mark it 7
+        r = parent(1) = 2 -> credit column 2, mark it 7
+        r = parent(2) = 3 -> credit column 3, mark it 7
+        r = parent(3) = 7 -> mark[7] == 7, stop
+j = 4:  r = 4 -> credit column 4, mark it 7
+        r = parent(4) = 5 -> credit column 5, mark it 7
+        r = parent(5) = 6 -> credit column 6, mark it 7
+        r = parent(6) = 7 -> mark[7] == 7, stop
+```
+
+So `T(7) = {1,2,3,4,5,6,7}`: both chains, which is exactly row 7 of `L`, and it says that
+every one of the six subdomain columns fills into the separator's first column.
+
+`k = 8`. Its `A`-neighbors below it are `2`, `5` and `7`. Mark `mark[8] = 8`:
+
+```
+j = 2:  credit 2, 3, 7 (climbing 2 -> 3 -> 7 -> 8, stopping at 8)
+j = 5:  credit 5, 6      (climbing 5 -> 6 -> 7, and 7 is already marked 8: stop)
+j = 7:  r = 7 is already marked 8: stop immediately, credit nothing
+```
+
+Both jobs of the marker are on display. Column `7` is reached three separate times and
+credited **once**. And the third neighbor, `7` itself, terminates before doing anything, since
+its climb was already absorbed into the first.
+
+Running every `k` gives:
+
+```
+column:      1    2    3    4    5    6    7    8    9
+|Struct|:    3    4    4    3    4    4    3    2    1     total 28
+subdiagonal: 2    3    3    2    3    3    2    1    0     total 19
+```
+
+The 28 is the length of the flat buffer symbolic factorization will need. Note it counts the
+9 diagonal entries plus 19 subdiagonal ones, and the fill is already in there: the original
+matrix has only 12 edges, so 12 subdiagonal nonzeros, and the other 7 are fill (matching the
+count in 2.7).
+
+### 2.6 The forest as transitive reduction of the update DAG
 
 A clean characterization ties the forest to the factorization dependencies of 1.6. Direct
 the "who-updates-whom" relation: an edge `j -> k` whenever eliminating `j` sends a
@@ -877,7 +1035,7 @@ transitively-implied edges to the minimal one); symbolic factorization *inverts*
 closure to use. The DAG must be the *filled* graph, not `A`'s graph, the reach relation
 runs over paths through eliminated vertices, so fill edges are essential.
 
-### 2.6 Worked example: nested dissection of a grid
+### 2.7 Worked example: nested dissection of a grid
 
 A 3x3 grid, small enough to trace, rich enough to branch, and a real sparse pattern.
 Nine nodes with grid adjacency; the ordering is the whole story, so take the good one,
@@ -1080,11 +1238,11 @@ original: 1-2, 2-3, 4-5, 5-6, 7-8, 8-9   fill: 3-7, 6-7
 - **Most fill is not on the tree.** Of the 7 fill entries in `L`, only 2 are forest edges
   (`3-7`, `6-7`); the other 5, `(2,7), (3,8), (5,7), (6,8), (7,9)`, are non-tree fill,
   higher entries in a column, above its parent. This is the transitive-reduction fact of
-  2.5 made concrete: the forest keeps one edge per column (the minimal one), so a column's
+  2.6 made concrete: the forest keeps one edge per column (the minimal one), so a column's
   other fills are transitively implied by climbing. The 7 fill entries collapse to 2 fill
   tree-edges.
 
-That last note is a nice payoff, it makes "forest = transitive reduction" (2.5)
+That last note is a nice payoff, it makes "forest = transitive reduction" (2.6)
 concrete: 7 fill entries collapse to 2 fill tree-edges.
 
 Contrast: the *row-major* numbering of the same grid collapses the forest to a single
@@ -1093,9 +1251,9 @@ fill spread across the whole band. Nested dissection turns that path into a bala
 of height 6 with two independent halves. Same matrix, same theory, better tree, the
 ordering is what the forest sees.
 
-### 2.7 A lighter ordering of the same grid
+### 2.8 A lighter ordering of the same grid
 
-The 2.6 ordering numbered each subdomain column top to bottom (`1,2,3` down the left),
+The 2.7 ordering numbered each subdomain column top to bottom (`1,2,3` down the left),
 making each a chain. A better choice numbers the two *ends* of every column before its
 *middle*, so the middle vertex separates the two ends, a nested dissection applied once
 more, inside each line. Relabel the same grid this way (`3`, `6`, `9` are the per-column
@@ -1232,17 +1390,17 @@ forest edge | A[parent][j] | kind
 original: 1-3, 2-3, 4-6, 5-6, 8-9   fill: 3-7, 6-7, 7-8
 ```
 
-Against 2.6, the same matrix under this ordering gives **5 fills instead of 7**, and a
+Against 2.7, the same matrix under this ordering gives **5 fills instead of 7**, and a
 shorter, bushier forest (height 5 rather than 6). The reason is exactly the
-sub-separators: 2.6's left block was the chain `1 -> 2 -> 3`, whereas here `1` and `2` are
+sub-separators: 2.7's left block was the chain `1 -> 2 -> 3`, whereas here `1` and `2` are
 independent leaves under `3`, so the column that was a path becomes a two-leaf fork, one
 fewer coupling to fill, per subdomain. The sub-separator shows in the elimination box:
 eliminating the two ends `1, 2` creates `(3,7), (3,8)`, and their meeting point `3` then
 creates `(7,8)`, confining each subdomain's interaction to a single vertex. Numbering the
 separators last, recursively, is the whole idea of nested dissection, this subsection is
-one more level of it applied to 2.6.
+one more level of it applied to 2.7.
 
-One subtlety is worth drawing out: 2.7 has *fewer* fill entries (5 vs 7) yet *more* fill
+One subtlety is worth drawing out: 2.8 has *fewer* fill entries (5 vs 7) yet *more* fill
 forest edges (3 vs 2). These count different things, total nonzeros created in `L`,
 versus columns whose parent edge (first below-diagonal nonzero) is fill. Split the fill
 into on-tree (a column's minimal entry, so a forest edge) and off-tree (higher entries,
@@ -1250,19 +1408,19 @@ above the parent) and they reconcile:
 
 ```
             on-tree fill    off-tree fill    total
-2.6              2                5            7
-2.7              3                2            5
+2.7              2                5            7
+2.8              3                2            5
 ```
 
-2.6's chains produce mostly off-tree fill, each chain column fills into several separator
-rows, most of them above its parent, redundant climbs high in the band. 2.7's
+2.7's chains produce mostly off-tree fill, each chain column fills into several separator
+rows, most of them above its parent, redundant climbs high in the band. 2.8's
 sub-separators cut those columns to near-single below-diagonal entries, concentrating fill
 at the parent. So a tighter ordering does two things at once: it lowers total fill, and it
-pushes the remaining fill toward the forest's transitive reduction (2.5), a larger share
+pushes the remaining fill toward the forest's transitive reduction (2.6), a larger share
 of it becomes minimal (on-tree), leaving fewer transitively-implied off-tree entries. Fill
 forest edges going up while total fill goes down is a signature of that.
 
-### 2.8 Connection to the traversals
+### 2.9 Connection to the traversals
 
 The two schedules of 1.3-1.4 are tree motions. Left-looking column `k` gathers from its
 **descendants**, exactly the columns whose scatters reach `k` (the subtree below it).
@@ -1336,7 +1494,7 @@ the forest go in, `Struct(L)` comes out.
 
 ### 3.2 Worked example: the grid
 
-Take the grid of 2.6, forest `parent = [2, 3, 7, 5, 6, 7, 8, 9, NIL]`. First read each
+Take the grid of 2.7, forest `parent = [2, 3, 7, 5, 6, 7, 8, 9, NIL]`. First read each
 column's original below-diagonal entries `Acol(j) = { i > j : A[i][j] != 0 }` off `A`, and
 the children off `parent[]`:
 
@@ -1363,16 +1521,16 @@ j=9  children 8      Struct(9) = {}    + {}               = {}
 ```
 
 (`+` denotes set union; the child terms are `Struct(c) \ {j}`.) These column patterns are
-exactly the `X`/`F` positions of `L` in 2.6, column 2 gains row 7 as fill from its child
+exactly the `X`/`F` positions of `L` in 2.7, column 2 gains row 7 as fill from its child
 1, column 3 inherits `{7,8}` from column 2, and at column 7 the two subtrees (children 3
 and 6) merge, each contributing `{8,9}`. The recurrence reconstructs the entire fill
 pattern from `A` and the forest, with no arithmetic.
 
 Two features of the forest show through the trace. Fill enters exactly at the multi-hop
-climbs of 2.6: a column's pattern grows only where a child hands up rows that were not in
+climbs of 2.7: a column's pattern grows only where a child hands up rows that were not in
 `A`'s column. And the two independent subtrees `{1,2,3}` and `{4,5,6}` are built without
 reference to each other, column 7 is the first to see both, which is the sibling
-independence of 2.8: the symbolic pass over disjoint subtrees is itself independent work.
+independence of 2.9: the symbolic pass over disjoint subtrees is itself independent work.
 
 ### 3.3 Output and storage
 
@@ -1416,8 +1574,8 @@ Fundamental supernodes are **unique** for a given forest. There is no choice to 
 no heuristic to tune, unlike the threshold-based merging that trades explicit zeros for
 larger blocks. That uniqueness is why they are the natural default.
 
-Write `snode(j)` for the supernode containing column `j`. The supernode's columns are its
-**front indices**; the rows below them, common to all of them, are its **update indices**.
+Write `supernode(j)` for the one containing column `j`. Its columns are the **front indices**;
+the rows below them, common to all of them, are the **update indices**.
 
 ### 4.2 The counting test
 
@@ -1465,17 +1623,17 @@ always numbered before it, so when column `k` is reached its child's supernode i
 decided.
 
 ```
-compress(forest, Struct) -> snode: # fundamental supernodes
-    s = 0
+compress(forest, Struct) -> supernode: # fundamental supernodes
+    s = 0 # supernodes so far; the first one created is numbered 1
     for k = 1 .. n: # increasing order = children before parents
         j = firstChild[k]
         if j != NIL # k has a child at all
                and j == lastChild[k] # condition 1: and only the one, j
                and |Struct(k)| == |Struct(j)| - 1: # condition 2: sharing one pattern
-            snode[k] = snode[j] # k continues j's supernode
+            supernode[k] = supernode[j] # k continues j's supernode
         else:
             s = s + 1
-            snode[k] = s # k starts a new supernode
+            supernode[k] = s # k starts a new supernode
 ```
 
 Both conditions of 4.1 are in that test, and the guard in front of them is not decoration.
@@ -1490,16 +1648,16 @@ That assigns every column to a supernode and counts them. The forest must then b
 over supernodes rather than columns. A second pass, in *decreasing* order, does it:
 
 ```
-rebuild(forest, snode) -> supernodal forest:
+rebuild(forest, supernode) -> supernodal forest:
     for S = 1 .. s:
         front(S) = 0
         done[S] = false
     for k = n .. 1: # decreasing order, so a supernode's topmost column comes first
-        S = snode[k]
+        S = supernode[k]
         front(S) = front(S) + 1 # every column of S adds to its front size
         if not done[S]: # k is the topmost column of S
             if parent(k) != NIL:
-                supParent(S) = snode[parent(k)]
+                supParent(S) = supernode[parent(k)]
             else:
                 supParent(S) = NIL # S is a root
             update(S) = |Struct(k)| # the rows below k are the rows below S
@@ -1519,13 +1677,13 @@ is free next to the factorization it accelerates.
 
 **Columns of a supernode need not be consecutive.** The forest is in topological order, not
 necessarily postorder, so a supernode can own scattered column indices. Consumers must
-gather its front indices through `snode[]` rather than assume a contiguous range. (A
+gather its front indices through `supernode[]` rather than assume a contiguous range. (A
 postordering of the forest would make them consecutive, and is worth doing for other
 reasons, but the algorithms above do not depend on it.)
 
 ### 4.4 Worked example: the grid
 
-Take the grid of 2.6 again, with `parent = [2, 3, 7, 5, 6, 7, 8, 9, NIL]` and the patterns
+Take the grid of 2.7 again, with `parent = [2, 3, 7, 5, 6, 7, 8, 9, NIL]` and the patterns
 computed in 3.2. Tabulate what the test needs, the only child (if any) and the pattern
 sizes:
 
@@ -1552,10 +1710,10 @@ k=9  j=8   |Struct(9)|=0, |Struct(8)|-1=0   0 == 0   merge, 9 joins 8
 Nine columns collapse to **seven supernodes**: six trivial ones, and `{7, 8, 9}`.
 
 ```
-snode:     1   2   3   4   5   6   7
-columns:  {1} {2} {3} {4} {5} {6} {7,8,9}
-front:     1   1   1   1   1   1   3
-update:    2   3   3   2   3   3   0
+supernode:   1    2    3    4    5    6    7
+columns:    {1}  {2}  {3}  {4}  {5}  {6}  {7,8,9}
+front:       1    1    1    1    1    1    3
+update:      2    3    3    2    3    3    0
 ```
 
 The one non-trivial supernode is exactly the **separator**. That is not a coincidence, it
@@ -1634,6 +1792,11 @@ knowledge and are worth a spot-check against the originals.
   union recurrence, and subtree independence / parallelism.
 - R. E. Tarjan, "Efficiency of a good but not linear set union algorithm", *J. ACM*
   22(2):215-225, 1975. The union-find bound behind the `alpha(n)` in Liu's algorithm.
+- J. R. Gilbert, E. G. Ng and B. W. Peyton, "An efficient algorithm to compute row and
+  column counts for sparse Cholesky factorization", *SIAM J. Matrix Anal. Appl.*
+  15(4):1075-1091, 1994. Column counts in nearly linear time in `nnz(A)`, using the skeleton
+  matrix and least common ancestors, rather than the `O(nnz(L))` pruned-row-subtree walk of
+  2.5.
 
 **Symbolic factorization, ordering, sparse direct methods (Section 3; general).**
 
@@ -1641,7 +1804,7 @@ knowledge and are worth a spot-check against the originals.
   Systems*, Prentice-Hall, 1981. Symbolic factorization, ordering, and the classic
   treatment of the whole pipeline.
 - A. George, "Nested dissection of a regular finite element mesh", *SIAM J. Numer. Anal.*
-  10(2):345-363, 1973. Nested dissection, the ordering of the grid example in 2.6.
+  10(2):345-363, 1973. Nested dissection, the ordering of the grid example in 2.7.
 - T. A. Davis, *Direct Methods for Sparse Linear Systems*, SIAM, 2006. A modern,
   code-level reference for the entire order / symbolic / numeric pipeline. Its CSparse
   `cs_etree` computes the tree from the upper triangle of each column, the standard route
@@ -1649,7 +1812,7 @@ knowledge and are worth a spot-check against the originals.
   first.
 
 **On the framing.** Two presentational choices here are expository, not lifted from a
-single source: casting the forest as the *transitive reduction of the update DAG* (2.5)
+single source: casting the forest as the *transitive reduction of the update DAG* (2.6)
 is a folklore-standard restatement rather than any one paper's language, and structuring
 the 2.4 correctness proof around the "Cholesky factors nest" lemma (Lemma A) is this
 document's packaging of the incremental argument. Both are consistent with the sources

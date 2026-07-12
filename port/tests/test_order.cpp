@@ -9,7 +9,7 @@ using namespace Oblio;
 static int pass=0, fail=0;
 static void ck(bool ok,const std::string& n){ std::cout<<"  "<<(ok?"PASS  ":"FAIL  ")<<n<<"\n"; ok?++pass:++fail; }
 template<class Val> static void checkOrder(const SparseMatrix<Val>& A, OrderMethod m, const std::string& lbl){
-    OrderEngine e(m); Permutation p; bool ok=e.order(A,p);
+    OrderEngine e(m); Permutation p; bool ok=e.compute(A,p);
     ck(ok && p.size()==A.size() && p.validate(), lbl); }
 template<class Val> static void reqSym(const SparseMatrix<Val>& A, const std::string& lbl){
     ck(OblioTest::isStructurallySymmetric(A), lbl); }

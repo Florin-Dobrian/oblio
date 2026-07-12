@@ -37,13 +37,17 @@ bool ElmForestEngine::compute(const std::vector<std::size_t>&  colPtr,
     finalizeLinks(f);
     computeColumnSizes(colPtr, rowIdx, p, f);
 
-    // Merge the columns into fundamental supernodes, unless asked to stay nodal. This
-    // rewrites the map, the parent links and the sizes, leaving the child/sibling links
-    // stale, so they are rebuilt straight after over the supernodes. finalizeLinks
-    // therefore runs twice: once on the nodal forest, whose links the merge test reads,
-    // and once on the compressed one.
+    // Merge the columns into fundamental supernodes, unless asked to stay nodal, then
+    // amalgamate if a threshold is set. Each rewrites the map, the parent links and the
+    // sizes, leaving the child/sibling links stale, so they are rebuilt straight after.
+    // Fundamental first: it does the free, canonical merging cheaply, leaving amalgamation
+    // the tie-broken and the paid work on a smaller forest.
     if (mSupernodes == Supernodes::Fundamental) {
         compressFundamental(f);
+        finalizeLinks(f);
+    }
+    if (mThreshold.has_value()) {
+        compressThreshold(f, *mThreshold);
         finalizeLinks(f);
     }
 
@@ -314,6 +318,147 @@ void ElmForestEngine::compressFundamental(ElmForest& f) const {
     // mFirstChild, mLastChild, mNextSibling, mPreviousSibling and the roots still describe
     // the nodal forest and are now stale. The caller rebuilds them with finalizeLinks.
 }
+
+void ElmForestEngine::compressThreshold(ElmForest& f, std::size_t threshold) const {
+    const std::size_t  size    = f.mSize;
+    const std::size_t  supSize = f.mSupSize;
+    const std::int32_t nSup    = static_cast<std::int32_t>(supSize);
+
+    // Where each old supernode ends up. Identity to begin with; supOldToNew[jj] = kk records
+    // that jj was absorbed into kk.
+    std::vector<std::int32_t> supOldToNew(supSize);
+    for (std::int32_t jj = 0; jj < nSup; ++jj)
+        supOldToNew[jj] = jj;
+
+    // Children still worth testing. A child that fails the budget can never pass it later,
+    // since its parent only ever grows, so striking it off is permanent and keeps the greedy
+    // loop from rescanning it.
+    std::vector<bool> candidate(supSize, true);
+
+    // A working copy of the front sizes, because they grow. When supernode kk absorbs a
+    // child, kk's front widens, and a later parent must price kk by its *current* width, not
+    // its original one. Parents run in increasing order, so a child has already been a parent
+    // itself by the time we look at it. 10.12 omits this update (the line is in its source,
+    // commented out, because it had made the array const), which silently understates both
+    // the fill and the resulting block.
+    std::vector<std::size_t> frontSize = f.mFrontSize;
+
+    std::size_t numSup = supSize;
+
+    // For every supernode kk, absorb as many of its children as the budget allows.
+    for (std::int32_t kk = 0; kk < nSup; ++kk) {
+        std::size_t fillInc  = 0;   // zeros already bought for kk
+        std::size_t frontInc = 0;   // columns already absorbed into kk
+
+        // kk's index set before any of this parent's merges. It grows by frontInc as we go.
+        const std::size_t kkSize = frontSize[kk] + f.mUpdateSize[kk];
+
+        for (;;) {
+            std::int32_t bestChild = NIL;
+            std::size_t  bestFill  = 0;
+
+            for (std::int32_t jj = f.mFirstChild[kk]; jj != NIL; jj = f.mNextSibling[jj]) {
+                if (!candidate[jj])
+                    continue;
+
+                // The zeros each column of jj must store once it joins kk's front: it held
+                // update(jj) rows below itself, and must now hold the whole of kk's index
+                // set. By the containment theorem update(jj) is a subset of that index set,
+                // so this is a set-difference size and cannot go negative.
+                const std::size_t zerosPerCol = kkSize + frontInc - f.mUpdateSize[jj];
+                const std::size_t fill = fillInc + zerosPerCol * frontSize[jj];
+
+                if (fill > threshold) {
+                    candidate[jj] = false;   // over budget, and kk only grows from here
+                    continue;
+                }
+
+                // Least fill; ties to the widest front; ties again to the first child in the
+                // list, which is arbitrariness made deterministic. A canonical algorithm
+                // would need no such rule.
+                if (bestChild == NIL || fill < bestFill
+                        || (fill == bestFill && frontSize[jj] > frontSize[bestChild])) {
+                    bestChild = jj;
+                    bestFill  = fill;
+                }
+            }
+
+            if (bestChild == NIL)
+                break;   // nothing more fits the budget
+
+            supOldToNew[bestChild] = kk;
+            fillInc  = bestFill;
+            frontInc += frontSize[bestChild];
+            candidate[bestChild] = false;
+            --numSup;
+        }
+
+        frontSize[kk] += frontInc;   // kk has grown; later parents must see it
+    }
+
+    // Resolve chains: a supernode may have been absorbed into one that was itself absorbed.
+    // Decreasing order, so an absorber (whose label exceeds its children's) is resolved before
+    // the children that point at it.
+    for (std::size_t t = supSize; t > 0; --t) {
+        const std::int32_t jj = static_cast<std::int32_t>(t - 1);
+        const std::int32_t kk = supOldToNew[jj];
+        if (kk != jj)
+            supOldToNew[jj] = supOldToNew[kk];
+    }
+
+    // Compact the labels: the survivors keep topological order, but their old labels have
+    // gaps where absorbed supernodes used to be.
+    std::vector<std::int32_t> label(supSize, NIL);
+    for (std::int32_t jj = 0; jj < nSup; ++jj)
+        label[supOldToNew[jj]] = 0;               // mark the survivors
+    std::int32_t next = 0;
+    for (std::int32_t jj = 0; jj < nSup; ++jj)
+        if (label[jj] != NIL)
+            label[jj] = next++;
+    for (std::int32_t jj = 0; jj < nSup; ++jj)
+        supOldToNew[jj] = label[supOldToNew[jj]];
+
+    // Carry the column map through.
+    std::vector<std::int32_t> idxToSupIdx(size);
+    for (std::size_t j = 0; j < size; ++j)
+        idxToSupIdx[j] = supOldToNew[f.mIdxToSupIdx[j]];
+
+    // Parent links and sizes of the merged supernodes. Scanning old supernodes in decreasing
+    // order, the first one seen for a given survivor is the absorber itself (its label is the
+    // largest in the merged set): its parent link leaves the merged supernode, and its update
+    // rows are the merged supernode's. Front sizes instead accumulate over every member, from
+    // the *input* sizes, not the working copy, which already holds the accumulated total.
+    std::vector<std::int32_t> parent(numSup, NIL);
+    std::vector<std::size_t>  newFrontSize(numSup, 0);
+    std::vector<std::size_t>  newUpdateSize(numSup, 0);
+    std::vector<bool>         seen(numSup, false);
+
+    for (std::size_t t = supSize; t > 0; --t) {
+        const std::int32_t jj    = static_cast<std::int32_t>(t - 1);
+        const std::int32_t jjNew = supOldToNew[jj];
+
+        newFrontSize[jjNew] += f.mFrontSize[jj];
+
+        if (seen[jjNew])
+            continue;
+
+        const std::int32_t kk = f.mParent[jj];
+        if (kk != NIL)
+            parent[jjNew] = supOldToNew[kk];
+        newUpdateSize[jjNew] = f.mUpdateSize[jj];
+        seen[jjNew] = true;
+    }
+
+    f.mSupSize = numSup;
+    f.mIdxToSupIdx.swap(idxToSupIdx);
+    f.mParent.swap(parent);
+    f.mFrontSize.swap(newFrontSize);
+    f.mUpdateSize.swap(newUpdateSize);
+
+    // The child, sibling and root links still describe the old forest. The caller rebuilds
+    // them with finalizeLinks.
+}
+
 
 template bool ElmForestEngine::compute(const SparseMatrix<double>&, const Permutation&, ElmForest&) const;
 template bool ElmForestEngine::compute(const SparseMatrix<std::complex<double>>&, const Permutation&, ElmForest&) const;

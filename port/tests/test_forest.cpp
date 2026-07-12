@@ -151,7 +151,7 @@ int main(){
       ck(inv && roots==2 && eq(f.parent(),{1,NP,3,NP}) && f.supSize()==4
          && eq(f.idxToSupIdx(),{0,1,1,2,3,3}), "two blocks natural  : 2 trees, compressed"); }
     { auto A=tridiagFull(30); reqSym(A,"tridiag n=30        : symmetric");
-      OrderEngine ord(OrderMethod::AMD); Permutation p; ord.order(A,p);
+      OrderEngine ord(OrderMethod::AMD); Permutation p; ord.compute(A,p);
       ElmForest f; bool ok=eng.compute(A,p,f); std::size_t roots=0; bool inv=validEtree(f.parent(),roots);
       ck(ok && inv && f.size()==30 && roots>=1, "tridiag n=30 + AMD  : valid etree"); }
 
@@ -206,10 +206,99 @@ int main(){
           Permutation pNat(size); ElmForest fNat, fNodal;
           if(!eng.compute(A,pNat,fNat) || !validForest(A,pNat,fNat,Supernodes::Fundamental)) ++bad;
           if(!nodal.compute(A,pNat,fNodal) || !validForest(A,pNat,fNodal,Supernodes::Nodal)) ++bad;
-          Permutation pAmd; ord.order(A,pAmd); ElmForest fAmd;
+          Permutation pAmd; ord.compute(A,pAmd); ElmForest fAmd;
           if(!eng.compute(A,pAmd,fAmd) || !validForest(A,pAmd,fAmd,Supernodes::Fundamental)) ++bad;
       }
       ck(bad==0, "random x200         : links, height, sizes valid, both regimes"); }
+
+
+    // Amalgamation. Fundamental supernodes are free but not maximal: the only-child condition
+    // refuses a parent with two children even when one shares its pattern exactly and could
+    // be absorbed for nothing. Amalgamation at threshold zero drops that condition.
+    { // The smallest case: a star, 0-2 and 1-2. Column 2 has two children, so fundamental
+      // merges nothing. Both children are free to merge, but only one can be: absorbing the
+      // first widens the front, which prices out the second.
+      std::vector<std::size_t> cp={0,2,4,7};
+      std::vector<std::int32_t> ri={0,2, 1,2, 0,1,2};
+      std::vector<double> v(ri.size(),1.0); SparseMatrix<double> A(3,cp,ri,v);
+      Permutation p(3);
+      ElmForest f0, f1; ElmForestEngine e1; e1.setThreshold(0);
+      eng.compute(A,p,f0); e1.compute(A,p,f1);
+      ck(f0.supSize()==3 && f1.supSize()==2 && eq2(f1.frontSize(),{1,2}),
+         "star n=3 amalg(0)   : 3 supernodes -> 2, no fill"); }
+
+    { // The grid of the notes. Fundamental gives 7 supernodes (the separator {7,8,9}).
+      // At threshold zero, column 3 joins it for free: update(3) == indexSet(separator).
+      std::vector<std::pair<std::size_t,std::size_t>> e =
+          {{0,1},{0,6},{1,2},{1,7},{2,8},{3,4},{3,6},{4,5},{4,7},{5,8},{6,7},{7,8}};
+      std::vector<std::vector<bool>> M(9, std::vector<bool>(9,false));
+      for(std::size_t i=0;i<9;++i) M[i][i]=true;
+      for(const auto& x : e){ M[x.first][x.second]=M[x.second][x.first]=true; }
+      std::vector<std::size_t> cp(10,0); std::vector<std::int32_t> ri; std::vector<double> v;
+      for(std::size_t j=0;j<9;++j){
+          for(std::size_t i=0;i<9;++i) if(M[i][j]){ ri.push_back(static_cast<std::int32_t>(i)); v.push_back(i==j?10.0:-1.0); }
+          cp[j+1]=ri.size(); }
+      SparseMatrix<double> A(9,cp,ri,v); Permutation p(9);
+      ElmForest f0, f1; ElmForestEngine e1; e1.setThreshold(0);
+      eng.compute(A,p,f0); e1.compute(A,p,f1);
+      ck(f0.supSize()==7 && f1.supSize()==6 && f1.frontSize()[5]==4,
+         "grid amalg(0)       : 7 supernodes -> 6, 4-column front"); }
+
+    // The invariants that survive tie-breaking. Amalgamation is greedy and not canonical, so
+    // the partition it produces depends on how ties are broken; these hold regardless.
+    { std::mt19937 rng(20260712);
+      OrderEngine ord(OrderMethod::AMD);
+      int bad=0; std::size_t fund=0, at8=0;
+      for(int trial=0; trial<200; ++trial){
+          std::size_t size = 3 + rng()%10;
+          std::vector<std::vector<bool>> M(size, std::vector<bool>(size,false));
+          for(std::size_t i=0;i<size;++i) M[i][i]=true;
+          for(std::size_t i=1;i<size;++i){ M[i][i-1]=M[i-1][i]=true; }
+          for(std::size_t i=0;i<size;++i)
+              for(std::size_t j=i+2;j<size;++j)
+                  if(rng()%100<25){ M[i][j]=M[j][i]=true; }
+          std::vector<std::size_t> cp(size+1,0); std::vector<std::int32_t> ri; std::vector<double> v;
+          for(std::size_t j=0;j<size;++j){
+              for(std::size_t i=0;i<size;++i) if(M[i][j]){ ri.push_back(static_cast<std::int32_t>(i)); v.push_back(i==j?10.0:-1.0); }
+              cp[j+1]=ri.size(); }
+          SparseMatrix<double> A(size,cp,ri,v);
+          Permutation pNat(size), pAmd; ord.compute(A,pAmd);
+
+          const Permutation* perms[2] = {&pNat, &pAmd};
+          for(int which=0; which<2; ++which){
+              const Permutation& p = *perms[which];
+              ElmForest f0, f1, f2;
+              ElmForestEngine a0;
+              ElmForestEngine a1; a1.setThreshold(0);
+              ElmForestEngine a2; a2.setThreshold(8);
+              if(!a0.compute(A,p,f0) || !a1.compute(A,p,f1) || !a2.compute(A,p,f2)) { ++bad; continue; }
+
+              // The links, height and labels must stay valid after amalgamation.
+              if(!validLinks(f1) || !validHeight(f1)) ++bad;
+              if(!validLinks(f2) || !validHeight(f2)) ++bad;
+              std::size_t roots=0;
+              if(!validEtree(f1.parent(),roots) || roots!=f1.numTrees()) ++bad;
+
+              // Amalgamation never increases the supernode count, and a larger budget never
+              // increases it either.
+              if(f1.supSize() > f0.supSize()) ++bad;
+              if(f2.supSize() > f1.supSize()) ++bad;
+
+              // Every column belongs to exactly one supernode, and front sizes sum to size.
+              std::size_t totalFront=0;
+              for(std::size_t k=0;k<f2.supSize();++k) totalFront += f2.frontSize()[k];
+              if(totalFront != size) ++bad;
+
+              // Supernode labels stay topological.
+              for(std::size_t k=0;k<f2.supSize();++k)
+                  if(f2.parent()[k]!=NP && f2.parent()[k] <= static_cast<std::int32_t>(k)) ++bad;
+
+              if(which==0){ fund += f0.supSize(); at8 += f2.supSize(); }
+          }
+      }
+      ck(bad==0, "random x200 amalg   : links, height, labels valid; count never grows");
+      ck(at8 < fund, "random x200 amalg   : threshold 8 merges ("+std::to_string(fund)
+                     +" -> "+std::to_string(at8)+" supernodes)"); }
 
     std::cout<<"\nElmForest tests: "<<pass<<"/"<<(pass+fail)<<" passed\n";
     return fail==0?0:1;

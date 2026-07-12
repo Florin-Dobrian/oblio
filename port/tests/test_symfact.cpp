@@ -256,7 +256,7 @@ int main(){
           std::size_t f1=0, f2=0;
           Permutation pNat(size);
           if(!runCase(A,pNat,f1)) ++bad;
-          Permutation pAmd; ord.order(A,pAmd);
+          Permutation pAmd; ord.compute(A,pAmd);
           if(!runCase(A,pAmd,f2)) ++bad;
           totalFill += f1 + f2;
       }

@@ -3,6 +3,77 @@
 Durable record of structural choices, newest first. Each entry: date, decision,
 why. This is the file to open after a gap to reconstruct the project's shape.
 
+## 2026-07-12, Amalgamation: a second compression, and the third bug in 10.12
+
+**Two compressions, and they are not the same algorithm with a knob.** Fundamental compression
+contracts *paths*: it merges a supernode with its child when that child is an **only** child
+and shares its pattern. Amalgamation contracts *stars*: it merges a supernode with any number
+of its children, and will pay for the privilege in explicitly stored zeros, up to a budget.
+They are orthogonal settings in the engine (`Supernodes::Fundamental` and an optional
+threshold), as they are in both references, and both may run, fundamental first.
+
+**Absent is not zero.** The threshold is a `std::optional<std::size_t>`, because "do not
+amalgamate" and "amalgamate but pay nothing" are different instructions. At threshold zero it
+still merges, and it merges strictly more than fundamental compression does.
+
+**Which is the interesting fact: fundamental supernodes are not maximal.** The zero-fill
+condition and the fundamental pattern condition are the *same* test. The only difference is
+the only-child requirement, which exists to make supernodes paths, and hence unique, not
+because merging would cost anything. Drop it and free merges appear. The smallest case is a
+three-column star: fundamental gives 3 supernodes, amalgamation at threshold zero gives 2, at
+no cost. On the grid of the notes it takes 7 supernodes to 6, column 3 joining the separator
+for nothing.
+
+**Uniqueness is what is being traded away, and it is worth stating plainly.** Where two
+children could each merge for free, only one can (absorbing the first widens the front, which
+prices out the second), so the algorithm must **break ties**, and a tie-break is a convention
+rather than a theorem. 0.9's rule is: least fill, then largest front, then first in the child
+list. That last clause is arbitrariness made deterministic, which is exactly what a canonical
+algorithm never needs. Fundamental supernodes are unique because they refuse to make the
+choice; amalgamation is not, because it makes it.
+
+**The third 10.12 bug, and the most instructive.** 0.9 updates a parent's front size after it
+absorbs children:
+
+```
+frontSizeArray[kk] += frontIncrement;
+```
+
+10.12 has that line, **commented out**, with the explanatory comment above it left intact:
+
+```
+// update the front size of supernode s2.
+//numFrntIdxsArr[s2] += frntInc;
+```
+
+It matters. Parents are processed in increasing label order, and a child's label is below its
+parent's, so by the time a parent is reached its children **have already been parents
+themselves** and may have absorbed children of their own. Pricing a merge needs the child's
+*current* front size. 10.12 reads the stale one, understating both the fill and the resulting
+block, silently. And the cause is visible in its own source: the array is declared `const`, so
+the update would not compile, and someone commented out the statement rather than fix the
+constness. We restore it.
+
+That is now three bugs found in 10.12 (the sibling-link copy in `SymbolicEngine`, the wrong
+front-size operand in the fundamental merge test, and this), and two of them left a corpse in
+place: a commented-out line whose comment still promises the behavior. The pattern is worth
+naming, since it will recur: **10.12 transcribes 0.9's prose faithfully and its code
+approximately.** Read the comments for intent; verify the code against 0.9.
+
+**The unsigned subtraction is safe by theorem, and says so.** The merge cost contains
+`|indexSet(K)| - |update(J)|`, which on unsigned types would wrap if it went negative. It
+cannot: by the containment theorem `update(J)` is a **subset** of `K`'s index set, so this is
+a set-difference size. We name it (`zerosPerCol`) and cite the theorem, rather than leaving a
+subtraction that happens not to wrap. Unlike the fundamental merge test, it cannot be
+rearranged into an addition, because the running fill total genuinely needs the difference.
+
+**Testing what survives tie-breaking.** Since the partition is not canonical, the tests assert
+only what is invariant under the tie-break: at threshold zero the stored-zero count is exactly
+zero; the factor's true nonzeros are all still present; the supernode count never rises, and a
+larger budget never raises it; the links, height and topological labelling stay valid. The
+specific partition is deliberately not asserted, except on the star and the grid, where it is
+forced.
+
 ## 2026-07-12, Friendship is a write grant, and reading needs no friend
 
 **Every argument an engine takes falls into one of three cases, and the third is the only one

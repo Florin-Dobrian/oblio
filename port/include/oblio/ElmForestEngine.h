@@ -14,6 +14,7 @@
 #include "oblio/Permutation.h"
 #include "oblio/ElmForest.h"
 
+#include <optional>
 #include <vector>
 #include <complex>
 #include <cstddef>
@@ -39,6 +40,17 @@ public:
     void       setSupernodes(Supernodes supernodes) { mSupernodes = supernodes; }
     Supernodes supernodes() const                   { return mSupernodes; }
 
+    // The amalgamation threshold: how many explicitly stored zeros we are willing to buy a
+    // wider front with. Amalgamation merges a supernode with several of its children, unlike
+    // fundamental compression, which merges only an only-child, and unlike it, it may pay
+    // fill to do so. It runs after fundamental compression when both are on.
+    //
+    // Absent means no amalgamation at all, which is not the same as a threshold of zero: at
+    // zero it still merges, but only where the merge is free. See the DESIGN_DECISIONS entry
+    // and Section 4.5 of the sparse-factorization notes.
+    void setThreshold(std::optional<std::size_t> threshold) { mThreshold = threshold; }
+    std::optional<std::size_t> threshold() const            { return mThreshold; }
+
     // Compute the elimination forest of A under the permutation p.
     //
     // Two overloads, the same layering used throughout this engine. The forest depends on
@@ -57,7 +69,8 @@ public:
                  const Permutation& p, ElmForest& f) const;
 
 private:
-    Supernodes mSupernodes = Supernodes::Fundamental;
+    Supernodes                 mSupernodes = Supernodes::Fundamental;
+    std::optional<std::size_t> mThreshold;   // absent: no amalgamation
     // Every helper below is free of Val. The adaptation happens once, at the public
     // boundary above, so nothing in here is templated and nothing in here is compiled twice.
     // The matrix appears only as its sparsity pattern, colPtr and rowIdx. The Permutation
@@ -138,6 +151,26 @@ private:
     // reads as "still valid", and these links are precisely not that: they describe the
     // nodal forest and are wrong for the compressed one until rebuilt.
     void compressFundamental(ElmForest& f) const;
+
+    // Amalgamate: merge a supernode with several of its children, paying explicitly stored
+    // zeros for a wider front. The threshold is the budget, in zeros.
+    //
+    // Unlike compressFundamental this works on any forest, nodal or supernodal, since a nodal
+    // forest is one whose supernodes are all trivial. Unlike it, it is also **not canonical**:
+    // where two children of a supernode could each be merged for free, only one can be (the
+    // first widens the front, which prices out the second), so the algorithm must break ties,
+    // and the tie-breaking rule is a convention rather than a theorem. Fundamental supernodes
+    // are unique precisely because they refuse to make that choice.
+    //
+    // Even at threshold zero this merges more than compressFundamental does: a free merge
+    // asks only that the child's pattern match, while a fundamental merge additionally
+    // demands that the child be an only child.
+    //
+    //   reads:   mSize, mSupSize, mIdxToSupIdx, mParent, mFirstChild, mNextSibling,
+    //            mFrontSize, mUpdateSize
+    //   writes:  mSupSize, mIdxToSupIdx, mParent, mFrontSize, mUpdateSize
+    //   stales:  the child, sibling and root links, as above
+    void compressThreshold(ElmForest& f, std::size_t threshold) const;
 };
 
 extern template bool ElmForestEngine::compute(const SparseMatrix<double>&, const Permutation&, ElmForest&) const;

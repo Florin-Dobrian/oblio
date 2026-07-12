@@ -42,7 +42,7 @@ the notes where they differ.
 | SparseMatrix | yes | checked | 0.9 `Matrix`; flat CSC, stored fully (both triangles). Build and structural symmetry tested |
 | OrderEngine | no | checked | AMD (SuiteSparse) and MMD (Sparspak) vendored verbatim; output checked for validity as a permutation, not against 0.9's ordering |
 | ElmForest | no | checked | data; supernodal shape, trivial supernodes for now |
-| ElmForestEngine | no | checked | parent links, child/sibling links, roots, height, front/update sizes. Links and height recomputed independently; sizes against the dense oracle, natural and AMD ordered |
+| ElmForestEngine | no | checked | parent links, child/sibling links, roots, height, column sizes, fundamental compression, threshold amalgamation. Links and height recomputed independently; sizes and supernodes against the dense oracle, natural and AMD ordered. Amalgamation is greedy and not canonical, so only its tie-break-invariant properties are asserted |
 | SymFact | no | checked | 0.9 `Symbolic`; flat index sets with per-supernode offsets |
 | SymFactEngine | no | checked | 0.9 `SymbolicEngine`; index sets against the dense oracle, natural and AMD ordered. 10.12's design, 0.9's behavior (see DESIGN_DECISIONS) |
 | Vector | yes | not started | |
@@ -65,7 +65,6 @@ obviated by lambdas).
   consuming these structures, because a difference the oracle cannot see (index
   order within a supernode's block, say) is exactly the kind that surfaces as a
   numeric bug much later.
-- **Fundamental-supernode compression** is not implemented. Supernodes are trivial
-  (one column each) throughout, so the supernodal machinery is real but untested at
-  supernode granularity: the symbolic union's multi-front-column generality runs
-  with exactly one front column per supernode.
+- **`sortForOptimalMultifrontal`** (0.9) / `rOptimizeForMultifrontal` (10.12) is not ported.
+  Both references call it after compression to reorder children for the multifrontal stack;
+  10.12's call site is commented out. Not needed until the numeric factorization exists.

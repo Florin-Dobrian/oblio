@@ -305,8 +305,10 @@ incidentally reconfirms the forest's update sizes on the same matrices.
 
 ## 2026-07-11, Flat vs vector-of-vectors storage, and the descriptor view that spans both
 
-*Provisional in part: the symfact/static decisions are settled; the dynamic-numfact
-storage is a brainstorm recorded ahead of having 0.9's numfact code (see Status).*
+*Partly measured (2026-07-12, `experiments/storage-options/`): the abstraction cost and the
+layout cost are now numbers, not guesses, and one of this entry's original claims is superseded
+by them. What remains provisional is the dynamic-numfact storage, still recorded ahead of having
+0.9's numfact code, and the flatten-or-not question the measurement reopened. See Status.*
 
 **Not an API question, a data-structure question.** Flat storage (one contiguous buffer
 plus a per-column/per-supernode offset array, CSC style) versus vector-of-vectors (VV, one
@@ -366,16 +368,24 @@ absolute pointer into the flat index buffer and the consumer walks `(base, len)`
 the friend-access decision generalized from "member access" to "a layout-agnostic view over
 members," and it applies to any CSC-style object, the matrix included.
 
-**The view must be monomorphic, or it costs what it is meant to save.** The unifier is free
-only as a compile-time abstraction: a plain `{ptr, len}` struct, or a `template<class
-Storage>` exposing `span(s) -> {ptr, len}`, so the inner loop compiles to the same machine
-code as hand-written flat. A runtime-polymorphic per-element accessor (`virtual get(s, k)`)
-reintroduces exactly the non-inlinable cost the friend-access measurement clocked at ~6x,
-the thing the hot path cannot afford. So: one algorithm source, instantiated per layout
-(two monomorphizations, not one binary switching layout at runtime inside the loop). It
-stays optimal on flat, correct-but-scatter-bound on VV. The write side unifies too: because
-sizes are known up front for the flat cases, both flat and a pre-sized VV inner accept the
-same `base[cursor++] = i` fill.
+**The view must not be a per-element virtual call. It need not be a template either.**
+*(Written before the measurement; the second half of this paragraph is what changed.)* Our
+worry was that unifying the layouts would reintroduce the non-inlinable per-element cost the
+friend-access experiment clocked at ~6x, so we planned a compile-time abstraction: one algorithm
+source, `template<class Storage>`, instantiated per layout. Two monomorphizations, not one binary
+branching on layout inside the loop.
+
+The measurement says even that is more machinery than the problem needs. Hoist the descriptors
+out of the loop entirely, into three plain arrays (`rowIdxPtr[j]`, `valPtr[j]`, `len[j]`), and
+the algorithm becomes an ordinary non-template function taking nothing but pointers. **One**
+compiled kernel, no instantiation per layout, no virtual call, and it matches hand-written CSC.
+The per-element indirection we feared never arises, because the indirection happens once per
+column, not once per entry. So the rule survives in its negative half (never a virtual accessor
+in the hot loop) and is superseded in its positive half (a template is sufficient but not
+necessary).
+
+The write side unifies too: because sizes are known up front for the flat cases, both flat and a
+pre-sized VV inner accept the same `base[cursor++] = i` fill.
 
 **One VV-only hazard: growth invalidates descriptors.** When a VV inner vector reallocates
 on growth its base pointer moves, so any cached `{ptr, len}` goes stale. For flat and
@@ -385,28 +395,99 @@ growth event. A `reserve()` per front to a symbolic-size-plus-margin reduces rea
 but cannot guarantee zero, so the fetch-after-growth discipline still governs. Delays land
 at assembly and the BLAS streaming comes after, so the ordering is natural.
 
-**An `experiments/` study should prove the abstraction is free before it spreads.**
-Following the `experiments/` convention (self-contained, validates a standard, not in the
-main build): one column-streaming kernel written hand-flat, templated-descriptor over flat,
-and templated-descriptor over VV, plus a runtime-virtual version as the cautionary
-baseline. It must show hand-flat and templated-over-flat match to noise (zero abstraction
-penalty), virtual is the ~6x hit (why the view stays monomorphic), and VV-over-descriptor
-is correct but slower purely from scatter. Keep the storages equal-content so it measures
-layout and abstraction, not two different structures.
+**Measured, in `experiments/storage-options/`, and the result is stronger than predicted.**
+Two sparse matrix classes (CSC and VV) holding identical content, one `MultiplyEngine`, and a
+sparse matvec. Each class fills the same three arrays, `rowIdxPtr[j]`, `valPtr[j]`, `len[j]`.
+CSC points into its single buffer; VV reads each inner vector's `data()`. The multiply takes
+nothing but those arrays, and on an M4:
 
-**Status and the open question.** Settled for now: flat for the matrix (mutability not
-assumed yet), flat for symfact, flat for static numfact. Provisional: dynamic numfact wants
-growable working storage, with the flatten-to-flat hybrid as the leading candidate for the
-persistent object. The blocker on finalizing is that we do not have 0.9's numeric
-factorization code; none of the numfact sources are in the reference set, so how 0.9 stores
-dynamic fronts is unverified. It is entirely possible 0.9 does not do dynamic with flat, in
-which case 0.9 supports this split rather than contradicting it, but that is a prediction to
-check against the code. When the numfact code surfaces: see whether the dynamic path uses
-growable per-front storage, worst-case preallocation, or reflow, and whether static and
-dynamic share a front representation. If 0.9 already runs dynamic scratch into a flat
-result, the hybrid is a port; if 0.9 keeps a dynamic factor object, the hybrid is a
-modernization on the rewrite track, and we verify the flat result matches 0.9's factor
-content, not its storage.
+```
+hand-written CSC (baseline)     1.362 ms
+multiply(), CSC pointers        1.454 ms   1.07x
+multiply(), VV pointers         1.499 ms   1.10x
+multiply(), VV scattered        8.723 ms   6.41x
+```
+
+Bit-identical results. Two findings, and the first supersedes what this entry originally
+claimed.
+
+**The abstraction is free, and it needs no template.** We had assumed the unifier would have to
+be a compile-time template, monomorphized per layout, to avoid a virtual call's cost. It does
+not. There is exactly **one compiled multiply**, verified in the symbol table, and its signature
+names neither matrix class:
+
+```
+T MultiplyEngine::multiply(unsigned long, int const* const*, double const* const*,
+                           unsigned long const*, double const*, double*) const
+```
+
+It cannot tell CSC from VV because by the time it runs there is nothing left to tell apart. The
+storage question and the algorithm question are **separable**: the layout decides where the
+pointers come from, and nothing else. Two layouts therefore cost us zero duplicated kernels, not
+"two monomorphizations" as this entry first supposed.
+
+**The interface costs the same on both layouts**, 1.07x and 1.10x, a three percent spread. What
+costs is *locality*: the two VV rows are the same class with the same content, differing only in
+the order their inner vectors were allocated. **A flat buffer guarantees consecutive columns are
+adjacent; a vector of vectors only ever borrows that from the allocator.**
+
+**Two caveats on the 6.41x, both important.** It is *constructed*, shuffled allocation plus
+interleaved spacers, engineered to remove the allocator's help entirely, so read 1.10x as VV's
+structural cost and 6.41x as an upper bound. And it is hardware-dependent: the same code measures
+8.87x on a machine with smaller caches. More importantly, **this kernel is the harshest possible
+setting for a cache miss**: a sparse matvec does about two flops per element loaded, so a miss
+shows at full price with nothing to hide behind.
+
+**Which layout for which object, with reasons rather than symmetry.** Having both layouts is now
+free, so the temptation is to offer both everywhere. Most of that would be storage nobody uses.
+
+- **`A`: CSC.** It is built once and read forever, so VV buys it nothing but scatter. A VV `A`
+  is defensible only for *structural* mutation, and that case is weaker than it looks. Value-only
+  mutation (same pattern, new numbers, refactorize) simply overwrites `mVal` in place and needs
+  no VV at all. Structural mutation invalidates the ordering, the forest, the symbolic
+  factorization and the factor's size, so it forces the whole analysis phase again, against which
+  rebuilding `A` in CSC is one `O(nnz)` pass and therefore noise. Which is also why one *batches*
+  structural changes: each forces re-analysis anyway, so nobody applies them one at a time. And
+  incremental assembly, the one place VV genuinely helps, has a better answer already: triplets,
+  then convert once, with no per-column allocation at all.
+- **`SymFact`: CSC.** Write-once into a size the forest already knows
+  (`frontSize + updateSize` per supernode). The textbook case for flat. VV buys it nothing.
+- **Static numfact: CSC**, for the same reason: write-once into a structure symbolic has sized.
+- **Dynamic numfact: VV.** Delayed pivoting grows a front at runtime by an amount symbolic never
+  predicted, and the growth is local. This is the one place the algorithm genuinely mutates.
+
+**Flatten-or-not is now a real fork, not a foregone conclusion.** This entry originally treated
+the flatten-to-flat hybrid as settled. At 1.10x for a packed VV, "do not flatten; let the solve
+read the VV factor" is defensible, and it saves an `O(nnz(L))` copy plus the peak memory of
+holding both representations at once. Against that: the solve *streams* the factor, which is
+exactly the cache-hostile shape the experiment measures, so it is the phase most likely to want
+flat. Both options are now open, and the experiment is what opened them.
+
+**The measurement we owe, and it is load-bearing.** The matvec is a toy for this purpose: about
+two flops per element loaded, so a cache miss shows at full price. Numeric factorization is the
+opposite, a dense front handed to BLAS level 3, `O(n^3)` arithmetic on `O(n^2)` data, where the
+same miss amortizes over far more work. **We have predicted that VV-during-elimination is
+therefore affordable, and we have not measured it.** That prediction is what the entire dynamic
+design rests on, and it deserves its own study against a realistic front, not a sparse column
+scatter. Until then, treat "VV is affordable in numfact" as a hypothesis, not a result.
+
+(Note also that the ~6x virtual-call figure this entry cites was carried over from the
+friend-access experiment and is *not* tested by storage-options, which has no virtual path. The
+question turned out not to arise, since the unifier needed no polymorphism at all.)
+
+**Status.** Settled: CSC for `A`, for symfact, and for static numfact. Settled: VV for dynamic
+numfact's working storage. Open: whether the persistent factor is flattened, and whether a
+VV-all-the-way numfact is viable, both of which want the BLAS-3 measurement above.
+
+Still unresolved, and unchanged: we do not have 0.9's numeric factorization code; none of the
+numfact sources are in the reference set, so how 0.9 stores dynamic fronts is unverified. It is
+entirely possible 0.9 does not do dynamic with flat, in which case 0.9 supports this split rather
+than contradicting it, but that is a prediction to check against the code. When the numfact code
+surfaces: see whether the dynamic path uses growable per-front storage, worst-case
+preallocation, or reflow, and whether static and dynamic share a front representation. If 0.9
+already runs dynamic scratch into a flat result, the hybrid is a port; if 0.9 keeps a dynamic
+factor object, the hybrid is a modernization on the rewrite track, and we verify the flat result
+matches 0.9's factor content, not its storage.
 
 ## 2026-07-09, Index types: `std::int32_t` IDs (NIL = -1), `std::size_t` offsets
 

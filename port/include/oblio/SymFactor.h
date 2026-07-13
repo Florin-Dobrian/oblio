@@ -1,6 +1,6 @@
 #pragma once
 
-// SymFact.h - the symbolic factorization of a sparse matrix.
+// SymFactor.h - the symbolic factorization of a sparse matrix.
 //
 // The symbolic factorization is the sparsity pattern of the factor L, computed
 // per supernode: for every supernode, the set of factor row indices its columns
@@ -8,9 +8,9 @@
 // columns) and the update indices (the rows below it, which its children and it
 // itself update). Numeric factorization consumes this structure.
 //
-// SymFact is self-contained: it copies the forest attributes it needs (the map,
+// SymFactor is self-contained: it copies the forest attributes it needs (the map,
 // the parent/child/sibling links, the front and update sizes, the tree
-// attributes), so numeric factorization needs SymFact alone, not the forest.
+// attributes), so numeric factorization needs SymFactor alone, not the forest.
 // Both 0.9 and 10.12 do this.
 //
 // Storage is flat, and deliberately the same shape as SparseMatrix. The index sets are
@@ -22,7 +22,7 @@
 // The parallel with SparseMatrix is exact, and the names say so:
 //
 //   SparseMatrix:  rowIdx[colPtr[j] .. colPtr[j + 1])   the rows of column j
-//   SymFact:       rowIdx[supPtr[s] .. supPtr[s + 1])   the rows of supernode s
+//   SymFactor:       rowIdx[supPtr[s] .. supPtr[s + 1])   the rows of supernode s
 //
 // A supernode's rows are the pattern its columns share: the first frontSize(s) of them are
 // its front indices (its own columns), the rest its update indices (the rows below). Within
@@ -40,11 +40,11 @@
 
 namespace Oblio {
 
-class SymFactEngine;
+class SymFactorEngine;
 
-class SymFact {
+class SymFactor {
 public:
-    SymFact() = default;
+    SymFactor() = default;
 
     std::size_t size()     const { return mSize; }       // number of columns
     std::size_t supSize()  const { return mSupSize; }    // number of supernodes
@@ -100,7 +100,7 @@ private:
     std::vector<std::size_t>  mSupPtr;          // offsets into mRowIdx (length mSupSize + 1)
     std::vector<std::int32_t> mRowIdx;          // factor row indices (length mNumRowIdx)
 
-    friend class SymFactEngine;   // fills the symbolic factorization via the engine
+    friend class SymFactorEngine;   // fills the symbolic factorization via the engine
 };
 
 } // namespace Oblio

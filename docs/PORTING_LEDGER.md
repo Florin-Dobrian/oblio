@@ -25,13 +25,14 @@ read this first, it turns "refresh my context" into a two-minute scan.
 
 ## Pipeline
 
-`OrderEngine -> ElmForestEngine -> SymFactEngine -> FactorEngine -> SolveEngine`,
+`OrderEngine -> ElmForestEngine -> SymFactorEngine -> NumFactorEngine -> SolveEngine`,
 orchestrated by `OblioEngine`.
 
 Naming note: the modern tree renames as it ports. 0.9's `Matrix` is `SparseMatrix`
 (a `DenseMatrix` will follow), and 0.9's `Symbolic` / `SymbolicEngine` pair is
-`SymFact` / `SymFactEngine`. The table gives the modern name, with the 0.9 name in
-the notes where they differ.
+`SymFactor` / `SymFactorEngine`, with `NumFactor` / `NumFactorEngine` to follow for the
+numeric phase. The table gives the modern name, with the 0.9 name in the notes where they
+differ.
 
 ## Units
 
@@ -41,15 +42,16 @@ the notes where they differ.
 | Permutation | no | checked | index-only. Ported: `set` (as `setOldToNew`/`setNewToOld`, replacing 0.9's direction flag) and `compose`. Not yet ported from 0.9: `get`, `read`/`write` (persist an ordering), `initialize2dGrid`/`initialize3dGrid` (structured orderings, useful as test inputs with hand-computable fill) |
 | SparseMatrix | yes | checked | 0.9 `Matrix`; flat CSC, stored fully (both triangles). Build and structural symmetry tested |
 | OrderEngine | no | checked | AMD (SuiteSparse) and MMD (Sparspak) vendored verbatim; output checked for validity as a permutation, not against 0.9's ordering |
-| ElmForest | no | checked | data; supernodal shape, trivial supernodes for now |
+| ElmForest | no | checked | data; supernodal shape throughout, nodal being the uncoarsened case rather than a special one |
 | ElmForestEngine | no | checked | parent links, child/sibling links, roots, height, column sizes, fundamental compression, threshold amalgamation. Links and height recomputed independently; sizes and supernodes against the dense oracle, natural and AMD ordered. Amalgamation is greedy and not canonical, so only its tie-break-invariant properties are asserted |
-| SymFact | no | checked | 0.9 `Symbolic`; flat index sets with per-supernode offsets |
-| SymFactEngine | no | checked | 0.9 `SymbolicEngine`; index sets against the dense oracle, natural and AMD ordered. 10.12's design, 0.9's behavior (see DESIGN_DECISIONS) |
+| SymFactor | no | checked | 0.9 `Symbolic`; flat index sets with per-supernode offsets |
+| SymFactorEngine | no | checked | 0.9 `SymbolicEngine`; index sets against the dense oracle, natural and AMD ordered. 10.12's design, 0.9's behavior (see DESIGN_DECISIONS) |
 | Vector | yes | not started | |
 | MultiplyEngine | yes | not started | |
 | BlasLapack | yes | not started | traits + underscore handling |
 | DenseMatrix | yes | not started | fronts and update blocks |
-| FactorEngine | yes | not started | most complex; friend access into SparseMatrix/Factors/SymFact. Dynamic LDL pivoting is what forces the storage question (see DESIGN_DECISIONS) |
+| NumFactor | yes | not started | the numeric factor; storage decided per the flat-vs-VV entry |
+| NumFactorEngine | yes | not started | most complex; friend access into SparseMatrix/NumFactor/SymFactor. Dynamic LDL pivoting is what forces the storage question (see DESIGN_DECISIONS) |
 | SolveEngine | yes | not started | watch backward-solve index signedness |
 | OblioEngine | yes | not started | top-level driver |
 

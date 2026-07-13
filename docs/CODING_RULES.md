@@ -28,6 +28,13 @@ softer layer: conventions for consistency, not correctness.
   (`oblio-new-devlog.md`, etc.). Macros are `OBLIO_`. Never write bare `oblio` as
   the package name in running text.
 
+- **Terminology lives in WRITING_RULES.** Its Terminology section is the one part of that file
+  that governs code as well as prose, because names and comments must use the same words the
+  documentation does, or a reader ends up carrying a translation table. It settles
+  **numeric** factorization (not "numerical", which is reserved for the mathematics: numerical
+  stability, numerical pivoting), **front** as the noun against **frontal** as the adjective,
+  and when to reach for matrix words, graph words, or the neutral `index` and `sup`.
+
 - **Data structures take the noun; functions may take the adjective.** Fields and accessors are
   strict: a supernode has a **front** (its columns), so the field is `mFrontSize` and the
   accessor `frontSize()`. Function names can afford to be descriptive, so `gatherFrontalIndices`
@@ -122,15 +129,25 @@ softer layer: conventions for consistency, not correctness.
   for the original ordering of `A`: `lj`, `lk`, `aj`, `ak`. This keeps 10.12's ordering
   distinction and 0.9's column roles at once, where each reference had only one of them.
 
-  **Rows are `i`, columns are `j` and `k`.** Always, with no exceptions for local convenience.
-  `lk` and `li` are a column and a row in the factor's ordering; `ak` and `ai` the same two in
-  `A`'s. (10.12 writes `lc`/`lr` for column and row; we do not, since `i` and `k` already carry
-  the distinction and mixing two schemes helps nobody.)
+  **Rows are `i`, columns are `j` and `k`. The prefix is the matrix: `a` for `A`, `l` for `L`.**
+  So `aj`, `ak`, `ai` are a column, a column and a row of `A`; `lj`, `lk`, `li` the same three
+  in `L`. Two letters, and both of them mean something.
+
+  Nothing more is needed, and nothing less will do. `j` and `k` are columns, `j` the lower and
+  `k` the higher; `i` is a row. They do turn into rows where the two meet (`A[k][j]` names an
+  entry, so `k` indexes a row there), and that is not a problem: rows and columns share one index
+  space, the structure being symmetric, so an index is an index and the letter says what it is
+  *for*, not what it *is*. The prefix says which matrix's numbering it is in, and the two
+  numberings are connected by exactly one thing, the `Permutation`: `oldToNew[aj] == lj` and
+  `newToOld[lk] == ak`. A line that converts between them should read as the conversion it is.
+
+  (10.12 writes `lc`/`lr` for column and row and drops the role distinction; 0.9 writes bare `j`
+  and `k` and drops the matrix distinction. We keep both, at a cost of one character.)
 
   **A position into a flat array is named for the array it walks**, since several coexist:
 
   - `ap` into `A`'s `colPtr`/`rowIdx`
-  - `fp` into `frontIdxPtr`/`frontIdx`, the front indices alone
+  - `fp` into `frontSupPtr`/`frontRowIdx`, the front indices alone
   - `sp` into `supPtr`/`rowIdx`, a supernode's whole index set, front and update
 
   0.9 calls all of these `p`; we cannot, since `p` is the `Permutation`, and in any case the

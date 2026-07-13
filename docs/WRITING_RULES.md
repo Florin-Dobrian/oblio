@@ -31,6 +31,44 @@ counterpart to CODING_RULES.md.
   Use `our` for the possessive. This keeps a single, collaborative voice across all
   documents.
 
+## Terminology
+
+**Scope note: this section is the one part of this file that also governs code.** Names and
+comments must use the same words as the prose, or the two drift apart and a reader has to hold
+a translation table. So the vocabulary below applies to prose, to code comments, and to
+identifiers alike. Everything else in this file is prose-only.
+
+**Numeric factorization, not numerical.** The phases are **symbolic** and **numeric**. Both
+adjectives are legitimate English, and the distinction is real: *numeric* means "consisting of
+numbers", *numerical* means "relating to the study or manipulation of numbers". The
+factorization consists of numbers, as against the symbolic one, which consists of structure. It
+is not a study of numbers. The field is near-unanimous here (Davis, SuiteSparse, MUMPS,
+UMFPACK, PARDISO all say "numeric factorization"), so this is a term of art and not a matter of
+taste.
+
+Keep *numerical* for the mathematics, where it is correct: **numerical stability**, **numerical
+pivoting**, **numerical rank**, **numerical analysis**. Those really are about the manipulation
+of numbers.
+
+The pair is not parallel, which is why only one half of it ever feels uncertain: *symbolic* has
+no competing form (there is no "symbolical"), so the ambiguity is entirely on the numeric side.
+Knowing that is half of not second-guessing it.
+
+Short forms: `SymFactor` / `symfactor` and `NumFactor` / `numfactor`.
+
+**Front is the noun, frontal the adjective.** A supernode has a *front* (its columns), so the
+field is `frontSize` and the prose says "front indices". A function may use the adjective, hence
+`gatherFrontalIndices`. The split is the ordinary one: the front is a thing, a frontal index is
+a kind of index. See CODING_RULES for the naming half of this.
+
+**Node and supernode, column and row, index.** These name the same object seen three ways, and
+all three are legitimate; the structure is symmetric, so an index is an index, and row `k`,
+column `k` and vertex `k` are the same `k`. Prefer the vocabulary of the context: matrix words
+(row, column, `colPtr`, `rowIdx`) when discussing `A` or `L` as matrices, graph words (node,
+supernode, parent, child) when discussing the elimination forest, and the neutral **index** and
+**sup** where the two meet, which is most of the symbolic factorization. `sup` is deliberately
+neutral: it reads as supernode or as supercolumn, and commits to neither.
+
 ## Document-specific style
 
 Conventions internal to a single document stay with that document, not here. For

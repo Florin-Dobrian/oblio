@@ -90,7 +90,7 @@ examples/           , usage examples
 
 This codebase is a C++17 modernization of Oblio 0.9, a sparse direct solver
 written circa 2003–2005. The algorithmic core, symbolic factorization,
-numerical factorization kernels, custom BLAS routines, solve engines, is
+numeric factorization kernels, custom BLAS routines, solve engines, is
 ported directly from the 0.9 source, not reimplemented. What is new is the
 wrapping: `enum class` instead of bare enums, a single `Val` template parameter
 instead of separate `*Real.h` / `*Complex.h` file pairs, `std::vector` storage

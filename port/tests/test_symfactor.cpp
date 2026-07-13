@@ -3,8 +3,8 @@
 #include "oblio/OrderEngine.h"
 #include "oblio/ElmForest.h"
 #include "oblio/ElmForestEngine.h"
-#include "oblio/SymFact.h"
-#include "oblio/SymFactEngine.h"
+#include "oblio/SymFactor.h"
+#include "oblio/SymFactorEngine.h"
 #include "oblio/Types.h"
 #include "test_util.h"
 #include <cstdint>
@@ -32,12 +32,12 @@ static SparseMatrix<double> fromEdges(std::size_t size,
     return SparseMatrix<double>(size,cp,ri,v);
 }
 
-// Compare a computed SymFact against the dense oracle. A fundamental supernode's columns
+// Compare a computed SymFactor against the dense oracle. A fundamental supernode's columns
 // share one sparsity pattern, so the supernode's index set is exactly the pattern of its
 // lowest column: its front indices are the supernode's own columns, its update indices
 // the rest. This holds in both regimes, a trivial supernode being the one-column case.
 static bool matchesOracle(const SparseMatrix<double>& A, const Permutation& p,
-                          const SymFact& s, std::size_t& fillOut){
+                          const SymFactor& s, std::size_t& fillOut){
     const auto pattern = OblioTest::denseFactorPattern(A, p);
     const std::size_t size = A.size();
     if(s.size()!=size) return false;
@@ -73,13 +73,13 @@ static bool matchesOracle(const SparseMatrix<double>& A, const Permutation& p,
     return true;
 }
 
-// Reconstruct the pattern of each factor column from a SymFact, in either regime. Column
+// Reconstruct the pattern of each factor column from a SymFactor, in either regime. Column
 // lc sits at some position t among its supernode's front indices; since a supernode's
 // index set is sorted and its front indices come first, the pattern of column lc is the
 // index set from position t onward. This is how numeric factorization will read a column,
 // and it must agree with the dense oracle whether or not supernodes were compressed.
 static bool columnPatternsMatch(const SparseMatrix<double>& A, const Permutation& p,
-                                const SymFact& s){
+                                const SymFactor& s){
     const auto pattern = OblioTest::denseFactorPattern(A,p);
     std::vector<std::size_t> posInFront(s.size(), 0);
     std::vector<std::size_t> cursor(s.supSize(), 0);
@@ -99,8 +99,8 @@ static bool columnPatternsMatch(const SparseMatrix<double>& A, const Permutation
 
 static bool runCase(const SparseMatrix<double>& A, const Permutation& p, std::size_t& fillOut,
                     Supernodes mode = Supernodes::Fundamental){
-    ElmForestEngine feng(mode); SymFactEngine seng;
-    ElmForest f; SymFact s;
+    ElmForestEngine feng(mode); SymFactorEngine seng;
+    ElmForest f; SymFactor s;
     if(!feng.compute(A,p,f)) return false;
     if(!seng.compute(A,p,f,s)) return false;
     // The offsets must bracket the index array exactly.
@@ -178,8 +178,8 @@ int main(){
     { // A dense 4x4: all four columns share a pattern, so one supernode spans them all.
       auto A=fromEdges(4,{{0,1},{0,2},{0,3},{1,2},{1,3},{2,3}});
       reqSym(A,"dense n=4           : symmetric");
-      ElmForestEngine feng; SymFactEngine seng;
-      Permutation p(4); ElmForest f; SymFact s;
+      ElmForestEngine feng; SymFactorEngine seng;
+      Permutation p(4); ElmForest f; SymFactor s;
       bool ok = feng.compute(A,p,f) && seng.compute(A,p,f,s);
       std::vector<std::int32_t> idx(s.rowIdx().begin(), s.rowIdx().end());
       ck(ok && s.supSize()==1 && s.frontSize()[0]==4 && s.updateSize()[0]==0
@@ -189,8 +189,8 @@ int main(){
     { // A single column hanging off a dense block: supernodes {0} and {1,2,3,4}.
       auto A=fromEdges(5,{{0,1},{1,2},{1,3},{1,4},{2,3},{2,4},{3,4}});
       reqSym(A,"tail n=5            : symmetric");
-      ElmForestEngine feng; SymFactEngine seng;
-      Permutation p(5); ElmForest f; SymFact s;
+      ElmForestEngine feng; SymFactorEngine seng;
+      Permutation p(5); ElmForest f; SymFactor s;
       bool ok = feng.compute(A,p,f) && seng.compute(A,p,f,s);
       ck(ok && s.supSize()==2 && s.frontSize()[0]==1 && s.updateSize()[0]==1
          && s.frontSize()[1]==4 && s.updateSize()[1]==0,
@@ -204,8 +204,8 @@ int main(){
     // forest and factor degenerate to the classic per-column form. The factor itself must
     // be identical to the compressed one; only the grouping into supernodes differs.
     { auto A=fromEdges(4,{{0,1},{0,2},{0,3},{1,2},{1,3},{2,3}});   // dense: 1 supernode when compressed
-      ElmForestEngine feng(Supernodes::Nodal); SymFactEngine seng;
-      Permutation p(4); ElmForest f; SymFact s;
+      ElmForestEngine feng(Supernodes::Nodal); SymFactorEngine seng;
+      Permutation p(4); ElmForest f; SymFactor s;
       bool ok = feng.compute(A,p,f) && seng.compute(A,p,f,s);
       bool allOne = true;
       for(std::size_t k=0;k<s.supSize();++k) if(s.frontSize()[k]!=1) allOne=false;
@@ -263,6 +263,6 @@ int main(){
       ck(bad==0, "random x200         : natural and AMD match oracle");
       ck(totalFill>0, "random x200         : fill exercised ("+std::to_string(totalFill)+" entries)"); }
 
-    std::cout<<"\nSymFact tests: "<<pass<<"/"<<(pass+fail)<<" passed\n";
+    std::cout<<"\nSymFactor tests: "<<pass<<"/"<<(pass+fail)<<" passed\n";
     return fail==0?0:1;
 }

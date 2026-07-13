@@ -1,4 +1,4 @@
-#include "oblio/SymFactEngine.h"
+#include "oblio/SymFactorEngine.h"
 
 #include <algorithm>
 
@@ -7,14 +7,14 @@ namespace Oblio {
 // Adapter: the factor's pattern needs only A's pattern, so the matrix overload pulls it out
 // and forwards. The implementation below is free of Val and compiled once.
 template<class Val>
-bool SymFactEngine::compute(const SparseMatrix<Val>& A, const Permutation& p,
-                            const ElmForest& f, SymFact& s) const {
+bool SymFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p,
+                            const ElmForest& f, SymFactor& s) const {
     return compute(A.colPtr(), A.rowIdx(), p, f, s);
 }
 
-bool SymFactEngine::compute(const std::vector<std::size_t>&  colPtr,
+bool SymFactorEngine::compute(const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,
-                            const Permutation& p, const ElmForest& f, SymFact& s) const {
+                            const Permutation& p, const ElmForest& f, SymFactor& s) const {
     if (colPtr.empty())
         return false;
     const std::size_t size = colPtr.size() - 1;
@@ -68,7 +68,7 @@ bool SymFactEngine::compute(const std::vector<std::size_t>&  colPtr,
     //   sp   into supPtr/rowIdx              the whole index set, front and update
     //
     // sp1 reads the child's index set, sp2 writes the parent's, keeping 0.9's 1-is-child,
-    // 2-is-parent pairing. The scratch pair mirrors SymFact's own, with front marking the
+    // 2-is-parent pairing. The scratch pair mirrors SymFactor's own, with front marking the
     // part it holds: frontSupPtr : frontRowIdx as supPtr : rowIdx.
     //
     // Rows and columns share one index space, the structure being symmetric, so an index is
@@ -132,7 +132,7 @@ bool SymFactEngine::compute(const std::vector<std::size_t>&  colPtr,
     return true;
 }
 
-void SymFactEngine::gatherFrontalIndices(const SymFact& s,
+void SymFactorEngine::gatherFrontalIndices(const SymFactor& s,
         std::vector<std::size_t>&  frontSupPtr,
         std::vector<std::int32_t>& frontRowIdx) const {
     // The offsets are the front sizes, accumulated.
@@ -151,7 +151,7 @@ void SymFactEngine::gatherFrontalIndices(const SymFact& s,
     }
 }
 
-void SymFactEngine::sortIndices(SymFact& s) const {
+void SymFactorEngine::sortIndices(SymFactor& s) const {
     const std::size_t numIdx = s.mRowIdx.size();
 
     // Count the supernodes each index appears in, then accumulate, giving the offsets of
@@ -181,7 +181,7 @@ void SymFactEngine::sortIndices(SymFact& s) const {
         }
 }
 
-template bool SymFactEngine::compute(const SparseMatrix<double>&, const Permutation&, const ElmForest&, SymFact&) const;
-template bool SymFactEngine::compute(const SparseMatrix<std::complex<double>>&, const Permutation&, const ElmForest&, SymFact&) const;
+template bool SymFactorEngine::compute(const SparseMatrix<double>&, const Permutation&, const ElmForest&, SymFactor&) const;
+template bool SymFactorEngine::compute(const SparseMatrix<std::complex<double>>&, const Permutation&, const ElmForest&, SymFactor&) const;
 
 } // namespace Oblio

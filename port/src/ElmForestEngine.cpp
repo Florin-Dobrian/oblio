@@ -87,7 +87,8 @@ void ElmForestEngine::computeParent(
     for (std::int32_t lk = 0; lk < static_cast<std::int32_t>(size); ++lk) {
         const std::int32_t ak = newToOld[lk];
         for (std::size_t ap = colPtr[ak]; ap < colPtr[ak + 1]; ++ap) {
-            const std::int32_t lj = oldToNew[rowIdx[ap]];
+            const std::int32_t aj = rowIdx[ap];       // a row of A, hence a column of L
+            const std::int32_t lj = oldToNew[aj];    // the same column, in L
             if (lj >= lk)
                 continue;   // later column or the diagonal itself
             std::int32_t r = lj;
@@ -211,7 +212,8 @@ void ElmForestEngine::computeColumnSizes(
         mark[lk] = lk;
         const std::int32_t ak = newToOld[lk];
         for (std::size_t ap = colPtr[ak]; ap < colPtr[ak + 1]; ++ap) {
-            const std::int32_t lj = oldToNew[rowIdx[ap]];
+            const std::int32_t aj = rowIdx[ap];       // a row of A, hence a column of L
+            const std::int32_t lj = oldToNew[aj];    // the same column, in L
             if (lj >= lk)
                 continue;   // later column or the diagonal itself
             std::int32_t r = lj;

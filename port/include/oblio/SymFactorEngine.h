@@ -1,6 +1,6 @@
 #pragma once
 
-// SymFactEngine.h - computes the symbolic factorization of a SparseMatrix under a
+// SymFactorEngine.h - computes the symbolic factorization of a SparseMatrix under a
 // given Permutation, from an already-computed ElmForest. Copies the forest
 // attributes the factor needs, then computes each supernode's index set as a
 // union: the sparsity patterns of the supernode's own front columns, plus the
@@ -16,7 +16,7 @@
 #include "oblio/SparseMatrix.h"
 #include "oblio/Permutation.h"
 #include "oblio/ElmForest.h"
-#include "oblio/SymFact.h"
+#include "oblio/SymFactor.h"
 
 #include <vector>
 #include <complex>
@@ -25,9 +25,9 @@
 
 namespace Oblio {
 
-class SymFactEngine {
+class SymFactorEngine {
 public:
-    SymFactEngine() = default;
+    SymFactorEngine() = default;
 
     // Compute the symbolic factorization of A under p, from the forest f.
     //
@@ -38,11 +38,11 @@ public:
     // factorization without inventing a scalar type to satisfy the signature.
     template<class Val>
     bool compute(const SparseMatrix<Val>& A, const Permutation& p,
-                 const ElmForest& f, SymFact& s) const;
+                 const ElmForest& f, SymFactor& s) const;
 
     bool compute(const std::vector<std::size_t>&  colPtr,
                  const std::vector<std::int32_t>& rowIdx,
-                 const Permutation& p, const ElmForest& f, SymFact& s) const;
+                 const Permutation& p, const ElmForest& f, SymFactor& s) const;
 
 private:
     // The front indices of each supernode, gathered contiguously. The map gives
@@ -54,7 +54,7 @@ private:
     //   reads:   s.mSize, s.mSupSize, s.mIdxToSupIdx, s.mFrontSize
     // The two outputs are scratch for the union recurrence, not fields of s, so they stay
     // out-parameters.
-    void gatherFrontalIndices(const SymFact& s,
+    void gatherFrontalIndices(const SymFactor& s,
                         std::vector<std::size_t>&  frontSupPtr,
                         std::vector<std::int32_t>& frontRowIdx) const;
 
@@ -67,10 +67,10 @@ private:
     //
     //   reads:   s.mSize, s.mSupSize, s.mSupPtr
     //   writes:  s.mRowIdx  (in place, permuted into sorted order)
-    void sortIndices(SymFact& s) const;
+    void sortIndices(SymFactor& s) const;
 };
 
-extern template bool SymFactEngine::compute(const SparseMatrix<double>&, const Permutation&, const ElmForest&, SymFact&) const;
-extern template bool SymFactEngine::compute(const SparseMatrix<std::complex<double>>&, const Permutation&, const ElmForest&, SymFact&) const;
+extern template bool SymFactorEngine::compute(const SparseMatrix<double>&, const Permutation&, const ElmForest&, SymFactor&) const;
+extern template bool SymFactorEngine::compute(const SparseMatrix<std::complex<double>>&, const Permutation&, const ElmForest&, SymFactor&) const;
 
 } // namespace Oblio

@@ -80,8 +80,8 @@ forced.
 that is subtle.**
 
 **Written: friend, and pass the object.** An engine is declared `friend` by exactly the object
-it fills, and by no other. `ElmForestEngine` writes `ElmForest`, `SymFactEngine` writes
-`SymFact`, `OrderEngine` writes `Permutation`. That is the complete list, and friendship exists
+it fills, and by no other. `ElmForestEngine` writes `ElmForest`, `SymFactorEngine` writes
+`SymFactor`, `OrderEngine` writes `Permutation`. That is the complete list, and friendship exists
 for no other purpose. Having granted it, pass the object rather than its fields: the engine can
 reach them regardless, so enumerating them in the signature restricts nothing and only makes it
 long. This is the subject of the entry above.
@@ -91,7 +91,7 @@ the engines read friendship on `SparseMatrix` and `Permutation`, on the theory t
 compact the signatures further. It compacts nothing. Every read already goes through an
 accessor returning a `const&`, so there is no copy to avoid and no access to gain: friendship
 would only let us write `A.mColPtr` where we write `A.colPtr()`, at the price of new friends on
-objects whose headers say plainly that they have no writer. `SymFactEngine` reads a dozen
+objects whose headers say plainly that they have no writer. `SymFactorEngine` reads a dozen
 fields of `ElmForest` and is not its friend, which is exactly right.
 
 **Read, and only part of the object is needed: take that part.** `SparseMatrix` is the one
@@ -139,7 +139,7 @@ this stale, and you must rebuild it before anything else reads it".
 
 **Three cases, and the third dissolves rather than trading off.**
 
-- **Objects we write through friendship** (`ElmForest`, `SymFact`): pass whole. This is what
+- **Objects we write through friendship** (`ElmForest`, `SymFactor`): pass whole. This is what
   the entry is about, and it is also 0.9's shape, whose `compress_()` is a member taking no
   arguments at all. Our array-passing came from following 10.12.
 - **Objects we only read, and take whole** (`Permutation`): pass whole. No friendship needed,
@@ -168,7 +168,7 @@ it actually consumes. A structural algorithm that demands a matrix is lying abou
 and it forces a caller holding only a graph to fabricate numbers to satisfy a signature that
 will ignore them. Both overloads are public for that reason: the lower one is not an internal
 shortcut, it is the **graph interface**. The whole structural pipeline,
-`OrderEngine -> ElmForestEngine -> SymFactEngine`, runs on a bare graph today: no `SparseMatrix`,
+`OrderEngine -> ElmForestEngine -> SymFactorEngine`, runs on a bare graph today: no `SparseMatrix`,
 no scalar type, no numbers. The rule would be right in any language, and we should not restate
 it as a fact about templates.
 
@@ -216,7 +216,7 @@ the derived one is simply wrong.
 **So: choice objects are freely constructible, derived-fact objects are engine-filled only.**
 `SparseMatrix` and `Permutation` are inputs in the sense that matters, they encode decisions
 the caller is entitled to make, so they take a full public interface for building and setting
-them. `ElmForest`, `SymFact` and the numeric factor to come are written only by their engine,
+them. `ElmForest`, `SymFactor` and the numeric factor to come are written only by their engine,
 through friend access, and expose read-only accessors. A caller-supplied elimination forest
 is meaningless at best and silently wrong at worst, so nothing is gained by permitting one,
 while a whole class of bugs is prevented by forbidding it.
@@ -264,7 +264,7 @@ capability. This is also not a departure from 0.9, whose symbolic factorization 
 front sizes from the map with exactly this loop; we merely compute them one stage earlier,
 on the forest, where they belong as an attribute.
 
-**SymFact stores its index sets flat, as 0.9 does, not as a vector of vectors.** This
+**SymFactor stores its index sets flat, as 0.9 does, not as a vector of vectors.** This
 follows directly from the flat-vs-VV decision below: the symbolic factor is written once
 into a structure whose size the forest already knows (`frontSize + updateSize` per
 supernode), so a flat buffer with per-supernode offsets is the right shape and stays
@@ -274,7 +274,7 @@ pointers into the index array, while we hold `std::size_t` offsets. Same layout,
 offsets bracket each supernode's block as `[s]`/`[s + 1]` and match the convention already
 used by `SparseMatrix`.
 
-**SymFact copies three links, not five.** The forest is doubly linked (parent, first and
+**SymFactor copies three links, not five.** The forest is doubly linked (parent, first and
 last child, next and previous sibling), because `computeHeight` walks it backward. Symbolic
 factorization only ever walks a child list forward, so it needs parent, first child and next
 sibling, and that is exactly what both 0.9 and 10.12 store in their symbolic object. We
@@ -307,8 +307,8 @@ incidentally reconfirms the forest's update sizes on the same matrices.
 
 *Partly measured (2026-07-12, `experiments/storage-options/`): the abstraction cost and the
 layout cost are now numbers, not guesses, and one of this entry's original claims is superseded
-by them. What remains provisional is the dynamic-numfact storage, still recorded ahead of having
-0.9's numfact code, and the flatten-or-not question the measurement reopened. See Status.*
+by them. What remains provisional is the dynamic-numfactor storage, still recorded ahead of having
+0.9's numfactor code, and the flatten-or-not question the measurement reopened. See Status.*
 
 **Not an API question, a data-structure question.** Flat storage (one contiguous buffer
 plus a per-column/per-supernode offset array, CSC style) versus vector-of-vectors (VV, one
@@ -325,15 +325,15 @@ up front: one allocation, contiguous streaming, cheap offsets to hand to BLAS. T
 flat is that each column's size must be known before filling; the cost of VV is scattered
 heap allocations (a cache miss at every column boundary) plus per-vector overhead.
 
-**Symfact and static numfact are flat.** Symbolic never grows: the elimination forest
+**Symfactor and static numfactor are flat.** Symbolic never grows: the elimination forest
 supplies `frontSize + updateSize` per supernode, so the flat buffer is sized exactly and
 each supernode's block is written once with a local cursor. This is what 0.9 does:
-`pointerToIndex` from the known sizes, then the union loop fills. A mutable symfact would be
+`pointerToIndex` from the known sizes, then the union loop fills. A mutable symfactor would be
 overkill; nobody patches a symbolic factor in place, one recomputes it after the matrix
 structure changes. Static numeric factorization is likewise write-once into a known
 structure. Both stay directly comparable to 0.9 buffer-for-buffer.
 
-**Dynamic numfact is why VV matters.** Dynamic LDL pivoting delays an unstable pivot and
+**Dynamic numfactor is why VV matters.** Dynamic LDL pivoting delays an unstable pivot and
 passes it up to an ancestor, so that ancestor's front acquires columns symbolic never
 predicted; its index set and value block grow at runtime by an amount unknowable until the
 numerics run. That is genuine mutability, arriving through the numerics rather than through
@@ -343,15 +343,15 @@ preallocate every front to its worst case (mostly wasted memory), or reflow the 
 each delay (O(nnz) per delay). Flat for dynamic is overkill; VV is the natural structure.
 
 **A hybrid can keep the stored object flat.** The dynamic structure is unpredictable only
-*during* elimination; once numfact finishes, every delay has resolved and the factor is a
+*during* elimination; once numfactor finishes, every delay has resolved and the factor is a
 fixed structure with known counts, so it is flattenable, we just cannot size the flat
 buffer until the numerics have run. The option on the table: dynamic (growable) working
-storage inside the numfact engine, then one flatten pass into the persistent flat factor.
+storage inside the numfactor engine, then one flatten pass into the persistent flat factor.
 The persistent factor is then uniformly flat whether it came from static or dynamic
-numfact, so the solve phase and the verification against 0.9 are identical either way, and
+numfactor, so the solve phase and the verification against 0.9 are identical either way, and
 dynamism becomes an implementation detail of the engine's scratch. The copy is O(nnz(L)),
-one pass, noise against numfact's O(flops), and we factor once and solve many. Two honest
-caveats: the flat factor is sized from the numfact *result*, not from symbolic (delayed
+one pass, noise against numfactor's O(flops), and we factor once and solve many. Two honest
+caveats: the flat factor is sized from the numfactor *result*, not from symbolic (delayed
 pivoting adds fill, so symbolic stays the static lower bound and the dynamic flat factor is
 a separate, post-hoc-sized object); and the flatten canonicalizes, it is copy-and-order
 into the fixed front-then-update sorted layout the solve expects, not a pure memcpy. An
@@ -389,7 +389,7 @@ pre-sized VV inner accept the same `base[cursor++] = i` fill.
 
 **One VV-only hazard: growth invalidates descriptors.** When a VV inner vector reallocates
 on growth its base pointer moves, so any cached `{ptr, len}` goes stale. For flat and
-symfact this never happens (read-only after fill), so the view is stable. For dynamic the
+symfactor this never happens (read-only after fill), so the view is stable. For dynamic the
 rule is grow, then fetch the descriptor, then stream; never hold a descriptor across a
 growth event. A `reserve()` per front to a symbolic-size-plus-margin reduces reallocations
 but cannot guarantee zero, so the fetch-after-growth discipline still governs. Delays land
@@ -450,10 +450,10 @@ free, so the temptation is to offer both everywhere. Most of that would be stora
   structural changes: each forces re-analysis anyway, so nobody applies them one at a time. And
   incremental assembly, the one place VV genuinely helps, has a better answer already: triplets,
   then convert once, with no per-column allocation at all.
-- **`SymFact`: CSC.** Write-once into a size the forest already knows
+- **`SymFactor`: CSC.** Write-once into a size the forest already knows
   (`frontSize + updateSize` per supernode). The textbook case for flat. VV buys it nothing.
-- **Static numfact: CSC**, for the same reason: write-once into a structure symbolic has sized.
-- **Dynamic numfact: VV.** Delayed pivoting grows a front at runtime by an amount symbolic never
+- **Static numfactor: CSC**, for the same reason: write-once into a structure symbolic has sized.
+- **Dynamic numfactor: VV.** Delayed pivoting grows a front at runtime by an amount symbolic never
   predicted, and the growth is local. This is the one place the algorithm genuinely mutates.
 
 **Flatten-or-not is now a real fork, not a foregone conclusion.** This entry originally treated
@@ -469,20 +469,20 @@ opposite, a dense front handed to BLAS level 3, `O(n^3)` arithmetic on `O(n^2)` 
 same miss amortizes over far more work. **We have predicted that VV-during-elimination is
 therefore affordable, and we have not measured it.** That prediction is what the entire dynamic
 design rests on, and it deserves its own study against a realistic front, not a sparse column
-scatter. Until then, treat "VV is affordable in numfact" as a hypothesis, not a result.
+scatter. Until then, treat "VV is affordable in numfactor" as a hypothesis, not a result.
 
 (Note also that the ~6x virtual-call figure this entry cites was carried over from the
 friend-access experiment and is *not* tested by storage-options, which has no virtual path. The
 question turned out not to arise, since the unifier needed no polymorphism at all.)
 
-**Status.** Settled: CSC for `A`, for symfact, and for static numfact. Settled: VV for dynamic
-numfact's working storage. Open: whether the persistent factor is flattened, and whether a
-VV-all-the-way numfact is viable, both of which want the BLAS-3 measurement above.
+**Status.** Settled: CSC for `A`, for symfactor, and for static numfactor. Settled: VV for dynamic
+numfactor's working storage. Open: whether the persistent factor is flattened, and whether a
+VV-all-the-way numfactor is viable, both of which want the BLAS-3 measurement above.
 
 Still unresolved, and unchanged: we do not have 0.9's numeric factorization code; none of the
-numfact sources are in the reference set, so how 0.9 stores dynamic fronts is unverified. It is
+numfactor sources are in the reference set, so how 0.9 stores dynamic fronts is unverified. It is
 entirely possible 0.9 does not do dynamic with flat, in which case 0.9 supports this split rather
-than contradicting it, but that is a prediction to check against the code. When the numfact code
+than contradicting it, but that is a prediction to check against the code. When the numfactor code
 surfaces: see whether the dynamic path uses growable per-front storage, worst-case
 preallocation, or reflow, and whether static and dynamic share a front representation. If 0.9
 already runs dynamic scratch into a flat result, the hybrid is a port; if 0.9 keeps a dynamic
@@ -562,7 +562,7 @@ The engine↔data access rule:
   `friend class OrderEngine` is removed; `OrderEngine` reads A via
   `colPtr()`/`rowIdx()`/`size()` and remains a friend only of `Permutation` (which
   it writes). `ElmForestEngine` already followed this (friend of `ElmForest` only).
-- **Numerical data classes** (`Factors`, …) still befriend their producing engines for
+- **Numeric data classes** (`Factors`, …) still befriend their producing engines for
   *writes*; their hot-path reads also go through public accessors with the
   bind-once/pointer discipline.
 - **Exposure stance (pragmatic, not purist):** exposing internals read-only is fine;
@@ -655,20 +655,20 @@ vs `friend`-direct access, with timing). Experiments use the already-settled sta
 (guarded explicit, `.cpp`, `mFoo`, `Oblio` namespace), so they double as worked
 references for those standards.
 
-## 2026-07-08, Numerical hot path: `friend` access, then BLAS (carried from 0.9)
+## 2026-07-08, Numeric hot path: `friend` access, then BLAS (carried from 0.9)
 
-The 0.9 design for numerical work, which the port preserves: **an engine reaches the
+The 0.9 design for numeric work, which the port preserves: **an engine reaches the
 data's contiguous block via `friend`, then hands that raw block to BLAS** wherever
 BLAS applies (gemv/gemm/syrk/trsm/potrf, via Accelerate on macOS). Not a new choice,
 this two-step (`friend` → BLAS) is how 0.9 does dense numerics.
 
-This *is* supernodal numerical factorization: supernodes are dense blocks embedded in
-the sparse structure, and the numerical phase is a long sequence of dense BLAS calls on
+This *is* supernodal numeric factorization: supernodes are dense blocks embedded in
+the sparse structure, and the numeric phase is a long sequence of dense BLAS calls on
 them, `syrk`/`gemm` for Schur-complement updates, `potrf`/`getrf` to factor the pivot
 block, `trsm` for the off-diagonal solve, repeated per supernode across the whole
 elimination. `FactorEngine` reaches each supernode's contiguous storage via `friend`
 and passes the pointer straight to BLAS, no copy, thousands of times per factorization.
-So `friend` isn't an optimization detail; it's the access mechanism the entire numerical
+So `friend` isn't an optimization detail; it's the access mechanism the entire numeric
 phase is built on. The `experiments/friend-access/` mat-vec is the single-block toy of
 this pattern.
 

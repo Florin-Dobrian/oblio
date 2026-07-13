@@ -37,17 +37,19 @@ bool OrderEngine::compute(const std::vector<std::size_t>&  colPtr,
         return orderAMD(size, colPtr, rowIdx, p);
 
     // A is stored full-symmetric; MMD wants the off-diagonal structure only.
-    // Strip the diagonal (no expansion needed, A already holds both triangles).
+    // Strip the diagonal (no expansion needed, A already holds both triangles). Columns are
+    // indices, so aj is an int32_t and the comparison against rowIdx[ap] needs no cast; ap is
+    // a position into A's arrays.
     std::vector<std::size_t> colPtrOff(size + 1, 0);
-    for (std::size_t j = 0; j < size; ++j)
-        for (std::size_t sp = colPtr[j]; sp < colPtr[j + 1]; ++sp)
-            if (static_cast<std::size_t>(rowIdx[sp]) != j) colPtrOff[j + 1]++;
+    for (std::int32_t aj = 0; aj < static_cast<std::int32_t>(size); ++aj)
+        for (std::size_t ap = colPtr[aj]; ap < colPtr[aj + 1]; ++ap)
+            if (rowIdx[ap] != aj) colPtrOff[aj + 1]++;
     for (std::size_t j = 0; j < size; ++j) colPtrOff[j + 1] += colPtrOff[j];
     std::vector<std::int32_t> rowIdxOff(colPtrOff[size]);
     std::vector<std::size_t> cur(colPtrOff.begin(), colPtrOff.end());
-    for (std::size_t j = 0; j < size; ++j)
-        for (std::size_t sp = colPtr[j]; sp < colPtr[j + 1]; ++sp)
-            if (static_cast<std::size_t>(rowIdx[sp]) != j) rowIdxOff[cur[j]++] = rowIdx[sp];
+    for (std::int32_t aj = 0; aj < static_cast<std::int32_t>(size); ++aj)
+        for (std::size_t ap = colPtr[aj]; ap < colPtr[aj + 1]; ++ap)
+            if (rowIdx[ap] != aj) rowIdxOff[cur[aj]++] = rowIdx[ap];
     return orderMMD(size, colPtrOff, rowIdxOff, p);
 }
 
@@ -63,6 +65,10 @@ bool OrderEngine::orderMMD(std::size_t size,
                            const std::vector<std::int32_t>& rowIdx,
                            Permutation& p) const {
     if (size == 0) return true;   // maps already sized to 0 by compute()
+
+    // Crossing into the vendored C API, which is int-based throughout. These casts are not the
+    // index/position crossings of our own type rules; they are the boundary of a foreign
+    // interface, and the arrays below exist only to feed it.
     const int N   = static_cast<int>(size);
     const int nnz = static_cast<int>(rowIdx.size());
 
@@ -98,7 +104,7 @@ bool OrderEngine::orderAMD(std::size_t size,
 
     for (int k = 0; k < N; ++k) {
         p.mNewToOld[k]    = static_cast<std::int32_t>(P[k]);
-        p.mOldToNew[static_cast<std::size_t>(P[k])] = static_cast<std::int32_t>(k);
+        p.mOldToNew[P[k]] = static_cast<std::int32_t>(k);
     }
     return true;
 }

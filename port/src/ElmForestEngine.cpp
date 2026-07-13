@@ -28,8 +28,8 @@ bool ElmForestEngine::compute(const std::vector<std::size_t>&  colPtr,
     // into fundamental supernodes.
     f.mSupSize = size;
     f.mIdxToSupIdx.resize(size);
-    for (std::size_t j = 0; j < size; ++j)
-        f.mIdxToSupIdx[j] = static_cast<std::int32_t>(j);
+    for (std::int32_t lj = 0; lj < static_cast<std::int32_t>(size); ++lj)
+        f.mIdxToSupIdx[lj] = lj;
 
     // The child, sibling and root links, then the front and update sizes. Both must
     // precede compression, whose merge test reads a column's only-child status from the
@@ -307,7 +307,7 @@ void ElmForestEngine::compressFundamental(ElmForest& f) const {
         seen[jj] = true;
     }
 
-    f.mSupSize = static_cast<std::size_t>(supSize);
+    f.mSupSize = supSize;   // the next free label is also the count
     f.mIdxToSupIdx.swap(idxToSupIdx);   // was the identity, now column -> supernode
     f.mParent.swap(parent);
     f.mFrontSize.swap(frontSize);
@@ -417,8 +417,8 @@ void ElmForestEngine::compressThreshold(ElmForest& f, std::size_t threshold) con
 
     // Carry the column map through.
     std::vector<std::int32_t> idxToSupIdx(size);
-    for (std::size_t j = 0; j < size; ++j)
-        idxToSupIdx[j] = supOldToNew[f.mIdxToSupIdx[j]];
+    for (std::int32_t lj = 0; lj < static_cast<std::int32_t>(size); ++lj)
+        idxToSupIdx[lj] = supOldToNew[f.mIdxToSupIdx[lj]];
 
     // Parent links and sizes of the merged supernodes. Scanning old supernodes in decreasing
     // order, the first one seen for a given survivor is the absorber itself (its label is the

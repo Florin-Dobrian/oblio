@@ -18,12 +18,12 @@ Permutation::Permutation(std::size_t size) {
 }
 
 void Permutation::setIdentity() {
-    // Fill the existing maps to the identity. Size is whatever was set at
-    // construction (already bounded by MAX_IDX), so the casts here cannot wrap.
+    // Fill the existing maps to the identity. The size was bounded by MAX_IDX at
+    // construction, so the counter cannot overflow an index.
     const std::size_t size = mOldToNew.size();
-    for (std::size_t i = 0; i < size; ++i) {
-        mOldToNew[i] = static_cast<std::int32_t>(i);
-        mNewToOld[i] = static_cast<std::int32_t>(i);
+    for (std::int32_t i = 0; i < static_cast<std::int32_t>(size); ++i) {
+        mOldToNew[i] = i;
+        mNewToOld[i] = i;
     }
 }
 
@@ -32,12 +32,14 @@ bool Permutation::isBijection(const std::vector<std::int32_t>& map) {
     if (size > MAX_IDX)
         return false;
 
-    // Every entry in range, and each value hit exactly once. A negative entry casts to
-    // a huge std::size_t, so the range test catches it.
+    // Every entry in range, and each value hit exactly once. The bounds are checked as
+    // indices, explicitly: a widening cast would turn a negative entry into a huge position
+    // and the range test would catch it by accident, which is a trick a reader has to know.
+    // Two comparisons say it outright.
     std::vector<bool> seen(size, false);
-    for (std::size_t i = 0; i < size; ++i) {
-        const std::size_t j = static_cast<std::size_t>(map[i]);
-        if (j >= size || seen[j])
+    for (std::int32_t i = 0; i < static_cast<std::int32_t>(size); ++i) {
+        const std::int32_t j = map[i];
+        if (j < 0 || j >= static_cast<std::int32_t>(size) || seen[j])
             return false;
         seen[j] = true;
     }
@@ -48,8 +50,8 @@ void Permutation::invert(const std::vector<std::int32_t>& map,
                          std::vector<std::int32_t>& inv) {
     const std::size_t size = map.size();
     inv.assign(size, 0);
-    for (std::size_t i = 0; i < size; ++i)
-        inv[static_cast<std::size_t>(map[i])] = static_cast<std::int32_t>(i);
+    for (std::int32_t i = 0; i < static_cast<std::int32_t>(size); ++i)
+        inv[map[i]] = i;
 }
 
 bool Permutation::setOldToNew(const std::vector<std::int32_t>& map) {
@@ -78,9 +80,9 @@ bool Permutation::compose(const Permutation& p) {
     // touched, so there is no aliasing. The new value then indexes newToOld, which
     // rebuilds the inverse as we go (every slot written exactly once, the composition
     // being a bijection), so no separate inversion pass is needed.
-    for (std::size_t i = 0; i < size; ++i) {
-        mOldToNew[i] = p.mOldToNew[static_cast<std::size_t>(mOldToNew[i])];
-        mNewToOld[static_cast<std::size_t>(mOldToNew[i])] = static_cast<std::int32_t>(i);
+    for (std::int32_t i = 0; i < static_cast<std::int32_t>(size); ++i) {
+        mOldToNew[i] = p.mOldToNew[mOldToNew[i]];
+        mNewToOld[mOldToNew[i]] = i;
     }
     return true;
 }
@@ -97,12 +99,12 @@ bool Permutation::validate() const {
     // Every old index maps into range, each new index hit exactly once, and the two
     // maps are consistent inverses.
     std::vector<bool> seen(size, false);
-    for (std::size_t i = 0; i < size; ++i) {
-        const std::size_t j = static_cast<std::size_t>(mOldToNew[i]);
-        if (j >= size || seen[j])
+    for (std::int32_t i = 0; i < static_cast<std::int32_t>(size); ++i) {
+        const std::int32_t j = mOldToNew[i];
+        if (j < 0 || j >= static_cast<std::int32_t>(size) || seen[j])
             return false;
         seen[j] = true;
-        if (static_cast<std::size_t>(mNewToOld[j]) != i)
+        if (mNewToOld[j] != i)
             return false;
     }
     return true;

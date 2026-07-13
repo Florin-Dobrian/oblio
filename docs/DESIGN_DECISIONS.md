@@ -512,11 +512,16 @@ size_t's range). Accepted deliberately: cleaner and more agile, and Oblio isn't 
 matrices past 2^31 structural indices for now. If that changes, widen the ID type to
 `std::int64_t` in one place.
 
-**Why `size_t` stays for offsets.** Offsets are never negative and can legitimately
-exceed 2^31 even when the ID *count* doesn't (a row-pointer indexes into `nnz`-length
-arrays). So they keep the full unsigned range and never carry a sentinel. This mirrors the
-graph's `GeneralGraph` exactly: `idx` (row-pointer) is `size_t`, `adj` (neighbour IDs) is
-`int32_t`.
+**Why `size_t` stays for positions.** A position is never negative and can legitimately exceed
+2^31 even when the index *count* does not: a row-pointer is a position into an `nnz`-length
+array, and `nnz` outgrows `n`. So positions keep the full unsigned range and never carry a
+sentinel. This mirrors the graph's `GeneralGraph` exactly: `idx` (the row-pointer) is `size_t`,
+`adj` (the neighbour indices) is `int32_t`.
+
+(CODING_RULES now calls these **indices** and **positions** rather than IDs and offsets, and
+bans the phrase "index into a vector": `index` names a matrix or graph entity, and reusing it
+for array access collides with that meaning exactly where the distinction matters. Same
+distinction, sharper words.)
 
 **No signed/unsigned friction, because loop counters stay `std::size_t`.** g2_csr
 demonstrates the discipline: counters that enumerate positions are `size_t` (so they

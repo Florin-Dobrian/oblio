@@ -69,7 +69,7 @@ softer layer: conventions for consistency, not correctness.
     nothing below it takes more than it needs. Do not repeat the pattern on each private
     helper: once the entry point has unpacked the object, the helpers already have the part
     they need, and a second layer of adapters would have no callers. All three engines
-    (`OrderEngine`, `ElmForestEngine`, `SymFactEngine`) have exactly one adapter, on `compute`.
+    (`OrderEngine`, `ElmForestEngine`, `SymFactorEngine`) have exactly one adapter, on `compute`.
 
 - **Prefer passing the whole object over passing its pieces**, where doing so does not drag
   in a template parameter the callee has no use for. Passing an object's fields to a function
@@ -82,13 +82,13 @@ softer layer: conventions for consistency, not correctness.
   engine takes.
 
   - **Written -> friend, pass the object.** An engine is declared `friend` by exactly the
-    object it fills, and by no other. `ElmForestEngine` writes `ElmForest`, `SymFactEngine`
-    writes `SymFact`, `OrderEngine` writes `Permutation`. Pass the object, not its fields:
+    object it fills, and by no other. `ElmForestEngine` writes `ElmForest`, `SymFactorEngine`
+    writes `SymFactor`, `OrderEngine` writes `Permutation`. Pass the object, not its fields:
     the engine can reach them anyway, so listing them only lengthens the signature. What a
     signature cannot say (which fields the callee leaves *stale*) goes in the comment.
   - **Read -> pass the object, public API, no friendship.** Reading needs no friend. The
     accessors return `const&`, so there is no copy to avoid and no access to gain; friendship
-    would spend encapsulation for nothing. `SymFactEngine` reads a dozen fields of `ElmForest`
+    would spend encapsulation for nothing. `SymFactorEngine` reads a dozen fields of `ElmForest`
     through its accessors and is not its friend.
   - **Read, and only the structure is needed -> take only the structure.** See below.
 
@@ -129,33 +129,86 @@ softer layer: conventions for consistency, not correctness.
   for the original ordering of `A`: `lj`, `lk`, `aj`, `ak`. This keeps 10.12's ordering
   distinction and 0.9's column roles at once, where each reference had only one of them.
 
-  **Rows are `i`, columns are `j` and `k`. The prefix is the matrix: `a` for `A`, `l` for `L`.**
-  So `aj`, `ak`, `ai` are a column, a column and a row of `A`; `lj`, `lk`, `li` the same three
-  in `L`. Two letters, and both of them mean something.
+  **Two kinds of thing, and they must not be confused: an index and a position.**
 
-  Nothing more is needed, and nothing less will do. `j` and `k` are columns, `j` the lower and
-  `k` the higher; `i` is a row. They do turn into rows where the two meet (`A[k][j]` names an
-  entry, so `k` indexes a row there), and that is not a problem: rows and columns share one index
-  space, the structure being symmetric, so an index is an index and the letter says what it is
-  *for*, not what it *is*. The prefix says which matrix's numbering it is in, and the two
-  numberings are connected by exactly one thing, the `Permutation`: `oldToNew[aj] == lj` and
+  An **index** identifies a matrix or graph entity: a row, a column, a node, a supernode. These
+  are the same kind of thing (rows, columns and vertices share one index space, the structure
+  being symmetric; supernodes have their own space), and any of them may need to say "none", so
+  an index is a **`std::int32_t`** and its sentinel is `NIL`.
+
+  A **position** is an offset into a vector. It identifies nothing; it locates something inside
+  one particular flat array, and means nothing outside it. A position is a **`std::size_t`**: it
+  measures, so it is never negative, never `NIL`, and free to exceed 2^31.
+
+  **An index becomes a position when we use it to select from a vector.** That is the one place
+  the two meet, and it is where care is needed: turning `NIL` into a position yields `SIZE_MAX`
+  and reads a mile past the end. The remedy is a guard (`if (kk != NIL)`), never a cast; see the
+  index-type rules below, where this is spelled out.
+
+  So the storage rule falls out. **A vector holding indices is a `std::vector<std::int32_t>`, and
+  a vector holding positions is a `std::vector<std::size_t>`. Both are accessed by position.**
+  `rowIdx` holds indices; `colPtr` holds positions; both are subscripted by a position.
+
+  **Do not say "index into a vector".** It is ordinary English, and that is exactly the problem:
+  `index` is reserved here for a matrix or graph entity, and reaching for it to mean array access
+  collides with that meaning at the moment the distinction matters most. Say **position**.
+  (*Offset* would also do, but it suggests a delta rather than a location, so position is
+  better.)
+
+  **And `colPtr` is not a pointer.** Neither are `supPtr` or `frontSupPtr`. They hold positions,
+  `std::size_t` offsets into a flat array. The `Ptr` is inherited vocabulary, universal in sparse
+  matrix codes (0.9, 10.12, CSparse, SuiteSparse all say `colptr` or `Ap`), and we keep it for
+  that reason alone. It is a name, not a claim about the type.
+
+  **Indices are global.** There are exactly six, and there will only ever be six, because there
+  are two orderings and three roles:
+
+  ```
+  aj  ak  ai      a column, a column and a row, in A's ordering
+  lj  lk  li      the same three, in the factor's ordering
+  ```
+
+  Rows are `i`, columns are `j` and `k`, with `j` the lower and `k` the higher. They do turn into
+  rows where the two meet (`A[k][j]` names an entry, so `k` indexes a row there), and that is not
+  a problem: rows and columns share one index space, the structure being symmetric, so an index
+  is an index and the letter says what it is *for*, not what it *is*. Every structure in the
+  solver, `A`, the forest, the symbolic factor, the numeric factor, indexes into that one space.
+
+  **Strictly, the prefix is the ordering, not the matrix.** "`a` for `A`, `l` for `L`" is the
+  mnemonic, and a good one, but what the prefix records is *which numbering the index is in*:
+  `A`'s original one, or the permuted one the factor is computed in. There is exactly one of
+  each, and they are connected by exactly one thing, the `Permutation`: `oldToNew[aj] == lj` and
   `newToOld[lk] == ak`. A line that converts between them should read as the conversion it is.
 
-  (10.12 writes `lc`/`lr` for column and row and drops the role distinction; 0.9 writes bare `j`
-  and `k` and drops the matrix distinction. We keep both, at a cost of one character.)
+  The distinction matters because `L` is not one matrix. Cholesky computes an `L` with
+  `A = LL^T`; static and dynamic LDL compute a different `L` with `A = LDL^T`, unit lower
+  triangular, not absorbing the square root of `D`. Numerically these are different factors, and
+  some texts write `A = CC^T` for the first precisely to keep `L` free for the second. But they
+  share one structure and one index space, which is why the elimination forest and the symbolic
+  factorization are computed once and serve all three. So `lk` means the same thing regardless of
+  which factorization is running, and it should: an index has no business knowing.
 
-  **A position into a flat array is named for the array it walks**, since several coexist:
+  (10.12 writes `lc`/`lr` for column and row and drops the role distinction; 0.9 writes bare `j`
+  and `k` and drops the ordering distinction. We keep both, at a cost of one character.)
+
+  **Positions are local to a structure, and named for the array they walk.** Unlike indices there
+  is no fixed set: each flat structure brings its own, and the name says which:
 
   - `ap` into `A`'s `colPtr`/`rowIdx`
-  - `fp` into `frontSupPtr`/`frontRowIdx`, the front indices alone
+  - `fp` into `frontSupPtr`/`frontRowIdx`, a supernode's front indices alone
   - `sp` into `supPtr`/`rowIdx`, a supernode's whole index set, front and update
+  - `lp` into the numeric factor's arrays, when it arrives
 
   0.9 calls all of these `p`; we cannot, since `p` is the `Permutation`, and in any case the
-  prefix is more useful than the bare letter. Note the distinction is *what the pointer indexes*,
-  not which storage it lives in: `fp` and `sp` both walk factor-side arrays, but one holds only
-  front indices and the other the whole set, and that is the distinction the symbolic union
-  turns on. Positions measure rather than name, so they are `std::size_t`, cannot be `NIL`, and
-  may exceed 2^31; the ID rules below do not apply to them.
+  prefix is more useful than the bare letter. The distinction is *what the array holds*, not
+  which storage it lives in: `fp` and `sp` both walk factor-side arrays, but one holds only front
+  indices and the other the whole set, and that is the distinction the symbolic union turns on.
+
+  **A position is not an index.** It cannot be compared with one, it means nothing outside its
+  own array, and it is a `std::size_t` because it measures rather than names: never negative,
+  never `NIL`, free to exceed 2^31, and outside the index-type rules below. The two meet only through a
+  dereference, `lk = frontRowIdx[fp]`, and code should make that step visible rather than nest
+  it.
 
   Scratch is `r` for the node a climb has reached and `t` for a general temporary.
 
@@ -165,8 +218,9 @@ softer layer: conventions for consistency, not correctness.
 - **Modern spellings, pin one per historical variation** (check this list before
   reintroducing an old form):
   - source files: **`.cpp`**, not `.cc` (headers `.h`)
-  - size/index type: **`std::size_t`** for offsets/counts, **`std::int32_t`** for IDs,
-    never bare `size_t`/`int32_t`, see the std-types and index-type rules below
+  - index types: **`std::int32_t`** for indices (which name something and may be `NIL`),
+    **`std::size_t`** for positions (which measure), never bare `size_t`/`int32_t`; see the
+    std-types and index-type rules below
   - aliases: **`using`**, not `typedef`
   - null pointer: **`nullptr`**, not `NULL`
   - enums: **`enum class`**, not bare `enum`
@@ -201,42 +255,47 @@ softer layer: conventions for consistency, not correctness.
   bare forms (`size_t`) rely on a global-namespace leak that isn't guaranteed by the
   C++ headers. This is the correct spelling even where a matching codebase uses the
   bare form, that codebase is the one to fix, not this one.
-- **Index types, IDs vs offsets** (the graph/matrix convention; see the design
-  decision for the full rationale):
-  - **IDs**, values that name a vertex/row/column/supernode and may carry a "none"
-    sentinel → **`std::int32_t`**. E.g. `SparseMatrix::rowIdx`, permutation maps,
-    `ElmForest` parent/child/sibling/supernode-map arrays. Sentinel is
-    **`NIL = -1`** (a `constexpr std::int32_t`), never `static_cast<std::size_t>(-1)`.
-    Cost: ~2.1 billion index cap, accepted for a clean signed sentinel, matching the
-    graph code and the vendored `int`-based AMD/MMD.
-  - **Offsets / counts / sizes**, row-pointers, `nnz`, dimensions, anything that
-    indexes-into or measures → **`std::size_t`**. Never negative, may exceed 2^31.
-    E.g. `SparseMatrix::colPtr`, `size()`, `nnz()`.
-  - **Loop counters are `std::size_t`.** A counter enumerates real positions (never
-    negative, never the sentinel), so the unsigned view is safe and avoids
-    signed/unsigned comparison against `.size()`. Do **not** loop with an `int32_t`
-    counter compared to a container size.
-  - **Cast only where information can be lost, which is one direction, not two:**
-    `static_cast<std::int32_t>(x)` when a `std::size_t` becomes an ID (**narrowing**; this is
-    where the 2^31 cap lives, and the compiler warns without it). The other direction needs
-    nothing: subscripting a container with an `std::int32_t` is legal, is silent under
-    `-Wall -Wextra`, and is correct for every value that is not `NIL`. Write `parent[jj]`, not
+- **Index types.** The same index/position split as in the naming rules above, now as types.
+  (The design decision calls these IDs and offsets, which is the older vocabulary for the same
+  thing.)
+
+  - **An index is a `std::int32_t`.** It names a vertex, row, column or supernode, and may
+    carry the sentinel **`NIL = -1`** (a `constexpr std::int32_t`, never
+    `static_cast<std::size_t>(-1)`). E.g. `SparseMatrix::rowIdx`, the permutation maps, the
+    forest's parent/child/sibling/map arrays. Cost: a ~2.1 billion cap, accepted for a clean
+    signed sentinel, and matching the graph code and the vendored `int`-based AMD/MMD.
+  - **A position is a `std::size_t`.** It measures rather than names: an offset into a buffer,
+    a count, a dimension. Never negative, never `NIL`, free to exceed 2^31. E.g.
+    `SparseMatrix::colPtr`, `size()`, `nnz()`.
+  - **A loop counter takes the type of what it counts.** A loop over *entities* (columns,
+    supernodes) counts indices, so the counter is `std::int32_t` and the bound is cast once in
+    the condition: `for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(supSize); ++kk)`.
+    The cast is loop-invariant and costs nothing. A loop over *positions* (an offset into
+    `colPtr`, a descending count-down) counts nothing that has a name, so it is `std::size_t`:
+    `for (std::size_t ap = colPtr[ak]; ap < colPtr[ak + 1]; ++ap)`. What is forbidden is an
+    `int32_t` counter compared against a container size *without* the cast, which is where the
+    signed/unsigned warning comes from.
+
+  Three rules about casting, and they matter more than they look, since we got each of them
+  wrong at least once.
+
+  - **Cast in one direction only, the one that loses information.**
+    `static_cast<std::int32_t>(x)`, when a `std::size_t` becomes an index. That is where the
+    2^31 cap lives, and the compiler warns without it. The other direction needs nothing:
+    subscripting a container with an `std::int32_t` is legal, is silent under `-Wall -Wextra`,
+    and is correct for every value that is not `NIL`. Write `parent[jj]`, never
     `parent[static_cast<std::size_t>(jj)]`.
   - **A widening cast is not a NIL guard, and must not be mistaken for one.**
     `static_cast<std::size_t>(NIL)` yields `SIZE_MAX` exactly as silently as the implicit
-    conversion would: the cast performs the mistake, it does not prevent it. What prevents it
-    is a branch, `if (kk != NIL)`, and that branch is required whether or not a cast is
-    written. Adding casts "for safety" buys nothing and costs a great deal of noise.
-  - **One name per entity, and this includes sizes.** `j`, `k`, `jj`, `kk` are `std::int32_t`,
-    because they name things and may carry `NIL`. Do not introduce a second variable holding the
-    same value in the other type: a reader then has to check whether the two are really the same
-    thing. That applies to **counts and sizes** just as much as to IDs, `const std::int32_t n =
-    static_cast<std::int32_t>(size);` is the same mistake wearing different clothes, and it is
-    easy to make precisely because a size feels too humble to need the rule. Where an ascending
-    loop counts entities, the counter is that entity's type (`std::int32_t`) and the *bound* is
-    cast in the loop condition (`k < static_cast<std::int32_t>(size)`), which is loop-invariant
-    and costs nothing. Where a loop counts *positions* rather than entities (an offset into
-    `colPtr`, or a descending count-down), it is a `std::size_t` and names nothing.
+    conversion would: **the cast performs the mistake, it does not prevent it.** What prevents
+    it is a branch, `if (kk != NIL)`, and that branch is required whether or not a cast is
+    written. Casts added "for safety" buy nothing and cost a great deal of noise.
+  - **One name per entity, and this includes sizes.** Do not introduce a second variable holding
+    the same value in the other type: a reader then has to check whether the two are really the
+    same thing. This applies to **counts and sizes** as much as to indices, and
+    `const std::int32_t n = static_cast<std::int32_t>(size);` is the same mistake wearing
+    different clothes. It is easy to make precisely because a size feels too humble to need the
+    rule.
 
 - Beyond the spellings above, `.clang-tidy` (`modernize-*`) and `.clang-format` also
   handle idiom cleanups (e.g. `.data()` over raw-pointer extraction) and formatting.

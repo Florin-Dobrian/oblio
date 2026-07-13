@@ -224,6 +224,111 @@ std::vector<std::vector<Val>> gridLaplacian(std::size_t g, std::mt19937& rng) {
     return A;
 }
 
+// Reconstruct the matrix from an LDL factor: L D L^T (or L D L^H) must equal P A P^T.
+//
+// A different kind of oracle from Cholesky's, and a better one where it applies. Cholesky is
+// compared against an independently written dense Cholesky, which is a *second implementation*.
+// LDL is checked by **reconstruction**, which needs no second implementation at all: multiply the
+// factor back out and see whether the matrix comes back. That checks D, L, the storage layout and
+// the supernodal assembly in one statement, and it works unchanged for all three symmetries.
+//
+// The factor's layout, which the reconstruction has to know:
+//
+//   the diagonal        holds D
+//   below it            holds L, which is UNIT lower triangular (the 1s are implicit)
+//   above it            holds U = D L^T, which we ignore: L and D are enough to rebuild A
+template<class Val>
+double reconstructLdl(const NumFactorStatic<Val>& f,
+                      const std::vector<std::vector<Val>>& permuted, bool hermitian) {
+    const std::size_t n = permuted.size();
+    std::vector<std::vector<Val>> L(n, std::vector<Val>(n, Val(0)));
+    std::vector<Val> D(n, Val(0));
+
+    for (std::size_t kk = 0; kk < f.supSize(); ++kk) {
+        const std::size_t   frontSize = f.frontSize()[kk];
+        const std::size_t   numIdx    = frontSize + f.updateSize()[kk];
+        const std::int32_t* rowIdx    = f.rowIdx().data() + f.supPtr()[kk];
+        const Val*          block     = f.val().data() + f.valPtr()[kk];
+
+        for (std::size_t lclCol = 0; lclCol < frontSize; ++lclCol) {
+            const std::size_t col = static_cast<std::size_t>(rowIdx[lclCol]);
+            D[col]      = block[lclCol * numIdx + lclCol];
+            L[col][col] = Val(1);
+            for (std::size_t lclRow = lclCol + 1; lclRow < numIdx; ++lclRow)
+                L[static_cast<std::size_t>(rowIdx[lclRow])][col] =
+                    block[lclCol * numIdx + lclRow];
+        }
+    }
+
+    double worst = 0;
+    for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t j = 0; j <= i; ++j) {
+            Val s(0);
+            for (std::size_t k = 0; k <= j; ++k) {
+                const Val ljk = hermitian ? conj_(L[j][k]) : L[j][k];
+                s += L[i][k] * D[k] * ljk;
+            }
+            worst = std::max(worst, std::abs(s - permuted[i][j]));
+        }
+    return worst;
+}
+
+// Factor with LDL, then reconstruct. Returns -1 if the factorization failed.
+template<class Val>
+double compareLdl(const SparseMatrix<Val>& A, const Permutation& p,
+                  const std::vector<std::vector<Val>>& dense,
+                  Factorization factorization, Traversal traversal, std::size_t& perturbations) {
+    ElmForest f;
+    ElmForestEngine fe;
+    if (!fe.compute(A, p, f)) return -1;
+
+    SymFactor s;
+    SymFactorEngine se;
+    if (!se.compute(A, p, f, s)) return -1;
+
+    NumFactorStatic<Val> nf;
+    NumFactorEngine ne(factorization, traversal);
+    if (!ne.compute(A, p, s, nf)) return -1;
+    perturbations += nf.numPerturbations();
+
+    const std::size_t n = dense.size();
+    const std::vector<std::int32_t>& newToOld = p.newToOld();
+    std::vector<std::vector<Val>> permuted(n, std::vector<Val>(n, Val(0)));
+    for (std::size_t li = 0; li < n; ++li)
+        for (std::size_t lj = 0; lj < n; ++lj)
+            permuted[li][lj] = dense[newToOld[li]][newToOld[lj]];
+
+    const bool hermitian = (factorization == Factorization::StaticLDLH
+                            || factorization == Factorization::DynamicLDLH);
+    return reconstructLdl(nf, permuted, hermitian);
+}
+
+// A random complex SYMMETRIC matrix (A = A^T, not Hermitian), which is what LDLT is for and what
+// Cholesky may never be handed. Diagonally dominant, so the pivots stay away from zero.
+std::vector<std::vector<Cplx>> randomComplexSymmetric(std::size_t n, std::mt19937& rng) {
+    std::vector<std::vector<Cplx>> A(n, std::vector<Cplx>(n, Cplx(0)));
+    std::uniform_real_distribution<double> u(-1.0, 1.0);
+    for (std::size_t i = 1; i < n; ++i) {
+        const Cplx v(u(rng), u(rng));
+        A[i][i - 1] = v;
+        A[i - 1][i] = v;          // plain transpose, NOT conjugate
+    }
+    for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t j = i + 2; j < n; ++j)
+            if (rng() % 100 < 25) {
+                const Cplx v(u(rng), u(rng));
+                A[j][i] = v;
+                A[i][j] = v;
+            }
+    for (std::size_t i = 0; i < n; ++i) {
+        double off = 0;
+        for (std::size_t j = 0; j < n; ++j)
+            if (i != j) off += std::abs(A[i][j]);
+        A[i][i] = Cplx(off + 1.0, 0.0);
+    }
+    return A;
+}
+
 } // namespace
 
 int main() {
@@ -317,6 +422,53 @@ int main() {
            + std::to_string(heightNat) + "; AMD cuts supernodes "
            + std::to_string(supNat) + "->" + std::to_string(supAmd)
            + ", indices " + std::to_string(idxNat) + "->" + std::to_string(idxAmd) + ")");
+    }
+
+    // Static LDL. Three symmetries, two traversals, checked by reconstruction.
+    {
+        OrderEngine ord(OrderMethod::AMD);
+        int ldlFail = 0;
+        std::size_t perturbations = 0;
+        double wR = 0, wCs = 0, wCh = 0;
+
+        for (int trial = 0; trial < 30; ++trial) {
+            const std::size_t n = 5 + rng() % 12;
+
+            const auto denseR  = randomHpd<double>(n, rng, 25);          // real symmetric
+            const auto denseCs = randomComplexSymmetric(n, rng);         // complex symmetric
+            const auto denseCh = randomHpd<Cplx>(n, rng, 25);            // complex Hermitian
+
+            const SparseMatrix<double> AR  = toSparse(denseR);
+            const SparseMatrix<Cplx>   ACs = toSparse(denseCs);
+            const SparseMatrix<Cplx>   ACh = toSparse(denseCh);
+
+            Permutation pNat(n), pAmd;
+            if (!ord.compute(AR, pAmd)) { ++ldlFail; continue; }
+
+            for (Traversal tr : {Traversal::LeftLooking, Traversal::RightLooking}) {
+                const double dr  = compareLdl(AR,  pAmd, denseR,  Factorization::StaticLDLT, tr, perturbations);
+                const double dcs = compareLdl(ACs, pAmd, denseCs, Factorization::StaticLDLT, tr, perturbations);
+                const double dch = compareLdl(ACh, pAmd, denseCh, Factorization::StaticLDLH, tr, perturbations);
+                if (dr < 0 || dcs < 0 || dch < 0) ++ldlFail;
+                else {
+                    wR  = std::max(wR,  dr);
+                    wCs = std::max(wCs, dcs);
+                    wCh = std::max(wCh, dch);
+                }
+            }
+        }
+
+        ck(ldlFail == 0 && wR < tol,
+           "LDLT real           : L D L^T reconstructs A, both traversals");
+        ck(ldlFail == 0 && wCs < tol,
+           "LDLT complex        : L D L^T reconstructs A (complex SYMMETRIC, D complex)");
+
+        // 0.9 does not have this one at all: its complex LDL is symmetric only.
+        ck(ldlFail == 0 && wCh < tol,
+           "LDLH complex        : L D L^H reconstructs A (complex HERMITIAN, D real)");
+
+        ck(perturbations == 0,
+           "LDL                 : no perturbations needed (diagonally dominant input)");
     }
 
     std::cout << "\nNumFactor tests: " << pass << "/" << (pass + fail) << " passed\n";

@@ -58,6 +58,15 @@ public:
     std::size_t numRowIdx() const { return mNumRowIdx; }
     std::size_t numVal()    const { return mNumVal; }
 
+    // How many pivots the factorization had to replace.
+    //
+    // Only LDL can perturb, and only because it must: a *static* factorization does not pivot, so
+    // a pivot too small to divide by has no remedy but replacement. A nonzero count means we
+    // factored a matrix slightly different from the one handed to us, and the caller is entitled
+    // to know. Cholesky never perturbs; it fails instead, which is what positive definiteness
+    // entitles it to do.
+    std::size_t numPerturbations() const { return mNumPerturbations; }
+
     // Column to supernode.
     const std::vector<std::int32_t>& idxToSupIdx() const { return mIdxToSupIdx; }
 
@@ -90,6 +99,8 @@ private:
     std::size_t              mNumVal = 0;
     std::vector<std::size_t> mValPtr;
     std::vector<Val>         mVal;
+
+    std::size_t mNumPerturbations = 0;
 
     friend class NumFactorEngine;
     friend class SolveEngine;

@@ -46,11 +46,11 @@ differ.
 | ElmForestEngine | no | checked | parent links, child/sibling links, roots, height, column sizes, fundamental compression, threshold amalgamation. Links and height recomputed independently; sizes and supernodes against the dense oracle, natural and AMD ordered. Amalgamation is greedy and not canonical, so only its tie-break-invariant properties are asserted |
 | SymFactor | no | checked | 0.9 `Symbolic`; flat index sets with per-supernode offsets |
 | SymFactorEngine | no | checked | 0.9 `SymbolicEngine`; index sets against the dense oracle, natural and AMD ordered. 10.12's design, 0.9's behavior (see DESIGN_DECISIONS) |
-| BlasLapack | yes | checked | wraps potrf/trsm/herk/syrk/gemm, overloaded on the scalar type. Named by *operation*, not routine: `herk` means A times A-conjugate-transpose, so it is `dsyrk_` for real and `zherk_` for complex, and the engine cannot pick the wrong one (0.9 does; see DESIGN_DECISIONS). One trait, `Blas<Val>::conjTrans`. Verified on hand-computed real SPD and complex Hermitian factors |
+| BlasLapack | yes | checked | wraps potrf/trsm/herk/syrk/gemm, overloaded on the scalar type. Named by *operation*, not routine: `herk` means A times A-conjugate-transpose, so it is `dsyrk_` for real and `zherk_` for complex, and the engine cannot pick the wrong one (0.9 does; see DESIGN_DECISIONS). One trait, `Blas<Val>::conjTrans`. Also carries the three kernels BLAS lacks, ported from 0.9: `ldl` (unpivoted LDL, 0.9's `OBLIO_POTRF2`), `formUpper` (`U = D L^T`, `OBLIO_COMPUTE_U`), `gemmLower` (`A -= L U` with the product known symmetric, `OBLIO_GEMM`). Verified on hand-computed factors and by reconstruction, 1x1 to 23x23 |
 | UpdateBlock | yes | checked | 0.9 `Temporary`; one supernode's update to one ancestor, dense column-major plus its row indices. Not the multifrontal update matrix, which is a different object |
 | NumFactorStatic | yes | checked | 0.9 `FactorsStatic`; SymFactor's structure copied, plus one flat value buffer with per-supernode offsets. Blocks are dense column-major rectangles (the upper front triangle is allocated and zero, so BLAS can take the whole block) |
 | NumFactorDynamic | yes | not started | 0.9 `FactorsDynamic`; a placeholder. Same fields, one buffer per supernode so a front can grow under delayed pivoting. No base class shared with the static one: `experiments/storage-options` showed a pointer array does the job a base would |
-| NumFactorEngine | yes | checked | Cholesky, left- and right-looking, real and complex Hermitian. Verified against a dense Cholesky, entry for entry, to 4e-16 on 60 random matrices per combination. **Does not yet validate that a complex input is Hermitian** (see Owed). Static LDL, dynamic LDL and multifrontal not started |
+| NumFactorEngine | yes | checked | **Static factorizations functionally complete**: `Cholesky`, `StaticLDLT`, `StaticLDLH`, each left- and right-looking, real and complex. Cholesky checked against an independent dense Cholesky (4e-16); LDL by reconstruction, `L D L^H == P A P^T` (2e-15), through AMD ordering and supernodes. `StaticLDLH` (complex Hermitian LDL) is an **extension**: 0.9's complex LDL is symmetric only. Gaps, both in Owed: the LDL **perturbation branch has never fired**, and a complex input is **not validated as Hermitian**. `DynamicLDLT`/`DynamicLDLH` and `Traversal::Multifrontal` not started |
 | Vector | yes | not started | |
 | MultiplyEngine | yes | not started | |
 | DenseMatrix | yes | not needed so far | a supernode's block is a raw pointer plus (rows, cols, ld), handed straight to BLAS. See Owed |
@@ -89,6 +89,15 @@ obviated by lambdas).
 
   Deferred deliberately: correct input gives correct output today, so this guards against misuse
   rather than fixing a defect. It must land before anyone but us runs the solver.
+
+- **The LDL perturbation branch has never executed.** A static factorization cannot pivot, so a
+  pivot smaller than the threshold is *replaced* and counted (`ldl`'s `n == 1` case;
+  `NumFactorStatic::numPerturbations` reports it). That branch is the only part of static LDL that
+  changes *what is computed* rather than how, and every test matrix so far is diagonally dominant,
+  so no pivot has ever been small enough to trigger it. It wants a matrix with a deliberately tiny
+  pivot, asserting both that the count is nonzero and that the reconstruction then differs from
+  `A` by about the perturbation, which is the honest statement of what perturbing means: we
+  factored a slightly different matrix, and said so.
 
 - **Statistics are not computed.** `setSymFactor` derives the value-block sizes it needs, but the
   aggregate counts 0.9 keeps (`numberOfEntries`, `numberOfAllocatedEntries`, the multifrontal

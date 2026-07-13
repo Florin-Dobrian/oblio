@@ -201,4 +201,70 @@ inline void gemm(char transa, char transb, int m, int n, int k,
     OBLIO_BLAS(zgemm)(&transa, &transb, &m, &n, &k, &alpha, a, &lda, b, &ldb, &beta, c, &ldc);
 }
 
+// ---------------------------------------------------------------------------------------------
+// What BLAS does not provide.
+//
+// LDL^T needs three things BLAS has no routine for, so 0.9 wrote them and we port them. They live
+// here, with the BLAS wrappers, because they are dense block kernels built on BLAS and belong
+// beside it, which is where 0.9 keeps them too.
+//
+// Why LAPACK cannot help: there is **no unpivoted LDL^T in LAPACK**. `?sytrf` is Bunch-Kaufman,
+// which pivots, and pivoting is precisely what a *static* factorization does not do. So the
+// kernel is ours.
+//
+// The storage, which is the thing to hold in mind. In a factored block:
+//
+//     the diagonal        holds D          (where L's implicit 1s would be)
+//     the lower triangle  holds L          unit lower triangular
+//     the upper triangle  holds U = D L^T  (or D L^H)
+//
+// So an LDL block uses the whole rectangle, where Cholesky leaves the upper triangle as zeros.
+// U is not redundant: the recursion needs D L^T in two places (to solve for the next L, and to
+// form the Schur complement), and computing it once and keeping it is cheaper than recomputing.
+//
+// The T/H distinction runs through all three. For `Factorization::StaticLDLT` the transpose is
+// plain and D comes out complex; for `StaticLDLH` it is conjugate and D comes out real. Over the
+// reals they are the same computation.
+// ---------------------------------------------------------------------------------------------
+
+// Unpivoted LDL of a dense n x n block, in place. 0.9's OBLIO_POTRF2.
+//
+// Recursive: split in half, factor the leading block, solve for the off-diagonal, form its upper
+// counterpart, take the Schur complement, recurse. The base case is where the two variants of
+// 0.9's kernel differ, and it is the only place they differ:
+//
+//   OBLIO_POTRF1   fails if the pivot is not positive        (its stand-in for Cholesky)
+//   OBLIO_POTRF2   replaces a tiny pivot and counts it       (static LDL)
+//
+// We need only the second. **Perturbation is not an optional refinement**: a static factorization
+// cannot pivot, so a tiny pivot has no remedy but replacement. We then factor a slightly different
+// matrix, and say how many entries we moved, which is honest. `perturbation` is the threshold and
+// the replacement value both; `numPerturbations` counts them.
+//
+// Returns 0 always (unlike Cholesky, which can fail): there is no positive-definiteness to violate.
+template<class Val>
+int ldl(int n, Val* a, int lda, double perturbation, int* numPerturbations, bool hermitian);
+
+// U := D L^T (or D L^H), into the upper triangle. 0.9's OBLIO_COMPUTE_U.
+//
+// `l` is the n x k lower block, `d` the diagonal of the factored leading block, `u` the k x n
+// upper block to fill. Note U is the *transpose* shape of L, which is why the index walk is what
+// it is.
+template<class Val>
+void formUpper(int n, int k, const Val* l, int ldl, Val* u, int ldu,
+               const Val* d, int ldd, bool hermitian);
+
+// A -= L U, filling **only the lower triangle**, because the product is symmetric. 0.9's
+// OBLIO_GEMM.
+//
+// BLAS has no such routine: `syrk` does A A^T, and there is no "A B with the result known
+// symmetric". So this recurses, calling a plain GEMM on the off-diagonal blocks (which are not
+// symmetric) and itself on the diagonal ones (which are).
+//
+// It bottoms out at n == 1, which means one BLAS call per scalar on the diagonal. That is 0.9's
+// structure and we port it; whether to bottom out earlier is a performance question for later, not
+// a correctness one.
+template<class Val>
+void gemmLower(int n, int k, const Val* l, int ldl, const Val* u, int ldu, Val* a, int lda);
+
 }   // namespace Oblio

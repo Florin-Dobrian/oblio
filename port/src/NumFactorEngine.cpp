@@ -122,25 +122,42 @@ void NumFactorEngine::assembleUpdate(const std::vector<std::int32_t>& gblToLcl,
 }
 
 template<class Val>
-bool NumFactorEngine::factorSupernode(std::size_t frontSize, std::size_t numIdx,
-                                      Val* block) const {
+bool NumFactorEngine::factorSupernode(std::size_t frontSize, std::size_t numIdx, Val* block,
+                                      std::size_t& numPerturbations) const {
     const int f  = static_cast<int>(frontSize);
     const int u  = static_cast<int>(numIdx - frontSize);
     const int ld = static_cast<int>(numIdx);
 
-    // The front, which is the diagonal block: A11 = L11 L11^H.
-    int info = 0;
-    potrf('L', f, block, ld, &info);
-    if (info > 0)
-        return false;   // not positive definite: the leading minor of order `info` failed
+    if (mFactorization == Factorization::Cholesky) {
+        // The front, which is the diagonal block: A11 = L11 L11^H.
+        int info = 0;
+        potrf('L', f, block, ld, &info);
+        if (info > 0)
+            return false;   // not positive definite: the leading minor of order `info` failed
 
-    // The update rows: L21 = A21 (L11^H)^-1, solved in place.
-    //
-    // Blas<Val>::conjTrans is 'T' for real and 'C' for complex, which is the whole of what the
-    // scalar type decides here. 0.9 writes 'T' unconditionally, which is wrong for a complex
-    // Hermitian factor, and there is nothing at its call site to reveal that.
+        // The update rows: L21 = A21 (L11^H)^-1, solved in place.
+        //
+        // Blas<Val>::conjTrans is 'T' for real and 'C' for complex, which is the whole of what the
+        // scalar type decides here. 0.9 writes 'T' unconditionally, which is wrong for a complex
+        // Hermitian factor, and there is nothing at its call site to reveal that.
+        if (u > 0)
+            trsm('R', 'L', Blas<Val>::conjTrans, 'N', u, f, Val(1), block, ld, block + f, ld);
+
+        return true;
+    }
+
+    // LDL. The kernel is ours: LAPACK has no unpivoted LDL^T (its ?sytrf pivots, and pivoting is
+    // what a *static* factorization refuses to do). It cannot fail, because there is no positive
+    // definiteness to violate; a pivot too small to divide by is perturbed and counted.
+    int numPert = 0;
+    ldl(f, block, ld, mPerturbation, &numPert, hermitian());
+    numPerturbations += static_cast<std::size_t>(numPert);
+
+    // The update rows: L21 = A21 U11^-1, where U11 = D11 L11^H sits in the front's *upper*
+    // triangle. So the solve is against the upper, untransposed, which is exactly what storing U
+    // buys: Cholesky would have to transpose, and does.
     if (u > 0)
-        trsm('R', 'L', Blas<Val>::conjTrans, 'N', u, f, Val(1), block, ld, block + f, ld);
+        trsm('R', 'U', 'N', 'N', u, f, Val(1), block, ld, block + f, ld);
 
     return true;
 }
@@ -154,23 +171,47 @@ void NumFactorEngine::updateSupernode(std::size_t frontSize, std::size_t numIdx,
     const int width  = static_cast<int>(t.mWidth);
     const int tld    = height;
 
-    Val* tVal = t.mVal.data();
-    const Val* L21 = block + offset;   // the update rows that reach this ancestor, and below
+    Val*       tVal = t.mVal.data();
+    const Val* L21  = block + offset;   // the update rows that reach this ancestor, and below
 
-    // The square part: t(0..width, 0..width) -= L21' L21'^H, where L21' is the `width` rows that
-    // land in the ancestor. Symmetric, so HERK, which touches only the lower triangle.
+    if (mFactorization == Factorization::Cholesky) {
+        // The square part: t(0..width, 0..width) -= L21' L21'^H, where L21' is the `width` rows
+        // that land in the ancestor. Symmetric, so HERK, which touches only the lower triangle.
+        //
+        // `herk` means "A times A-conjugate-transpose": dsyrk_ for real, zherk_ for complex. The
+        // engine never names either, which is what makes 0.9's bug (SYRK on a Hermitian factor)
+        // impossible to write here.
+        herk('L', 'N', width, f, -1.0, L21, ld, 1.0, tVal, tld);
+
+        // The rectangle below it: t(width.., 0..width) -= L21'' L21'^H, where L21'' is the rows of
+        // the supernode's update block that lie *below* the ancestor's. Not symmetric, so GEMM.
+        if (height > width)
+            gemm('N', Blas<Val>::conjTrans, height - width, width, f,
+                 Val(-1), L21 + width, ld,
+                 L21, ld,
+                 Val(1), tVal + width, tld);
+        return;
+    }
+
+    // LDL. The update is t -= L21 D L21^H, and **no BLAS routine computes it**: the D in the
+    // middle rules out a rank-k call, which is why Cholesky gets one and LDL does not.
     //
-    // `herk` means "A times A-conjugate-transpose": dsyrk_ for real, zherk_ for complex. The
-    // engine never names either, which is what makes 0.9's bug (SYRK on a Hermitian factor)
-    // impossible to write here.
-    herk('L', 'N', width, f, -1.0, L21, ld, 1.0, tVal, tld);
+    // So form U := D L21'^H explicitly, into a scratch, and then two multiplies. The scratch is
+    // f by width, and it is the whole price of the D.
+    std::vector<Val> upper(static_cast<std::size_t>(f) * static_cast<std::size_t>(width), Val(0));
+    formUpper(width, f, L21, ld, upper.data(), f, block, ld, hermitian());
 
-    // The rectangle below it: t(width.., 0..width) -= L21'' L21'^H, where L21'' is the rows of the
-    // supernode's update block that lie *below* the ancestor's. Not symmetric, so GEMM.
+    // The square part: symmetric, so only its lower triangle is filled. BLAS has nothing for this
+    // either (syrk does A A^T, not A B with B known to make the product symmetric), so gemmLower
+    // is ours as well.
+    gemmLower(width, f, L21, ld, upper.data(), f, tVal, tld);
+
+    // The rectangle below: not symmetric, so a plain GEMM. Note 'N','N': the transpose is already
+    // baked into U.
     if (height > width)
-        gemm('N', Blas<Val>::conjTrans, height - width, width, f,
+        gemm('N', 'N', height - width, width, f,
              Val(-1), L21 + width, ld,
-             L21, ld,
+             upper.data(), f,
              Val(1), tVal + width, tld);
 }
 
@@ -254,9 +295,9 @@ bool NumFactorEngine::factorLeftLooking(const SparseMatrix<Val>& A, const Permut
                 owed[f.mIdxToSupIdx[jjRowIdx[pos[jj]]]].push_back(jj);
         }
 
-        if (!factorSupernode(f.mFrontSize[kk], kkNumIdx, kkBlock)) {
+        if (!factorSupernode(f.mFrontSize[kk], kkNumIdx, kkBlock, f.mNumPerturbations)) {
             clearGlobalToLocal(kkNumIdx, kkRowIdx, gblToLcl);
-            return false;   // not positive definite
+            return false;   // not positive definite (Cholesky only; LDL perturbs instead)
         }
 
         // kk is factored, so it now owes updates of its own. Its front rows are its own columns
@@ -308,8 +349,8 @@ bool NumFactorEngine::factorRightLooking(const SparseMatrix<Val>& A, const Permu
         const std::int32_t* jjRowIdx    = f.mRowIdx.data() + f.mSupPtr[jj];
         Val*                jjBlock     = f.mVal.data() + f.mValPtr[jj];
 
-        if (!factorSupernode(jjFrontSize, jjNumIdx, jjBlock))
-            return false;   // not positive definite
+        if (!factorSupernode(jjFrontSize, jjNumIdx, jjBlock, f.mNumPerturbations))
+            return false;   // not positive definite (Cholesky only; LDL perturbs instead)
 
         // Walk jj's update rows. Each run of them belonging to one ancestor is one update.
         std::size_t from = jjFrontSize;
@@ -348,9 +389,16 @@ bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, 
     if (A.size() != p.size() || A.size() != s.size())
         return false;
 
-    // Cholesky only, for now. LDL and multifrontal follow.
-    if (mFactorization != Factorization::Cholesky)
-        return false;
+    // Cholesky and static LDL, in both transposes. Dynamic LDL and multifrontal follow.
+    switch (mFactorization) {
+        case Factorization::Cholesky:
+        case Factorization::StaticLDLT:
+        case Factorization::StaticLDLH:
+            break;
+        case Factorization::DynamicLDLT:
+        case Factorization::DynamicLDLH:
+            return false;   // not implemented
+    }
 
     switch (mTraversal) {
         case Traversal::LeftLooking:  return factorLeftLooking(A, p, s, f);

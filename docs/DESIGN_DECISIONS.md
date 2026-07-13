@@ -3,6 +3,125 @@
 Durable record of structural choices, newest first. Each entry: date, decision,
 why. This is the file to open after a gap to reconstruct the project's shape.
 
+## 2026-07-13, Static LDL: three kernels BLAS does not have, and why the traversals did not change
+
+**LAPACK has no unpivoted LDL.** `?sytrf` is Bunch-Kaufman, which pivots, and pivoting is exactly
+what a *static* factorization refuses to do. So the kernel is ours. 0.9 wrote it; we port it.
+
+**Three kernels, all from 0.9, all absent from BLAS:**
+
+- **`ldl`** (0.9's `OBLIO_POTRF2`). Recursive: split the block in half, factor the leading part,
+  solve for the off-diagonal, form its upper counterpart, take the Schur complement, recurse.
+- **`formUpper`** (`OBLIO_COMPUTE_U`). `U := D L^T` (or `D L^H`), into the upper triangle.
+- **`gemmLower`** (`OBLIO_GEMM`). `A -= L U`, filling only the lower triangle, because the product
+  is symmetric. BLAS has nothing for this: `syrk` computes `A A^T`, and there is no "`A B` where
+  the product is known symmetric".
+
+**A nice factoring in 0.9 worth naming.** `OBLIO_POTRF1` and `OBLIO_POTRF2` are the *same
+algorithm*, differing only at `n == 1`: the first fails on a non-positive pivot, the second
+replaces a tiny one and counts it. So 0.9's `NO_LAPACK` "Cholesky" is really an LDL that refuses
+to proceed unless `D > 0`, which is legitimate (`LDL^T` with positive `D` *is* Cholesky, with
+`L_chol = L_ldl sqrt(D)`; same factorization, different storage). We need only the second, since
+LAPACK gives us a real Cholesky.
+
+**The storage, which the statistics predicted.** In an LDL block:
+
+```
+the diagonal        holds D          where L's implicit 1s would be
+the lower triangle  holds L          unit lower triangular
+the upper triangle  holds U = D L^T  which Cholesky leaves as explicit zeros
+```
+
+So an LDL block uses the whole rectangle. `U` is not redundant: the recursion needs `D L^T` in two
+places (to solve for the next `L`, and to form the Schur complement), so it is computed once and
+kept. We reasoned to exactly this layout from 0.9's `numberOfEntries` versus
+`numberOfAllocatedEntries` counts, before seeing the code.
+
+**Perturbation is not a refinement; it is the only recourse.** A static factorization cannot pivot,
+so a pivot too small to divide by has no remedy but replacement. We then factor a matrix slightly
+different from the one we were given, which is a real thing to have done, so the count is reported
+on the factor (`NumFactorStatic::numPerturbations`) rather than hidden. It belongs on the factor,
+not the engine: it is a property of what was computed, not of the thing that computed it.
+
+**And the update is not a rank-k operation, which is the deep difference from Cholesky.**
+
+```
+Cholesky:  T -= L21 L21^H          one HERK. Exactly what a rank-k routine computes.
+LDL:       T -= L21 D L21^H        no BLAS routine at all: the D in the middle rules it out.
+```
+
+So LDL forms `U := D L21^H` into a **scratch block**, then multiplies. That scratch is the whole
+price of the `D`, and it is why Cholesky's update is one call and LDL's is three.
+
+**The traversals did not change by a line, and that was the design working.** `factorSupernode` and
+`updateSupernode` dispatch on the factorization type internally, so left-looking and right-looking
+decide *when* to factor and *when* to update, never *how*. Adding LDL touched those two functions
+and one `switch`. That separation is worth protecting when multifrontal arrives: a traversal is a
+schedule, not an arithmetic.
+
+**Complex Hermitian LDL (`StaticLDLH`) is an extension, not a port.** 0.9's complex LDL is
+symmetric only, which is why its complex LDL correctly uses `SYRK` and `'T'`. We support both, and
+the `T`/`H` distinction runs through all three kernels as a single `bool hermitian`, which for
+`double` is a no-op in every branch. That is the honest expression of "real symmetric and real
+Hermitian are the same case".
+
+**Checked by reconstruction, which is a better oracle than a second implementation.** Cholesky is
+compared against an independently written dense Cholesky. LDL is checked by multiplying the factor
+back out: `L D L^H == P A P^T`. That needs no second implementation, validates `D`, `L`, the
+storage layout and the supernodal assembly in one statement, and works unchanged across all three
+symmetries, which a dense oracle would not.
+
+## 2026-07-13, Symmetry is part of the factorization, not a setting beside it
+
+*(Supersedes the "symmetry is determined, not chosen" half of the entry below, written earlier
+today. That claim was true for Cholesky and false the moment LDL arrived. Recording the
+correction rather than editing the original, because the reason it was wrong is worth keeping.)*
+
+**What changed.** The earlier entry argued that `Val` and the factorization type fix the symmetry
+between them, so symmetry never needs to be named:
+
+```
+real    + anything   ->  symmetric
+complex + Cholesky   ->  Hermitian
+complex + LDL        ->  symmetric
+```
+
+The third line is where it breaks. It is what **0.9** does, not what LDL *is*. A complex matrix
+may be symmetric (`A = A^T`, so `D` comes out complex) or Hermitian (`A = A^H`, so `D` comes out
+real), and both are legitimate, useful factorizations. `LDL^T` and `LDL^H` are different
+computations, and nothing in `Val` or in "static LDL" says which one is wanted. **Symmetry becomes
+a genuine choice.**
+
+**The choice goes into the factorization type, not beside it.**
+
+```cpp
+enum class Factorization {
+    Cholesky,      // A = LL^H  (LL^T for real). Positive definite, hence Hermitian.
+    StaticLDLT,    // A = LDL^T          complex: D complex
+    StaticLDLH,    // A = LDL^H          complex: D real
+    DynamicLDLT,
+    DynamicLDLH
+};
+```
+
+**Why here and not as a `Symmetry` flag beside it**, which was the obvious alternative: the same
+principle that shaped `BlasLapack`, **make the wrong thing unwriteable.** A separate flag would let
+a caller ask for `Cholesky` + `Symmetric` + complex, which we would then reject at runtime. In the
+enum above there is no such value. The combination is not *forbidden*; it does not *exist*. That is
+strictly stronger, and it costs one letter in a name.
+
+A flag would also be **inert for real**, where symmetric and Hermitian coincide. An API parameter
+that is sometimes meaningless is a small lie, and worth avoiding for the price of an enumerator.
+
+The cost, stated honestly: the enum grows, and `T`/`H` is a suffix convention a reader must learn.
+Both seem cheap against a runtime rejection that exists only to guard a combination we could
+simply not have named.
+
+**And complex Hermitian LDL is an extension, not a port.** 0.9 does only the symmetric one, which
+is why its complex LDL correctly uses `SYRK` and `'T'`. That its *Cholesky* also uses them is the
+bug we have already recorded; the two are related, since Cholesky is the one place 0.9 needed the
+Hermitian convention and did not reach for it.
+
 ## 2026-07-13, The factorization space, and a BLAS layer that names operations rather than routines
 
 Entering the numeric phase, three questions had to be settled together: which combinations of

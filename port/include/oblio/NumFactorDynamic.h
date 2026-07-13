@@ -69,7 +69,7 @@ public:
 private:
     std::size_t   mSize    = 0;
     std::size_t   mSupSize = 0;
-    Factorization mFactorization = Factorization::DynamicLDL;
+    Factorization mFactorization = Factorization::DynamicLDLT;
 
     // Copied from SymFactor, exactly as in NumFactorStatic. Under delayed pivoting the index sets
     // themselves grow, which is the second reason the factor owns a copy rather than referring

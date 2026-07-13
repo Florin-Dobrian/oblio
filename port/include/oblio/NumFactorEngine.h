@@ -50,6 +50,16 @@ public:
     void      setTraversal(Traversal traversal) { mTraversal = traversal; }
     Traversal traversal() const                 { return mTraversal; }
 
+    // The perturbation threshold, for LDL only.
+    //
+    // A static factorization does not pivot, so a pivot smaller than this has no remedy: it is
+    // replaced by this value, and counted. The count comes back on the factor
+    // (NumFactorStatic::numPerturbations), because it is a property of what was computed, not of
+    // the engine that computed it. Cholesky ignores this: it fails on a bad pivot rather than
+    // perturbing, which is what positive definiteness entitles it to do.
+    void   setPerturbation(double perturbation) { mPerturbation = perturbation; }
+    double perturbation() const                 { return mPerturbation; }
+
     // The public entry point. Returns false if the matrix is not positive definite (Cholesky
     // found a non-positive pivot), or if the matrix does not match the structure the symbolic
     // factorization predicted.
@@ -60,6 +70,7 @@ public:
 private:
     Factorization mFactorization = Factorization::Cholesky;
     Traversal     mTraversal     = Traversal::LeftLooking;
+    double        mPerturbation  = 1e-14;
 
     // Copy the structure from SymFactor and allocate the value blocks, zeroed. Every traversal
     // starts here, so it is shared.
@@ -97,27 +108,40 @@ private:
                         const UpdateBlock<Val>& t,
                         std::size_t numIdx, Val* block) const;
 
-    // Factor one supernode's block in place.
+    // Factor one supernode's block in place, and form the update it owes an ancestor. **These two
+    // dispatch on the factorization type**, which is what keeps the traversals below identical
+    // across Cholesky and LDL: left-looking and right-looking decide *when* to factor and *when*
+    // to update, never *how*.
     //
-    //   POTRF on the front (the diagonal block), giving L11.
-    //   TRSM  on the update rows, giving L21 = A21 (L11^H)^-1.
+    // Cholesky:
+    //   factor  POTRF on the front, then TRSM on the update rows: L21 = A21 (L11^H)^-1.
+    //   update  HERK on the square part, GEMM on the rectangle below. One rank-k call, because
+    //           L21 L21^H is exactly what HERK computes.
     //
-    // The conjugate-transpose character comes from Blas<Val>, so this is correct for real and for
-    // complex Hermitian without a branch. Returns false on a non-positive pivot.
+    // LDL:
+    //   factor  our own kernel (LAPACK has no unpivoted LDL), then TRSM against the *upper*
+    //           triangle, untransposed, because the block holds U = D L^T there.
+    //   update  T -= L21 D L21^T, which no BLAS routine computes: the D in the middle rules out
+    //           a rank-k call. So U := D L21^T into a scratch, then gemmLower on the symmetric
+    //           part and GEMM on the rectangle. The scratch is the price of the D.
+    //
+    // factorSupernode returns false only for Cholesky, on a non-positive pivot. LDL cannot fail:
+    // it perturbs instead, and reports how often.
     template<class Val>
-    bool factorSupernode(std::size_t frontSize, std::size_t numIdx, Val* block) const;
+    bool factorSupernode(std::size_t frontSize, std::size_t numIdx, Val* block,
+                         std::size_t& numPerturbations) const;
 
-    // Form the update that a factored supernode contributes to one ancestor, into t.
-    //
-    //   HERK on the square part:      t -= L21' L21'^H
-    //   GEMM on the rectangle below:  t -= L21'' L21'^H
-    //
-    // where L21' is the `width` rows of the supernode's update block that land in the ancestor,
-    // and L21'' the rows below them. Two calls rather than one because the diagonal part is
-    // symmetric and HERK is the routine that knows it.
     template<class Val>
     void updateSupernode(std::size_t frontSize, std::size_t numIdx, const Val* block,
                          std::size_t offset, UpdateBlock<Val>& t) const;
+
+    // True when the factorization conjugates: Cholesky always (A = LL^H, and over the reals the
+    // conjugate is the identity), LDLH yes, LDLT no.
+    bool hermitian() const {
+        return mFactorization == Factorization::Cholesky
+            || mFactorization == Factorization::StaticLDLH
+            || mFactorization == Factorization::DynamicLDLH;
+    }
 
     // The two traversals. Same arithmetic, opposite direction.
     //

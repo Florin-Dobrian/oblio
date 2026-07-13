@@ -34,6 +34,7 @@ OBLIO_SRCS = \
   src/OrderEngine.cpp \
   src/ElmForestEngine.cpp \
   src/SymFactorEngine.cpp \
+  src/BlasLapack.cpp \
   src/UpdateBlock.cpp \
   src/NumFactorStatic.cpp \
   src/NumFactorDynamic.cpp \

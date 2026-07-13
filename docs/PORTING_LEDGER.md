@@ -46,12 +46,14 @@ differ.
 | ElmForestEngine | no | checked | parent links, child/sibling links, roots, height, column sizes, fundamental compression, threshold amalgamation. Links and height recomputed independently; sizes and supernodes against the dense oracle, natural and AMD ordered. Amalgamation is greedy and not canonical, so only its tie-break-invariant properties are asserted |
 | SymFactor | no | checked | 0.9 `Symbolic`; flat index sets with per-supernode offsets |
 | SymFactorEngine | no | checked | 0.9 `SymbolicEngine`; index sets against the dense oracle, natural and AMD ordered. 10.12's design, 0.9's behavior (see DESIGN_DECISIONS) |
+| BlasLapack | yes | checked | wraps potrf/trsm/herk/syrk/gemm, overloaded on the scalar type. Named by *operation*, not routine: `herk` means A times A-conjugate-transpose, so it is `dsyrk_` for real and `zherk_` for complex, and the engine cannot pick the wrong one (0.9 does; see DESIGN_DECISIONS). One trait, `Blas<Val>::conjTrans`. Verified on hand-computed real SPD and complex Hermitian factors |
+| UpdateBlock | yes | checked | 0.9 `Temporary`; one supernode's update to one ancestor, dense column-major plus its row indices. Not the multifrontal update matrix, which is a different object |
+| NumFactorStatic | yes | checked | 0.9 `FactorsStatic`; SymFactor's structure copied, plus one flat value buffer with per-supernode offsets. Blocks are dense column-major rectangles (the upper front triangle is allocated and zero, so BLAS can take the whole block) |
+| NumFactorDynamic | yes | not started | 0.9 `FactorsDynamic`; a placeholder. Same fields, one buffer per supernode so a front can grow under delayed pivoting. No base class shared with the static one: `experiments/storage-options` showed a pointer array does the job a base would |
+| NumFactorEngine | yes | checked | Cholesky, left- and right-looking, real and complex Hermitian. Verified against a dense Cholesky, entry for entry, to 4e-16 on 60 random matrices per combination. **Does not yet validate that a complex input is Hermitian** (see Owed). Static LDL, dynamic LDL and multifrontal not started |
 | Vector | yes | not started | |
 | MultiplyEngine | yes | not started | |
-| BlasLapack | yes | not started | traits + underscore handling |
-| DenseMatrix | yes | not started | fronts and update blocks |
-| NumFactor | yes | not started | the numeric factor; storage decided per the flat-vs-VV entry |
-| NumFactorEngine | yes | not started | most complex; friend access into SparseMatrix/NumFactor/SymFactor. Dynamic LDL pivoting is what forces the storage question (see DESIGN_DECISIONS) |
+| DenseMatrix | yes | not needed so far | a supernode's block is a raw pointer plus (rows, cols, ld), handed straight to BLAS. See Owed |
 | SolveEngine | yes | not started | watch backward-solve index signedness |
 | OblioEngine | yes | not started | top-level driver |
 
@@ -60,6 +62,46 @@ friends, obviated by `std::vector`) and `Functional` (pre-C++11 comparators,
 obviated by lambdas).
 
 ## Owed
+
+### Numeric factorization
+
+- **The input is not checked for Hermitian symmetry, and this is a correctness hole.** For
+  complex Cholesky the matrix must be Hermitian (`A[i][j] == conj(A[j][i])`). Nothing enforces
+  it. `zpotrf` reads only the lower triangle and *assumes* the upper is its conjugate, and
+  `assembleFromA` takes the same triangle, so a complex **symmetric** matrix would be factored as
+  though it were the Hermitian matrix agreeing with its lower triangle, and would **succeed**,
+  returning a plausible wrong answer. Silent, and complex-only.
+
+  The fix, agreed: compute two flags on `SparseMatrix` at construction, in one pass, and have the
+  engine require the first for Cholesky.
+
+  ```
+  isHermitian()   A == A^H    what Cholesky needs
+  isSymmetric()   A == A^T    what complex LDL will need
+  ```
+
+  For `double` the two predicates coincide and are both true together; for complex they are
+  genuinely different and a matrix may be one, the other, or neither. Compute both now, since it
+  is the same pass and one extra comparison per entry, and LDL then needs no change to
+  `SparseMatrix`. 10.12 carries only `mIsNmrclySym`, which sufficed for it because it never
+  finished complex Cholesky. 0.9 checks only that the diagonal is real, and only in its
+  `NO_LAPACK` path, so its LAPACK build does not check at all.
+
+  Deferred deliberately: correct input gives correct output today, so this guards against misuse
+  rather than fixing a defect. It must land before anyone but us runs the solver.
+
+- **Statistics are not computed.** `setSymFactor` derives the value-block sizes it needs, but the
+  aggregate counts 0.9 keeps (`numberOfEntries`, `numberOfAllocatedEntries`, the multifrontal
+  stack high-water marks, the factor and solve flop estimates) are unported. 0.9 computes them in
+  `EliminationForest::computeStatistics_`; 10.12's `rComputeStats` is commented out. The stack
+  counts become necessary for multifrontal; the rest are reporting.
+
+- **No `DenseMatrix`.** The ledger lists one as a unit. It has not been needed: a supernode's
+  block is a raw pointer plus (rows, columns, leading dimension), handed straight to BLAS, which
+  is what `experiments/storage-options` argued for and what keeps the kernels blind to the
+  storage. Revisit only if something wants a dense matrix as an object.
+
+### Structural
 
 - **Nothing is `verified` yet.** Every structural unit is `checked` against the
   dense oracle, which is real evidence, but none has been compared against 0.9

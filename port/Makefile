@@ -1,4 +1,4 @@
-# Parallel port tree — builds the new units and every test in tests/.
+# Parallel port tree, builds the new units and every test in tests/.
 # The PoC build (top-level CMake) is untouched; this compiles port/ in isolation.
 #
 #   make            build all test executables
@@ -13,15 +13,33 @@
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O3 -Wall -Wextra -Iinclude
 
-# Oblio units — full warnings apply.
+# BLAS and LAPACK, for the numeric factorization.
+#
+# OBLIO_BLAS_UNDERSCORE selects the trailing-underscore Fortran symbol convention
+# (dpotrf_ rather than dpotrf), which is what Accelerate and the reference BLAS both
+# use. See include/oblio/BlasLapack.h.
+CXXFLAGS += -DOBLIO_BLAS_UNDERSCORE
+
+UNAME := $(shell uname -s)
+ifeq ($(UNAME),Darwin)
+  BLAS_LIBS = -framework Accelerate
+else
+  BLAS_LIBS = -llapack -lblas
+endif
+
+# Oblio units, full warnings apply.
 OBLIO_SRCS = \
   src/SparseMatrix.cpp \
   src/Permutation.cpp \
   src/OrderEngine.cpp \
   src/ElmForestEngine.cpp \
-  src/SymFactorEngine.cpp
+  src/SymFactorEngine.cpp \
+  src/UpdateBlock.cpp \
+  src/NumFactorStatic.cpp \
+  src/NumFactorDynamic.cpp \
+  src/NumFactorEngine.cpp
 
-# Vendored ordering codes (SuiteSparse AMD, Sparspak MMD) — copied verbatim, not
+# Vendored ordering codes (SuiteSparse AMD, Sparspak MMD), copied verbatim, not
 # maintained here, so warnings are silenced (-w) for these two files only.
 VENDOR_SRCS = \
   src/Amd.cpp \
@@ -51,7 +69,7 @@ $(VENDOR_OBJS): %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -w -c $< -o $@
 
 %_cpp: tests/%.cpp $(LIB_OBJS) $(LIB_HDRS) $(wildcard tests/*.h)
-	$(CXX) $(CXXFLAGS) tests/$*.cpp $(LIB_OBJS) -o $@
+	$(CXX) $(CXXFLAGS) tests/$*.cpp $(LIB_OBJS) $(BLAS_LIBS) -o $@
 
 test: all
 	@for t in $(TEST_BINS); do echo "== $$t =="; ./$$t || exit 1; echo; done

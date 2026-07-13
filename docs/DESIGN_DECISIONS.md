@@ -3,6 +3,118 @@
 Durable record of structural choices, newest first. Each entry: date, decision,
 why. This is the file to open after a gap to reconstruct the project's shape.
 
+## 2026-07-13, The factorization space, and a BLAS layer that names operations rather than routines
+
+Entering the numeric phase, three questions had to be settled together: which combinations of
+scalar type, symmetry and factorization we support, how the code selects among them, and what
+shape the BLAS wrapper takes. They turn out to be one question.
+
+**The space, and it collapses.** Three axes, `Val` in {real, complex}, symmetry in
+{symmetric, Hermitian}, factorization in {`CC^T`, `LDL^T`}:
+
+| `Val` | symmetry | `CC^T` | `LDL^T` |
+|---|---|---|---|
+| real | symmetric **is** Hermitian | yes, SPD | yes, indefinite |
+| complex | Hermitian | yes, HPD (`zpotrf`) | yes; 0.9 does not do it, we will |
+| complex | symmetric | **forbidden** | yes, the standard case |
+
+**For real the symmetry axis does not exist.** Conjugation is the identity, so `A^H = A^T` and
+the two conditions are the same condition. That row is one row wearing two hats.
+
+**Complex symmetric Cholesky is forbidden, and not merely unimplemented.** Positive definiteness
+means `x* A x > 0`, which requires that quantity to be *real*, which happens for all `x` exactly
+when `A` is Hermitian. For a complex *symmetric* `A`, `x^T A x` is a complex number and the
+inequality does not even typecheck. Concretely: `A = [[0, 1], [1, 0]]` is symmetric and
+nonsingular, and `a11 = 0` kills the very first square root. Cholesky has no pivoting to recover
+with, because not needing pivoting is the entire point of Cholesky, and that guarantee comes from
+positive definiteness. LAPACK has no complex-symmetric Cholesky for precisely this reason. So the
+API rejects it, as a hard error rather than a to-do.
+
+The stable factorization for complex symmetric matrices is `LDL^T` with 2x2 pivots, which is
+already on the plan. Complex symmetric `CC^T` would be an unstable duplicate of a thing we are
+building anyway.
+
+**Complex Hermitian `LDL^T` (`A = LDL^H`, `D` real) is a gap in 0.9, not a gap in the
+mathematics.** It is a perfectly good factorization, indefinite Hermitian, and we intend to
+support it. 0.9 simply never wrote it. Worth distinguishing sharply from the cell above: one is a
+mathematical impossibility and must be rejected forever, the other is work not yet done. They
+must not report the same error.
+
+**So symmetry is determined, not chosen, and there is no third parameter.** Given `Val` and the
+factorization type, everything else follows:
+
+```
+real    + anything   ->  symmetric  ->  'T',  syrk
+complex + CC^T       ->  Hermitian  ->  'C',  herk
+complex + LDL^T      ->  symmetric  ->  'T',  syrk
+```
+
+`Val` is the template parameter and `FactorType` is an engine setting (10.12 already has the
+enum: `eCC`, `eStaticLDL`, `eDynamicLDL`). Between them the transpose character and the rank-k
+routine are fixed. No symmetry flag, no extra argument.
+
+**The BLAS layer names operations, not routines. This is the part 0.9 gets wrong.** A wrapper is
+needed regardless: BLAS is a Fortran interface, everything by pointer, and without a layer every
+call site carries `&uplo, &trans, &n, &k, &alpha, ...` plus a branch to choose `d` or `z`. 0.9
+has such a layer, overloaded inline wrappers on `Real*` and `Complex*`, and that much is right.
+
+What is wrong is *what it wraps*. 0.9 wraps BLAS **routine by routine**: `SYRK`, `GEMM`, `TRSM`,
+`POTRF`, leaving the caller to choose `'T'` versus `'C'` and `SYRK` versus `HERK`. The convention
+therefore leaks into the engine, and the engine gets it wrong: **0.9's complex Cholesky calls
+`SYRK` and `TRSM('T')` and `GEMM('N','T')`, all of which are the complex *symmetric* pattern,
+while `POTRF` maps to `zpotrf_`, which is Hermitian.** There is no `HERK` anywhere in 0.9's
+`BlasLapack`. For Hermitian `A = LL^H` the update must be `L21 L21^H` and the off-diagonal solve
+must be against `L11^H`; using `'T'` is correct only when `L11` is real. Almost certainly never
+exercised on a genuinely complex Hermitian matrix.
+
+Our layer therefore exposes an operation whose *meaning* is fixed and lets the type pick the
+routine:
+
+```cpp
+// "A times A-conjugate-transpose", whatever that means for this Val.
+void herk(char uplo, char trans, ...);   // double -> dsyrk_ ;  complex -> zherk_
+
+template<class Val> struct Blas;
+template<> struct Blas<double>               { static constexpr char conjTrans = 'T'; };
+template<> struct Blas<std::complex<double>> { static constexpr char conjTrans = 'C'; };
+```
+
+so the Cholesky kernel is one piece of code, correct for both:
+
+```cpp
+potrf('L', f, block, ld);
+trsm ('R', 'L', Blas<Val>::conjTrans, 'N', u, f, ...);
+herk ('L', 'N', ...);
+gemm ('N', Blas<Val>::conjTrans, ...);
+```
+
+No branch, no `if constexpr`, and **0.9's bug becomes unwriteable**: the engine never names
+`SYRK` or `HERK`, so it cannot pick the wrong one. `syrk` and a literal `'T'` remain available in
+the header for `LDL^T`, where plain transpose is what is wanted, and there the *algorithm* asks
+for them explicitly rather than inheriting them by accident.
+
+**Storage: this is what the storage-options experiment was for.** Yesterday's study
+(`experiments/storage-options/`) established that one compiled algorithm serves both a flat CSC
+storage and a vector-of-vectors, through nothing but a pointer array, and that the abstraction
+costs about nothing (1.07x flat, 1.10x packed VV, one `multiply` symbol in the binary). It was
+run against exactly this moment. `NumFactor` uses both:
+
+- **static** (`CC^T`, static `LDL^T`): **flat**. Symbolic has already sized every block, nothing
+  grows, so one buffer with per-supernode offsets. 0.9 does the same (`FactorsStatic` allocates
+  one array and points into it).
+- **dynamic** (dynamic `LDL^T`): **VV**. Delayed pivoting grows a front at runtime by an amount
+  symbolic never predicted, and the growth is local. 0.9 does the same (`FactorsDynamic`
+  allocates one array per supernode).
+
+**Static and dynamic, not flat and VV**, in the naming. The layout is a *consequence* of
+mutability, not the thing being chosen, and 0.9 names its classes the same way. Flat-versus-VV
+describes the bytes; static-versus-dynamic describes why.
+
+**Status.** Settled: the table above, symmetry determined rather than chosen, operation-named
+BLAS, static-flat and dynamic-VV. The objects are `NumFactor` and `NumFactorEngine`, the engine
+taking a factorization type (`CC^T` first, then `LDL^T` static and dynamic) and a traversal
+(left-looking, right-looking, multifrontal). Cholesky first, left- and right-looking first.
+
 ## 2026-07-12, Amalgamation: a second compression, and the third bug in 10.12
 
 **Two compressions, and they are not the same algorithm with a knob.** Fundamental compression
@@ -479,15 +591,21 @@ question turned out not to arise, since the unifier needed no polymorphism at al
 numfactor's working storage. Open: whether the persistent factor is flattened, and whether a
 VV-all-the-way numfactor is viable, both of which want the BLAS-3 measurement above.
 
-Still unresolved, and unchanged: we do not have 0.9's numeric factorization code; none of the
-numfactor sources are in the reference set, so how 0.9 stores dynamic fronts is unverified. It is
-entirely possible 0.9 does not do dynamic with flat, in which case 0.9 supports this split rather
-than contradicting it, but that is a prediction to check against the code. When the numfactor code
-surfaces: see whether the dynamic path uses growable per-front storage, worst-case
-preallocation, or reflow, and whether static and dynamic share a front representation. If 0.9
-already runs dynamic scratch into a flat result, the hybrid is a port; if 0.9 keeps a dynamic
-factor object, the hybrid is a modernization on the rewrite track, and we verify the flat result
-matches 0.9's factor content, not its storage.
+**Confirmed against 0.9 (2026-07-13).** This entry predicted the split and flagged it as
+unverified, pending sight of 0.9's numeric code. That code has now arrived, and 0.9 does exactly
+what we reasoned it must:
+
+- **`FactorsStatic`** sums `numberOfAllocatedEntries` over every supernode, allocates **one
+  buffer**, and points `pointerToEntry[jj]` into it. **Flat.**
+- **`FactorsDynamic`** runs `for (jj) pointerToEntryArray[jj] = new Real[jjEntrySize];`. **One
+  allocation per supernode. A vector of vectors in all but name.**
+
+So the split is a *port*, not a modernization: 0.9 already separates the two storages by
+mutability, for the same reason we would. The prediction and the oracle agree, and the entry's
+provisional status on this point is closed. What remains open is the *hybrid* question, whether
+the dynamic factor is flattened afterwards, which 0.9 answers only implicitly (it keeps a
+`FactorsDynamic` object, and `SolveEngine` reads it through the same abstract base), and the
+BLAS-3 measurement that would tell us whether flattening is worth it.
 
 ## 2026-07-09, Index types: `std::int32_t` IDs (NIL = -1), `std::size_t` offsets
 

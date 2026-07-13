@@ -23,8 +23,14 @@ Two references, two roles: favor 10.12's *design*, verify against 0.9's *behavio
   decomposition, and interfaces wherever it reaches. It is unverified, so never assume
   its code is correct (it can carry bugs 0.9 does not). Take *shape* from 10.12 and
   *behavior* from 0.9, and fall back to 0.9 wherever 10.12 is silent or incomplete.
-- **PoC tree** (built in one day, 2026-03-07) is a proof of concept. Learn from it;
-  do not assume its code is correct.
+- **PoC tree** (built in one day, 2026-03-07) is a proof of concept. It may inform, but its
+  code is not trusted and nothing is ported from it. Its remains are the top-level `src/` and
+  `include/`, which are on their way out; do not read them.
+
+**Where things live.** The 0.9, 10.12 and PoC sources live in **`reference/`**, which is
+gitignored and so absent from REPO_MAP; files are suffixed `-0_9`, `-10_12` and `-PoC`. All work
+happens in **`port/`** (`port/src/`, `port/include/oblio/`, `port/tests/`). Nothing else in the
+tree is either a reference or a target.
 
 ## Process (every session)
 
@@ -142,9 +148,14 @@ Linux: replace `-framework Accelerate` with `-lblas -llapack -lm`.
 - **CONTRIBUTING.md / CHANGELOG.md**, stubs, ahead of need. Fill CONTRIBUTING on
   going public; start CHANGELOG at the first tagged release.
 - **README.md**, public-facing overview.
-- **archive/**, history: `oblio-new-devlog.md`, `oblio_modernization_notes.md`,
-  `oblio_modernization_appendix.md`. These describe 0.9/10.12 and the PoC;
-  rationale, not current guidance.
+- **archive/sparse_factorization.md**, the algorithm notes: elimination forest,
+  symbolic factorization, supernodes and amalgamation, with worked examples. **Current
+  guidance, despite the folder.** Actively maintained, and the code cross-references it
+  by section number (`SymFactorEngine.h` cites 4.6). Its home is under review.
+- **archive/**, otherwise history: `oblio-new-devlog.md`, `oblio_modernization_notes.md`,
+  `oblio_modernization_appendix.md`, plus `template_comparison.jsx` and the 0.9-era
+  `test09*.cc`. These describe 0.9/10.12 and the PoC; rationale, not current guidance.
 - **experiments/**, runnable design studies, one self-contained folder each
-  (`template-instantiation/`, `friend-access/`). Each validates a coding standard;
-  build standalone with `make test`. Not part of the main build. See DESIGN_DECISIONS.
+  (`template-instantiation/`, `friend-access/`, `storage-options/`). Each validates a
+  coding standard; build standalone with `make test`. Not part of the main build. See
+  DESIGN_DECISIONS.

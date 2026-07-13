@@ -1,0 +1,101 @@
+#pragma once
+
+// NumFactorStatic.h - the numeric factorization of a sparse matrix, statically stored.
+//
+// Static means the structure is fixed before any arithmetic runs: symbolic factorization has
+// already sized every supernode's block, and nothing grows. That covers Cholesky and static LDL.
+// Dynamic LDL does grow, by delaying unstable pivots into an ancestor, and gets its own class
+// (NumFactorDynamic), because the storage that suits growth does not suit this.
+//
+// This object is SymFactor plus the values. It copies what it needs from SymFactor rather than
+// referring to it, exactly as SymFactor copies from ElmForest: each object is self-contained, so
+// SymFactor may be discarded once factorization is done, and the solve reads only this.
+//
+// Storage is flat, one contiguous buffer with per-supernode offsets:
+//
+//   supPtr -> rowIdx     the index sets, copied from SymFactor
+//   valPtr -> val        the values, computed here
+//
+// Supernode kk's block is val[valPtr[kk] .. valPtr[kk + 1]), a **dense column-major rectangle**:
+//
+//   rows    = frontSize(kk) + updateSize(kk)   = the index-set size
+//   columns = frontSize(kk)
+//   leading dimension = the index-set size
+//
+// Entry (li, lj) of the block, in local coordinates, is at valPtr[kk] + lj * indexSize + li.
+//
+// Note the block is a **rectangle, not a trapezoid**. The strictly upper triangle of the front is
+// allocated and left as zeros, because BLAS wants a rectangular block with a leading dimension,
+// and paying for `frontSize * (frontSize - 1) / 2` zeros per supernode is the price of handing
+// the whole thing to a level-3 kernel. 0.9 counts these two quantities separately for exactly
+// this reason: numberOfAllocatedEntries is the rectangle, numberOfEntries the trapezoid.
+//
+// The engine writes this object through friendship; nothing else may.
+
+#include "oblio/Types.h"
+
+#include <complex>
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
+namespace Oblio {
+
+class NumFactorEngine;
+class SolveEngine;
+
+template<class Val>
+class NumFactorStatic {
+public:
+    NumFactorStatic() = default;
+
+    std::size_t   size()      const { return mSize; }
+    std::size_t   supSize()   const { return mSupSize; }
+    Factorization factorization() const { return mFactorization; }
+
+    // Total row indices, and total values. The second is the rectangle count: the sum over
+    // supernodes of indexSize * frontSize.
+    std::size_t numRowIdx() const { return mNumRowIdx; }
+    std::size_t numVal()    const { return mNumVal; }
+
+    // Column to supernode.
+    const std::vector<std::int32_t>& idxToSupIdx() const { return mIdxToSupIdx; }
+
+    // Per supernode: its own columns, and the rows below them.
+    const std::vector<std::size_t>& frontSize()  const { return mFrontSize; }
+    const std::vector<std::size_t>& updateSize() const { return mUpdateSize; }
+
+    // The index sets, flat: offsets (length supSize() + 1), then row indices.
+    const std::vector<std::size_t>&  supPtr() const { return mSupPtr; }
+    const std::vector<std::int32_t>& rowIdx() const { return mRowIdx; }
+
+    // The values, flat: offsets (length supSize() + 1), then the dense blocks.
+    const std::vector<std::size_t>& valPtr() const { return mValPtr; }
+    const std::vector<Val>&         val()    const { return mVal; }
+
+private:
+    std::size_t   mSize    = 0;
+    std::size_t   mSupSize = 0;
+    Factorization mFactorization = Factorization::Cholesky;
+
+    // Copied from SymFactor.
+    std::vector<std::int32_t> mIdxToSupIdx;
+    std::vector<std::size_t>  mFrontSize;
+    std::vector<std::size_t>  mUpdateSize;
+    std::size_t               mNumRowIdx = 0;
+    std::vector<std::size_t>  mSupPtr;
+    std::vector<std::int32_t> mRowIdx;
+
+    // Computed here. mVal holds every supernode's dense block, end to end.
+    std::size_t              mNumVal = 0;
+    std::vector<std::size_t> mValPtr;
+    std::vector<Val>         mVal;
+
+    friend class NumFactorEngine;
+    friend class SolveEngine;
+};
+
+extern template class NumFactorStatic<double>;
+extern template class NumFactorStatic<std::complex<double>>;
+
+} // namespace Oblio

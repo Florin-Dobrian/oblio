@@ -95,14 +95,14 @@ static bool validSupernodes(const SparseMatrix<double>& A, const Permutation& p,
             if(f.idxToSupIdx()[lc]!=static_cast<std::int32_t>(lc)) return false;
     }
 
-    // Gather each supernode's columns from the map.
+    // Collect each supernode's columns from the map.
     std::vector<std::vector<std::size_t>> cols(f.supSize());
     for(std::size_t lc=0; lc<f.size(); ++lc)
         cols[static_cast<std::size_t>(f.idxToSupIdx()[lc])].push_back(lc);
 
     for(std::size_t s=0; s<f.supSize(); ++s){
         if(cols[s].empty()) return false;
-        const std::size_t lowest = cols[s].front();     // columns gathered in increasing order
+        const std::size_t lowest = cols[s].front();     // collected in increasing order
         if(f.frontSize()[s]!=cols[s].size()) return false;
         if(f.frontSize()[s]+f.updateSize()[s]!=pattern[lowest].size()) return false;
         // Every column of the supernode must appear in the lowest column's pattern.

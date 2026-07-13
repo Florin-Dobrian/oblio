@@ -191,18 +191,36 @@ softer layer: conventions for consistency, not correctness.
   (10.12 writes `lc`/`lr` for column and row and drops the role distinction; 0.9 writes bare `j`
   and `k` and drops the ordering distinction. We keep both, at a cost of one character.)
 
-  **Positions are local to a structure, and named for the array they walk.** Unlike indices there
-  is no fixed set: each flat structure brings its own, and the name says which:
+  **A position is named for the pointer array it walks: its initials, and nothing else.** That is
+  the whole rule, and it has no exceptions.
 
-  - `ap` into `A`'s `colPtr`/`rowIdx`
-  - `fp` into `frontSupPtr`/`frontRowIdx`, a supernode's front indices alone
-  - `sp` into `supPtr`/`rowIdx`, a supernode's whole index set, front and update
-  - `lp` into the numeric factor's arrays, when it arrives
+  | position | walks | one entry per | the data is |
+  |---|---|---|---|
+  | `cp` | `colPtr` / `rowIdx` | column | row indices |
+  | `sp` | `supPtr` / `rowIdx` | supernode | row indices |
+  | `rp` | `rowPtr` / `supIdx` | row | supernode indices |
+  | `fsp` | `frontSupPtr` / `frontRowIdx` | supernode | front (column) indices |
+
+  Read across the table and the CSC convention falls out: **the letter names what the array has
+  one entry of, and the data is the other thing.** `colPtr` has one entry per column and holds
+  rows. `supPtr` has one per supernode and holds rows. `rowPtr` has one per row and holds
+  supernodes.
+
+  `sp` and `rp` are exact mirrors, and worth holding onto as the clearest case: `sp` is a *sup*
+  pointer, so its data is rows; `rp` is a *row* pointer, so its data is supernodes. That is why
+  the two counting sorts in `sortIndices` are the same code with the roles exchanged, and why the
+  names stay honest across both passes without needing a second set.
+
+  `fsp` is not an exception but the rule applied to a longer name: `frontSupPtr` -> `fsp`. It is a
+  `sp` restricted to the front, and the letters say so.
+
+  The letters name the *array*, not the matrix. There is only one `colPtr` in the solver, so `cp`
+  is unambiguous. Should two objects ever both carry one, qualify then and not before: `acp`,
+  `lcp`.
 
   0.9 calls all of these `p`; we cannot, since `p` is the `Permutation`, and in any case the
-  prefix is more useful than the bare letter. The distinction is *what the array holds*, not
-  which storage it lives in: `fp` and `sp` both walk factor-side arrays, but one holds only front
-  indices and the other the whole set, and that is the distinction the symbolic union turns on.
+  prefix is more useful than the bare letter. Unlike indices there is no fixed set of positions:
+  each flat structure brings its own, and `lp` will arrive with the numeric factor.
 
   **A position is not an index.** It cannot be compared with one, it means nothing outside its
   own array, and it is a `std::size_t` because it measures rather than names: never negative,

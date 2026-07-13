@@ -76,8 +76,8 @@ void ElmForestEngine::computeParent(
     // ordering of A, and j and k carry the column roles, j the lower and k the higher. So lk
     // is the factor column being processed, lj an earlier neighbour of it (lj < lk, enforced
     // by the guard below), and ak is lk's column in A. The same prefix marks a position in
-    // the storage: ap is an offset into A's flat arrays, which is 0.9's p (the name p being
-    // taken here by the Permutation). Positions measure rather than name, so ap is a
+    // the storage: cp is an offset into A's flat arrays, which is 0.9's p (the name p being
+    // taken here by the Permutation). Positions measure rather than name, so cp is a
     // std::size_t and cannot be NIL, unlike the columns. Beyond those, r is the node the
     // climb has reached and t the temporary that saves the next hop before compression
     // overwrites it.
@@ -86,8 +86,8 @@ void ElmForestEngine::computeParent(
     // columns lj < lk; path-compress to attach lj's subtree under lk.
     for (std::int32_t lk = 0; lk < static_cast<std::int32_t>(size); ++lk) {
         const std::int32_t ak = newToOld[lk];
-        for (std::size_t ap = colPtr[ak]; ap < colPtr[ak + 1]; ++ap) {
-            const std::int32_t aj = rowIdx[ap];       // a row of A, hence a column of L
+        for (std::size_t cp = colPtr[ak]; cp < colPtr[ak + 1]; ++cp) {
+            const std::int32_t aj = rowIdx[cp];       // a row of A, hence a column of L
             const std::int32_t lj = oldToNew[aj];    // the same column, in L
             if (lj >= lk)
                 continue;   // later column or the diagonal itself
@@ -211,8 +211,8 @@ void ElmForestEngine::computeColumnSizes(
     for (std::int32_t lk = 0; lk < static_cast<std::int32_t>(size); ++lk) {
         mark[lk] = lk;
         const std::int32_t ak = newToOld[lk];
-        for (std::size_t ap = colPtr[ak]; ap < colPtr[ak + 1]; ++ap) {
-            const std::int32_t aj = rowIdx[ap];       // a row of A, hence a column of L
+        for (std::size_t cp = colPtr[ak]; cp < colPtr[ak + 1]; ++cp) {
+            const std::int32_t aj = rowIdx[cp];       // a row of A, hence a column of L
             const std::int32_t lj = oldToNew[aj];    // the same column, in L
             if (lj >= lk)
                 continue;   // later column or the diagonal itself

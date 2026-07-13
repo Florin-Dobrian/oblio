@@ -42,7 +42,7 @@ static bool matchesOracle(const SparseMatrix<double>& A, const Permutation& p,
     const std::size_t size = A.size();
     if(s.size()!=size) return false;
 
-    // Gather each supernode's columns from the map (increasing, so front() is lowest).
+    // Collect each supernode's columns from the map (increasing, so front() is lowest).
     std::vector<std::vector<std::size_t>> cols(s.supSize());
     for(std::size_t lc=0; lc<size; ++lc)
         cols[static_cast<std::size_t>(s.idxToSupIdx()[lc])].push_back(lc);
@@ -264,7 +264,7 @@ int main(){
       ck(totalFill>0, "random x200         : fill exercised ("+std::to_string(totalFill)+" entries)"); }
 
 
-    // Amalgamation, and the two front-gather paths. Symbolic factorization reads one front
+    // Amalgamation, and the two front-index paths. Symbolic factorization reads one front
     // column per supernode when the supernodes have exactly matching patterns, and all of them
     // when amalgamation has stored zeros. The first path is what every test above exercises;
     // this is the second.
@@ -307,9 +307,9 @@ int main(){
               extraIndices += got.size() - pattern[lk].size();
           }
       }
-      ck(bad==0, "random x200 amalg   : no true nonzero lost, both gather paths");
+      ck(bad==0, "random x200 amalg   : no true nonzero lost, both index paths");
       ck(inexactForests>0 && exactForests>0,
-         "random x200 amalg   : both gather paths taken ("+std::to_string(exactForests)
+         "random x200 amalg   : both index paths taken ("+std::to_string(exactForests)
          +" exact, "+std::to_string(inexactForests)+" with stored zeros)");
       ck(extraIndices>0, "random x200 amalg   : explicit zeros present as extra indices ("
                          +std::to_string(extraIndices)+")"); }

@@ -47,18 +47,18 @@ public:
                  const Permutation& p, const ElmForest& f, SymFactor& s) const;
 
 private:
-    // The front indices of each supernode, gathered contiguously. The map runs column to
+    // The front indices of each supernode, laid out contiguously. The map runs column to
     // supernode, so a supernode's columns are generally scattered through it (and after
     // amalgamation they need not even be consecutive), while the union loop wants them
     // together. Counting sort by supernode: walking columns in increasing order leaves each
     // supernode's front indices sorted.
     //
-    // The gather itself is needed in *both* regimes, and cannot be avoided in either: the map
+    // A pass over the map is needed in *both* regimes, and cannot be avoided in either: the map
     // runs column to supernode and we want the reverse, and a supernode's columns need not be
     // contiguous (the forest is topological, not postordered), so its lowest column cannot be
-    // found by inspection. One pass over the map is the price of admission.
+    // found by inspection. That pass is the price of admission.
     //
-    // What amalgamation changes is how much that pass must produce. With fundamental supernodes
+    // What amalgamation changes is how much the pass must produce. With fundamental supernodes
     // the columns share a pattern exactly, so Struct(k'') is contained in Struct(k') for any two
     // front columns k' < k'' of a supernode, and reading the first (lowest) front column's
     // A-pattern is enough: everything the later ones would contribute is already there. (Nor do
@@ -68,13 +68,12 @@ private:
     // only *nearly* identical, paying explicit zeros for the difference, so the containment
     // fails and every front column must genuinely be read.
     //
-    // So the specialization available and not taken is one of *size*, not of passes: with
-    // fundamental supernodes only, this could produce the lowest column of each supernode
-    // (supSize entries) rather than all front columns (size entries), and the union loop would
-    // lose its inner loop over them. Both references take the general path unconditionally, and
-    // 0.9's comment says exactly why one could not. See Section 4.6 of the sparse-factorization
-    // notes.
-    void gatherFrontalIndices(const SymFactor& s,
+    // So the alternative (getFirstFrontalIndex, below) differs in *size*, not in passes: it
+    // produces the lowest column of each supernode, supSize entries, where this produces all
+    // front columns, size entries. Both references take this general path unconditionally, and
+    // 0.9's comment says exactly why one must when amalgamation is on. See Section 4.6 of the
+    // sparse-factorization notes.
+    void getFrontalIndices(const SymFactor& s,
                               std::vector<std::size_t>&  frontSupPtr,
                               std::vector<std::int32_t>& frontRowIdx) const;
 
@@ -83,17 +82,24 @@ private:
     // position is the supernode.
     //
     // Correct exactly when the forest reports exactPatterns(): a supernode's columns then share
-    // one pattern, so Struct(k'') is contained in Struct(k') for any two front columns k' < k'',
-    // and reading the lowest one is enough. That covers nodal forests, fundamental supernodes,
-    // and amalgamation at threshold zero (which merges only where the merge is free, hence only
-    // where the patterns already agree). It is wrong the moment amalgamation stores a zero: the
-    // later front columns then carry rows the first does not, and skipping them would silently
-    // lose indices.
+    // one pattern *in L*, so L(k'') is contained in L(k') for any two front columns k' < k''.
+    // That covers nodal forests, fundamental supernodes, and amalgamation at threshold zero
+    // (which merges only where the merge is free, hence only where the patterns already agree).
+    // It is wrong the moment amalgamation stores a zero: the later front columns then carry rows
+    // the first does not, and skipping them would silently lose indices.
     //
-    // What it saves is a great deal of A. The general gather makes the union read every column
-    // of A, all `size` of them; this one makes it read `supSize`, one per supernode. On a forest
+    // Be careful about *what* is sufficient, since the obvious gloss is false. It is **not**
+    // that one column of A suffices: A's columns of a supernode are not nested, and a later one
+    // can hold indices the first does not. What is sufficient is the *L* column. The union
+    // computes Idx(K) = L(k') from two inputs, A's column k' and the children, and anything a
+    // later front column of A could contribute is already in L(k'), so it arrives through the
+    // children instead. Nothing is lost; the reason is containment in L, not in A. See Section
+    // 4.6 of the notes, which works this through on a three-column example.
+    //
+    // What it saves is a great deal of A. getFrontalIndices makes the union read every column of
+    // A, all `size` of them; this one makes it read `supSize`, one per supernode. On a forest
     // that compresses well that is most of the traversal of A.
-    void gatherFirstFrontalIndices(const SymFactor& s,
+    void getFirstFrontalIndex(const SymFactor& s,
                                    std::vector<std::int32_t>& firstFrontRowIdx) const;
 
     void sortIndices(SymFactor& s) const;

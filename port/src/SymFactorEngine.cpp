@@ -49,16 +49,16 @@ bool SymFactorEngine::compute(const std::vector<std::size_t>&  colPtr,
 
     // The front columns each supernode must read from A. When the supernodes have exactly
     // matching patterns the lowest front column of each is enough (Section 4.6 of the notes);
-    // otherwise every front column must be read. Only one of the two gathers runs.
+    // otherwise every front column must be read. Only one of the two runs.
     const bool exact = f.exactPatterns();
 
     std::vector<std::int32_t> firstFrontRowIdx;   // exact: one column per supernode
     std::vector<std::size_t>  frontSupPtr;        // otherwise: all of them, with offsets
     std::vector<std::int32_t> frontRowIdx;
     if (exact)
-        gatherFirstFrontalIndices(s, firstFrontRowIdx);
+        getFirstFrontalIndex(s, firstFrontRowIdx);
     else
-        gatherFrontalIndices(s, frontSupPtr, frontRowIdx);
+        getFrontalIndices(s, frontSupPtr, frontRowIdx);
 
     const std::vector<std::int32_t>& oldToNew = p.oldToNew();
     const std::vector<std::int32_t>& newToOld = p.newToOld();
@@ -70,11 +70,12 @@ bool SymFactorEngine::compute(const std::vector<std::size_t>&  colPtr,
     // factor (permuted) ordering and an a prefix the ordering of A, so ak is lk's column in
     // A, and li and ai are the corresponding rows.
     //
-    // Positions into a flat array carry a prefix naming the array they walk:
+    // A position is named for the pointer array it walks: its initials, and nothing else.
     //
-    //   ap   into A's colPtr/rowIdx          (0.9 calls all of these p)
-    //   fp   into frontSupPtr/frontRowIdx    the front indices alone
-    //   sp   into supPtr/rowIdx              the whole index set, front and update
+    //   cp    colPtr        one entry per column      (0.9 calls all of these p)
+    //   sp    supPtr        one entry per supernode
+    //   fsp   frontSupPtr   one entry per supernode, the front indices alone
+    //   rp    rowPtr        one entry per row         (the transpose, in sortIndices)
     //
     // sp1 reads the child's index set, sp2 writes the parent's, keeping 0.9's 1-is-child,
     // 2-is-parent pairing. The scratch pair mirrors SymFactor's own, with front marking the
@@ -103,8 +104,8 @@ bool SymFactorEngine::compute(const std::vector<std::size_t>&  colPtr,
     auto addIndicesFromA = [&](std::int32_t lk, std::int32_t kk, std::size_t& sp2) {
         const std::int32_t ak = newToOld[lk];
 
-        for (std::size_t ap = colPtr[ak]; ap < colPtr[ak + 1]; ++ap) {
-            const std::int32_t ai = rowIdx[ap];
+        for (std::size_t cp = colPtr[ak]; cp < colPtr[ak + 1]; ++cp) {
+            const std::int32_t ai = rowIdx[cp];
             const std::int32_t li = oldToNew[ai];
 
             if (li < lk)
@@ -127,8 +128,8 @@ bool SymFactorEngine::compute(const std::vector<std::size_t>&  colPtr,
         if (exact) {
             addIndicesFromA(firstFrontRowIdx[kk], kk, sp2);
         } else {
-            for (std::size_t fp = frontSupPtr[kk]; fp < frontSupPtr[kk + 1]; ++fp)
-                addIndicesFromA(frontRowIdx[fp], kk, sp2);
+            for (std::size_t fsp = frontSupPtr[kk]; fsp < frontSupPtr[kk + 1]; ++fsp)
+                addIndicesFromA(frontRowIdx[fsp], kk, sp2);
         }
 
         // The contribution of the children of kk.
@@ -153,7 +154,7 @@ bool SymFactorEngine::compute(const std::vector<std::size_t>&  colPtr,
     return true;
 }
 
-void SymFactorEngine::gatherFrontalIndices(const SymFactor& s,
+void SymFactorEngine::getFrontalIndices(const SymFactor& s,
         std::vector<std::size_t>&  frontSupPtr,
         std::vector<std::int32_t>& frontRowIdx) const {
     // The offsets are the front sizes, accumulated.
@@ -165,18 +166,18 @@ void SymFactorEngine::gatherFrontalIndices(const SymFactor& s,
     // Scatter each column into its supernode's slot. Columns are walked in increasing order, so
     // each supernode's front indices come out sorted.
     //
-    // fp[kk] is the next free position in frontRowIdx for supernode kk, so it is an fp in the
+    // fsp[kk] is the next free position in frontRowIdx for supernode kk, so it is an fsp in the
     // usual sense, one per supernode rather than one in hand. It starts at the offsets and
     // advances as the columns land.
     frontRowIdx.resize(s.mSize);
-    std::vector<std::size_t> fp(frontSupPtr.begin(), frontSupPtr.end() - 1);
+    std::vector<std::size_t> fsp(frontSupPtr.begin(), frontSupPtr.end() - 1);
     for (std::int32_t lk = 0; lk < static_cast<std::int32_t>(s.mSize); ++lk) {
         const std::int32_t kk = s.mIdxToSupIdx[lk];   // the supernode of column lk
-        frontRowIdx[fp[kk]++] = lk;
+        frontRowIdx[fsp[kk]++] = lk;
     }
 }
 
-void SymFactorEngine::gatherFirstFrontalIndices(const SymFactor& s,
+void SymFactorEngine::getFirstFrontalIndex(const SymFactor& s,
         std::vector<std::int32_t>& firstFrontRowIdx) const {
     // The lowest column of each supernode. Columns are walked in increasing order, so the first
     // one seen for a supernode is its lowest; later ones are skipped. NIL doubles as "not seen
@@ -192,33 +193,77 @@ void SymFactorEngine::gatherFirstFrontalIndices(const SymFactor& s,
 }
 
 void SymFactorEngine::sortIndices(SymFactor& s) const {
-    const std::size_t numIdx = s.mRowIdx.size();
+    // Sort each supernode's index set into increasing order, by transposing twice.
+    //
+    // The factor is a supernode-to-rows structure. Its transpose is a row-to-supernodes
+    // structure, and the names mirror it exactly:
+    //
+    //   factor:     supPtr -> rowIdx     supernode kk, and the rows it holds
+    //   transpose:  rowPtr -> supIdx     row li, and the supernodes that hold it
+    //
+    // The positions mirror too, sp into the factor and rp into the transpose, and so do the two
+    // passes: each walks one structure with a scalar position and fills the other through a
+    // cursor array, and the second pass is the first with the roles exchanged. Reading the
+    // transpose back with rows in increasing order leaves every supernode's set sorted, with no
+    // comparison anywhere. Two counting sorts, in opposite directions.
 
-    // Count the supernodes each index appears in, then accumulate, giving the offsets of
-    // the transpose.
-    std::vector<std::size_t> supPtr(s.mSize + 1, 0);
-    for (std::size_t sp = 0; sp < numIdx; ++sp)
-        ++supPtr[s.mRowIdx[sp] + 1];
-    for (std::int32_t i = 0; i < static_cast<std::int32_t>(s.mSize); ++i)
-        supPtr[i + 1] += supPtr[i];
+    // The transpose's offsets: how many supernodes each row appears in, accumulated.
+    //
+    // The + 1 is a trick, not an off-by-one, and it is worth naming properly.
+    //
+    // A prefix sum comes in two flavours. The *inclusive* one over [a, b, c] gives
+    // [a, a+b, a+b+c]: each output counts itself. The *exclusive* one gives [0, a, a+b]: each
+    // output counts only what comes before it, and the first is zero.
+    //
+    // Offsets are exclusive by nature. rowPtr[li] must be the total for all rows strictly below
+    // li, which is where row li's run begins; that is what makes rowPtr[0] == 0 and makes
+    // rowPtr[li + 1] - rowPtr[li] the length of row li's run.
+    //
+    // But the loop below, rowPtr[li + 1] += rowPtr[li] sweeping upward, is mechanically an
+    // *inclusive* sum: each cell absorbs the running total beneath it, its own count included.
+    // Storing each count one slot high is what reconciles the two. Row li's count lives at
+    // rowPtr[li + 1], so it is never in rowPtr[li] to be absorbed, and an inclusive sweep lands
+    // on exclusive results. rowPtr[0] is never written at all, and stays zero for free.
+    //
+    //   init         [0, 0, 0, 0]
+    //   count        [0, 1, 2, 1]     counts, each at li + 1
+    //   prefix sum   [0, 1, 3, 4]     offsets: row 0 -> [0,1), row 1 -> [1,3), row 2 -> [3,4)
+    //
+    // The shift converts an inclusive sweep into an exclusive result. Without it the counts would
+    // sit at rowPtr[li], and getting exclusive offsets would need a genuinely exclusive sum: a
+    // temporary to hold each count before it is overwritten, or a second backward pass.
+    //
+    // OrderEngine builds colPtrOff the same way. getFrontalIndices below does *not* need the
+    // shift: its counts already exist, in mFrontSize, so it can write a plain exclusive sum
+    // directly (frontSupPtr[kk + 1] = frontSupPtr[kk] + mFrontSize[kk]) with nothing to
+    // overwrite. The shift is for when the counts must be tallied in place.
+    std::vector<std::size_t> rowPtr(s.mSize + 1, 0);
+    for (std::size_t sp = 0; sp < s.mNumRowIdx; ++sp)
+        ++rowPtr[s.mRowIdx[sp] + 1];
+    for (std::int32_t li = 0; li < static_cast<std::int32_t>(s.mSize); ++li)
+        rowPtr[li + 1] += rowPtr[li];
 
-    // First pass: build the transpose, the supernodes each index appears in.
-    std::vector<std::int32_t> sup(numIdx);
-    std::vector<std::size_t> cursor(supPtr.begin(), supPtr.end() - 1);
-    for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(s.mSupSize); ++kk)
-        for (std::size_t sp = s.mSupPtr[kk]; sp < s.mSupPtr[kk + 1]; ++sp) {
-            const std::int32_t i = s.mRowIdx[sp];
-            sup[cursor[i]++] = kk;
-        }
+    // Pass one: walk the factor, fill the transpose. rp[li] is row li's next free position in it.
+    std::vector<std::int32_t> supIdx(s.mNumRowIdx);
+    {
+        std::vector<std::size_t> rp(rowPtr.begin(), rowPtr.end() - 1);
+        for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(s.mSupSize); ++kk)
+            for (std::size_t sp = s.mSupPtr[kk]; sp < s.mSupPtr[kk + 1]; ++sp) {
+                const std::int32_t li = s.mRowIdx[sp];
+                supIdx[rp[li]++] = kk;
+            }
+    }
 
-    // Second pass: read the transpose back, walking the indices in increasing order, which
-    // writes each supernode's index set sorted.
-    std::vector<std::size_t> writeCursor(s.mSupPtr.begin(), s.mSupPtr.end() - 1);
-    for (std::int32_t i = 0; i < static_cast<std::int32_t>(s.mSize); ++i)
-        for (std::size_t sp = supPtr[i]; sp < supPtr[i + 1]; ++sp) {
-            const std::int32_t kk = sup[sp];
-            s.mRowIdx[writeCursor[kk]++] = i;
-        }
+    // Pass two: walk the transpose, fill the factor. sp[kk] is supernode kk's next free position
+    // in it. Rows are walked in increasing order, so each supernode's set comes out sorted.
+    {
+        std::vector<std::size_t> sp(s.mSupPtr.begin(), s.mSupPtr.end() - 1);
+        for (std::int32_t li = 0; li < static_cast<std::int32_t>(s.mSize); ++li)
+            for (std::size_t rp = rowPtr[li]; rp < rowPtr[li + 1]; ++rp) {
+                const std::int32_t kk = supIdx[rp];
+                s.mRowIdx[sp[kk]++] = li;
+            }
+    }
 }
 
 template bool SymFactorEngine::compute(const SparseMatrix<double>&, const Permutation&, const ElmForest&, SymFactor&) const;

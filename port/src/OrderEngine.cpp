@@ -38,18 +38,18 @@ bool OrderEngine::compute(const std::vector<std::size_t>&  colPtr,
 
     // A is stored full-symmetric; MMD wants the off-diagonal structure only.
     // Strip the diagonal (no expansion needed, A already holds both triangles). Columns are
-    // indices, so aj is an int32_t and the comparison against rowIdx[ap] needs no cast; ap is
+    // indices, so aj is an int32_t and the comparison against rowIdx[cp] needs no cast; cp is
     // a position into A's arrays.
     std::vector<std::size_t> colPtrOff(size + 1, 0);
     for (std::int32_t aj = 0; aj < static_cast<std::int32_t>(size); ++aj)
-        for (std::size_t ap = colPtr[aj]; ap < colPtr[aj + 1]; ++ap)
-            if (rowIdx[ap] != aj) colPtrOff[aj + 1]++;
+        for (std::size_t cp = colPtr[aj]; cp < colPtr[aj + 1]; ++cp)
+            if (rowIdx[cp] != aj) colPtrOff[aj + 1]++;
     for (std::size_t j = 0; j < size; ++j) colPtrOff[j + 1] += colPtrOff[j];
     std::vector<std::int32_t> rowIdxOff(colPtrOff[size]);
     std::vector<std::size_t> cur(colPtrOff.begin(), colPtrOff.end());
     for (std::int32_t aj = 0; aj < static_cast<std::int32_t>(size); ++aj)
-        for (std::size_t ap = colPtr[aj]; ap < colPtr[aj + 1]; ++ap)
-            if (rowIdx[ap] != aj) rowIdxOff[cur[aj]++] = rowIdx[ap];
+        for (std::size_t cp = colPtr[aj]; cp < colPtr[aj + 1]; ++cp)
+            if (rowIdx[cp] != aj) rowIdxOff[cur[aj]++] = rowIdx[cp];
     return orderMMD(size, colPtrOff, rowIdxOff, p);
 }
 

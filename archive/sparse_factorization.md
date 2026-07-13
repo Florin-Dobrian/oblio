@@ -1935,26 +1935,195 @@ symbolicFactorNodal(A, forest) -> Idx:
             Idx(k) = Idx(k) union ( Idx(j) \ {j} ) # drop j's own diagonal; the rest carries up
 ```
 
-**Fundamental supernodes.** The columns of a supernode share a pattern exactly, so for any two
+**Fundamental supernodes.** The columns of a supernode share a pattern in `L`, so for any two
 front columns `k' < k''` of `K`,
 
 ```
 Struct(k'') is contained in Struct(k')
 ```
 
-Reading the **first** (lowest) front column of `A` is therefore enough: whatever the later front
-columns would contribute is already there. And the front indices need no seeding, since the first
-column's `Struct` already contains every later column of `K` (they are rows below it). The block
-diagonal *emerges* from the union.
+Reading the **first** (lowest) front column of `A` is therefore enough. But that inference is
+less obvious than it looks, and it is worth doing carefully, because two things one might assume
+are false.
+
+**Sharing a pattern in `L` does not mean sharing one in `A`.** Take the smallest case that shows
+it, three columns with `A`-edges `1-2` and `1-3`:
+
+```
+        1  --  2
+        |
+        3
+```
+
+Structure of `A` (`X` = nonzero; full symmetric):
+
+```
+     1 2 3
+  1  X X X
+  2  X X .
+  3  X . X
+```
+
+Eliminating column 1 makes 2 and 3 adjacent, so `L` gains one fill entry at `(3,2)`, marked `F`:
+
+```
+     1 2 3
+  1  X . .
+  2  X X .
+  3  X F X
+```
+
+Read the columns off both:
+
+```
+A columns:  A(1) = {1,2,3}    A(2) = {1,2}     A(3) = {1,3}
+L columns:  L(1) = {1,2,3}    L(2) = {2,3}     L(3) = {3}
+```
+
+All three merge into **one** fundamental supernode: the `L` patterns nest, each is the next with
+one more row on top. The `A` patterns do not resemble each other at all. And look at column 2: in
+`A` it has **nothing below its diagonal**, while in `L` it holds `{3}`. That entry is fill, and
+it arrives from column 2's child (column 1), not from `A` at all.
+
+**And `A`'s column is generally a strict subset of `L`'s.** Column `k'` has fill of its own, from
+its own children. So `A(k')` does not contain `L(k')`, and cannot be expected to. (In the picture
+above column 1 happens to have none, being a leaf, but in general it will.)
+
+Which raises the real question. The shortcut reads only `A`'s column `k'`. What if `A`'s column
+`k''` holds an index that `A`'s column `k'` does not?
+
+It can, and the shortcut still finds it. Let `i` be such an index: `A[i][k''] != 0`, `i >= k''`,
+and `i` not in `A(k')`. Then `i` is in `L(k'')`, and by the containment above `i` is in `L(k')`.
+Now `L(k')` decomposes exactly two ways:
+
+```
+L(k') = { rows of A's column k', at or below k' }  union  { update indices of k's children }
+```
+
+`i` is not in the first set, so it is in the second, **and the shortcut reads that set too**. The
+step that closes it: a fundamental supernode is a *path* in which every column above the bottom
+has exactly one child, and that child is the previous column of the same supernode. So the only
+edges reaching in from outside land on `k'`, and the supernode's children are exactly `k'`'s
+children.
+
+Hence
+
+```
+Idx(K) = L(k') = (A's column k', at or below k')  union  (the children's update indices)
+```
+
+which is precisely what the algorithm computes. The shortcut is **not** "the later `A` columns
+are redundant copies of the first", which is false. It is "the later `A` columns can only
+contribute indices that `L(k')` already holds, and every index of `L(k')` arrives through one of
+the two doors the union already opens".
+
+The front indices need no seeding either, for the same reason: `L(k')` already contains every
+later column of `K`, since those are rows below `k'`. The block diagonal *emerges* from the union.
 
 ```
 symbolicFactorFundamental(A, forest) -> Idx:
     for K = 1 .. numSupernodes:
         k' = the lowest column of K # its first front index
-        Idx(K) = { i >= k' : A[i][k'] != 0 } # one column of A suffices
+        Idx(K) = { i >= k' : A[i][k'] != 0 } # A's column k' only
         for each child J of K:
             Idx(K) = Idx(K) union ( Idx(J) \ front(J) ) # drop the child's columns, not one index
 ```
+
+Read the first line carefully, because the obvious gloss on it, "one column of `A` suffices", is
+**false as an argument**, even though it is true as a conclusion. Getting from one to the other
+is the whole content of this subsection, and it is worth the space.
+
+**`A`'s columns of a supernode are not nested.** The three-column picture above shows it:
+`A(2) = {1,2}` and `A(3) = {1,3}`, and neither sits inside the other. Only `L`'s columns nest.
+So the shortcut cannot be "the later columns of `A` are redundant copies of the first". They are
+not copies of anything.
+
+**And a later column of `A` really can hold something the first does not.** The smallest case
+needs four columns, with `A`-edges `1-2`, `1-4`, `2-3`, `3-4`, and crucially **no** edge `2-4`:
+
+```
+A (X = nonzero):          L (F = fill):
+     1 2 3 4                   1 2 3 4
+  1  X X . X              1  X . . .
+  2  X X X .              2  X X . .
+  3  . X X X              3  . X X .
+  4  X . X X              4  X F X X
+```
+
+The supernodes are `{1}` and `{2,3,4}`, so `K = {2,3,4}` and `k' = 2`. Look at what `A` offers
+each front column, below its own diagonal:
+
+```
+A(2) | >= 2 = {2,3}      <- all the shortcut reads
+A(3) | >= 3 = {3,4}      <- holds 4, and A(2) does not
+A(4) | >= 4 = {4}
+```
+
+`A`'s column 3 has an original entry at row 4. The shortcut never reads column 3. So where does
+the 4 come from?
+
+**From the child.** `K`'s only child is the supernode `{1}`, whose update indices are
+`L(1) \ {1} = {2,4}`. So the union computes
+
+```
+Idx(K) = A(2)|>=2  union  (child's update indices)
+       = {2,3}     union  {2,4}
+       = {2,3,4}                                    which is L(2), and correct
+```
+
+The 4 arrives, but **not as `A`'s entry at (4,3)**. It arrives as *fill*, through the graph path
+`2 - 1 - 4`: vertex 1 lies below both, so eliminating it makes 2 and 4 adjacent. That is the `F`
+at `(4,2)` in the picture. The original entry and the fill entry are **two different reasons for
+the same index**, and the shortcut collects it by the second reason while ignoring the first.
+
+**The general argument, now that the example has made it concrete.** Take any `i` in `A(k'')`
+with `i >= k''`. Then `i` is in `L(k'')`, since `A`'s pattern is contained in `L`'s. And
+`L(k'')` is contained in `L(k')`, since they are front columns of one supernode. So
+
+```
+i is in L(k')
+```
+
+**guaranteed, by the shared pattern alone.** And `L(k')` has a complete recipe that never mentions
+`A(k'')`:
+
+```
+L(k') = { i >= k' : A[i][k'] != 0 }  union  (update indices of k's etree children)
+```
+
+So `i` must arrive through one of those two doors. Which one varies, and the example shows both:
+the 3 comes straight from `A(2)`, the 4 comes from the child. The shortcut does not need to know
+which.
+
+That is the honest form of "one column of `A` suffices". Not *"the other columns of `A` say
+nothing new"*, which is false, but *"whatever the other columns of `A` could say about `L` is
+already forced into `L(k')` by the shared pattern, and `L(k')` is computed anyway"*. The columns
+of `A` are bound together by the pattern their `L` columns share.
+
+**And it must be `k'`, not any other front column.** Two things pick it out, and both are needed.
+
+*It sees the widest window.* `k'` reads rows `>= k'`, which includes every row a later front
+column could see, plus the rows between `k'` and `k''` that a later column structurally cannot
+reach. So no other column would do.
+
+*It is where the children attach.* A fundamental supernode is a path in which every column above
+the bottom has exactly one child, and that child is the previous column of the same supernode. So
+`k'` is the only front column whose elimination-tree children are the **supernode's** children.
+Its recurrence therefore has both its inputs to hand; a later column's recurrence would refer to
+the update indices of `k'' - 1`, a column *inside* the supernode whose index set was never
+computed separately.
+
+The first says no other column would do. The second says this one does. Try `k''` on the
+three-column picture, a leaf supernode with no children at all, and the failure is immediate:
+
+```
+from k' = 1:   {1,2,3} union {}  =  {1,2,3}       correct
+from k'' = 2:  {2}     union {}  =  {2}           wrong: 1 and 3 are lost
+```
+
+Finally, the front indices need no seeding, for the same containment reason: `L(k')` already
+contains every later column of `K`, since those are rows below `k'`. The block diagonal *emerges*
+from the union rather than being put into it.
 
 **Amalgamated supernodes.** Amalgamation (4.5) merges columns whose patterns are only *nearly*
 identical, paying explicit zeros for the difference. So `Struct(k'')` is no longer contained in

@@ -84,8 +84,7 @@ void ElmForestEngine::computeParent(
     //
     // For each factor column lk (increasing), look at its neighbours mapping to earlier
     // columns lj < lk; path-compress to attach lj's subtree under lk.
-    const std::int32_t n = static_cast<std::int32_t>(size);
-    for (std::int32_t lk = 0; lk < n; ++lk) {
+    for (std::int32_t lk = 0; lk < static_cast<std::int32_t>(size); ++lk) {
         const std::int32_t ak = newToOld[lk];
         for (std::size_t ap = colPtr[ak]; ap < colPtr[ak + 1]; ++ap) {
             const std::int32_t lj = oldToNew[rowIdx[ap]];
@@ -184,7 +183,6 @@ void ElmForestEngine::computeColumnSizes(
         const Permutation& p,
         ElmForest& f) const {
     const std::size_t size = f.mSize;
-    const std::int32_t n = static_cast<std::int32_t>(size);
     const std::vector<std::int32_t>& oldToNew = p.oldToNew();
     const std::vector<std::int32_t>& newToOld = p.newToOld();
 
@@ -209,7 +207,7 @@ void ElmForestEngine::computeColumnSizes(
     // what the forest wants, and saves both the array and the pass.
     f.mUpdateSize.assign(size, 0);
     std::vector<std::int32_t> mark(size, NIL);
-    for (std::int32_t lk = 0; lk < n; ++lk) {
+    for (std::int32_t lk = 0; lk < static_cast<std::int32_t>(size); ++lk) {
         mark[lk] = lk;
         const std::int32_t ak = newToOld[lk];
         for (std::size_t ap = colPtr[ak]; ap < colPtr[ak + 1]; ++ap) {
@@ -237,8 +235,7 @@ void ElmForestEngine::compressFundamental(ElmForest& f) const {
     // parent's.
     std::vector<std::int32_t> idxToSupIdx(size, NIL);
     std::int32_t supSize = 0;
-    const std::int32_t n = static_cast<std::int32_t>(size);
-    for (std::int32_t k = 0; k < n; ++k) {
+    for (std::int32_t k = 0; k < static_cast<std::int32_t>(size); ++k) {
         const std::int32_t j = f.mFirstChild[k];
 
         // Does k merge into its child j? The two clauses after the guard are the
@@ -275,11 +272,10 @@ void ElmForestEngine::compressFundamental(ElmForest& f) const {
     // order, the first column seen for a given supernode is its topmost: its parent link is
     // the one that leaves the supernode, and its rows below are the supernode's update
     // rows. Front sizes instead accumulate over every column, so that runs before the test.
-    const std::size_t numSup = static_cast<std::size_t>(supSize);
-    std::vector<std::int32_t> parent(numSup, NIL);
-    std::vector<std::size_t>  frontSize(numSup, 0);
-    std::vector<std::size_t>  updateSize(numSup, 0);
-    std::vector<bool>         seen(numSup, false);
+    std::vector<std::int32_t> parent(supSize, NIL);
+    std::vector<std::size_t>  frontSize(supSize, 0);
+    std::vector<std::size_t>  updateSize(supSize, 0);
+    std::vector<bool>         seen(supSize, false);
 
     // Counting down, not indexing down: see finalizeLinks for why a std::size_t descending
     // loop must be written this way.
@@ -309,7 +305,7 @@ void ElmForestEngine::compressFundamental(ElmForest& f) const {
         seen[jj] = true;
     }
 
-    f.mSupSize = numSup;
+    f.mSupSize = static_cast<std::size_t>(supSize);
     f.mIdxToSupIdx.swap(idxToSupIdx);   // was the identity, now column -> supernode
     f.mParent.swap(parent);
     f.mFrontSize.swap(frontSize);
@@ -320,14 +316,13 @@ void ElmForestEngine::compressFundamental(ElmForest& f) const {
 }
 
 void ElmForestEngine::compressThreshold(ElmForest& f, std::size_t threshold) const {
-    const std::size_t  size    = f.mSize;
-    const std::size_t  supSize = f.mSupSize;
-    const std::int32_t nSup    = static_cast<std::int32_t>(supSize);
+    const std::size_t size    = f.mSize;
+    const std::size_t supSize = f.mSupSize;
 
     // Where each old supernode ends up. Identity to begin with; supOldToNew[jj] = kk records
     // that jj was absorbed into kk.
     std::vector<std::int32_t> supOldToNew(supSize);
-    for (std::int32_t jj = 0; jj < nSup; ++jj)
+    for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(supSize); ++jj)
         supOldToNew[jj] = jj;
 
     // Children still worth testing. A child that fails the budget can never pass it later,
@@ -346,7 +341,7 @@ void ElmForestEngine::compressThreshold(ElmForest& f, std::size_t threshold) con
     std::size_t numSup = supSize;
 
     // For every supernode kk, absorb as many of its children as the budget allows.
-    for (std::int32_t kk = 0; kk < nSup; ++kk) {
+    for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(supSize); ++kk) {
         std::size_t fillInc  = 0;   // zeros already bought for kk
         std::size_t frontInc = 0;   // columns already absorbed into kk
 
@@ -409,13 +404,13 @@ void ElmForestEngine::compressThreshold(ElmForest& f, std::size_t threshold) con
     // Compact the labels: the survivors keep topological order, but their old labels have
     // gaps where absorbed supernodes used to be.
     std::vector<std::int32_t> label(supSize, NIL);
-    for (std::int32_t jj = 0; jj < nSup; ++jj)
+    for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(supSize); ++jj)
         label[supOldToNew[jj]] = 0;               // mark the survivors
     std::int32_t next = 0;
-    for (std::int32_t jj = 0; jj < nSup; ++jj)
+    for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(supSize); ++jj)
         if (label[jj] != NIL)
             label[jj] = next++;
-    for (std::int32_t jj = 0; jj < nSup; ++jj)
+    for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(supSize); ++jj)
         supOldToNew[jj] = label[supOldToNew[jj]];
 
     // Carry the column map through.

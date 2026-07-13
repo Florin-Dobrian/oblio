@@ -54,9 +54,9 @@ private:
     //   reads:   s.mSize, s.mSupSize, s.mIdxToSupIdx, s.mFrontSize
     // The two outputs are scratch for the union recurrence, not fields of s, so they stay
     // out-parameters.
-    void gatherFrontIdx(const SymFact& s,
-                        std::vector<std::size_t>&  frontIdxPtr,
-                        std::vector<std::int32_t>& frontIdx) const;
+    void gatherFrontalIndices(const SymFact& s,
+                        std::vector<std::size_t>&  frontSupPtr,
+                        std::vector<std::int32_t>& frontRowIdx) const;
 
     // Sort each supernode's index set in increasing order, by a transposition
     // bucket sort: build the transpose (the supernodes each index appears in),
@@ -65,9 +65,9 @@ private:
     // is reached by indirection anyway), but numeric factorization assembles the
     // original matrix values assuming sorted front indices.
     //
-    //   reads:   s.mSize, s.mSupSize, s.mIdxPtr
-    //   writes:  s.mIdx  (in place, permuted into sorted order)
-    void sortIdx(SymFact& s) const;
+    //   reads:   s.mSize, s.mSupSize, s.mSupPtr
+    //   writes:  s.mRowIdx  (in place, permuted into sorted order)
+    void sortIndices(SymFact& s) const;
 };
 
 extern template bool SymFactEngine::compute(const SparseMatrix<double>&, const Permutation&, const ElmForest&, SymFact&) const;

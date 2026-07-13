@@ -934,6 +934,27 @@ takes the other route: it fixes a column and gathers from that column's children
 fixing a row and climbing. Same object, same marker trick, opposite traversal. It is the one
 we implement, and it needs the counts of this section just the same, to size what it fills.)
 
+**The marker is the same array in both, with its two roles exchanged.** This is the sharpest
+way to see the duality, and it is worth writing out:
+
+```
+here (row-oriented):     mark[column] = row       "column r is already counted for row k"
+3.1 (column-oriented):   mark[row]    = column    "row i is already in Struct(j)"
+```
+
+One algorithm fixes a row and marks the columns it reaches; the other fixes a column and marks
+the rows it reaches. Same array, same size `n`, same `O(1)` duplicate rejection, and the two
+are mirror images because they traverse the same object from opposite ends.
+
+**And in both, the marker is stamped rather than set, which is what keeps the cost linear.**
+The natural thing to reach for is a boolean array, cleared before each iteration. That would
+cost `O(n)` per iteration and `O(n^2)` overall, swamping the `O(nnz(L))` the algorithm is
+supposed to run in. Stamping with the *identifier of the current iteration* (the row `k` here,
+the column `j` in 3.1) removes the clearing entirely: a stale stamp from an earlier iteration
+is simply not equal to the current one, so it reads as unmarked. The array is initialized once,
+to a value no iteration uses, and never touched again. That is not a micro-optimization, it is
+the reason the mark array is used at all rather than a set.
+
 **The diagonal is a choice.** Initializing `colSize[j] = 1` counts the diagonal, giving
 `|Struct(j)|` in full. Initializing to `0` instead gives the count of *subdiagonal* entries,
 which is what a supernode's **update size** is (Section 4). The two differ by exactly one and
@@ -1469,6 +1490,14 @@ array (a timestamp per row) makes each union a linear scan with `O(1)` duplicate
 rejection: to build column `j`, append a row and stamp `mark[i] = j`; a row already
 stamped `j` is a duplicate and is skipped.
 
+Two things about that array, both established in 2.5 and both easy to pass over. The stamp is
+the *column being built*, not a boolean, which is what removes the clearing pass: a stale stamp
+from an earlier column is simply not equal to `j`, so it reads as unmarked, and the array is
+initialized once rather than `n` times. Without that the phase would be `O(n^2)`, not
+`O(nnz(L))`. And the array is the exact mirror of the one in 2.5: here `mark[row] = column`,
+there `mark[column] = row`, because that algorithm fixes a row and marks the columns it reaches
+while this one fixes a column and marks the rows. Same trick, same array, roles exchanged.
+
 ```
 symbolicFactor(A, forest) -> Struct: # with marks
     for r = 1 .. n:
@@ -1570,9 +1599,15 @@ list rather than one per column. Condition 1 is what makes them *contiguous* in 
 if a column on the path had two children, the two subtrees would both feed it, and the
 column below it on the path would not carry the whole story.
 
-Fundamental supernodes are **unique** for a given forest. There is no choice to make and
-no heuristic to tune, unlike the threshold-based merging that trades explicit zeros for
-larger blocks. That uniqueness is why they are the natural default.
+Fundamental supernodes are **unique** for a given forest. Conditions 1 and 2 are properties,
+not choices: there is nothing to decide and no heuristic to tune. That is why they are the
+natural default, and it is worth being precise about what it costs.
+
+They are **not maximal**. Condition 1 is stricter than the sparsity requires: a parent with
+two children is refused outright, even when one of those children shares its pattern exactly
+and could be absorbed at no cost whatever. The only-child condition is there to make the
+supernodes *paths*, hence unique, not because merging would introduce fill. Section 4.5 drops
+it, and pays for the extra merges in uniqueness.
 
 Write `supernode(j)` for the one containing column `j`. Its columns are the **front indices**;
 the rows below them, common to all of them, are the **update indices**.
@@ -1729,7 +1764,150 @@ not `{7,8}`. The patterns differ, so the columns cannot share an index list. Col
 growing do the columns start agreeing, and in this ordering that happens only inside the
 separator.
 
-### 4.5 What changes downstream
+### 4.5 Amalgamation: buying bigger blocks with explicit zeros
+
+Fundamental supernodes are free but timid. This section relaxes them in two directions at
+once, and a single parameter controls both.
+
+**The fill of a merge.** Let `K` be a supernode and `J` one of its children. Merging `J` into
+`K` makes `J`'s columns part of `K`'s front, so each of them must now store the whole of `K`'s
+index set below it, where before it stored only `J`'s own update rows. By the containment
+theorem (2.3), `update(J)` is a **subset** of `K`'s index set, so the new entries per column of
+`J` are exactly
+
+```
+indexSet(K) \ update(J)      of which there are   |indexSet(K)| - |update(J)|
+```
+
+and every one of them is a **zero**, stored explicitly because the block must be rectangular.
+Multiply by the number of columns `J` contributes:
+
+```
+fill(J -> K)  =  ( |indexSet(K)| - |update(J)| ) * |front(J)|
+```
+
+Being a set-difference size, it is never negative: containment guarantees it.
+
+**Zero fill is the pattern test.** The expression vanishes exactly when
+`update(J) = indexSet(K)`, which is condition 2 of 4.1, the identical-pattern condition. So a
+zero-fill merge and a fundamental merge ask the *same* question about patterns. The only
+difference is condition 1: fundamental compression additionally demands that `J` be `K`'s
+**only** child. Drop that demand and we merge strictly more, at no cost.
+
+**And that changes the answer.** Take the smallest case, a three-column star, `A` with edges
+`1-3` and `2-3`:
+
+```
+Struct(1) = {1,3}    Struct(2) = {2,3}    Struct(3) = {3}
+parent(1) = 3        parent(2) = 3        parent(3) = NIL
+```
+
+Column 3 has **two** children, so fundamental compression merges nothing: three supernodes.
+Now compute the fills. `indexSet(3) = {3}`, of size 1, and `update(1) = update(2) = {3}`, also
+of size 1, so
+
+```
+fill(1 -> 3) = (1 - 1) * 1 = 0
+fill(2 -> 3) = (1 - 1) * 1 = 0
+```
+
+Both children merge for free. But not both *together*. Absorb column 1 first, and supernode
+`{1,3}` now has a front of two columns, so its index set has grown to `{1,3}`. Recompute:
+
+```
+fill(2 -> {1,3}) = (2 - 1) * 1 = 1
+```
+
+Column 2 would have to store a zero at row 1. So one child merges and the other does not:
+**two supernodes, no fill**, where fundamental compression gave three.
+
+**Uniqueness is the price.** Which child? Both were equally free, and the choice mattered:
+taking column 2 first yields `{2,3}` and `{1}`, a different partition with the same count and
+the same (zero) fill. There is no canonical answer, so the algorithm must **break ties**, and
+any tie-breaking rule is a convention rather than a theorem. The usual one is: least fill
+first; ties to the largest front size; ties again to the first child in the list. That last
+rule is arbitrariness made deterministic, which is exactly what a canonical algorithm never
+needs. Fundamental supernodes are unique because they *refuse* to make this choice.
+
+**Spending fill on purpose.** So far the threshold has been zero. Raising it lets a merge
+through even when it costs zeros, and the reason is Section 4.6: a supernode's nonzeros form
+a dense block, and dense blocks run on BLAS level 3. A wider block is a better block, and past
+some point the arithmetic on a few explicit zeros is cheaper than the overhead of processing
+two narrow blocks instead of one. The threshold is the budget: **how many explicitly stored
+zeros are we willing to buy a bigger front with**. It is a genuine tuning parameter, with no
+right answer independent of the machine.
+
+**The algorithm.** Greedy, one parent at a time.
+
+```
+amalgamate(forest, threshold) -> supernode:
+    for K = 1 .. numSupernodes:
+        candidate[K] = true
+
+    for K = 1 .. numSupernodes: # increasing: children before parents
+        fillInc = 0 # zeros already bought for K
+        frontInc = 0 # columns already absorbed into K
+        kSize = |front(K)| + |update(K)| # K's index set, before growth
+
+        loop:
+            best = NIL
+            for each child J of K:
+                if not candidate[J]:
+                    continue
+                zerosPerCol = kSize + frontInc - |update(J)| # >= 0, by containment
+                cost = fillInc + zerosPerCol * |front(J)|
+                if cost > threshold:
+                    candidate[J] = false # over budget now, and only ever more so
+                    continue
+                if best == NIL or cost < bestCost or
+                   (cost == bestCost and |front(J)| > |front(best)|):
+                    best = J
+                    bestCost = cost
+
+            if best == NIL:
+                break # nothing more fits the budget
+
+            supernode[best] = K # absorb it
+            fillInc = bestCost
+            frontInc = frontInc + |front(best)|
+            candidate[best] = false
+
+        front(K) = front(K) + frontInc # K has grown; later merges must see this
+```
+
+Three details are load-bearing.
+
+**`frontInc` must be inside the cost.** Every child absorbed widens `K`'s front, which raises
+the price of the next one. That is what stopped column 2 in the star, and it is why the loop
+recomputes the cost on every pass rather than ranking the children once.
+
+**`candidate[J] = false` is permanent.** A child that fails the test can never pass it later,
+since `K` only grows. Striking it off keeps the greedy loop from rescanning it, and turns what
+looks quadratic into something close to linear in practice.
+
+**Updating `front(K)` at the end is not bookkeeping.** The parents are processed in increasing
+order, so by the time `K` is reached its children have *already been parents themselves* and
+may have absorbed children of their own. The cost of merging `J` into `K` depends on `J`'s
+**current** front size, not the one it started with. Forgetting this line underestimates both
+the fill and the resulting block, and the error is silent.
+
+**A consequence for storage.** 4.3 noted that a supernode's columns need not be consecutive,
+and that a postordering would make them so. That escape closes here. A fundamental supernode
+is a *path*, and a postorder numbers a path consecutively. An amalgamated supernode is a
+parent plus a **subset** of its children, and a postorder places the parent after *all* of its
+children, including the ones that were not merged. The star gives the smallest instance:
+supernode `{1,3}` skips column 2, and no renumbering fixes it, because 2 must precede 3 and
+cannot precede 1. So consumers must gather a supernode's front indices through `supernode[]`
+and never assume a contiguous range. Both the symbolic factorization of 4.6 and the numeric
+one depend on this.
+
+**Where it fits.** Amalgamation runs on any forest, nodal or supernodal, since a nodal forest
+is just one whose supernodes are all trivial. In practice one runs it *after* fundamental
+compression: fundamental does the free, canonical work cheaply, and amalgamation then does the
+tie-broken and the paid work on a smaller forest. Running it directly on a nodal forest at
+threshold zero reaches the same fill (none) but by a longer route.
+
+### 4.6 What changes downstream
 
 Symbolic factorization runs unchanged, at supernode granularity. The recurrence of 3.1 is
 the same union, with two adjustments. It reads the patterns of *every* front column of the

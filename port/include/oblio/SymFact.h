@@ -13,13 +13,20 @@
 // attributes), so numeric factorization needs SymFact alone, not the forest.
 // Both 0.9 and 10.12 do this.
 //
-// Storage is flat. The index sets are written once and their sizes are known in
-// advance from the forest (front size + update size per supernode), so they go in
-// one contiguous array mIdx with per-supernode offsets mIdxPtr, exactly as in 0.9
-// (10.12 uses a vector of vectors here; see the flat-vs-VV decision). For
-// supernode s, its index set is mIdx[mIdxPtr[s] .. mIdxPtr[s + 1]), whose first
-// frontSize(s) entries are the front indices and the rest the update indices.
-// Within a supernode the indices are sorted in increasing order.
+// Storage is flat, and deliberately the same shape as SparseMatrix. The index sets are
+// written once and their sizes are known in advance from the forest (front size + update
+// size per supernode), so they go in one contiguous array of row indices with per-supernode
+// offsets. Exactly as in 0.9; 10.12 uses a vector of vectors here (see the flat-vs-VV
+// decision).
+//
+// The parallel with SparseMatrix is exact, and the names say so:
+//
+//   SparseMatrix:  rowIdx[colPtr[j] .. colPtr[j + 1])   the rows of column j
+//   SymFact:       rowIdx[supPtr[s] .. supPtr[s + 1])   the rows of supernode s
+//
+// A supernode's rows are the pattern its columns share: the first frontSize(s) of them are
+// its front indices (its own columns), the rest its update indices (the rows below). Within
+// a supernode they are sorted in increasing order.
 //
 // Index roles (see the index-types decision): supernode indices, column indices,
 // factor row indices and the links are IDs -> std::int32_t with NIL = -1; sizes,
@@ -43,7 +50,7 @@ public:
     std::size_t supSize()  const { return mSupSize; }    // number of supernodes
     std::size_t numTrees() const { return mNumTrees; }   // number of trees (roots)
     std::size_t height()   const { return mHeight; }     // forest height (max depth + 1)
-    std::size_t numIdx()   const { return mNumIdx; }     // total factor indices
+    std::size_t numRowIdx()   const { return mNumRowIdx; }   // total row indices
 
     std::int32_t firstRoot() const { return mFirstRoot; }   // first root supIdx, or NIL
     std::int32_t lastRoot()  const { return mLastRoot; }    // last root supIdx, or NIL
@@ -60,10 +67,10 @@ public:
     const std::vector<std::size_t>&  frontSize()   const { return mFrontSize; }
     const std::vector<std::size_t>&  updateSize()  const { return mUpdateSize; }
 
-    // The index sets, flat. Offsets (length supSize() + 1), then indices
-    // (length numIdx()).
-    const std::vector<std::size_t>&  idxPtr() const { return mIdxPtr; }
-    const std::vector<std::int32_t>& idx()    const { return mIdx; }
+    // The index sets, flat: offsets (length supSize() + 1), then row indices
+    // (length numRowIdx()).
+    const std::vector<std::size_t>&  supPtr() const { return mSupPtr; }
+    const std::vector<std::int32_t>& rowIdx() const { return mRowIdx; }
 
 private:
     // Dimensions and tree attributes, copied from the forest.
@@ -89,9 +96,9 @@ private:
     std::vector<std::size_t>  mUpdateSize;    // update indices below the supernode
 
     // The index sets, flat and computed here.
-    std::size_t               mNumIdx = 0;    // total factor indices (== mIdxPtr[mSupSize])
-    std::vector<std::size_t>  mIdxPtr;        // offsets into mIdx (length mSupSize + 1)
-    std::vector<std::int32_t> mIdx;           // factor row indices (length mNumIdx)
+    std::size_t               mNumRowIdx = 0;   // total row indices (== mSupPtr[mSupSize])
+    std::vector<std::size_t>  mSupPtr;          // offsets into mRowIdx (length mSupSize + 1)
+    std::vector<std::int32_t> mRowIdx;          // factor row indices (length mNumRowIdx)
 
     friend class SymFactEngine;   // fills the symbolic factorization via the engine
 };

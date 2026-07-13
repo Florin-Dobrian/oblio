@@ -28,6 +28,17 @@ softer layer: conventions for consistency, not correctness.
   (`oblio-new-devlog.md`, etc.). Macros are `OBLIO_`. Never write bare `oblio` as
   the package name in running text.
 
+- **Data structures take the noun; functions may take the adjective.** Fields and accessors are
+  strict: a supernode has a **front** (its columns), so the field is `mFrontSize` and the
+  accessor `frontSize()`. Function names can afford to be descriptive, so `gatherFrontalIndices`
+  reads as prose in a declaration. Both are correct, and the split is the ordinary one: the
+  front is a thing, a frontal index is a kind of index. Prose documentation follows the fields,
+  since that is what a reader cross-references.
+
+  Function names also spell words out where a field would abbreviate: `sortIndices`, not
+  `sortIdx`. Loop-local variables go the other way and abbreviate freely (`fp`, `sp`, `lk`),
+  because there they are read a hundred times and written once.
+
 - **Definition order follows declaration order.** The `.cpp` defines functions in the same
   order the header declares them. The header is the table of contents; the source is the
   book, and they should agree. A reader who has found something in the header knows where
@@ -111,13 +122,25 @@ softer layer: conventions for consistency, not correctness.
   for the original ordering of `A`: `lj`, `lk`, `aj`, `ak`. This keeps 10.12's ordering
   distinction and 0.9's column roles at once, where each reference had only one of them.
 
-  The same prefix marks a **position** in the flat storage: `ap` is an offset into `A`'s
-  arrays, `lp` an offset into the factor's. This is 0.9's `p`, the name `p` being taken by the
-  `Permutation`. Positions measure rather than name, so they are `std::size_t`, cannot be
-  `NIL`, and may exceed 2^31; the ID rules above do not apply to them.
+  **Rows are `i`, columns are `j` and `k`.** Always, with no exceptions for local convenience.
+  `lk` and `li` are a column and a row in the factor's ordering; `ak` and `ai` the same two in
+  `A`'s. (10.12 writes `lc`/`lr` for column and row; we do not, since `i` and `k` already carry
+  the distinction and mixing two schemes helps nobody.)
 
-  Row indices are `i`. Scratch is `r` for the node a climb has reached and `t` for a general
-  temporary.
+  **A position into a flat array is named for the array it walks**, since several coexist:
+
+  - `ap` into `A`'s `colPtr`/`rowIdx`
+  - `fp` into `frontIdxPtr`/`frontIdx`, the front indices alone
+  - `sp` into `supPtr`/`rowIdx`, a supernode's whole index set, front and update
+
+  0.9 calls all of these `p`; we cannot, since `p` is the `Permutation`, and in any case the
+  prefix is more useful than the bare letter. Note the distinction is *what the pointer indexes*,
+  not which storage it lives in: `fp` and `sp` both walk factor-side arrays, but one holds only
+  front indices and the other the whole set, and that is the distinction the symbolic union
+  turns on. Positions measure rather than name, so they are `std::size_t`, cannot be `NIL`, and
+  may exceed 2^31; the ID rules below do not apply to them.
+
+  Scratch is `r` for the node a climb has reached and `t` for a general temporary.
 
   See the index-type rules below for why `j`, `k`, `jj`, `kk` are `std::int32_t` and are used
   to subscript without a cast.
@@ -187,13 +210,16 @@ softer layer: conventions for consistency, not correctness.
     conversion would: the cast performs the mistake, it does not prevent it. What prevents it
     is a branch, `if (kk != NIL)`, and that branch is required whether or not a cast is
     written. Adding casts "for safety" buys nothing and costs a great deal of noise.
-  - **One name per entity.** `j`, `k`, `jj`, `kk` are `std::int32_t`, because they name things
-    and may carry `NIL`. Do not introduce a second variable holding the same value as a
-    `std::size_t`: a reader then has to check whether the two are really the same thing. Where
-    an ascending loop counts entities, the counter is that entity's type (`std::int32_t`) and
-    the *bound* is cast once in the loop header, rather than the counter being cast at every
-    use. Where a loop counts *positions* rather than entities (an offset into `colPtr`, or a
-    descending count-down), it is a `std::size_t` and names nothing.
+  - **One name per entity, and this includes sizes.** `j`, `k`, `jj`, `kk` are `std::int32_t`,
+    because they name things and may carry `NIL`. Do not introduce a second variable holding the
+    same value in the other type: a reader then has to check whether the two are really the same
+    thing. That applies to **counts and sizes** just as much as to IDs, `const std::int32_t n =
+    static_cast<std::int32_t>(size);` is the same mistake wearing different clothes, and it is
+    easy to make precisely because a size feels too humble to need the rule. Where an ascending
+    loop counts entities, the counter is that entity's type (`std::int32_t`) and the *bound* is
+    cast in the loop condition (`k < static_cast<std::int32_t>(size)`), which is loop-invariant
+    and costs nothing. Where a loop counts *positions* rather than entities (an offset into
+    `colPtr`, or a descending count-down), it is a `std::size_t` and names nothing.
 
 - Beyond the spellings above, `.clang-tidy` (`modernize-*`) and `.clang-format` also
   handle idiom cleanups (e.g. `.data()` over raw-pointer extraction) and formatting.

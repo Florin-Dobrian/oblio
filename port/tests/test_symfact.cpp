@@ -50,8 +50,8 @@ static bool matchesOracle(const SparseMatrix<double>& A, const Permutation& p,
     for(std::size_t k=0; k<s.supSize(); ++k){
         if(cols[k].empty()) return false;
         const std::size_t lowest = cols[k].front();
-        std::vector<std::int32_t> got(s.idx().begin()+static_cast<std::ptrdiff_t>(s.idxPtr()[k]),
-                                      s.idx().begin()+static_cast<std::ptrdiff_t>(s.idxPtr()[k+1]));
+        std::vector<std::int32_t> got(s.rowIdx().begin()+static_cast<std::ptrdiff_t>(s.supPtr()[k]),
+                                      s.rowIdx().begin()+static_cast<std::ptrdiff_t>(s.supPtr()[k+1]));
         if(got != pattern[lowest]) return false;                 // index set, sorted
         if(s.frontSize()[k] != cols[k].size()) return false;     // front == own columns
         if(s.frontSize()[k]+s.updateSize()[k] != pattern[lowest].size()) return false;
@@ -89,9 +89,9 @@ static bool columnPatternsMatch(const SparseMatrix<double>& A, const Permutation
     }
     for(std::size_t lc=0; lc<s.size(); ++lc){
         const std::size_t k = static_cast<std::size_t>(s.idxToSupIdx()[lc]);
-        const std::size_t from = s.idxPtr()[k] + posInFront[lc];
-        std::vector<std::int32_t> got(s.idx().begin()+static_cast<std::ptrdiff_t>(from),
-                                      s.idx().begin()+static_cast<std::ptrdiff_t>(s.idxPtr()[k+1]));
+        const std::size_t from = s.supPtr()[k] + posInFront[lc];
+        std::vector<std::int32_t> got(s.rowIdx().begin()+static_cast<std::ptrdiff_t>(from),
+                                      s.rowIdx().begin()+static_cast<std::ptrdiff_t>(s.supPtr()[k+1]));
         if(got != pattern[lc]) return false;
     }
     return true;
@@ -104,9 +104,9 @@ static bool runCase(const SparseMatrix<double>& A, const Permutation& p, std::si
     if(!feng.compute(A,p,f)) return false;
     if(!seng.compute(A,p,f,s)) return false;
     // The offsets must bracket the index array exactly.
-    if(s.idxPtr().size()!=s.supSize()+1) return false;
-    if(s.idxPtr()[s.supSize()]!=s.numIdx()) return false;
-    if(s.idx().size()!=s.numIdx()) return false;
+    if(s.supPtr().size()!=s.supSize()+1) return false;
+    if(s.supPtr()[s.supSize()]!=s.numRowIdx()) return false;
+    if(s.rowIdx().size()!=s.numRowIdx()) return false;
     if(!columnPatternsMatch(A,p,s)) return false;
     return matchesOracle(A,p,s,fillOut);
 }
@@ -181,9 +181,9 @@ int main(){
       ElmForestEngine feng; SymFactEngine seng;
       Permutation p(4); ElmForest f; SymFact s;
       bool ok = feng.compute(A,p,f) && seng.compute(A,p,f,s);
-      std::vector<std::int32_t> idx(s.idx().begin(), s.idx().end());
+      std::vector<std::int32_t> idx(s.rowIdx().begin(), s.rowIdx().end());
       ck(ok && s.supSize()==1 && s.frontSize()[0]==4 && s.updateSize()[0]==0
-         && s.numIdx()==4 && idx==std::vector<std::int32_t>({0,1,2,3}),
+         && s.numRowIdx()==4 && idx==std::vector<std::int32_t>({0,1,2,3}),
          "dense n=4 natural   : one supernode, 4 front columns"); }
 
     { // A single column hanging off a dense block: supernodes {0} and {1,2,3,4}.

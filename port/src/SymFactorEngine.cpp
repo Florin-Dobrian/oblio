@@ -47,9 +47,18 @@ bool SymFactorEngine::compute(const std::vector<std::size_t>&  colPtr,
     s.mNumRowIdx = s.mSupPtr[supSize];
     s.mRowIdx.resize(s.mNumRowIdx);
 
-    std::vector<std::size_t>  frontSupPtr;
+    // The front columns each supernode must read from A. When the supernodes have exactly
+    // matching patterns the lowest front column of each is enough (Section 4.6 of the notes);
+    // otherwise every front column must be read. Only one of the two gathers runs.
+    const bool exact = f.exactPatterns();
+
+    std::vector<std::int32_t> firstFrontRowIdx;   // exact: one column per supernode
+    std::vector<std::size_t>  frontSupPtr;        // otherwise: all of them, with offsets
     std::vector<std::int32_t> frontRowIdx;
-    gatherFrontalIndices(s, frontSupPtr, frontRowIdx);
+    if (exact)
+        gatherFirstFrontalIndices(s, firstFrontRowIdx);
+    else
+        gatherFrontalIndices(s, frontSupPtr, frontRowIdx);
 
     const std::vector<std::int32_t>& oldToNew = p.oldToNew();
     const std::vector<std::int32_t>& newToOld = p.newToOld();
@@ -81,43 +90,55 @@ bool SymFactorEngine::compute(const std::vector<std::size_t>&  colPtr,
     // there?" a single lookup.
     std::vector<std::int32_t> mark(size, NIL);
 
-    // For every supernode kk, in increasing order (a topological order, so the
-    // children of kk are complete when kk is reached).
+    // One of the two contributors to a supernode's index set: the indices that come from A.
+    // Given a front column lk of kk, take the rows of A's column at or below lk, map them into
+    // the factor's ordering, and add the ones not already there.
+    //
+    // Every index it adds is an A index, permuted. Nothing else here invents one. The other
+    // contributor is the child loop below, and that is where fill enters: A's pattern is a
+    // subset of L's, so the originals arrive here and the rest arrives from the children.
+    //
+    // This is also the only place A is read, which is what lets the two regimes differ in *how
+    // many times it is called* rather than in what they do.
+    auto addIndicesFromA = [&](std::int32_t lk, std::int32_t kk, std::size_t& sp2) {
+        const std::int32_t ak = newToOld[lk];
+
+        for (std::size_t ap = colPtr[ak]; ap < colPtr[ak + 1]; ++ap) {
+            const std::int32_t ai = rowIdx[ap];
+            const std::int32_t li = oldToNew[ai];
+
+            if (li < lk)
+                continue;   // above the front column, so not in the index set of kk
+            if (mark[li] == kk)
+                continue;   // already in the index set of kk
+
+            mark[li] = kk;
+            s.mRowIdx[sp2++] = li;
+        }
+    };
+
+    // For every supernode kk, in increasing order (a topological order, so the children of kk
+    // are complete when kk is reached).
     for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(supSize); ++kk) {
         std::size_t sp2 = s.mSupPtr[kk];   // write cursor into the index set of kk
 
-        // The contribution of kk itself. Without threshold-based compression it
-        // would be enough to read the sparsity pattern of the first front column
-        // of kk, but compression groups columns whose patterns are only nearly
-        // identical, so every front column is read and the patterns unioned.
-        for (std::size_t fp = frontSupPtr[kk]; fp < frontSupPtr[kk + 1]; ++fp) {
-            const std::int32_t lk = frontRowIdx[fp];
-            const std::int32_t ak = newToOld[lk];
-
-            // For every factor row li with a structural nonzero in factor column lk.
-            for (std::size_t ap = colPtr[ak]; ap < colPtr[ak + 1]; ++ap) {
-                const std::int32_t ai = rowIdx[ap];
-                const std::int32_t li = oldToNew[ai];
-
-                if (li < lk)
-                    continue;   // above the front column, so not in the index set of kk
-                if (mark[li] == kk)
-                    continue;   // already in the index set of kk
-
-                mark[li] = kk;
-                s.mRowIdx[sp2++] = li;
-            }
+        // The contribution of kk itself. One front column when the patterns match exactly, all
+        // of them otherwise.
+        if (exact) {
+            addIndicesFromA(firstFrontRowIdx[kk], kk, sp2);
+        } else {
+            for (std::size_t fp = frontSupPtr[kk]; fp < frontSupPtr[kk + 1]; ++fp)
+                addIndicesFromA(frontRowIdx[fp], kk, sp2);
         }
 
         // The contribution of the children of kk.
         for (std::int32_t jj = s.mFirstChild[kk]; jj != NIL; jj = s.mNextSibling[jj]) {
-
             for (std::size_t sp1 = s.mSupPtr[jj]; sp1 < s.mSupPtr[jj + 1]; ++sp1) {
                 const std::int32_t li = s.mRowIdx[sp1];
 
                 if (s.mIdxToSupIdx[li] == jj)
-                    continue;   // a front index of jj, so it dies with jj: only the
-                                // update indices of jj carry into the index set of kk
+                    continue;   // a front index of jj, so it dies with jj: only the update
+                                // indices of jj carry into the index set of kk
                 if (mark[li] == kk)
                     continue;   // already in the index set of kk
 
@@ -141,13 +162,32 @@ void SymFactorEngine::gatherFrontalIndices(const SymFactor& s,
     for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(s.mSupSize); ++kk)
         frontSupPtr[kk + 1] = frontSupPtr[kk] + s.mFrontSize[kk];
 
-    // Scatter each column into its supernode's slot. Columns are walked in increasing
-    // order, so each supernode's front indices come out sorted.
+    // Scatter each column into its supernode's slot. Columns are walked in increasing order, so
+    // each supernode's front indices come out sorted.
+    //
+    // fp[kk] is the next free position in frontRowIdx for supernode kk, so it is an fp in the
+    // usual sense, one per supernode rather than one in hand. It starts at the offsets and
+    // advances as the columns land.
     frontRowIdx.resize(s.mSize);
-    std::vector<std::size_t> cursor(frontSupPtr.begin(), frontSupPtr.end() - 1);
+    std::vector<std::size_t> fp(frontSupPtr.begin(), frontSupPtr.end() - 1);
     for (std::int32_t lk = 0; lk < static_cast<std::int32_t>(s.mSize); ++lk) {
         const std::int32_t kk = s.mIdxToSupIdx[lk];   // the supernode of column lk
-        frontRowIdx[cursor[kk]++] = lk;
+        frontRowIdx[fp[kk]++] = lk;
+    }
+}
+
+void SymFactorEngine::gatherFirstFrontalIndices(const SymFactor& s,
+        std::vector<std::int32_t>& firstFrontRowIdx) const {
+    // The lowest column of each supernode. Columns are walked in increasing order, so the first
+    // one seen for a supernode is its lowest; later ones are skipped. NIL doubles as "not seen
+    // yet", and since every supernode owns at least one column, none survives the pass.
+    //
+    // No offsets: each supernode has exactly one entry, so the position is the supernode.
+    firstFrontRowIdx.assign(s.mSupSize, NIL);
+    for (std::int32_t lk = 0; lk < static_cast<std::int32_t>(s.mSize); ++lk) {
+        const std::int32_t kk = s.mIdxToSupIdx[lk];   // the supernode of column lk
+        if (firstFrontRowIdx[kk] == NIL)
+            firstFrontRowIdx[kk] = lk;
     }
 }
 

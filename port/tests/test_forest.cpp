@@ -300,6 +300,32 @@ int main(){
       ck(at8 < fund, "random x200 amalg   : threshold 8 merges ("+std::to_string(fund)
                      +" -> "+std::to_string(at8)+" supernodes)"); }
 
+    // exactPatterns(): do a supernode's columns share one sparsity pattern? It decides whether
+    // symbolic factorization may read one front column per supernode or must read them all, so
+    // it has to be exactly right, not merely conservative.
+    { std::vector<std::vector<bool>> M(6, std::vector<bool>(6,false));
+      for(std::size_t i=0;i<6;++i) M[i][i]=true;
+      auto edge=[&](std::size_t a,std::size_t b){ M[a][b]=M[b][a]=true; };
+      edge(0,1); edge(1,2); edge(2,3); edge(3,4); edge(4,5); edge(0,3); edge(1,4);
+      std::vector<std::size_t> cp(7,0); std::vector<std::int32_t> ri; std::vector<double> v;
+      for(std::size_t j=0;j<6;++j){
+          for(std::size_t i=0;i<6;++i) if(M[i][j]){ ri.push_back(static_cast<std::int32_t>(i)); v.push_back(i==j?10.0:-1.0); }
+          cp[j+1]=ri.size(); }
+      SparseMatrix<double> A(6,cp,ri,v);
+      Permutation p(6);
+      ElmForest fNodal, fFund, fAmal0, fAmal8;
+      ElmForestEngine eNodal(Supernodes::Nodal);
+      ElmForestEngine eFund;
+      ElmForestEngine eAmal0; eAmal0.setThreshold(0);
+      ElmForestEngine eAmal8; eAmal8.setThreshold(64);
+      eNodal.compute(A,p,fNodal); eFund.compute(A,p,fFund);
+      eAmal0.compute(A,p,fAmal0); eAmal8.compute(A,p,fAmal8);
+      ck(fNodal.exactPatterns(), "exactPatterns       : nodal, trivially true");
+      ck(fFund.exactPatterns(),  "exactPatterns       : fundamental, true by definition");
+      ck(fAmal0.exactPatterns(), "exactPatterns       : amalgamation at 0 buys nothing, still true");
+      ck(!fAmal8.exactPatterns() || fAmal8.supSize()==fFund.supSize(),
+         "exactPatterns       : false once a zero is stored"); }
+
     std::cout<<"\nElmForest tests: "<<pass<<"/"<<(pass+fail)<<" passed\n";
     return fail==0?0:1;
 }

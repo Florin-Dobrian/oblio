@@ -263,6 +263,57 @@ int main(){
       ck(bad==0, "random x200         : natural and AMD match oracle");
       ck(totalFill>0, "random x200         : fill exercised ("+std::to_string(totalFill)+" entries)"); }
 
+
+    // Amalgamation, and the two front-gather paths. Symbolic factorization reads one front
+    // column per supernode when the supernodes have exactly matching patterns, and all of them
+    // when amalgamation has stored zeros. The first path is what every test above exercises;
+    // this is the second.
+    //
+    // With stored zeros the factor holds explicit zeros, so its index set is a *superset* of the
+    // true pattern, and the oracle check becomes containment rather than equality.
+    { std::mt19937 rng(20260713);
+      int bad=0, exactForests=0, inexactForests=0;
+      std::size_t extraIndices=0;
+      for(int trial=0; trial<200; ++trial){
+          std::size_t size = 4 + rng()%10;
+          std::vector<std::pair<std::size_t,std::size_t>> e;
+          for(std::size_t i=1;i<size;++i) e.push_back({i-1,i});
+          for(std::size_t i=0;i<size;++i)
+              for(std::size_t j=i+2;j<size;++j)
+                  if(rng()%100 < 30) e.push_back({i,j});
+          auto A=fromEdges(size,e);
+          Permutation p(size);
+          const auto pattern = OblioTest::denseFactorPattern(A,p);
+
+          ElmForestEngine feng; feng.setThreshold(8);
+          ElmForest f; SymFactorEngine seng; SymFactor s;
+          if(!feng.compute(A,p,f) || !seng.compute(A,p,f,s)) { ++bad; continue; }
+
+          if(f.exactPatterns()) ++exactForests; else ++inexactForests;
+
+          // Every true nonzero of every column must still be present. The stored zeros may add
+          // more, but nothing may be lost: losing an index is exactly the failure mode of
+          // taking the fast path when it does not apply.
+          std::vector<std::size_t> pos(s.size(),0), cur(s.supSize(),0);
+          for(std::size_t lk=0; lk<s.size(); ++lk) pos[lk] = cur[s.idxToSupIdx()[lk]]++;
+          for(std::size_t lk=0; lk<s.size(); ++lk){
+              const std::size_t kk = s.idxToSupIdx()[lk];
+              std::vector<std::int32_t> got(
+                  s.rowIdx().begin()+static_cast<std::ptrdiff_t>(s.supPtr()[kk]+pos[lk]),
+                  s.rowIdx().begin()+static_cast<std::ptrdiff_t>(s.supPtr()[kk+1]));
+              std::size_t w=0;
+              for(std::int32_t g : got) if(w<pattern[lk].size() && pattern[lk][w]==g) ++w;
+              if(w != pattern[lk].size()) ++bad;   // a true nonzero went missing
+              extraIndices += got.size() - pattern[lk].size();
+          }
+      }
+      ck(bad==0, "random x200 amalg   : no true nonzero lost, both gather paths");
+      ck(inexactForests>0 && exactForests>0,
+         "random x200 amalg   : both gather paths taken ("+std::to_string(exactForests)
+         +" exact, "+std::to_string(inexactForests)+" with stored zeros)");
+      ck(extraIndices>0, "random x200 amalg   : explicit zeros present as extra indices ("
+                         +std::to_string(extraIndices)+")"); }
+
     std::cout<<"\nSymFactor tests: "<<pass<<"/"<<(pass+fail)<<" passed\n";
     return fail==0?0:1;
 }

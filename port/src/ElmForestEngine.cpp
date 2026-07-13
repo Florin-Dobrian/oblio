@@ -228,20 +228,20 @@ void ElmForestEngine::computeColumnSizes(
 
 void ElmForestEngine::compressFundamental(ElmForest& f) const {
     // Precondition: f is nodal, so a supernode is a column, and the code names them as the
-    // columns they are, j and k. The map is the identity and every front size is 1.
+    // columns they are, lj and lk. The map is the identity and every front size is 1.
     const std::size_t size = f.mSize;
 
-    // Assign every column to a supernode. Column k continues its child j's supernode when the
+    // Assign every column to a supernode. Column lk continues its child lj's supernode when the
     // two form a fundamental supernode, otherwise it starts a new one. Increasing order, so
-    // idxToSupIdx[j] is settled before k needs it: a child's column is numbered below its
+    // idxToSupIdx[lj] is settled before lk needs it: a child's column is numbered below its
     // parent's.
     std::vector<std::int32_t> idxToSupIdx(size, NIL);
     std::int32_t supSize = 0;
-    for (std::int32_t k = 0; k < static_cast<std::int32_t>(size); ++k) {
-        const std::int32_t j = f.mFirstChild[k];
+    for (std::int32_t lk = 0; lk < static_cast<std::int32_t>(size); ++lk) {
+        const std::int32_t lj = f.mFirstChild[lk];
 
-        // Does k merge into its child j? The two clauses after the guard are the
-        // conditions of a fundamental supernode: j is the only child of k, and the two
+        // Does lk merge into its child lj? The two clauses after the guard are the
+        // conditions of a fundamental supernode: lj is the only child of lk, and the two
         // share one sparsity pattern.
         //
         // The guard is not decoration. firstChild == lastChild also holds when both are
@@ -250,24 +250,28 @@ void ElmForestEngine::compressFundamental(ElmForest& f) const {
         // matters: the guard protects the clauses to its right, which is a property of
         // this expression, not something a later test could restore.
         //
-        // The pattern test is |update(j)| = |front(k)| + |update(k)|, written as an addition
-        // rather than a subtraction. A subtraction (0.9's |update(j)| - 1) is unsigned and
-        // would wrap if its right side ever exceeded its left; the addition has nothing to
-        // wrap. Nor can the addition overflow: the sum is the size of k's index set, which
-        // is a subset of the factor's rows, so it is at most size, a number we already hold.
+        // The pattern test, in the notes' notation (Section 4.2), is
         //
-        // Every front size is 1 here, so this is 0.9's |update(k)| == |update(j)| - 1. We
-        // keep the identity in full because it is the form derived in the theory, and
-        // because a bare + 1 would go silently wrong if the precondition were ever broken.
-        const bool merge = (j != NIL)
-            && (j == f.mLastChild[k])
-            && (f.mFrontSize[k] + f.mUpdateSize[k]
-                    == f.mUpdateSize[j]);
+        //     |update(J)| = |front(K)| + |update(K)|
+        //
+        // for a child supernode J and its parent K. The forest is nodal here, so a supernode is
+        // a column: J is lj and K is lk. It is written as an addition rather than a subtraction.
+        // A subtraction (0.9's |update(J)| - 1) is unsigned and would wrap if its right side
+        // ever exceeded its left; the addition has nothing to wrap. Nor can it overflow: the sum
+        // is the size of lk's index set, a subset of the factor's rows, so at most size.
+        //
+        // Every front size is 1 here, so this reduces to 0.9's |update(K)| == |update(J)| - 1.
+        // We keep the identity in full because it is the form derived in the theory, and because
+        // a bare + 1 would go silently wrong if the precondition were ever broken.
+        const bool merge = (lj != NIL)
+            && (lj == f.mLastChild[lk])
+            && (f.mFrontSize[lk] + f.mUpdateSize[lk]
+                    == f.mUpdateSize[lj]);
 
         if (merge)
-            idxToSupIdx[k] = idxToSupIdx[j];   // k continues j's
+            idxToSupIdx[lk] = idxToSupIdx[lj];   // lk continues lj's
         else
-            idxToSupIdx[k] = supSize++;                                  // k starts a new one
+            idxToSupIdx[lk] = supSize++;                                  // lk starts a new one
     }
 
     // The parent links and the sizes of the supernodes. Scanning columns in decreasing
@@ -283,27 +287,27 @@ void ElmForestEngine::compressFundamental(ElmForest& f) const {
     // loop must be written this way.
     //
     // Naming follows 0.9: a single letter is a column, a doubled one is that column's
-    // supernode, so the doubling is the map applied. Column j is the one being scanned and
-    // jj is its supernode; k is j's parent column and kk is the supernode that lands in.
-    // The column convention j < k survives, since a parent's column is numbered above its
-    // child's, and the assignment then reads as the fact it derives: the supernode of j's
-    // parent column is the parent of j's supernode.
+    // supernode, so the doubling is the map applied. Column lj is the one being scanned and
+    // jj is its supernode; lk is lj's parent column and kk is the supernode that lands in.
+    // The column convention lj < lk survives, since a parent's column is numbered above its
+    // child's, and the assignment then reads as the fact it derives: the supernode of lj's
+    // parent column is the parent of lj's supernode.
     for (std::size_t t = size; t > 0; --t) {
-        const std::int32_t j  = static_cast<std::int32_t>(t - 1);   // column scanned
-        const std::int32_t jj = idxToSupIdx[j];                     // its supernode
+        const std::int32_t lj  = static_cast<std::int32_t>(t - 1);   // column scanned
+        const std::int32_t jj = idxToSupIdx[lj];                     // its supernode
 
         ++frontSize[jj];   // every column of jj adds one to it
 
         if (seen[jj])
             continue;      // jj's topmost column came earlier; the rest is taken from it
 
-        const std::int32_t k = f.mParent[j];
-        if (k != NIL) {
-            const std::int32_t kk = idxToSupIdx[k];
+        const std::int32_t lk = f.mParent[lj];
+        if (lk != NIL) {
+            const std::int32_t kk = idxToSupIdx[lk];
             parent[jj] = kk;
         }
-        // the rows below j are the rows below jj
-        updateSize[jj] = f.mUpdateSize[j];
+        // the rows below lj are the rows below jj
+        updateSize[jj] = f.mUpdateSize[lj];
         seen[jj] = true;
     }
 
@@ -341,6 +345,11 @@ void ElmForestEngine::compressThreshold(ElmForest& f, std::size_t threshold) con
     std::vector<std::size_t> frontSize = f.mFrontSize;
 
     std::size_t numSup = supSize;
+
+    // Whether any merge actually stored a zero. At threshold zero none can, so the merged
+    // supernodes still have exactly matching patterns and the forest stays "exact"; above it,
+    // the first zero stored breaks that.
+    bool storedAZero = false;
 
     // For every supernode kk, absorb as many of its children as the budget allows.
     for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(supSize); ++kk) {
@@ -384,6 +393,8 @@ void ElmForestEngine::compressThreshold(ElmForest& f, std::size_t threshold) con
                 break;   // nothing more fits the budget
 
             supOldToNew[bestChild] = kk;
+            if (bestFill > 0)
+                storedAZero = true;   // this merge pays in explicitly stored zeros
             fillInc  = bestFill;
             frontInc += frontSize[bestChild];
             candidate[bestChild] = false;
@@ -451,6 +462,9 @@ void ElmForestEngine::compressThreshold(ElmForest& f, std::size_t threshold) con
     f.mParent.swap(parent);
     f.mFrontSize.swap(newFrontSize);
     f.mUpdateSize.swap(newUpdateSize);
+
+    if (storedAZero)
+        f.mExactPatterns = false;   // the merged columns now differ, by the zeros we bought
 
     // The child, sibling and root links still describe the old forest. The caller rebuilds
     // them with finalizeLinks.

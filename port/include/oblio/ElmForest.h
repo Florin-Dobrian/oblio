@@ -36,6 +36,18 @@ class ElmForest {
 public:
     ElmForest() = default;
 
+    // Do the columns of every supernode share exactly one sparsity pattern?
+    //
+    // True for a nodal forest (a supernode is a column, trivially) and for fundamental
+    // supernodes (that is condition 2 of their definition). True also after amalgamation at
+    // threshold zero, which merges only where the merge is free, hence only where the patterns
+    // already agree. False as soon as amalgamation stores an explicit zero: the merged columns
+    // then have *nearly* identical patterns, and the later ones carry rows the first does not.
+    //
+    // Consumers need this. Symbolic factorization can read one front column per supernode when
+    // it holds, and must read them all when it does not.
+    bool exactPatterns() const { return mExactPatterns; }
+
     std::size_t size()     const { return mSize; }       // number of columns
     std::size_t supSize()  const { return mSupSize; }    // number of supernodes
     std::size_t numTrees() const { return mNumTrees; }   // number of trees (roots)
@@ -66,6 +78,9 @@ private:
     std::size_t  mHeight    = 0;     // forest height (max depth + 1)
     std::int32_t mFirstRoot = NIL;   // first root supIdx, or NIL if empty
     std::int32_t mLastRoot  = NIL;   // last root supIdx, or NIL if empty
+
+    // Set false only by amalgamation, and only when it actually stores a zero.
+    bool mExactPatterns = true;
 
     // Column-indexed (length mSize): the supernode owning each column.
     // Identity while supernodes are trivial (supIdx == column index).

@@ -1,6 +1,6 @@
 # Sparse Factorization
 
-Notes on the algorithms behind Oblio's numerical phase. The goal is to keep the
+Notes on the algorithms behind Oblio's numeric phase. The goal is to keep the
 mathematics and the traversal schedules in one place, so the code (left-looking,
 right-looking, multifrontal) can be read against a common reference.
 
@@ -847,8 +847,14 @@ the clean one.
 
 ### 2.5 Column counts of L, without computing L
 
-The forest gives the parent links. The next thing we want is `|Struct(j)|`, the number of
-nonzeros in each column of `L`, and we want it **without computing `Struct(j)` itself**.
+The forest gives the parent links. The next thing we want is the **size** of each column of
+`L`, and we want it **without computing the column itself**.
+
+Be precise about the diagonal, since it is one entry and every count here is off by one if we
+are careless. `Struct(j)` is *strictly* subdiagonal (2.1): `Struct(j) = { i > j : L[i][j] != 0 }`.
+Column `j` of `L` therefore holds `{j} union Struct(j)`, so its size is `|Struct(j)| + 1`. Both
+numbers are wanted, and they differ by one: symbolic factorization stores the column, diagonal
+included, while a supernode's *update size* (Section 4) counts only what lies below its columns.
 
 The reason is allocation. If the size of a structure can be computed before the structure
 itself, it is nearly always worth doing: allocate exactly once, fill, and never grow. Guessing
@@ -1640,14 +1646,14 @@ No pattern is ever compared. This is the whole trick: containment guarantees `St
 is *at least* `{k} union Struct(k)`, so equality of the sizes forces equality of the sets.
 
 **The supernodal form.** Written for a forest whose vertices are already supernodes rather
-than single columns, the same identity reads
+than single columns, the same identity reads (uppercase now, since these are supernodes):
 
 ```
-|update(j)| = |front(k)| + |update(k)|
+|update(J)| = |front(K)| + |update(K)|
 ```
 
-because the rows below supernode `j` are the columns of `k` followed by the rows below `k`.
-For a nodal forest `|front(k)| = 1` and this collapses to the test above. The general form
+because the rows below supernode `J` are the columns of `K` followed by the rows below `K`.
+For a nodal forest `|front(K)| = 1` and this collapses to the test above. The general form
 is worth keeping: it is what lets compression run on a forest that has already been
 compressed. Note it is the **parent's** front size that appears, not the child's.
 
@@ -1659,7 +1665,7 @@ decided.
 
 ```
 compress(forest, Struct) -> supernode: # fundamental supernodes
-    s = 0 # supernodes so far; the first one created is numbered 1
+    S = 0 # supernodes so far; the first one created is numbered 1
     for k = 1 .. n: # increasing order = children before parents
         j = firstChild[k]
         if j != NIL # k has a child at all
@@ -1667,8 +1673,8 @@ compress(forest, Struct) -> supernode: # fundamental supernodes
                and |Struct(k)| == |Struct(j)| - 1: # condition 2: sharing one pattern
             supernode[k] = supernode[j] # k continues j's supernode
         else:
-            s = s + 1
-            supernode[k] = s # k starts a new supernode
+            S = S + 1
+            supernode[k] = S # k starts a new supernode
 ```
 
 Both conditions of 4.1 are in that test, and the guard in front of them is not decoration.
@@ -1684,7 +1690,7 @@ over supernodes rather than columns. A second pass, in *decreasing* order, does 
 
 ```
 rebuild(forest, supernode) -> supernodal forest:
-    for S = 1 .. s:
+    for S = 1 .. numSupernodes:
         front(S) = 0
         done[S] = false
     for k = n .. 1: # decreasing order, so a supernode's topmost column comes first
@@ -1909,22 +1915,102 @@ threshold zero reaches the same fill (none) but by a longer route.
 
 ### 4.6 What changes downstream
 
-Symbolic factorization runs unchanged, at supernode granularity. The recurrence of 3.1 is
-the same union, with two adjustments. It reads the patterns of *every* front column of the
-supernode rather than a single column, and when absorbing a child it drops the child's
-front indices rather than a single index `j`:
+Symbolic factorization runs unchanged, at supernode granularity. It is the same union as 3.1,
+and the three regimes differ in exactly two places: how much of `A` the supernode reads, and how
+much of a child it drops. Here are all three, written out. Repetition is cheap and the
+differences are the point.
+
+Throughout, `Idx(K)` is a supernode's **index set**, `front(K) union update(K)`: its own columns
+followed by the rows below them. For a nodal supernode `{k}` that is `{k} union Struct(k)`, the
+column with its diagonal. (The doc does not permute, so `j` and `k` are the same indices in `A`
+and in `L`.)
+
+**Nodal.** One column per supernode. This is 3.1, restated in the index-set vocabulary.
 
 ```
-symbolicFactor(A, supernodal forest) -> Idx:
-    for K = 1 .. numSupernodes: # increasing = children before parents
-        Idx(K) = union, over front columns k of K, { i >= k : A[i][k] != 0 }
-        for each child J of K: # absorb each child's update indices
+symbolicFactorNodal(A, forest) -> Idx:
+    for k = 1 .. n: # increasing = children before parents
+        Idx(k) = { i >= k : A[i][k] != 0 } # A's column k: the diagonal, and below it
+        for each child j of k:
+            Idx(k) = Idx(k) union ( Idx(j) \ {j} ) # drop j's own diagonal; the rest carries up
+```
+
+**Fundamental supernodes.** The columns of a supernode share a pattern exactly, so for any two
+front columns `k' < k''` of `K`,
+
+```
+Struct(k'') is contained in Struct(k')
+```
+
+Reading the **first** (lowest) front column of `A` is therefore enough: whatever the later front
+columns would contribute is already there. And the front indices need no seeding, since the first
+column's `Struct` already contains every later column of `K` (they are rows below it). The block
+diagonal *emerges* from the union.
+
+```
+symbolicFactorFundamental(A, forest) -> Idx:
+    for K = 1 .. numSupernodes:
+        k' = the lowest column of K # its first front index
+        Idx(K) = { i >= k' : A[i][k'] != 0 } # one column of A suffices
+        for each child J of K:
+            Idx(K) = Idx(K) union ( Idx(J) \ front(J) ) # drop the child's columns, not one index
+```
+
+**Amalgamated supernodes.** Amalgamation (4.5) merges columns whose patterns are only *nearly*
+identical, paying explicit zeros for the difference. So `Struct(k'')` is no longer contained in
+`Struct(k')`, the shortcut above fails, and **every** front column of `A` must be read.
+
+```
+symbolicFactorAmalgamated(A, forest) -> Idx:
+    for K = 1 .. numSupernodes:
+        Idx(K) = union, over every front column k of K, { i >= k : A[i][k] != 0 }
+        for each child J of K:
             Idx(K) = Idx(K) union ( Idx(J) \ front(J) )
 ```
 
-For a nodal forest each supernode has one front column and `front(J) = {j}`, and this is
-exactly the algorithm of 3.1. The same code covers both regimes, which is a good reason to
-write the supernodal form even when the forest happens to be nodal.
+**The three are one algorithm.** The last is the general form and is correct in all three
+regimes: on a fundamental forest the extra front columns contribute nothing (the union simply
+finds every index already present), and on a nodal forest there is only one front column and
+`front(J) = {j}`, which is the first listing exactly. So an implementation can write the third
+and get all three, which is what both references do, and what we do.
+
+The saving forgone is real but modest, and it is worth being exact about what it is *not*. Both
+forms need a pass over the column-to-supernode map, and neither can avoid it: the map runs the
+wrong way, and a supernode's columns need not be contiguous (the forest is topological, not
+postordered), so its lowest column cannot be found by inspection. That pass is the price of
+admission in either regime.
+
+What differs is what the pass must *produce*. The fundamental form needs only the lowest column
+of each supernode (`numSupernodes` entries); the general form needs all front columns gathered
+contiguously (`n` entries), and pays an inner loop over them in the union. So the specialization
+is one of **size**, not of passes. It is available and not taken.
+
+**What actually changed, in a table.** The nodal case is not a special case of the supernodal
+one; it is the uncoarsened one.
+
+```
+                     nodal                          supernodal
+own contribution     A's column k, rows >= k        A's columns of K, rows >= each, unioned
+front space          {k}, one diagonal entry        the block diagonal, |front(K)| entries
+children give        each child's update indices    each child's update indices
+```
+
+Three things are worth reading off that table.
+
+**The children's half does not change at all.** A child gives its update indices and only those;
+its front indices die with it, because they are the child's own columns and lie strictly above
+the parent. Nodal and supernodal differ only in *how many* indices are dropped, one, or
+`|front(J)|` of them.
+
+**What generalizes is the front space**, from a single diagonal entry to a block diagonal. That
+is the whole content of the supernodal step, and it is why a supernode's front indices have to
+be found at all: nodally there is nothing to find, since the front of column `k` is `k`.
+
+**And `A` contributes to both spaces, not just the front.** The union seeds a supernode with
+`{ i >= k : A[i][k] != 0 }`, the diagonal *and* the subdiagonal. Fill comes from the children;
+the original nonzeros come from `A`, and most of them lie below the diagonal. It is tempting to
+read the parent's own contribution as "the block diagonal" and the children's as "everything
+else", but that is not what happens: `A` reaches into the update space too.
 
 The payoff is not in the symbolic phase, which was already optimal, but in the numeric one.
 A supernode's columns share a pattern, so its nonzeros form a **dense rectangular block**,

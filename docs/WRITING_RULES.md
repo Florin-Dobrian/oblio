@@ -61,6 +61,20 @@ field is `frontSize` and the prose says "front indices". A function may use the 
 `gatherFrontalIndices`. The split is the ordinary one: the front is a thing, a frontal index is
 a kind of index. See CODING_RULES for the naming half of this.
 
+**Case carries the level: lowercase for a column, uppercase for a supernode.** In prose and in
+pseudocode, `j` and `k` are single columns and `J` and `K` are supernodes. This is the ordinary
+convention of numerical linear algebra, where a block of a partitioned matrix is `A_{IJ}` and the
+uppercase subscript is an *index set*. A supernode is exactly that: a set of columns. So the
+notation is doing its usual job, not being borrowed for a new one.
+
+No collision with `A` and `L`, which are matrices: nobody will read `Idx(K)` as indexing a
+matrix, and the context is never in doubt.
+
+Code cannot use case this way (`J` and `K` are poor variable names), so **the doc's uppercase is
+the code's doubling**: `K` in prose is `kk` in code, `J` is `jj`. Both say "the supernode", one
+by case and one by repetition, and each is the natural device for its medium. See CODING_RULES
+for the doubling rule.
+
 **Node and supernode, column and row, index.** These name the same object seen three ways, and
 all three are legitimate; the structure is symmetric, so an index is an index, and row `k`,
 column `k` and vertex `k` are the same `k`. Prefer the vocabulary of the context: matrix words

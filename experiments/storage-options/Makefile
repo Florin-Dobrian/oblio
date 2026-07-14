@@ -18,7 +18,7 @@ CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O3 -DNDEBUG -Wall -Wextra
 
 SRCS = MultiplyEngine.cpp
-HDRS = SparseMatrixCsc.h SparseMatrixVv.h MultiplyEngine.h
+HDRS = SparseMatrixStatic.h SparseMatrixDynamic.h MultiplyEngine.h
 
 .PHONY: all test clean
 

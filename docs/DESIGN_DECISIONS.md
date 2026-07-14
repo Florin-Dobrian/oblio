@@ -67,7 +67,81 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
-## 2026-07-13, Two rules for conventions: one predicate, and a sparse choice matrix
+## 2026-07-14, An object offers what its storage makes cheap, and nothing else
+
+A third rule in the same family as the two below, and it came out of naming the storage-options
+experiment's classes for their *purpose* (`SparseMatrixStatic`, `SparseMatrixDynamic`) rather than
+their layout (`Csc`, `Vv`).
+
+**The two classes do not have the same API, and that is the design.**
+
+| | static (flat) | dynamic (vector of vectors) |
+|---|---|---|
+| `setValues`, same structure, new numbers | **yes**, cheap: nothing moves | **yes**, cheap |
+| `setColumn`, one column's structure | **absent by design** | **yes**, cheap: the column owns its buffer |
+| restructure | build a new one | `setColumn` |
+
+**`setValues` is the mutation a solver actually performs most often**, a Newton iteration, a time
+step: same pattern, new numbers, refactorize. The flat layout is perfectly happy with it, so both
+classes have it. This is also why "we need a mutable matrix" is a weaker argument for VV than it
+first appears: the common case needs no VV at all.
+
+**`setColumn` is absent from the flat one, and its absence is the point.** Changing a column's
+*structure* there means shifting every later column: `O(nnz)`, not `O(column)`. An API that looks
+cheap and is secretly linear in the whole matrix is a trap, and the caller who writes it in a loop
+will not find out until their program crawls. **Refusing to offer it is not a limitation; it is
+telling the truth about the storage.**
+
+And it puts the decision where it belongs. The caller knows whether they are changing one column or
+rebuilding, and can pick the object that suits: *want a column replaced for you, use the dynamic
+one; want to shift data around a flat buffer, do it yourself, this class will not pretend it is
+cheap.*
+
+**This is the API-side argument for having no common base class**, and it is stronger than the
+performance one already recorded. A shared interface would force one of two lies:
+
+- `setColumn` on the flat matrix, pretending an `O(nnz)` shift is a column operation, or
+- `setColumn` on **neither**, crippling the dynamic one to match its sibling's weakness.
+
+So the asymmetry between `NumFactorStatic` and `NumFactorDynamic` is not a wart to be tidied away
+when dynamic LDL lands. It is what the two storages **are**, and the interfaces should say so.
+
+**The rule: an object offers what its storage makes cheap, and nothing else.** Which is the same
+instinct as the two rules below, seen from the API rather than from the conventions: *do not name a
+thing you cannot honour.*
+
+**And a corollary that dynamic LDL will live or die by: structural mutation invalidates every
+pointer previously extracted; value mutation does not.**
+
+```
+setValues   does NOT invalidate.  The buffer stays put; only its contents change.
+setColumn   DOES invalidate.      The column's buffer is replaced; anything into it dangles.
+```
+
+The experiment demonstrates it rather than asserting it (`testInvalidation` extracts the pointers,
+mutates, and observes which still point where they did). The rule holds in both storages, and it is
+exactly the rule the dynamic factor needs: a delayed pivot grows an ancestor's front, which
+reallocates its buffer, which dangles every pointer previously taken into it. **Silently.**
+
+```cpp
+eng.blockPointers(f, block);        // extracted once
+for (kk) {
+    ... factor kk ...
+    f.mVal[pp].resize(bigger);      // a delayed column grows ancestor pp
+    ...                             // block[pp] is now DANGLING
+}
+```
+
+Nothing in C++ enforces this. The remedy is to **fetch a supernode's block pointer at the moment of
+use rather than up front**, which is one indirection and which `storage-options` measured at
+essentially nothing. The alternative, re-extracting after every growth, is more code and more to
+forget.
+
+This is the one thing the experiment does *not* rehearse, since its structures change only between
+runs of the algorithm, never during one. Worth knowing before writing dynamic LDL rather than
+after.
+
+## 2026-07-14, Two rules for conventions: one predicate, and a sparse choice matrix
 
 Two ideas that keep recurring, worth stating once rather than rediscovering.
 

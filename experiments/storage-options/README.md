@@ -1,17 +1,27 @@
 # Storage-Options Experiment
 
-Can **one multiply function** serve both a CSC sparse matrix and a vector-of-vectors sparse
-matrix? Reference / teaching only, **not** part of the main Oblio build.
+Can **one multiply function** serve both a *static* sparse matrix (fixed structure, stored flat)
+and a *dynamic* one (mutable structure, stored as a vector of vectors)? Reference / teaching only, **not** part of the main Oblio build.
+
+**A note on the names.** The classes are `SparseMatrixStatic` and `SparseMatrixDynamic`, not
+`Csc` and `Vv`. The layouts *are* CSC and vector-of-vectors, but the layout is a **consequence** of
+whether the structure can change, not the thing being chosen. Static and dynamic name the reason;
+flat and VV name the bytes. It is also the vocabulary the solver itself uses (`NumFactorStatic`,
+`NumFactorDynamic`), and one vocabulary is easier to hold than two.
+
+Honesty about the gap: **nothing in this experiment mutates.** Both matrices are built once and
+read. What is measured is what the *layout* costs, not what the mutation buys. A `setColumn` on the
+dynamic one would make the name earn itself; it is not written yet.
 
 ## Why this exists
 
 Oblio needs both layouts, and the reason is mutability. See the flat-vs-VV entry in
 DESIGN_DECISIONS; in brief:
 
-- **CSC (flat)** is right wherever the structure is written once into a size known in advance:
+- **Static** (flat, CSC) is right wherever the structure is written once into a size known in advance:
   the matrix, the symbolic factorization, the static numeric factor. One allocation,
   contiguous streaming, cheap raw blocks to hand to BLAS.
-- **Vector of vectors** is right for **dynamic LDL**, where a delayed pivot passes columns up
+- **Dynamic** (a vector of vectors) is right for **dynamic LDL**, where a delayed pivot passes columns up
   to an ancestor and that ancestor's front grows at runtime by an amount symbolic never
   predicted. The growth is local, one front grows while its siblings do not, which is what VV
   does cheaply and a flat buffer does not.
@@ -22,11 +32,11 @@ kernel, unless the algorithm can be written so that it does not know the layout 
 
 ## The idea
 
-In CSC, `colPtr[j]` is an **index**. But a real pointer is one step away:
+In the static matrix, `colPtr[j]` is an **index**. But a real pointer is one step away:
 `&mRowIdx[mColPtr[j]]` is where column `j`'s row indices begin, and it is a plain
 `const std::int32_t*`.
 
-In VV, the pointer is already there: `mRowIdx[j].data()`. **The same type, from a different
+In the dynamic one, the pointer is already there: `mRowIdx[j].data()`. **The same type, from a different
 place.**
 
 So both classes can fill the same three arrays:
@@ -68,7 +78,7 @@ right-looking factorization and of every assembly step in the multifrontal metho
 column's (index, value) run and scatter into a dense target.
 
 Four rows. The last three are the same compiled function, called with pointers from different
-places. The first is the honest baseline: **hand-written CSC**, which builds no pointer arrays
+places. The first is the honest baseline: **hand-written flat**, which builds no pointer arrays
 at all and walks `colPtr` directly, as one would if CSC were the only storage.
 
 ## Results
@@ -76,10 +86,10 @@ at all and walks `colPtr` directly, as one would if CSC were the only storage.
 Apple M4, 200000 columns, ~3.2M nonzeros:
 
 ```
-hand-written CSC (baseline)     1.362 ms
-multiply(), CSC pointers        1.454 ms   1.07x
-multiply(), VV pointers         1.499 ms   1.10x
-multiply(), VV scattered        8.723 ms   6.41x
+hand-written flat (baseline)    1.362 ms
+multiply(), static pointers     1.454 ms   1.07x
+multiply(), dynamic, packed     1.499 ms   1.10x
+multiply(), dynamic, scattered  8.723 ms   6.41x
 ```
 
 All results bit-identical.
@@ -87,8 +97,8 @@ All results bit-identical.
 **One algorithm does serve both.** That is the answer to the question, and it needs no
 templating and no polymorphism.
 
-**The interface costs almost nothing, and costs the same on both layouts.** CSC pointers 1.07x,
-packed VV 1.10x: a three percent spread between two entirely different storage formats, through
+**The interface costs almost nothing, and costs the same on both layouts.** static 1.07x,
+packed dynamic 1.10x: a three percent spread between two entirely different storage formats, through
 one compiled function. The generality is not a tax paid for flexibility; it is close to free,
 and it is free on *both* layouts rather than only on the one it was written for.
 
@@ -133,6 +143,81 @@ though it will not be zero.
 Which is exactly why the experiment is worth having: it isolates the locality cost by holding
 everything else fixed (same class, same content, same interface, same compiled function), and
 it puts a *ceiling* on it rather than a guess.
+
+## The asymmetry is the design
+
+The two classes do **not** offer the same API, and that is deliberate.
+
+| | static | dynamic |
+|---|---|---|
+| `setValues`, same structure, new numbers | **yes**, cheap: nothing moves | **yes**, cheap: nothing moves |
+| `setColumn`, one column's structure | **absent by design** | **yes**, cheap: the column owns its buffer |
+| restructure | build a new one | `setColumn` |
+
+**`setValues` is the mutation the solver actually does most often**, a Newton iteration, a time
+step, the same pattern with new numbers, refactorize, and the flat layout is perfectly happy with
+it. Both classes have it.
+
+**`setColumn` is absent from the static one, and its absence is the point.** Changing a column's
+*structure* in a flat layout means shifting every later column: `O(nnz)`, not `O(column)`. An API
+that *looks* cheap and is secretly linear in the whole matrix is a trap, and the caller who writes
+it in a loop will not find out until their program crawls.
+
+**Refusing to offer it is not a limitation. It is telling the truth about the storage.** And it
+puts the decision where it belongs: the caller knows whether they are changing one column or
+rebuilding, and can pick the object that suits. Want a column swapped for you? Use the dynamic one.
+Want to shift data around a flat buffer? Do it yourself; this class will not pretend it is cheap.
+
+**This also explains why there is no common base class.** A shared interface would force one of two
+lies:
+
+- `setColumn` on the flat matrix, pretending an `O(nnz)` shift is a column operation, or
+- `setColumn` on **neither**, crippling the dynamic one to match its sibling's weakness.
+
+So the asymmetry is not a wart to be tidied away. It is what the two storages *are*.
+
+**The rule, in one line: an object offers what its storage makes cheap, and nothing else.**
+
+## Pointer validity, which is the rule that will bite
+
+The engine works through extracted pointers. So: **when do they stop being valid?**
+
+```
+setValues   does NOT invalidate.  The buffer stays put; only its contents change.
+setColumn   DOES invalidate.      The column's buffer is replaced; anything into it dangles.
+```
+
+The experiment demonstrates this rather than asserting it (`testInvalidation`): extract the
+pointers, mutate, and observe which pointers still point where they did.
+
+```
+setValues   pointer UNCHANGED   (buffer reused; contents overwritten in place)
+setColumn   pointer MOVED       (buffer replaced; anything held from before now dangles)
+```
+
+**So the rule is exactly: structural mutation invalidates; value mutation does not.** It holds in
+both storages, and it is not a quirk of this experiment.
+
+**It is the rule the solver's dynamic factor will live by.** Delayed pivoting grows a front, which
+reallocates its buffer, which dangles every pointer previously taken into it:
+
+```cpp
+eng.blockPointers(f, block);        // extracted once
+for (kk) {
+    ... factor kk ...
+    f.mVal[pp].resize(bigger);      // a delayed column grows ancestor pp
+    ...                             // block[pp] is now DANGLING, and silently so
+}
+```
+
+Nothing in C++ enforces this, and nothing can. The remedy is one of two: fetch a supernode's block
+pointer *at the moment of use* rather than up front (one indirection, and this experiment says that
+costs nothing), or re-extract after any growth. The first is simpler and is what the numeric engine
+should do.
+
+**And that is the one thing this experiment does not rehearse**, because its structures do not grow
+*during* the algorithm, only between runs of it. Worth knowing before writing dynamic LDL, not
+after.
 
 ## What this settles for Oblio
 

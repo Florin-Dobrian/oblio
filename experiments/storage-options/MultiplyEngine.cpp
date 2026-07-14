@@ -2,7 +2,7 @@
 
 namespace StorageOptions {
 
-// The one algorithm. Note what is absent: any mention of SparseMatrixCsc, of SparseMatrixVv,
+// The one algorithm. Note what is absent: any mention of SparseMatrixStatic, of SparseMatrixDynamic,
 // of colPtr, of an inner vector. It walks pointers.
 void MultiplyEngine::multiply(std::size_t size,
                               const std::int32_t* const* rowIdxPtr,
@@ -22,7 +22,7 @@ void MultiplyEngine::multiply(std::size_t size,
 
 // CSC: colPtr holds indices, so take the address of the element they index. The pointers all
 // land in one buffer, at increasing addresses, which is exactly why CSC streams well.
-void MultiplyEngine::columnPointers(const SparseMatrixCsc& A,
+void MultiplyEngine::columnPointers(const SparseMatrixStatic& A,
                                     std::vector<const std::int32_t*>& rowIdxPtr,
                                     std::vector<const double*>&       valPtr,
                                     std::vector<std::size_t>&         len) const {
@@ -41,7 +41,7 @@ void MultiplyEngine::columnPointers(const SparseMatrixCsc& A,
 
 // VV: the pointers are already there, one per inner vector. They land wherever the allocator
 // put each column, which is the whole difference, and the only difference.
-void MultiplyEngine::columnPointers(const SparseMatrixVv& A,
+void MultiplyEngine::columnPointers(const SparseMatrixDynamic& A,
                                     std::vector<const std::int32_t*>& rowIdxPtr,
                                     std::vector<const double*>&       valPtr,
                                     std::vector<std::size_t>&         len) const {
@@ -57,8 +57,8 @@ void MultiplyEngine::columnPointers(const SparseMatrixVv& A,
     }
 }
 
-// The baseline: CSC with no pointer arrays at all.
-void MultiplyEngine::multiplyCsc(const SparseMatrixCsc& A, const double* x, double* y) const {
+// The baseline: the static matrix with no pointer arrays at all.
+void MultiplyEngine::multiplyStatic(const SparseMatrixStatic& A, const double* x, double* y) const {
     const std::size_t   size   = A.mSize;
     const std::size_t*  colPtr = A.mColPtr.data();
     const std::int32_t* rowIdx = A.mRowIdx.data();

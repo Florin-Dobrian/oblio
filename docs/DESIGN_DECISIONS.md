@@ -3,6 +3,175 @@
 Durable record of structural choices, newest first. Each entry: date, decision,
 why. This is the file to open after a gap to reconstruct the project's shape.
 
+---
+
+## Why this file exists
+
+**In a solver, the bottleneck was never writing the code.** A Cholesky is a day's work. A
+supernodal Cholesky is a week's. What takes years is deciding *how the pieces should fit*: where
+the factor's values live, whether the engines hold state or the data does, how symmetry is
+expressed, what the API promises, which phase owns which fact. Those are the decisions Oblio was
+made of, and they were the hard part in the late 1990s.
+
+**They are expensive because they propagate.** Choose the storage and you have chosen the API;
+choose the API and you have chosen what every engine can see; and by the time a mistake shows up
+it is behind ten thousand lines that assume it. A wrong turn is not a wrong function, it is a
+redesign. So each decision carries risk, so you deliberate, so they queue, so the project slows.
+That is the real reason a library like this takes a decade rather than a year.
+
+**And the tooling of the time made it worse.** C++98 with shaky compiler support: templates you
+could not trust, no move semantics, containers that might or might not be there, and no cheap way
+to *try* an abstraction and measure what it cost. The design space was constrained and the
+instruments for exploring it were bad. So you chose carefully, once, and lived with it.
+
+**What has changed is not that decisions became easier. It is that exploring one became
+disposable.**
+
+A design question can now be turned into a measurement in an hour (`experiments/storage-options`
+answered flat-versus-VV with a number and a symbol table). A ported kernel can be tested standalone
+before it touches anything (0.9's LDL was reconstructing `A` before the engine had ever seen it). A
+clever solution can be built, looked at, called a hack, and rewritten before lunch (the
+identity-offsets array in `SymFactorEngine`, which existed for about twenty minutes). A claim can
+be made, and superseded the same day when it turns out to have been true only of the case that
+prompted it ("symmetry is determined, not chosen", which LDL falsified within hours).
+
+**So the thing to optimize for is not choosing correctly the first time. It is making a wrong
+choice cheap to discover and cheap to reverse.**
+
+That reframes what infrastructure is *for*:
+
+- **Per-phase oracles.** Each phase is checkable against something that shares no code with it, so
+  a mistake is localized rather than inferred.
+- **An end-to-end residual.** `||Ax - b|| / ||b||` in one number, across six phases, tells you the
+  pipeline is *consistent*, which no per-phase test can.
+- **`experiments/`.** A design argument that can be settled by measurement should be, and the
+  measurement should be kept, so nobody re-litigates it from memory.
+- **This file.** A decision that was reversed is more instructive than one that was right, and a
+  reversal that is not written down will simply be made again. Entries here supersede rather than
+  overwrite, and say what was wrong and why it looked right.
+- **A willingness to throw work away.** The cost of a wrong turn is now measured in minutes, which
+  means the correct response to "that is a hack" is to do it again, not to defend it.
+
+**And the human's role changes rather than shrinks.** Code is fast; *judgment* is not. Which claim
+is load-bearing and which is decoration, whether an argument is sound or merely plausible, whether
+an abstraction is elegant or merely clever, these do not get cheaper, and they are what decides
+whether the fast part was worth doing. Nearly every real correction in this project came from
+someone looking at a plausible answer and saying "no, that is not quite it".
+
+The best example is the smallest. Cholesky spent years as an open question here, "in real it is
+`CC^T`; in complex, can I have both `CC^T` and `CC^H`?", and it would not close, because it was
+the wrong question. `CC^T` in complex does not exist: positive definiteness requires `x* A x` to
+be real, which requires Hermitian. Once that is on the table, the design collapses to a sentence:
+**Cholesky is `CC^H`, always, and in real that *is* `CC^T`.** No option, no flag, no forbidden
+combination to reject. The answer was not hard. Asking the right question was.
+
+---
+
+## 2026-07-13, Two rules for conventions: one predicate, and a sparse choice matrix
+
+Two ideas that keep recurring, worth stating once rather than rediscovering.
+
+### One predicate, in one place, applied everywhere
+
+**When several places must agree about a convention, they must not each decide it.** Give them one
+named thing to ask, and let it be the only place the decision exists.
+
+**Example 1, and it is the reason for the rule: `hermitian()`.** The factorization and the solve
+must both know whether the factor conjugates. 10.12 lets each site decide for itself:
+
+```cpp
+// in the factorization
+SYRK('L','N', ...)              // decides: no conjugate
+GEMM('N','T', ...)              // decides: no conjugate, again
+
+// in the solve, a different file
+y[lc] -= y[lr] * val[lij];      // decides: no conjugate, a third time
+```
+
+Nowhere is it written down that a Cholesky factor is Hermitian. Each site *inferred* the
+convention from context, and each inherited LDL's (symmetric) habit. So Cholesky is wrong in
+**all three**, independently, and fixing one would not fix the others. Nothing reveals the
+disagreement, because there is nothing to disagree *with*.
+
+Ours has one predicate:
+
+```cpp
+static bool hermitian(Factorization f) {
+    return f == Factorization::Cholesky
+        || f == Factorization::StaticLDLH
+        || f == Factorization::DynamicLDLH;
+}
+```
+
+The factorization asks it; the solve asks it. Add a factorization type and both follow. Get the
+predicate wrong and *everything* breaks loudly, which is far better than one site being quietly
+wrong.
+
+**Example 2, and it shows the other half of the rule: `exactPatterns()`.**
+
+Symbolic factorization may read one front column per supernode when the supernodes' columns share
+a pattern exactly, and must read them all when they do not. Who decides?
+
+Not the caller. A `bool useExactPatterns` parameter on `SymFactorEngine` would put the decision in
+the hands of whoever wires the phases together, and that person **cannot know the answer**:
+amalgamation at threshold zero merges only free merges, so it *may or may not* store a zero
+depending on the matrix. Threshold alone does not determine it. Only the forest engine, which did
+the merging, knows what it actually did.
+
+So the forest **records** it (`ElmForest::exactPatterns()`, set false by `compressThreshold` only
+when a merge actually pays fill), and symbolic factorization **reads** it. One place decides, at
+the moment it can, and everyone downstream asks rather than infers.
+
+**The two examples differ in an instructive way.**
+
+| | `hermitian()` | `exactPatterns()` |
+|---|---|---|
+| what it is | a pure function of a setting | a fact about what happened at runtime |
+| where it lives | computed on demand, anywhere | **recorded** by the code that knows |
+| why | the answer is determined by the input | the answer is not determined by any input |
+
+So the discipline is one rule with two shapes: **if the convention is a function of the inputs,
+make it a predicate; if it depends on what happened, record it at the moment it happens. Either
+way, decide once and let everyone else ask.** The failure mode both avoid is the same: a
+convention re-derived at each use, drifting apart, with nothing to compare against.
+
+`Blas<Val>::conjTrans` is the same rule at the smallest scale: one trait, not `'T'` and `'C'` typed
+out at each call site.
+
+### The choice matrix is sparse. Enumerate its nonzeros, not the product.
+
+The obvious modelling of "what do we factor" is a product:
+
+```
+(Cholesky, LDL)  x  (transpose, conjugate-transpose)   ->  four combinations
+```
+
+and then one of the four (**complex symmetric Cholesky**) has to be *forbidden*, because positive
+definiteness is meaningless for it. A runtime rejection, guarding a combination the API invited
+the caller to ask for.
+
+**We did not do that.** The enum lists only the combinations that exist:
+
+```cpp
+enum class Factorization {
+    Cholesky,      // always A = LL^H. There is no LL^T variant to name.
+    StaticLDLT, StaticLDLH,
+    DynamicLDLT, DynamicLDLH
+};
+```
+
+Cholesky carries no transpose suffix because **it has no choice to offer**: it is always the
+conjugate transpose, and over the reals that *is* the plain transpose. LDL carries one because it
+genuinely has two forms. The forbidden cell is not rejected; **it does not exist**.
+
+The cost is one letter of naming convention. The gain is that a whole class of runtime error is
+unrepresentable, which is the same principle as `BlasLapack`'s operation-named wrappers: **make the
+wrong thing unwriteable, not merely refused.**
+
+Worth naming the general shape, since it will recur: a design space is rarely a full product. Model
+the combinations that mean something and leave the rest unnameable. In a sparse-matrix library the
+metaphor is right there: **the choice matrix is sparse, so store its nonzeros.**
+
 ## 2026-07-13, The solve, and the first test that checks the pipeline rather than a phase
 
 **Every test before this one checks a phase against an oracle.** The forest against a

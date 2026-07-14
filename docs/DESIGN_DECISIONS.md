@@ -3,6 +3,50 @@
 Durable record of structural choices, newest first. Each entry: date, decision,
 why. This is the file to open after a gap to reconstruct the project's shape.
 
+## 2026-07-13, The solve, and the first test that checks the pipeline rather than a phase
+
+**Every test before this one checks a phase against an oracle.** The forest against a
+recomputation, the symbolic factor against a dense pattern, the numeric factor against a dense
+Cholesky or by reconstruction. Each says *this phase computed what it should*. **None says the
+phases compose.**
+
+```
+|| A x - b ||  /  || b ||
+```
+
+says that, in one number, through ordering, elimination forest, symbolic factorization, numeric
+factorization, triangular solve and sparse matvec. Six phases. It is where two phases disagreeing
+about a convention would show, an ordering, a conjugate, an index base, and nothing else we have
+would catch that. It comes out at 3e-16 for every factorization, both traversals, both scalar
+types.
+
+The right-hand side is manufactured from a known solution (`b := A x`), so the test needs no
+reference solver. And it checks the **residual**, not the distance to the manufactured `x`: those
+differ by the conditioning of `A`, and the residual is the honest thing to require of a direct
+solver.
+
+**`MultiplyEngine` exists for this**, and only for this. It is fifteen lines and it is what makes
+the check possible.
+
+**One right-hand side, and the scalar solve that follows from it.** 0.9 has two vector classes and
+the split is principled: with a *single* right-hand side there is no level-3 BLAS to be had, so its
+`SingleVector` solve is scalar and works directly on the vector through indirect indexing. With
+*many*, a supernode's rows become a dense block and the solve becomes TRSM and GEMM, which is worth
+the gather and scatter that packing demands. We take the first. The multi-column path is real and
+worth adding; it is a performance path, not a correctness one.
+
+**And the conjugate in the backward pass is where 10.12 repeats its bug.** Its backward solve is
+
+```cpp
+y[col] -= y[row] * val[...];        // no conjugate: this applies L^-T, not L^-H
+```
+
+which is right for its complex-symmetric LDL and **wrong for its Cholesky**, exactly as its `SYRK`
+is. Ours conjugates when the factorization does, using the *same* `hermitian()` predicate the
+factorization uses, so it is one rule stated once rather than two rules that must be kept in step.
+That is the pattern to hold on to: **when two places must agree about a convention, give them one
+predicate, not two copies of a decision.**
+
 ## 2026-07-13, Static LDL: three kernels BLAS does not have, and why the traversals did not change
 
 **LAPACK has no unpivoted LDL.** `?sytrf` is Bunch-Kaufman, which pivots, and pivoting is exactly

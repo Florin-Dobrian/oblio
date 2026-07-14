@@ -51,10 +51,10 @@ differ.
 | NumFactorStatic | yes | checked | 0.9 `FactorsStatic`; SymFactor's structure copied, plus one flat value buffer with per-supernode offsets. Blocks are dense column-major rectangles (the upper front triangle is allocated and zero, so BLAS can take the whole block) |
 | NumFactorDynamic | yes | not started | 0.9 `FactorsDynamic`; a placeholder. Same fields, one buffer per supernode so a front can grow under delayed pivoting. No base class shared with the static one: `experiments/storage-options` showed a pointer array does the job a base would |
 | NumFactorEngine | yes | checked | **Static factorizations functionally complete**: `Cholesky`, `StaticLDLT`, `StaticLDLH`, each left- and right-looking, real and complex. Cholesky checked against an independent dense Cholesky (4e-16); LDL by reconstruction, `L D L^H == P A P^T` (2e-15), through AMD ordering and supernodes. `StaticLDLH` (complex Hermitian LDL) is an **extension**: 0.9's complex LDL is symmetric only. Gaps, both in Owed: the LDL **perturbation branch has never fired**, and a complex input is **not validated as Hermitian**. `DynamicLDLT`/`DynamicLDLH` and `Traversal::Multifrontal` not started |
-| Vector | yes | not started | |
-| MultiplyEngine | yes | not started | |
+| Vector | yes | checked | 0.9 `SingleVector`; one column. 0.9 also has `MultipleVector`, whose solve uses TRSM/GEMM with a gather and scatter; with one right-hand side there is no level-3 BLAS to be had, so the scalar solve is right and the multi-column path is a later performance addition |
+| MultiplyEngine | yes | checked | `y = A x` and `r = A x - b`. Exists for the residual: it is what turns per-phase oracles into an end-to-end check |
 | DenseMatrix | yes | not needed so far | a supernode's block is a raw pointer plus (rows, cols, ld), handed straight to BLAS. See Owed |
-| SolveEngine | yes | not started | watch backward-solve index signedness |
+| SolveEngine | yes | checked | forward, diagonal (LDL only), backward, for Cholesky and both static LDLs, real and complex. Scalar, one right-hand side, as 0.9's `SingleVector` path is. **The backward pass conjugates when the factorization does**, which 10.12 omits: its backward solve applies `L^-T` where a Hermitian factor needs `L^-H`, correct for its complex-symmetric LDL and wrong for its Cholesky. Verified by residual, `\|Ax - b\| / \|b\|` at 3e-16 through the whole pipeline |
 | OblioEngine | yes | not started | top-level driver |
 
 Units from 0.9 deliberately not carried over: `Utility` (`ResizeVector` and

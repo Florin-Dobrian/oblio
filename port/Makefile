@@ -38,7 +38,10 @@ OBLIO_SRCS = \
   src/UpdateBlock.cpp \
   src/NumFactorStatic.cpp \
   src/NumFactorDynamic.cpp \
-  src/NumFactorEngine.cpp
+  src/NumFactorEngine.cpp \
+  src/Vector.cpp \
+  src/MultiplyEngine.cpp \
+  src/SolveEngine.cpp
 
 # Vendored ordering codes (SuiteSparse AMD, Sparspak MMD), copied verbatim, not
 # maintained here, so warnings are silenced (-w) for these two files only.

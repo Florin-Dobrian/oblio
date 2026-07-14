@@ -1,8 +1,14 @@
 # Sparse Factorization
 
-Notes on the algorithms behind Oblio's numeric phase. The goal is to keep the
-mathematics and the traversal schedules in one place, so the code (left-looking,
-right-looking, multifrontal) can be read against a common reference.
+Notes on the algorithms behind Oblio: the ordering that decides the fill, the elimination
+forest and symbolic factorization that predict it, the supernodes that make it fast, and the
+numeric traversals that compute it. The goal is to keep the mathematics and the schedules in one
+place, so the code (left-looking, right-looking, multifrontal) can be read against a common
+reference.
+
+The sections run in dependency order rather than pipeline order: Cholesky and fill first, since
+everything is stated in their terms; then the forest, symbolic factorization, and supernodes; and
+ordering last (Section 5), because it is the one phase whose *output* the others take as given.
 
 Conventions: matrices are `n x n`, indexed `1 .. n` (math style). `A` is the input
 matrix, `L` the computed factor. Column indices are `j` and `k`; row indices are `i`.
@@ -2191,6 +2197,209 @@ also why threshold-based merging exists, it accepts some explicitly stored zeros
 bigger blocks. Fundamental supernodes are the free case: they introduce no zeros at all.
 
 
+## 5. Ordering
+
+Everything above takes the permutation as given. This section is about where it comes from, and
+it is the last black box in the pipeline: `OrderEngine` calls a vendored AMD and a vendored MMD,
+and nothing in the port has yet looked inside either.
+
+The section is here for two reasons. The obvious one: the ordering decides the fill, and
+therefore the forest, the supernodes, the work, and the memory. Everything downstream is
+downstream *of this*. The less obvious one: the classical implementations are hard to read, and
+it is worth separating what is hard because the *algorithm* is intricate from what is hard
+because the *encoding* is fifty years old. They are not the same, and only one of them is worth
+preserving.
+
+### 5.1 Minimum degree, and why the obvious version does not work
+
+The greedy idea (Tinney and Walker, 1967) is one line: **eliminate the vertex of least degree
+next.** A vertex of degree `d` creates a clique on its `d` neighbours, so `d` bounds the fill it
+causes. Pick the smallest and you cause the least immediate fill.
+
+It is a heuristic, not an optimum. Minimizing fill exactly is NP-hard, and minimum degree is
+greedy on a local quantity. It is nevertheless very good in practice, and it is what AMD and MMD
+both are.
+
+The trouble is entirely in the implementation, and there are two problems.
+
+**The graph grows.** Eliminating a vertex of degree `d` adds up to `d(d-1)/2` edges. Sum that over
+the elimination and you are storing the fill you were trying to avoid predicting. The graph must
+therefore be represented in a way that does *not* materialize the cliques.
+
+**And the degrees must be recomputed.** After eliminating `p`, every neighbour's degree changes,
+and computing a degree means taking a set union over the vertex's neighbourhood. Done naively this
+is the dominant cost, by a wide margin.
+
+Everything intricate in a real minimum-degree code is one of those two problems being solved.
+
+### 5.2 The quotient graph
+
+Do not add the clique's edges. **Store the clique as one object.**
+
+An eliminated vertex becomes an **element**, and its pattern `L_p` is the set of vertices it made
+mutually adjacent. A live vertex `i` is then adjacent to a mixture:
+
+```
+A_i     the original neighbours of i that have not been eliminated  (variables)
+E_i     the elements i belongs to                                   (cliques)
+```
+
+and its true neighbourhood is
+
+```
+adj(i) = A_i  union  ( union of L_e over e in E_i )   minus  i itself
+```
+
+which is never formed. The clique that eliminating `p` created is represented by the single fact
+that its members all list `p` in their `E`.
+
+**Elements are absorbed.** When `p` is eliminated, every element adjacent to `p` is consumed into
+`L_p` and dies: whatever those cliques joined, the new one joins too. So the number of elements
+stays bounded, and the representation does not grow without limit. This is the whole reason the
+quotient graph is affordable.
+
+### 5.3 Supervariables
+
+Two vertices with **identical neighbourhoods** will have equal degree at every step, will be
+chosen at the same moment, and will fill in identically. They can be merged and eliminated
+together.
+
+They are detected by **hashing** the pattern (`A_i` and `E_i` together) and then comparing
+candidates within a bucket, since a hash collision is not a match. A merged vertex is a
+**supervariable**, and it carries a weight: how many original vertices it stands for.
+
+This is not a marginal optimization. Real matrices are full of indistinguishable vertices,
+especially after a few eliminations have merged their neighbourhoods, and supervariables are
+often the difference between a usable code and an unusable one.
+
+**Mass elimination** is the same idea one step further. After forming the element `L`, if some
+vertex `i` in `L` has nothing left outside `L`, it is adjacent only to the new clique, and can be
+eliminated immediately at no cost. Its degree, computed below, comes out zero and says so.
+
+### 5.4 Approximate degree, which is the idea in AMD
+
+The exact external degree of `i` is
+
+```
+d_i = | A_i  union  ( union of L_e over e in E_i ) |    minus i
+```
+
+a set union per vertex per step. That is the bottleneck of true minimum degree, and it is what
+AMD refuses to pay.
+
+**Bound it instead.** Sum the elements' contributions rather than uniting them:
+
+```
+d_i  <=  min(  n - k,                                       # nothing can exceed what remains
+               d_i_old + |L \ i|,                           # it can only grow by the new element
+               |A_i \ L|  +  |L \ i|  +  sum |L_e \ L|  )   # over e in E_i, e != the new element
+```
+
+The third line is the approximation. It **overcounts**, because two elements may overlap outside
+`L` and that overlap is counted twice. So it is an *upper bound* on the degree, not the degree.
+
+**And the payoff is in one word: reuse.** The quantity `|L_e \ L|` depends only on the element
+`e`, not on the vertex `i`. It is computed **once per element** and read by every vertex that
+touches `e`. The exact degree would need a union *per vertex*. That single substitution is what
+separates AMD from minimum degree, and the surprise of the AMD paper is that the ordering barely
+suffers: an upper bound on the degree, chosen greedily, produces fill within a few percent of the
+exact computation while running several times faster.
+
+### 5.5 The algorithm, whole
+
+```
+amd(A) -> elimination order:
+
+    for each vertex i:
+        A_i    = the neighbours of i in A
+        E_i    = {}                        # no elements yet
+        w_i    = 1                         # supervariable weight
+        d_i    = |A_i|                     # degree
+
+    while vertices remain:
+
+        # PICK
+        p = the live vertex of least d
+
+        # FORM THE ELEMENT: absorb every element p touches
+        L = A_p
+        for e in E_p:
+            L = L union L_e
+            kill e                         # element absorption
+        L = L \ {p}
+        L_p = L                            # p is now an element
+        eliminate p
+
+        # APPROXIMATE THE NEW DEGREES
+        for each element e reachable from L:
+            we = |L_e \ L|                 # ONCE per element, not per vertex
+
+        for i in L:
+            d_i = min( remaining,
+                       d_i + |L| - w_i,
+                       |A_i \ L| + |L| + sum of we over e in E_i )
+
+            if d_i == 0:                   # MASS ELIMINATION
+                eliminate i with p         # nothing outside the new clique
+
+            h_i = hash(A_i, E_i)           # for the next step
+
+        # ABSORB INDISTINGUISHABLE SUPERVARIABLES
+        for i, j in one hash bucket, with identical patterns:
+            w_i = w_i + w_j
+            kill j                         # j eliminates whenever i does
+
+    expand the supervariables back into individual vertices
+```
+
+Four mechanisms, and each is a solution to one of the two problems of 5.1:
+
+| mechanism | solves |
+|---|---|
+| quotient graph, element absorption | the graph growing |
+| approximate degree | the degrees being expensive |
+| supervariables | both, by shrinking the graph |
+| mass elimination | both, likewise |
+
+### 5.6 What is intricate, and what is merely old
+
+The vendored SuiteSparse AMD is about 1200 lines of code (plus 990 of comment) in essentially one
+function. It is worth being exact about where that goes, because the two causes have very
+different implications for a rewrite.
+
+**Inherent, and no style will remove it:**
+
+- the quotient graph, with elements, absorption, and the variable/element split
+- the approximate degree bound, and the `|L_e \ L|` computation that makes it cheap
+- supervariable hashing, and the pattern comparison that confirms a match
+- mass elimination
+
+**Archaeological, and would evaporate in a modern encoding:**
+
+- **One flat `int` array** (`Iw`) holding every adjacency list, every element pattern, and the
+  free space, interleaved, indexed by offsets in a second array. This is a Fortran constraint: no
+  dynamic allocation, no structs, one workspace handed in by the caller.
+- **A garbage collector**, several hundred lines, to compact that array when absorbed lists have
+  left it full of holes. This exists *only because of the flat array*. Give each vertex its own
+  vector and there is nothing to collect.
+- **Parallel arrays instead of a record**: `Pe`, `Len`, `Nv`, `Elen`, `Degree`, `W`, `Head`,
+  `Next`, `Last`, all indexed by vertex, all conceptually fields of one struct. A COMMON block,
+  transliterated.
+- **Sentinel-encoded state**: `Elen[i] < 0` means "i is an element", `Nv[i] < 0` means "absorbed",
+  and so on. Negative numbers as tags, because there was nowhere else to put a flag.
+- **One 1800-line function**, because subroutine calls were expensive and everything shared the
+  workspace anyway.
+
+So the code is long *both* because the mechanisms are intricate *and* because the encoding is
+fifty years old. Only the first is worth preserving. A legible version keeps every mechanism above
+and loses every item in the second list, and the honest expectation is that it lands at a few
+hundred lines and can be read.
+
+The risk, which is real: a rewrite must produce **the same permutation**, or the fill changes and
+every downstream measurement drifts. That equivalence is the thing that makes it a piece of work
+rather than a stylistic pass, and it is also the thing that makes it testable: run both, compare
+the permutations, and the vendored code is its own oracle.
+
 ## References
 
 The material above is standard sparse-matrix theory; the grouping below points to the
@@ -2243,6 +2452,66 @@ knowledge and are worth a spot-check against the originals.
   `cs_etree` computes the tree from the upper triangle of each column, the standard route
   used by Oblio (2.4); single-triangle storage in the other orientation is transposed
   first.
+
+**Ordering (not covered above, but it is what feeds the forest).** The doc takes a permutation
+as given; producing a good one is a subject of its own, and the two we vendor come from here.
+
+- W. F. Tinney and J. W. Walker, "Direct solutions of sparse network equations by optimally
+  ordered triangular factorization", *Proc. IEEE* 55(11):1801-1809, 1967. The origin of minimum
+  degree: eliminate the vertex of least degree next, greedily.
+- A. George and J. W. H. Liu, "The evolution of the minimum degree ordering algorithm", *SIAM
+  Review* 31(1):1-19, 1989. **The one to read first.** It explains why a naive minimum degree is
+  unusable and how every trick in a real implementation (the quotient graph, element absorption,
+  supervariables, mass elimination, incomplete degree update) exists to make it affordable. Read
+  this before touching AMD's source: the code is long because these mechanisms are, not because it
+  is badly written.
+- J. W. H. Liu, "Modification of the minimum-degree algorithm by multiple elimination", *ACM
+  Trans. Math. Software* 11(2):141-153, 1985. Multiple minimum degree, which is what our vendored
+  MMD is.
+- P. R. Amestoy, T. A. Davis, and I. S. Duff, "An approximate minimum degree ordering algorithm",
+  *SIAM J. Matrix Anal. Appl.* 17(4):886-905, 1996. AMD. The idea is to bound the degree instead
+  of computing it, which turns the expensive step into a cheap one and, surprisingly, does not
+  hurt the ordering.
+- T. A. Davis, *Direct Methods for Sparse Linear Systems*, SIAM, 2006, chapter 7. Davis's own
+  compact AMD (`cs_amd`), several times shorter than the SuiteSparse implementation. **The
+  shortness is in the surrounding machinery, not the algorithm**: statistics, control parameters,
+  input validation, debug dumps, and the unsymmetric preprocessing all fall away, while the
+  quotient graph with garbage collection and supervariable hashing remains, because it is
+  irreducible.
+
+**Supernodes and amalgamation (Section 4).**
+
+- C. Ashcraft and R. G. Grimes, "The influence of relaxed supernode partitions on the multifrontal
+  method", *ACM Trans. Math. Software* 15(4):291-309, 1989. Relaxed (amalgamated) supernodes: the
+  trade of explicitly stored zeros for larger dense blocks, which is what 4.5 is about.
+- E. G. Ng and B. W. Peyton, "Block sparse Cholesky algorithms on advanced uniprocessor
+  computers", *SIAM J. Sci. Comput.* 14(5):1034-1056, 1993. The supernodal Cholesky the numeric
+  phase implements, and the case for why level-3 BLAS on dense blocks is the whole point.
+
+**The multifrontal method (mentioned in 2.9, not yet implemented here).**
+
+- I. S. Duff and J. K. Reid, "The multifrontal solution of indefinite sparse symmetric linear
+  systems", *ACM Trans. Math. Software* 9(3):302-325, 1983. The method, and its update stack.
+
+**Indefinite factorization and pivoting (what dynamic LDL needs).**
+
+- J. R. Bunch and L. Kaufman, "Some stable methods for calculating inertia and solving symmetric
+  linear systems", *Math. Comp.* 31(137):163-179, 1977. The 1x1/2x2 pivot selection strategy.
+- C. Ashcraft, R. G. Grimes, and J. G. Lewis, "Accurate symmetric indefinite linear equation
+  solvers", *SIAM J. Matrix Anal. Appl.* 20(2):513-561, 1998. Delayed pivoting in a sparse
+  factorization, which is why dynamic LDL grows a front at runtime.
+- N. J. Higham, *Accuracy and Stability of Numerical Algorithms*, 2nd ed., SIAM, 2002. For the
+  perturbation of a small pivot in a *static* factorization, which cannot pivot and so has no
+  other recourse.
+
+**Dense kernels.**
+
+- J. J. Dongarra, J. Du Croz, S. Hammarling, and I. Duff, "A set of level 3 basic linear algebra
+  subprograms", *ACM Trans. Math. Software* 16(1):1-17, 1990. Level-3 BLAS: `gemm`, `syrk`,
+  `herk`, `trsm`. The reason supernodes are worth forming at all.
+- E. Anderson et al., *LAPACK Users' Guide*, 3rd ed., SIAM, 1999. `potrf` (Cholesky) and `sytrf`
+  (Bunch-Kaufman). Note there is **no unpivoted LDL in LAPACK**, which is why a static LDL kernel
+  has to be written by hand.
 
 **On the framing.** Two presentational choices here are expository, not lifted from a
 single source: casting the forest as the *transitive reduction of the update DAG* (2.6)

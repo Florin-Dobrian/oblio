@@ -38,7 +38,7 @@ void SolveEngine::forward(const NumFactorStatic<Val>& f, Vector<Val>& y) const {
         const std::size_t   frontSize = f.mFrontSize[kk];
         const std::size_t   numIdx    = frontSize + f.mUpdateSize[kk];
         const std::int32_t* rowIdx    = f.mRowIdx.data() + f.mSupPtr[kk];
-        const Val*          block     = f.mVal.data() + f.mValPtr[kk];
+        const Val*          block     = blockOf(f, kk);
 
         for (std::size_t lclCol = 0; lclCol < frontSize; ++lclCol) {
             const std::int32_t lk = rowIdx[lclCol];               // the global column
@@ -67,7 +67,7 @@ void SolveEngine::diagonal(const NumFactorStatic<Val>& f, Vector<Val>& y) const 
         const std::size_t   frontSize = f.mFrontSize[kk];
         const std::size_t   numIdx    = frontSize + f.mUpdateSize[kk];
         const std::int32_t* rowIdx    = f.mRowIdx.data() + f.mSupPtr[kk];
-        const Val*          block     = f.mVal.data() + f.mValPtr[kk];
+        const Val*          block     = blockOf(f, kk);
 
         for (std::size_t lclCol = 0; lclCol < frontSize; ++lclCol)
             y.mVal[rowIdx[lclCol]] /= block[lclCol * numIdx + lclCol];
@@ -86,7 +86,7 @@ void SolveEngine::backward(const NumFactorStatic<Val>& f, Vector<Val>& y) const 
         const std::size_t   frontSize = f.mFrontSize[kk];
         const std::size_t   numIdx    = frontSize + f.mUpdateSize[kk];
         const std::int32_t* rowIdx    = f.mRowIdx.data() + f.mSupPtr[kk];
-        const Val*          block     = f.mVal.data() + f.mValPtr[kk];
+        const Val*          block     = blockOf(f, kk);
 
         for (std::size_t s = frontSize; s > 0; --s) {
             const std::size_t  lclCol = s - 1;

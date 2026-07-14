@@ -83,6 +83,27 @@ public:
     const std::vector<Val>&         val()    const { return mVal; }
 
 private:
+    // Where supernode kk's dense block lives.
+    //
+    // **A lookup, not a view**, and that is why it belongs here rather than on the engines. It
+    // computes an address inside the existing storage: no allocation, nothing materialized,
+    // nothing owned. The layout it knows about (one flat buffer, offsets in mValPtr) is a fact
+    // about *this class*, and no consumer should have to restate it.
+    //
+    // Contrast `columnPointers` in experiments/storage-options, which lives on the *engine*: that
+    // one **materializes** three new arrays, shaped for one traversal, which somebody then owns.
+    // A view built for a consumer belongs to the consumer; a lookup into the storage belongs to
+    // the storage. NumFactorDynamic supplies its own blockPtr, over its own layout, and the
+    // engines cannot tell them apart.
+    //
+    // **Call it at the moment of use, never hoist it.** In the dynamic factor a delayed pivot
+    // grows an ancestor's front, which reallocates its buffer, which dangles every pointer
+    // previously taken into it, silently. experiments/storage-options demonstrates the rule
+    // (structural mutation invalidates, value mutation does not) and measures the cost of obeying
+    // it: one indirection, which is nothing.
+    Val*       blockPtr(std::int32_t kk)       { return mVal.data() + mValPtr[kk]; }
+    const Val* blockPtr(std::int32_t kk) const { return mVal.data() + mValPtr[kk]; }
+
     std::size_t   mSize    = 0;
     std::size_t   mSupSize = 0;
     Factorization mFactorization = Factorization::Cholesky;

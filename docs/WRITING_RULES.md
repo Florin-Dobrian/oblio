@@ -83,6 +83,35 @@ supernode, parent, child) when discussing the elimination forest, and the neutra
 **sup** where the two meet, which is most of the symbolic factorization. `sup` is deliberately
 neutral: it reads as supernode or as supercolumn, and commits to neither.
 
+## Dated entries (DESIGN_DECISIONS, CHANGELOG, the devlog)
+
+**Read the date before writing it.** An entry is stamped with the date it is *written*, and that
+sounds too obvious to need a rule until you notice how it goes wrong: not by getting the date
+wrong, but by **never looking it up**. The date carries forward by habit, from the last entry, from
+the last session, from whatever was true when the work began.
+
+Two failures, both of which happened here:
+
+- **A session that runs past midnight.** Work started on the 13th and continued into the 14th; five
+  entries were stamped 07-13 and one of them was written the next morning. Nothing felt wrong at
+  the time, because nothing had changed.
+- **A gap between writing and committing.** An entry written on the 14th and dated from memory as
+  the 13th, because the previous entries said 13.
+
+**So: look the date up, per entry, at the moment of writing.** Not once at the start of a session,
+not inherited from the entry above.
+
+**And the record can be checked, which is better than trusting it.** The git history knows when an
+entry actually landed:
+
+```
+git show <commit> -- docs/DESIGN_DECISIONS.md | grep "^+## "
+```
+
+lists the entry headings a commit introduced. If a heading's date and its commit's date disagree,
+the heading is wrong. Worth running when a decision matters enough to be cited later, which most of
+them are.
+
 ## Document-specific style
 
 Conventions internal to a single document stay with that document, not here. For

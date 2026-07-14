@@ -110,6 +110,41 @@ when dynamic LDL lands. It is what the two storages **are**, and the interfaces 
 instinct as the two rules below, seen from the API rather than from the conventions: *do not name a
 thing you cannot honour.*
 
+**A second corollary: a lookup belongs to the storage; a view belongs to the consumer.**
+
+This one took a wrong turn first, which is worth recording because the wrong version *looked*
+right.
+
+The storage-options experiment puts `columnPointers` on the **engine**, not on the matrix, and that
+is correct. The natural generalization is "access functions live in the algorithm class", and on
+that reasoning `blockOf` was first written as a private helper on `NumFactorEngine` and again on
+`SolveEngine`. Two copies of one expression, which is exactly the duplication the rule below
+forbids.
+
+The generalization was too broad. The two things are not the same kind of thing:
+
+| | `columnPointers` | `blockPtr` |
+|---|---|---|
+| what it does | **materializes** three new arrays | **computes an address** in the existing storage |
+| cost | `O(n)`, called once | `O(1)`, called in the hot loop |
+| ownership | somebody owns the arrays | nothing is owned |
+| shaped by | the traversal that wants it | the storage that holds it |
+
+`columnPointers` is a **view**: a new structure, built in the shape one algorithm wants. A different
+algorithm would want a different one, so putting it on the matrix would grow the matrix a method
+per consumer, each committing it to a format chosen for somebody else. **A view belongs to the
+consumer.**
+
+`blockPtr` is a **lookup**: it answers "where does supernode kk's block live", and the answer is a
+fact about the layout, not a shape chosen by anyone. The layout (one flat buffer with offsets, or
+one vector per supernode) is the factor's own business, and no consumer should have to restate it.
+**A lookup belongs to the storage.**
+
+So `blockPtr` now lives on `NumFactorStatic` and `NumFactorDynamic`, private, with the engines as
+friends. One definition per storage rather than one per engine, and the engines cannot tell the two
+factors apart. It still inlines to nothing (no `blockPtr` symbol survives in either object file), so
+the move is free.
+
 **And a corollary that dynamic LDL will live or die by: structural mutation invalidates every
 pointer previously extracted; value mutation does not.**
 

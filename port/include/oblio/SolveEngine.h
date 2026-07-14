@@ -70,15 +70,6 @@ private:
     template<class Val>
     void backward(const NumFactorStatic<Val>& f, Vector<Val>& y) const;
 
-    // Supernode kk's dense block. The same seam NumFactorEngine has, and for the same reason: one
-    // overload per factor storage, fetched at the moment of use and never hoisted. The solve reads
-    // a *finished* factor, so nothing grows under it and the hazard does not arise here; the shape
-    // is kept identical so the dynamic factor slots in without a second solve.
-    template<class Val>
-    static const Val* blockOf(const NumFactorStatic<Val>& f, std::int32_t kk) {
-        return f.mVal.data() + f.mValPtr[kk];
-    }
-
     // Whether the backward pass conjugates. The same rule the factorization uses, stated once.
     static bool hermitian(Factorization factorization) {
         return factorization == Factorization::Cholesky

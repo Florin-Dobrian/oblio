@@ -72,26 +72,6 @@ private:
     Traversal     mTraversal     = Traversal::LeftLooking;
     double        mPerturbation  = 1e-14;
 
-    // Supernode kk's dense block. **One overload per factor storage**, and this is the seam that
-    // lets NumFactorDynamic reach the same traversals: the flat factor computes a pointer into its
-    // one buffer, the dynamic one hands over its per-supernode vector's data(). Nothing else in
-    // the engine knows which it is talking to.
-    //
-    // **It must be called at the moment of use, never hoisted out of a loop.** In the dynamic
-    // factor a delayed pivot grows an ancestor's front, which reallocates its buffer, which
-    // dangles every pointer previously taken into it, silently. `experiments/storage-options`
-    // demonstrates the rule (structural mutation invalidates, value mutation does not) and
-    // measures the cost of obeying it: one indirection, which is nothing. Every call site below
-    // fetches inside the loop, and must keep doing so.
-    template<class Val>
-    static Val* blockOf(NumFactorStatic<Val>& f, std::int32_t kk) {
-        return f.mVal.data() + f.mValPtr[kk];
-    }
-    template<class Val>
-    static const Val* blockOf(const NumFactorStatic<Val>& f, std::int32_t kk) {
-        return f.mVal.data() + f.mValPtr[kk];
-    }
-
     // Copy the structure from SymFactor and allocate the value blocks, zeroed. Every traversal
     // starts here, so it is shared.
     //

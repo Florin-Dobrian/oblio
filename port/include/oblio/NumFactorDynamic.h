@@ -67,6 +67,16 @@ public:
     const std::vector<std::vector<Val>>& val() const { return mVal; }
 
 private:
+    // Where supernode kk's dense block lives. The static factor's counterpart computes an offset
+    // into one flat buffer; this one hands over the column's own vector. Same question, same
+    // signature, different storage, and the engines cannot tell which they are talking to.
+    //
+    // **Call it at the moment of use, never hoist it.** Here the warning is not theoretical: a
+    // delayed pivot grows an ancestor's front, which resizes its vector, which dangles every
+    // pointer previously taken into it.
+    Val*       blockPtr(std::int32_t kk)       { return mVal[kk].data(); }
+    const Val* blockPtr(std::int32_t kk) const { return mVal[kk].data(); }
+
     std::size_t   mSize    = 0;
     std::size_t   mSupSize = 0;
     Factorization mFactorization = Factorization::DynamicLDLT;

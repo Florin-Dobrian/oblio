@@ -11,9 +11,9 @@
 //
 // The answer is yes, through the storage's own per-column lookups. Each matrix carries three:
 //
-//     rowIdxPtr(j)   where column j's row indices start
-//     valPtr(j)      where column j's values start
-//     colLen(j)      how many entries column j has
+//     rowIdx(j)    where column j's row indices start
+//     val(j)       where column j's values start
+//     colSize(j)   how many entries column j has
 //
 // The static one answers from its single contiguous buffer (mRowIdx.data() + mColPtr[j]); the
 // dynamic one from each inner vector's data(). A lookup is a fact about the layout, so it lives on
@@ -51,15 +51,17 @@ namespace StorageOptions {
 
 class MultiplyEngine {
 public:
-    // The one multiply source. y += A*x, column by column, scattering into y.
+    // The one multiply source. y = A*x, column by column, scattering into y.
     //
     // Templated over the matrix, it reads each column through the storage's own lookups
-    // (rowIdxPtr / valPtr / colLen) and knows nothing else about the storage. Direct access: it
+    // (rowIdx / val / colSize) and knows nothing else about the storage. Direct access: it
     // asks the matrix where a column lives at the moment it needs it and holds no pointer across
     // the loop, so there is nothing to invalidate. This is the same shape the numeric engine uses
     // on the factor, and the reason one source serves both static and dynamic.
     //
-    // y is accumulated into (the BLAS convention, y += A x), so the caller zeroes it first.
+    // A pure multiply, y = A*x (BLAS's beta = 0): it overwrites y and does not read the old value,
+    // so the caller passes y and does not pre-zero. Because the sweep is column-outer the kernel
+    // zeros y once itself, then accumulates, which a column-outer multiply must do anyway.
     //
     // Declared here, defined and explicitly instantiated in the .cpp (for SparseMatrixStatic and
     // SparseMatrixDynamic), the same declaration-in-header / definition-in-cpp discipline the main

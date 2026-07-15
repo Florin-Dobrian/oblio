@@ -41,19 +41,20 @@ public:
     std::size_t size() const { return mSize; }
     std::size_t nnz()  const { return mRowIdx.size(); }
 
-    // Per-column lookups: where column j's row indices and values start, and how many entries it
-    // has. Each computes an address (or a length) inside the existing storage, O(1), no
-    // allocation, nothing owned. A lookup is a fact about the layout, so it belongs to the storage
-    // that holds it, not to any consumer. This is the matrix-side twin of the factor's blockPtr,
-    // and it is what lets a consumer read a column directly without the engine having to restate
-    // where the flat buffer keeps things.
-    const std::int32_t* rowIdxPtr(std::int32_t j) const { return mRowIdx.data() + mColPtr[j]; }
-    const double*       valPtr(std::int32_t j)    const { return mVal.data()    + mColPtr[j]; }
-    std::size_t         colLen(std::int32_t j)    const { return mColPtr[j + 1] - mColPtr[j]; }
+    // Per-column accessors: where column j's row indices and values start, and how many entries it
+    // has. Each returns an address (or a size) into the existing storage, O(1), no allocation,
+    // nothing owned. This is a fact about the layout, so it belongs to the storage that holds it,
+    // not to any consumer, and it is the matrix-side twin of the factor's blockPtr. Named for what
+    // they return (a column's row indices, its values), not for the array behind them, so the
+    // dynamic sibling can offer the same three under the same names. colPtr never appears in a
+    // signature; it is a static-internal detail.
+    const std::int32_t* rowIdx(std::int32_t j)  const { return mRowIdx.data() + mColPtr[j]; }
+    const double*       val(std::int32_t j)     const { return mVal.data()    + mColPtr[j]; }
+    std::size_t         colSize(std::int32_t j) const { return mColPtr[j + 1] - mColPtr[j]; }
 
     // Replace one column's values, keeping its structure. Cheap: the column's values are the
     // contiguous run mVal[colPtr[j] .. colPtr[j+1]-1], so overwriting them touches that run and
-    // nothing else, O(colLen), no shift. This is the value half of mutation, the numbers change and
+    // nothing else, O(colSize), no shift. This is the value half of mutation, the numbers change and
     // the pattern does not, which is what a solver does most often (a Newton iteration, a time step,
     // refactorize). Its identical twin on SparseMatrixDynamic overwrites that column's inner vector.
     //
@@ -70,11 +71,11 @@ public:
     bool setValues(std::int32_t j, const std::vector<double>& val) {
         if (j < 0 || static_cast<std::size_t>(j) >= mSize)
             return false;
-        if (val.size() != colLen(j))
+        if (val.size() != colSize(j))
             return false;
-        const std::size_t from = mColPtr[j];
+        const std::size_t cp = mColPtr[j];
         for (std::size_t k = 0; k < val.size(); ++k)
-            mVal[from + k] = val[k];
+            mVal[cp + k] = val[k];
         return true;
     }
 

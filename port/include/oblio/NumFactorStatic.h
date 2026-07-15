@@ -90,7 +90,7 @@ private:
     // nothing owned. The layout it knows about (one flat buffer, offsets in mValPtr) is a fact
     // about *this class*, and no consumer should have to restate it.
     //
-    // The matrix's per-column lookups (rowIdxPtr / valPtr / colLen in experiments/storage-options)
+    // The matrix's per-column lookups (rowIdx / val / colSize in experiments/storage-options)
     // are the same idea over a different storage: a fact about the layout, answered by the class
     // that owns it. NumFactorDynamic supplies its own blockPtr, over its own layout, and the
     // engines cannot tell them apart.

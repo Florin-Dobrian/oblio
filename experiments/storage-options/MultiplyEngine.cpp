@@ -2,22 +2,29 @@
 
 namespace StorageOptions {
 
-// The one multiply source. y += A*x, column by column, scattering into y. It reads each column
-// through the storage's own lookups (rowIdxPtr / valPtr / colLen) and names no member, buffer, or
-// layout, so this single body serves both storages; the explicit instantiations below specialize
-// it per storage. Direct access: the pointer and length are read at the moment of use, held across
-// nothing, so a growing dynamic storage has no cached pointer to dangle.
+// The one multiply source. y = A*x, a pure multiply: it overwrites y and never reads the old value
+// (BLAS's beta = 0 case). The loop is column-outer, so each y[i] is touched by several columns and
+// cannot be written in one shot; y is therefore zeroed once up front and then accumulated into,
+// which a column-outer sweep must do regardless. It reads each column through the storage's own
+// accessors (rowIdx / val / colSize) and names no member, buffer, or layout, so this single body
+// serves both storages; the explicit instantiations below specialize it per storage. Direct access:
+// the pointer and size are read at the moment of use, held across nothing, so a growing dynamic
+// storage has no cached pointer to dangle.
 template <class Matrix>
 void MultiplyEngine::multiply(const Matrix& A, const double* x, double* y) const {
     const std::size_t size = A.size();
+    for (std::int32_t i = 0; i < static_cast<std::int32_t>(size); ++i)
+        y[i] = 0.0;
     for (std::int32_t j = 0; j < static_cast<std::int32_t>(size); ++j) {
-        const std::int32_t* rowIdx = A.rowIdxPtr(j);
-        const double*       val    = A.valPtr(j);
-        const std::size_t   n      = A.colLen(j);
-        const double        xj     = x[j];
+        const std::int32_t* rowIdx  = A.rowIdx(j);
+        const double*       val     = A.val(j);
+        const std::size_t   colSize = A.colSize(j);
+        const double        xj      = x[j];
 
-        for (std::size_t p = 0; p < n; ++p)
-            y[rowIdx[p]] += val[p] * xj;
+        // cp is the column position: it scans this column's rowIdx/val, whatever backs them (a slice
+        // of a flat buffer here for static, an inner vector for dynamic). Not a colPtr index.
+        for (std::size_t cp = 0; cp < colSize; ++cp)
+            y[rowIdx[cp]] += val[cp] * xj;
     }
 }
 
@@ -31,17 +38,20 @@ template void MultiplyEngine::multiply<SparseMatrixDynamic>(
 // The baseline: the static matrix walked directly, no lookup call and no pointer array. It reaches
 // the raw buffers through friendship, and that rawness is the point: it is the reference the
 // templated multiply must match, so that "reaching a column through the lookup costs nothing" is a
-// measured claim rather than a hoped-for one.
+// measured claim rather than a hoped-for one. Same pure-multiply contract: y is overwritten, zeroed
+// once then accumulated, since it too is column-outer.
 void MultiplyEngine::multiplyStatic(const SparseMatrixStatic& A, const double* x, double* y) const {
-    const std::size_t   size   = A.mSize;
-    const std::size_t*  colPtr = A.mColPtr.data();
-    const std::int32_t* rowIdx = A.mRowIdx.data();
-    const double*       val    = A.mVal.data();
+    const std::size_t                size   = A.mSize;
+    const std::vector<std::size_t>&  colPtr = A.mColPtr;
+    const std::vector<std::int32_t>& rowIdx = A.mRowIdx;
+    const std::vector<double>&       val    = A.mVal;
 
+    for (std::int32_t i = 0; i < static_cast<std::int32_t>(size); ++i)
+        y[i] = 0.0;
     for (std::int32_t j = 0; j < static_cast<std::int32_t>(size); ++j) {
         const double xj = x[j];
-        for (std::size_t p = colPtr[j]; p < colPtr[j + 1]; ++p)
-            y[rowIdx[p]] += val[p] * xj;
+        for (std::size_t cp = colPtr[j]; cp < colPtr[j + 1]; ++cp)
+            y[rowIdx[cp]] += val[cp] * xj;
     }
 }
 

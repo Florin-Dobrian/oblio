@@ -71,7 +71,7 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 A consumer that reads a CSC-style object can do it two ways. *Direct*: hold the object and ask it
 for one column's (or one supernode's) pointer and length at the moment of use, through the storage's
-own lookup (`rowIdxPtr` / `valPtr` / `colLen` on the matrix, `blockPtr` on the factor). *Bulk*:
+own lookup (`rowIdx` / `val` / `colSize` on the matrix, `blockPtr` on the factor). *Bulk*:
 extract every pointer up front into three plain arrays, then run a kernel that takes nothing but
 those arrays, so the object is out of the picture and its dimensions must be extracted alongside.
 
@@ -144,6 +144,15 @@ step: same pattern, new numbers, refactorize. The flat layout is perfectly happy
 classes have it. This is also why "we need a mutable matrix" is a weaker argument for VV than it
 first appears: the common case needs no VV at all.
 
+**Amendment (2026-07-14): `setValues` landed at column granularity.** The experiment settled on
+`setValues(std::int32_t j, const std::vector<double>& val)`, one column, with an *identical
+signature on both classes*: static overwrites the contiguous run `mVal[colPtr[j]..]`, dynamic
+overwrites `mVal[j]` in place, and neither invalidates a pointer. Setting every value is a loop over
+columns, the write-twin of reading every column through the accessors. This strengthens the point
+rather than changing it: the cheap operation is now not merely present on both classes but the *same
+call* on both, and the asymmetry stays exactly where it belongs, on `setColumn` (structural), which
+remains dynamic-only.
+
 **`setColumn` is absent from the flat one, and its absence is the point.** Changing a column's
 *structure* there means shifting every later column: `O(nnz)`, not `O(column)`. An API that looks
 cheap and is secretly linear in the whole matrix is a trap, and the caller who writes it in a loop
@@ -207,7 +216,7 @@ the move is free.
 extractor at all.** The rule above is right and `blockPtr` is right, but it mis-cast
 `columnPointers`. Calling it a view and leaving it on the engine treated it as a genuine
 algorithm-shaped structure, which it is not: the three arrays it builds are a bulk copy of the
-per-column lookups the matrix already answers (`rowIdxPtr` / `valPtr` / `colLen`, the matrix-side
+per-column lookups the matrix already answers (`rowIdx` / `val` / `colSize`, the matrix-side
 twin of `blockPtr`, added to the storage after this entry was written). Once those lookups exist a
 consumer reads a column directly, at the point of use, and the extractor is pure redundancy: an
 `O(n)` up-front copy of what the storage already holds, carrying an invalidation hazard that exists
@@ -1121,6 +1130,20 @@ provisional status on this point is closed. What remains open is the *hybrid* qu
 the dynamic factor is flattened afterwards, which 0.9 answers only implicitly (it keeps a
 `FactorsDynamic` object, and `SolveEngine` reads it through the same abstract base), and the
 BLAS-3 measurement that would tell us whether flattening is worth it.
+
+**Amendment (2026-07-14): the taxonomy stands; the descriptor view in the title did not.** The
+storage split above (CSC for the matrix, the symbolic factor, and the static numeric factor; a
+vector of vectors for the dynamic factor) is the settled, 0.9-confirmed core and is unchanged. What
+did not survive is the mechanism this entry pairs with it, the "descriptor view that spans both": a
+bulk extractor that materializes `rowIdxPtr[j]` / `valPtr[j]` / `len[j]` arrays and feeds one
+storage-blind compiled multiply. That was superseded by **direct access**. Each storage now exposes
+per-column accessors (`rowIdx(j)` / `val(j)` / `colSize(j)`, one pointer or size per call), a
+consumer templates over the storage and calls them at the moment of use, and there is no extractor
+at all, so nothing is materialized, owned, or left to go stale. Direct is also faster (it streams no
+extra arrays) and it is what the numeric factorization must use regardless, since a growing dynamic
+factor would dangle any pointer extracted up front. So the array-valued names in this entry describe
+the retired bulk form; the current interface is the three per-column accessors. See the
+bulk-versus-direct entry above, and the storage-options README.
 
 ## 2026-07-09, Index types: `std::int32_t` IDs (NIL = -1), `std::size_t` offsets
 

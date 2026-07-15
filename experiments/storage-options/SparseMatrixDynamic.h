@@ -24,7 +24,7 @@
 // and it is a plain const std::int32_t*. The same type CSC produces, from a different place.
 //
 // MultiplyEngine is no longer a friend: it reads this matrix through the public per-column lookups
-// (rowIdxPtr / valPtr / colLen), the same ones the static sibling offers, so it needs no access to
+// (rowIdx / val / colSize), the same ones the static sibling offers, so it needs no access to
 // the private storage.
 
 #include <cstddef>
@@ -47,14 +47,14 @@ public:
         return n;
     }
 
-    // Per-column lookups, the same interface the static sibling offers, answered from this layout
-    // instead. Here the pointer is the inner vector's own data() and the length is its size(); in
-    // the static sibling it is an offset into one flat buffer. Same signature, same meaning,
-    // different storage, which is exactly what lets a consumer read either matrix through one
-    // storage-blind path.
-    const std::int32_t* rowIdxPtr(std::int32_t j) const { return mRowIdx[j].data(); }
-    const double*       valPtr(std::int32_t j)    const { return mVal[j].data(); }
-    std::size_t         colLen(std::int32_t j)    const { return mRowIdx[j].size(); }
+    // Per-column accessors, the same three the static sibling offers, under the same names,
+    // answered from this layout instead. Here each pointer is the inner vector's own data() and the
+    // size is its size(); in the static sibling they come from one flat buffer via colPtr. Same
+    // signature, same meaning, different storage, which is exactly what lets a consumer read either
+    // matrix through one storage-blind path.
+    const std::int32_t* rowIdx(std::int32_t j)  const { return mRowIdx[j].data(); }
+    const double*       val(std::int32_t j)     const { return mVal[j].data(); }
+    std::size_t         colSize(std::int32_t j) const { return mRowIdx[j].size(); }
 
     // Replace one column's values, keeping its structure. Identical in signature to the static
     // sibling, and cheap for the same reason: it overwrites this column's value buffer in place,

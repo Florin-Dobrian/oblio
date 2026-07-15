@@ -1,7 +1,8 @@
 // test_multiply.cpp - one multiply function, two storages.
 //
 // Builds one sparse matrix, stores it twice (CSC and vector-of-vectors) from the same
-// entries, extracts column pointers from each, and runs the *same* multiply over both.
+// entries, and runs the *same* multiply source over both, each reading its matrix through
+// that storage's own per-column lookups (rowIdxPtr / valPtr / colLen).
 //
 // Correctness is the first result and the point of the experiment: the two runs must agree
 // bit for bit, because they are the same additions in the same order over the same values,
@@ -128,16 +129,14 @@ void testMutation() {
     SparseMatrixDynamic d(3, {{0,1}, {0,1,2}, {1,2}}, {{2,1}, {1,3,1}, {1,4}});
 
     MultiplyEngine eng;
-    std::vector<const std::int32_t*> ri; std::vector<const double*> vp; std::vector<std::size_t> ln;
     std::vector<double> x = {1, 1, 1}, y(3);
 
     // multiply() ACCUMULATES into y (the BLAS convention: y += A x), so y must be zeroed before
     // each call. The benchmark above does the same. Forgetting it is exactly the kind of quiet
     // wrong answer that a test with no expected value would never catch.
     auto run = [&](auto& A) {
-        eng.columnPointers(A, ri, vp, ln);
         std::fill(y.begin(), y.end(), 0.0);
-        eng.multiply(3, ri.data(), vp.data(), ln.data(), x.data(), y.data());
+        eng.multiply(A, x.data(), y.data());
     };
 
     // setValues: BOTH support it, and it costs nothing in either. Same structure, new numbers, is
@@ -188,25 +187,20 @@ void testInvalidation() {
     std::cout << "\nPointer validity: which mutations move the buffers\n";
 
     SparseMatrixDynamic d(3, {{0,1}, {0,1,2}, {1,2}}, {{2,1}, {1,3,1}, {1,4}});
-    MultiplyEngine eng;
 
-    std::vector<const std::int32_t*> ri; std::vector<const double*> vp; std::vector<std::size_t> ln;
-    eng.columnPointers(d, ri, vp, ln);
-    const double* before = vp[1];             // where column 1's values lived
+    const double* before = d.valPtr(1);       // where column 1's values lived
 
     // setValues: the buffers stay put. The old pointer still points at column 1, and now sees the
     // new numbers. Safe to keep, though few callers should want to.
     d.setValues({{20,10}, {10,30,10}, {10,40}});
-    eng.columnPointers(d, ri, vp, ln);
-    const bool valueKept = (vp[1] == before);
+    const bool valueKept = (d.valPtr(1) == before);
     std::cout << "  setValues   pointer " << (valueKept ? "UNCHANGED" : "moved    ")
               << "   (buffer reused; contents overwritten in place)\n";
 
     // setColumn: the buffer is replaced. The old pointer is dangling, and we must not read it.
     // We can only observe that it is no longer where the column lives.
     d.setColumn(1, {0, 2}, {7.0, 9.0});
-    eng.columnPointers(d, ri, vp, ln);
-    const bool structMoved = (vp[1] != before);
+    const bool structMoved = (d.valPtr(1) != before);
     std::cout << "  setColumn   pointer " << (structMoved ? "MOVED    " : "unchanged")
               << "   (buffer replaced; anything held from before now dangles)\n";
 
@@ -228,15 +222,6 @@ int main() {
 
     MultiplyEngine eng;
 
-    // Extract the column pointers, once per storage. After this, the storages are gone: the
-    // multiply sees only these arrays.
-    std::vector<const std::int32_t*> riC, riV, riS;
-    std::vector<const double*>       vC,  vV,  vS;
-    std::vector<std::size_t>         lC,  lV,  lS;
-    eng.columnPointers(csc, riC, vC, lC);
-    eng.columnPointers(vv,  riV, vV, lV);
-    eng.columnPointers(vvS, riS, vS, lS);
-
     std::vector<double> x(size);
     for (std::size_t j = 0; j < size; ++j)
         x[j] = 1.0 + 0.001 * static_cast<double>(j % 97);
@@ -250,14 +235,11 @@ int main() {
     const double tBase = timeIt([&]{ std::fill(yBase.begin(), yBase.end(), 0.0);
                                      eng.multiplyStatic(csc, x.data(), yBase.data()); }, repeats);
     const double tCsc  = timeIt([&]{ std::fill(yCsc.begin(), yCsc.end(), 0.0);
-                                     eng.multiply(size, riC.data(), vC.data(), lC.data(),
-                                                  x.data(), yCsc.data()); }, repeats);
+                                     eng.multiply(csc, x.data(), yCsc.data()); }, repeats);
     const double tVv   = timeIt([&]{ std::fill(yVv.begin(), yVv.end(), 0.0);
-                                     eng.multiply(size, riV.data(), vV.data(), lV.data(),
-                                                  x.data(), yVv.data()); }, repeats);
+                                     eng.multiply(vv, x.data(), yVv.data()); }, repeats);
     const double tVvS  = timeIt([&]{ std::fill(yVvS.begin(), yVvS.end(), 0.0);
-                                     eng.multiply(size, riS.data(), vS.data(), lS.data(),
-                                                  x.data(), yVvS.data()); }, repeats);
+                                     eng.multiply(vvS, x.data(), yVvS.data()); }, repeats);
 
     const double dCsc = maxDiff(yBase, yCsc);
     const double dVv  = maxDiff(yBase, yVv);
@@ -266,7 +248,7 @@ int main() {
 
     std::cout << std::fixed << std::setprecision(3);
     std::cout << "  hand-written flat (baseline) " << std::setw(8) << tBase << " ms\n";
-    std::cout << "  multiply(), static pointers  " << std::setw(8) << tCsc << " ms   "
+    std::cout << "  multiply(), static (direct)  " << std::setw(8) << tCsc << " ms   "
               << std::setprecision(2) << tCsc / tBase << "x\n" << std::setprecision(3);
     std::cout << "  multiply(), dynamic, packed  " << std::setw(8) << tVv << " ms   "
               << std::setprecision(2) << tVv / tBase << "x\n" << std::setprecision(3);
@@ -282,15 +264,18 @@ int main() {
     testInvalidation();
 
     std::cout << "\nWhat this shows:\n"
-              << "  The three timed multiply() rows are the SAME COMPILED FUNCTION. Not a\n"
-              << "  template instantiated three times: one function, called three times, with\n"
-              << "  pointers that came from different places. It cannot tell static from dynamic,\n"
-              << "  because by the time it runs there is nothing left to tell apart.\n"
+              << "  The three timed multiply() rows are one multiply SOURCE, monomorphized per\n"
+              << "  storage. Each instantiation reads its matrix through that storage's own\n"
+              << "  lookups (rowIdxPtr / valPtr / colLen) and names no member, no buffer, no\n"
+              << "  layout, so the source is written once and the compiler specializes it. This\n"
+              << "  is direct access, the consumer templated on the storage, which is exactly the\n"
+              << "  shape the numeric engine uses on the factor through blockPtr. There is no\n"
+              << "  extractor and no pointer-array view, so nothing is owned and nothing dangles.\n"
               << "\n"
-              << "  The pointer indirection is free. multiply() over the static matrix's\n"
-              << "  pointers matches the hand-written flat baseline, which builds no pointer\n"
-              << "  array at all, so the generality costs nothing on the layout we care most\n"
-              << "  about.\n"
+              << "  Reaching a column through the lookup is free. multiply() over the static\n"
+              << "  matrix matches the hand-written flat baseline, which calls no lookup at all\n"
+              << "  and walks colPtr raw, so the abstraction costs nothing on the layout we care\n"
+              << "  most about.\n"
               << "\n"
               << "  What costs is the layout. The two dynamic rows are the same class holding\n"
               << "  the same content, differing only in the order their inner vectors were\n"

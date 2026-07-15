@@ -23,15 +23,15 @@
 // The pointers are already here: mRowIdx[j].data() is where column j's row indices start,
 // and it is a plain const std::int32_t*. The same type CSC produces, from a different place.
 //
-// MultiplyEngine is a friend, as in the CSC class.
+// MultiplyEngine is no longer a friend: it reads this matrix through the public per-column lookups
+// (rowIdxPtr / valPtr / colLen), the same ones the static sibling offers, so it needs no access to
+// the private storage.
 
 #include <cstddef>
 #include <cstdint>
 #include <vector>
 
 namespace StorageOptions {
-
-class MultiplyEngine;
 
 class SparseMatrixDynamic {
 public:
@@ -46,6 +46,15 @@ public:
         for (const auto& c : mRowIdx) n += c.size();
         return n;
     }
+
+    // Per-column lookups, the same interface the static sibling offers, answered from this layout
+    // instead. Here the pointer is the inner vector's own data() and the length is its size(); in
+    // the static sibling it is an offset into one flat buffer. Same signature, same meaning,
+    // different storage, which is exactly what lets a consumer read either matrix through one
+    // storage-blind path.
+    const std::int32_t* rowIdxPtr(std::size_t j) const { return mRowIdx[j].data(); }
+    const double*       valPtr(std::size_t j)    const { return mVal[j].data(); }
+    std::size_t         colLen(std::size_t j)    const { return mRowIdx[j].size(); }
 
     // Replace the values, keeping the structure. Cheap here as it is in the static sibling: this
     // is the mutation both layouts support, because it moves nothing.
@@ -102,8 +111,6 @@ private:
     std::size_t                            mSize;
     std::vector<std::vector<std::int32_t>> mRowIdx;   // one vector per column
     std::vector<std::vector<double>>       mVal;      // one vector per column
-
-    friend class MultiplyEngine;
 };
 
 } // namespace StorageOptions

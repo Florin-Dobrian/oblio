@@ -67,6 +67,64 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-07-14, Bulk versus direct access: direct wins, and bulk was never worth its one advantage
+
+A consumer that reads a CSC-style object can do it two ways. *Direct*: hold the object and ask it
+for one column's (or one supernode's) pointer and length at the moment of use, through the storage's
+own lookup (`rowIdxPtr` / `valPtr` / `colLen` on the matrix, `blockPtr` on the factor). *Bulk*:
+extract every pointer up front into three plain arrays, then run a kernel that takes nothing but
+those arrays, so the object is out of the picture and its dimensions must be extracted alongside.
+
+Two questions decide between them, and they have different answers.
+
+**Is bulk safe? Only for a consumer that does not mutate the object during its own sweep.** A
+read-only sweep (matvec, the solve, both read a frozen structure) may be bulk: nothing grows, so no
+extracted pointer goes stale. A mutating sweep must be direct: the numeric factorization grows a
+front under itself (a delayed pivot reallocates an ancestor's buffer), so a pointer extracted up
+front dangles, silently. This is the hard constraint, and it puts `NumFactorEngine` on direct by
+necessity rather than preference.
+
+**Is bulk worth it, where it is safe? No.** Bulk's single advantage is one storage-blind compiled
+kernel, verifiable in the symbol table, against direct's one instantiation per storage. For us that
+trades a real cost for nothing we need:
+
+- The instantiation it saves is cheap. We have a small fixed set of storages, and the arithmetic
+  kernels stay shared regardless (they take raw pointers); only the traversal, which is bookkeeping,
+  monomorphizes. One extra copy of the bookkeeping per storage is noise.
+- It is slower. Bulk streams three extra arrays that direct never touches, plus an `O(n)` extraction
+  pass, and on a memory-bound sweep that traffic shows at full price. Measured, the matvec: bulk runs
+  1.05x to 1.07x of hand-written flat, while direct matches hand-written flat.
+- It is more API and more hazard. The extractor is method surface a reader must understand, and it
+  carries an invalidation warning (a stale extracted pointer) that exists only because something was
+  extracted. Direct deletes the method, the warning, and the paragraph explaining the warning, all
+  at once.
+
+So the rule is direct, and the storage's lookup is the whole interface: a fact about the layout,
+answered by the class that owns it, called by a consumer templated on the storage type. No consumer
+carries an extractor of its own, which was the repetition the lookup-versus-view corollary set out to
+kill and then, by leaving `columnPointers` on the engine, half-kept. That is corrected in the same
+entry: `columnPointers` was a bulk copy of the lookups, not a genuine view, and once the lookups
+moved onto the matrix it was removed and the matvec reshaped to direct access.
+
+| engine | access | why |
+|---|---|---|
+| NumFactorEngine | direct | must be: the factor grows under it, so a bulk pointer would dangle |
+| SolveEngine | direct | frozen factor, so bulk would be safe, but direct is faster and smaller |
+| MultiplyEngine | direct | frozen matrix, same reason |
+
+One thing stays genuinely open, and only one: the deferred multi-RHS solve. There the kernel is
+BLAS-3, `O(n^3)` work on `O(n^2)` data, so an extraction's cost amortizes over heavy block work
+rather than showing at full price as it does on the memory-bound single-RHS sweeps. If bulk ever
+earns its keep it is there, and even then the arrays would be built once from the same storage
+lookups, in one shared helper, never a method per engine. The no-per-consumer-extractor rule holds
+regardless of how that measures.
+
+This aligns the matrix and the factor on one pattern, which is the point: whether an object is static
+or dynamic because the user changes it (the matrix) or because the algorithm changes it (the factor),
+the consumer sees one lookup interface and templates over the storage. See "an object offers what its
+storage makes cheap" for the lookup-versus-view rule this completes, and the flat-versus-VV entry for
+the storage taxonomy.
+
 ## 2026-07-14, An object offers what its storage makes cheap, and nothing else
 
 A third rule in the same family as the two below, and it came out of naming the storage-options
@@ -144,6 +202,22 @@ So `blockPtr` now lives on `NumFactorStatic` and `NumFactorDynamic`, private, wi
 friends. One definition per storage rather than one per engine, and the engines cannot tell the two
 factors apart. It still inlines to nothing (no `blockPtr` symbol survives in either object file), so
 the move is free.
+
+**Amendment (2026-07-14, later the same day): the view was not a view, and the right answer was no
+extractor at all.** The rule above is right and `blockPtr` is right, but it mis-cast
+`columnPointers`. Calling it a view and leaving it on the engine treated it as a genuine
+algorithm-shaped structure, which it is not: the three arrays it builds are a bulk copy of the
+per-column lookups the matrix already answers (`rowIdxPtr` / `valPtr` / `colLen`, the matrix-side
+twin of `blockPtr`, added to the storage after this entry was written). Once those lookups exist a
+consumer reads a column directly, at the point of use, and the extractor is pure redundancy: an
+`O(n)` up-front copy of what the storage already holds, carrying an invalidation hazard that exists
+only because something was extracted. Its one property, a single storage-blind compiled kernel, has
+no value to us: a small fixed set of storages, so direct costs one instantiation per storage, and
+bulk measures a few percent slower on the memory-bound matvec besides. So `columnPointers` was
+removed and the matvec reshaped to direct access, three lookups per matrix and one templated
+`multiply` that calls them, no extractor. What stands: a lookup belongs to the storage; a genuine
+view (a transpose, an algorithm-specific reordering) still belongs to the consumer, but
+`columnPointers` was never one. See the bulk-versus-direct entry above.
 
 **And a corollary that dynamic LDL will live or die by: structural mutation invalidates every
 pointer previously extracted; value mutation does not.**

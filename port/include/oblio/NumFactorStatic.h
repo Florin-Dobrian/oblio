@@ -90,10 +90,9 @@ private:
     // nothing owned. The layout it knows about (one flat buffer, offsets in mValPtr) is a fact
     // about *this class*, and no consumer should have to restate it.
     //
-    // Contrast `columnPointers` in experiments/storage-options, which lives on the *engine*: that
-    // one **materializes** three new arrays, shaped for one traversal, which somebody then owns.
-    // A view built for a consumer belongs to the consumer; a lookup into the storage belongs to
-    // the storage. NumFactorDynamic supplies its own blockPtr, over its own layout, and the
+    // The matrix's per-column lookups (rowIdxPtr / valPtr / colLen in experiments/storage-options)
+    // are the same idea over a different storage: a fact about the layout, answered by the class
+    // that owns it. NumFactorDynamic supplies its own blockPtr, over its own layout, and the
     // engines cannot tell them apart.
     //
     // **Call it at the moment of use, never hoist it.** In the dynamic factor a delayed pivot

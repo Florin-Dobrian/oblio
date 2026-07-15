@@ -1,32 +1,43 @@
 #pragma once
 
-// MultiplyEngine.h - one sparse matvec, over either storage.
+// MultiplyEngine.h - one sparse matvec source, over either storage.
 //
-// The question: can a single multiply function serve both a **static** matrix (fixed structure,
-// stored flat, in CSC) and a **dynamic** one (mutable structure, stored as a vector of vectors)?
+// The question: can a single multiply serve both a **static** matrix (fixed structure, stored
+// flat, in CSC) and a **dynamic** one (mutable structure, stored as a vector of vectors), without
+// the engine restating either layout?
 //
 // The classes are named for the purpose, the comments for the layout. The layout is a consequence
 // of the purpose, and the solver names them the same way (NumFactorStatic, NumFactorDynamic).
 //
-// The answer here is yes, and not by templating the algorithm. There is exactly **one**
-// compiled multiply. It takes no matrix at all. It takes three arrays:
+// The answer is yes, through the storage's own per-column lookups. Each matrix carries three:
 //
-//     rowIdxPtr[j]   where column j's row indices start
-//     valPtr[j]      where column j's values start
-//     len[j]         how many entries column j has
+//     rowIdxPtr(j)   where column j's row indices start
+//     valPtr(j)      where column j's values start
+//     colLen(j)      how many entries column j has
 //
-// Both storages can fill those. The static one points into its single contiguous buffer
-// (&mRowIdx[mColPtr[j]]); the dynamic one reads each inner vector's data(). Once filled, the arrays are
-// indistinguishable, and multiply() cannot tell which class produced them, because there is
-// nothing left to tell apart.
+// The static one answers from its single contiguous buffer (mRowIdx.data() + mColPtr[j]); the
+// dynamic one from each inner vector's data(). A lookup is a fact about the layout, so it lives on
+// the storage that holds it, exactly as blockPtr lives on the numeric factor. That is the one place
+// the two layouts differ.
 //
-// That is the whole demonstration. The storage question and the algorithm question are
-// separable: the layout decides where the pointers come from, and nothing else.
+// multiply is then a template over the matrix. It calls those lookups and never names a member, a
+// buffer, or a layout, so its source is written once and serves both storages; the compiler
+// specializes it per storage. This is **direct access, the consumer templated on the storage**, and
+// it is the same shape the numeric engine uses on the factor. There is deliberately no extractor:
+// nothing materializes a pointer-array view, so nothing is owned, nothing goes stale, and no
+// consumer carries a columnPointers of its own to restate. That per-engine extractor was the
+// repetition this design exists to avoid: a view written once per consumer is a view written many
+// times.
 //
-// Two extractors (columnPointers, one overload per storage) and one algorithm. Plus a
-// hand-written flat multiply as the honest baseline: it skips the pointer arrays entirely and
-// walks colPtr directly, which is what any sane CSC code does. If the pointer-array version
-// matches it, the indirection costs nothing.
+// Direct is also what the numeric factorization must use regardless (a dynamic factor grows under
+// it, so any pointer extracted up front would dangle), so the matvec matches it rather than
+// inventing a second pattern. A read-only consumer that later wants the bulk form (one compiled
+// kernel over pointer arrays, for the deferred multi-RHS solve) builds those arrays from these same
+// lookups, in one shared helper, never a method per engine.
+//
+// Plus a hand-written flat multiply as the honest baseline: it walks colPtr directly, which is what
+// one would write if CSC were the only storage. If the templated version matches it, reaching a
+// column through the lookup costs nothing.
 //
 // Val is fixed to double. This experiment is about storage, not scalar type.
 
@@ -35,52 +46,42 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <vector>
 
 namespace StorageOptions {
 
 class MultiplyEngine {
 public:
-    // The one algorithm. y = A*x, column by column, scattering into y.
+    // The one multiply source. y += A*x, column by column, scattering into y.
     //
-    // It sees pointers and lengths. No matrix, no template parameter, no virtual call, no
-    // knowledge of any storage class. One function, compiled once.
-    void multiply(std::size_t size,
-                  const std::int32_t* const* rowIdxPtr,
-                  const double* const*       valPtr,
-                  const std::size_t*         len,
-                  const double* x, double* y) const;
+    // Templated over the matrix, it reads each column through the storage's own lookups
+    // (rowIdxPtr / valPtr / colLen) and knows nothing else about the storage. Direct access: it
+    // asks the matrix where a column lives at the moment it needs it and holds no pointer across
+    // the loop, so there is nothing to invalidate. This is the same shape the numeric engine uses
+    // on the factor, and the reason one source serves both static and dynamic.
+    //
+    // y is accumulated into (the BLAS convention, y += A x), so the caller zeroes it first.
+    //
+    // Declared here, defined and explicitly instantiated in the .cpp (for SparseMatrixStatic and
+    // SparseMatrixDynamic), the same declaration-in-header / definition-in-cpp discipline the main
+    // tree uses for its value templates. The extern template lines below are the in-place reminder
+    // of that rule: they suppress an implicit instantiation here, so a body accidentally moved into
+    // this header would stop compiling rather than silently instantiate per translation unit.
+    template <class Matrix>
+    void multiply(const Matrix& A, const double* x, double* y) const;
 
-    // Extract the column pointers. One overload per storage; both produce the same three
-    // arrays, and after this call the storage is out of the picture.
-    //
-    // **The pointers are only valid until the matrix's structure changes.** This is the rule that
-    // matters, and nothing enforces it:
-    //
-    //   setValues   preserves them. The buffers stay put; only their contents change.
-    //   setColumn   destroys them. The column's buffer is replaced, so any pointer into it dangles.
-    //
-    // So the invalidation rule tracks *structural* mutation exactly, and in both storages. Refactor
-    // with new numbers and the pointers hold; change a pattern and they do not.
-    //
-    // This is not a quirk of the experiment. It is the rule the solver's dynamic factor will live
-    // by: delayed pivoting grows a front, which reallocates its buffer, which invalidates every
-    // pointer previously taken into it. A use-after-free there is silent, and it is exactly the
-    // failure this experiment exists to make visible before it costs a day.
-    void columnPointers(const SparseMatrixStatic& A,
-                        std::vector<const std::int32_t*>& rowIdxPtr,
-                        std::vector<const double*>&       valPtr,
-                        std::vector<std::size_t>&         len) const;
-
-    void columnPointers(const SparseMatrixDynamic& A,
-                        std::vector<const std::int32_t*>& rowIdxPtr,
-                        std::vector<const double*>&       valPtr,
-                        std::vector<std::size_t>&         len) const;
-
-    // The baseline. Hand-written flat: no pointer arrays, walks colPtr directly. This is what
-    // one would write if CSC were the only storage, and it is what the general version must
-    // match to earn its keep.
+    // The baseline. Hand-written flat: walks colPtr directly, no lookup call. This is what one
+    // would write if CSC were the only storage, and it is what the templated version must match to
+    // earn its keep. It reaches the raw buffers through friendship, which is exactly the honest
+    // reference the general path is measured against.
     void multiplyStatic(const SparseMatrixStatic& A, const double* x, double* y) const;
 };
+
+// The two instantiations that exist, defined in the .cpp. These extern declarations are the
+// header-side reminder of the definition-in-cpp rule; the matching `template ...` definitions live
+// in MultiplyEngine.cpp.
+extern template void MultiplyEngine::multiply<SparseMatrixStatic>(
+    const SparseMatrixStatic&, const double*, double*) const;
+extern template void MultiplyEngine::multiply<SparseMatrixDynamic>(
+    const SparseMatrixDynamic&, const double*, double*) const;
 
 } // namespace StorageOptions

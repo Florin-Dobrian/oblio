@@ -17,7 +17,9 @@
 // &mRowIdx[mColPtr[j]] is where column j's row indices start, and it is a plain
 // const std::int32_t*. That is the observation this experiment turns on.
 //
-// MultiplyEngine is a friend, and reaches the storage directly (the friend-access decision).
+// MultiplyEngine is a friend, used now only by the hand-written flat baseline (multiplyStatic),
+// which walks the raw buffers on purpose. The general path reaches columns through the public
+// per-column lookups above and needs no friendship.
 
 #include <cstddef>
 #include <cstdint>
@@ -38,6 +40,16 @@ public:
 
     std::size_t size() const { return mSize; }
     std::size_t nnz()  const { return mRowIdx.size(); }
+
+    // Per-column lookups: where column j's row indices and values start, and how many entries it
+    // has. Each computes an address (or a length) inside the existing storage, O(1), no
+    // allocation, nothing owned. A lookup is a fact about the layout, so it belongs to the storage
+    // that holds it, not to any consumer. This is the matrix-side twin of the factor's blockPtr,
+    // and it is what lets a consumer read a column directly without the engine having to restate
+    // where the flat buffer keeps things.
+    const std::int32_t* rowIdxPtr(std::size_t j) const { return mRowIdx.data() + mColPtr[j]; }
+    const double*       valPtr(std::size_t j)    const { return mVal.data()    + mColPtr[j]; }
+    std::size_t         colLen(std::size_t j)    const { return mColPtr[j + 1] - mColPtr[j]; }
 
     // Replace the values, keeping the structure. Cheap: nothing moves.
     //

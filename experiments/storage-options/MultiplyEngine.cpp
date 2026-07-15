@@ -2,17 +2,18 @@
 
 namespace StorageOptions {
 
-// The one algorithm. Note what is absent: any mention of SparseMatrixStatic, of SparseMatrixDynamic,
-// of colPtr, of an inner vector. It walks pointers.
-void MultiplyEngine::multiply(std::size_t size,
-                              const std::int32_t* const* rowIdxPtr,
-                              const double* const*       valPtr,
-                              const std::size_t*         len,
-                              const double* x, double* y) const {
+// The one multiply source. y += A*x, column by column, scattering into y. It reads each column
+// through the storage's own lookups (rowIdxPtr / valPtr / colLen) and names no member, buffer, or
+// layout, so this single body serves both storages; the explicit instantiations below specialize
+// it per storage. Direct access: the pointer and length are read at the moment of use, held across
+// nothing, so a growing dynamic storage has no cached pointer to dangle.
+template <class Matrix>
+void MultiplyEngine::multiply(const Matrix& A, const double* x, double* y) const {
+    const std::size_t size = A.size();
     for (std::size_t j = 0; j < size; ++j) {
-        const std::int32_t* rowIdx = rowIdxPtr[j];
-        const double*       val    = valPtr[j];
-        const std::size_t   n      = len[j];
+        const std::int32_t* rowIdx = A.rowIdxPtr(j);
+        const double*       val    = A.valPtr(j);
+        const std::size_t   n      = A.colLen(j);
         const double        xj     = x[j];
 
         for (std::size_t p = 0; p < n; ++p)
@@ -20,44 +21,17 @@ void MultiplyEngine::multiply(std::size_t size,
     }
 }
 
-// CSC: colPtr holds indices, so take the address of the element they index. The pointers all
-// land in one buffer, at increasing addresses, which is exactly why CSC streams well.
-void MultiplyEngine::columnPointers(const SparseMatrixStatic& A,
-                                    std::vector<const std::int32_t*>& rowIdxPtr,
-                                    std::vector<const double*>&       valPtr,
-                                    std::vector<std::size_t>&         len) const {
-    const std::size_t size = A.mSize;
-    rowIdxPtr.resize(size);
-    valPtr.resize(size);
-    len.resize(size);
+// One line per storage, and adding a storage is one more line. This is the whole cost of the
+// declaration-in-header / definition-here pattern.
+template void MultiplyEngine::multiply<SparseMatrixStatic>(
+    const SparseMatrixStatic&, const double*, double*) const;
+template void MultiplyEngine::multiply<SparseMatrixDynamic>(
+    const SparseMatrixDynamic&, const double*, double*) const;
 
-    for (std::size_t j = 0; j < size; ++j) {
-        const std::size_t from = A.mColPtr[j];
-        rowIdxPtr[j] = A.mRowIdx.data() + from;
-        valPtr[j]    = A.mVal.data() + from;
-        len[j]       = A.mColPtr[j + 1] - from;
-    }
-}
-
-// VV: the pointers are already there, one per inner vector. They land wherever the allocator
-// put each column, which is the whole difference, and the only difference.
-void MultiplyEngine::columnPointers(const SparseMatrixDynamic& A,
-                                    std::vector<const std::int32_t*>& rowIdxPtr,
-                                    std::vector<const double*>&       valPtr,
-                                    std::vector<std::size_t>&         len) const {
-    const std::size_t size = A.mSize;
-    rowIdxPtr.resize(size);
-    valPtr.resize(size);
-    len.resize(size);
-
-    for (std::size_t j = 0; j < size; ++j) {
-        rowIdxPtr[j] = A.mRowIdx[j].data();
-        valPtr[j]    = A.mVal[j].data();
-        len[j]       = A.mRowIdx[j].size();
-    }
-}
-
-// The baseline: the static matrix with no pointer arrays at all.
+// The baseline: the static matrix walked directly, no lookup call and no pointer array. It reaches
+// the raw buffers through friendship, and that rawness is the point: it is the reference the
+// templated multiply must match, so that "reaching a column through the lookup costs nothing" is a
+// measured claim rather than a hoped-for one.
 void MultiplyEngine::multiplyStatic(const SparseMatrixStatic& A, const double* x, double* y) const {
     const std::size_t   size   = A.mSize;
     const std::size_t*  colPtr = A.mColPtr.data();

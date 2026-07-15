@@ -25,6 +25,20 @@ inline constexpr std::int32_t NIL = -1;
 inline constexpr std::size_t MAX_IDX =
     static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max());
 
+// Guard a size or count against the index range. Throws std::length_error if `size` exceeds
+// MAX_IDX, naming `what` (e.g. "Vector size", "SparseMatrix nnz") in the message; otherwise returns
+// `size` unchanged, so it can guard an init-list member directly:
+//
+//   Vector(std::size_t size) : mSize(checkIndexRange(size, "Vector size")), mVal(size, Val(0)) {}
+//
+// Members initialize in declaration order, so a guard in the first member's initializer runs before
+// any later member allocates. That is how a class that allocates from its size (Vector) checks
+// before allocating; a class that moves or resizes instead (SparseMatrix, Permutation) can call it
+// as a plain statement in the body. Defined in Types.cpp, not here: the throw is kept out of this
+// widely-included header so the exception path stays out of the units that compile the numeric
+// kernels (an in-header throw was measured to perturb a hot loop's codegen).
+std::size_t checkIndexRange(std::size_t size, const char* what);
+
 // What the numeric factorization computes. **The symmetry is part of this, not a separate
 // setting.**
 //

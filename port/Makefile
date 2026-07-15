@@ -29,6 +29,7 @@ endif
 
 # Oblio units, full warnings apply.
 OBLIO_SRCS = \
+  src/Types.cpp \
   src/SparseMatrix.cpp \
   src/Permutation.cpp \
   src/OrderEngine.cpp \

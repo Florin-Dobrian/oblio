@@ -1,8 +1,7 @@
 #include "oblio/SparseMatrix.h"
 
-#include "oblio/Types.h"   // MAX_IDX
+#include "oblio/Types.h"   // checkIndexRange
 
-#include <stdexcept>   // std::length_error
 #include <utility>     // std::move
 
 namespace Oblio {
@@ -15,14 +14,14 @@ SparseMatrix<Val>::SparseMatrix(std::size_t size,
     : mSize(size),
       mColPtr(std::move(colPtr)),
       mRowIdx(std::move(rowIdx)),
-      mVal(std::move(val)) {
-    // Row indices are std::int32_t, so the dimension and the number of stored
-    // entries must both fit in that range (indices name rows; nnz is cast to int
-    // at the AMD/MMD boundary). Guard at construction so an over-range input fails
-    // loudly here rather than silently wrapping at the first narrowing cast.
-    if (mSize > MAX_IDX || mRowIdx.size() > MAX_IDX)
-        throw std::length_error(
-            "SparseMatrix: dimension or nnz exceeds the std::int32_t index range");
+      mVal(std::move(val)),
+      mNnz(mRowIdx.size()) {
+    // Row indices are std::int32_t, so the dimension and the number of stored entries must both fit
+    // in that range (indices name rows; nnz is cast to int at the AMD/MMD boundary). The vectors are
+    // moved in, not allocated here, so there is nothing to precede: guard after the moves. Two calls,
+    // so the message names whichever overflowed.
+    checkIndexRange(mSize, "SparseMatrix size");
+    checkIndexRange(mNnz, "SparseMatrix nnz");
 }
 
 template<class Val>
@@ -32,7 +31,7 @@ std::size_t SparseMatrix<Val>::size() const {
 
 template<class Val>
 std::size_t SparseMatrix<Val>::nnz() const {
-    return mColPtr.empty() ? 0 : mColPtr[mSize];
+    return mNnz;
 }
 
 template<class Val>

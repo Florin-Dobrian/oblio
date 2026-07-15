@@ -61,6 +61,7 @@ private:
     std::vector<std::size_t>  mColPtr;   // size mSize + 1 (offsets)
     std::vector<std::int32_t> mRowIdx;   // size nnz (row IDs)
     std::vector<Val>          mVal;      // size nnz
+    std::size_t               mNnz = 0;  // number of stored entries (== mRowIdx.size()); nnz() returns this
 };
 
 extern template class SparseMatrix<double>;

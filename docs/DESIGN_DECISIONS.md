@@ -112,8 +112,9 @@ A follow-on to the index-types entry (2026-07-09), sharpening one thing it left 
 of "the ~2.1-billion index cap" as if a single ceiling covered both indices and nnz. There are two
 ceilings, with different origins, equal today only by coincidence.
 
-**Two separate ceilings.** The *dimension/index* ceiling is representability: row and column ids are
-`std::int32_t`, so `n` and every id must fit `2^31 - 1`. Intrinsic to the id type. The *nnz(A)*
+**Two separate ceilings.** The *dimension/index* ceiling holds every id to `2^31 - 1`, because ids
+are `std::int32_t`. But note the dimension `n` is capped one below what index representability alone
+would allow, and for a distinct reason (see the next paragraph). The *nnz(A)*
 ceiling is not that. nnz is a count, stored as `std::size_t` everywhere (`colPtr`, block offsets,
 every position), so nothing internal caps it at `2^31`. What caps it is the ordering handoff: the
 vendored AMD/MMD are the `int`-based build, and A's pattern reaches them as `int` arrays, `Ap` (with
@@ -121,6 +122,18 @@ vendored AMD/MMD are the `int`-based build, and A's pattern reaches them as `int
 The two ceilings coincide at `INT32_MAX` solely because both are "largest value that fits a signed
 32-bit int," one as an id, one as a count in `Ap[n]`. That coincidence is why one constant,
 `MAX_IDX = INT32_MAX = 2^31 - 1`, does both jobs. It is a coincidence, not a shared fact.
+
+**Why the dimension cap is `2^31 - 1`, not `2^31`.** Pure index representability would allow
+`n = 2^31`: an `n x n` matrix then has largest index `n - 1 = 2^31 - 1`, which fits `int32`. What
+removes that last value is the *loop counter*, not the index. Entity loops run
+`for (std::int32_t j = 0; j < static_cast<std::int32_t>(size); ++j)`, and at `size = 2^31` the cast
+is `INT32_MIN` (negative), so the loop runs zero times, silently; an `int32` counter also cannot reach
+`2^31` without overflowing on the final increment. So `n <= 2^31 - 1` is the largest dimension an
+`int32` counter can walk, and the dimension cap binds through the counter, not the index. The cost is
+one unusable value: the index `INT32_MAX` is representable but never reached (the largest valid index
+is `n - 1 = 2^31 - 2`), sacrificed to keep the `int32` entity-loop convention sound. This is why the
+guarded constructors reject `size > MAX_IDX` (not `>=`), and it is the same ceiling nnz(A) meets from
+the other direction.
 
 **int32 indices and size_t offsets are a self-consistent CSC pairing.** A fully dense matrix at int32
 dimension has `nnz = n^2 <= (2^31)^2 = 2^62`, and `size_t` holds `2^64`, so `colPtr[n] = nnz` is

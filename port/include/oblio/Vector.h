@@ -32,10 +32,12 @@ class Vector {
 public:
     Vector() = default;
 
-    explicit Vector(std::size_t size) : mSize(size), mVal(size, Val(0)) {}
-
-    Vector(std::size_t size, std::vector<Val> val)
-        : mSize(size), mVal(std::move(val)) {}
+    // Defined in Vector.cpp, not here: both guard the size (via checkIndexRange) and so can throw,
+    // and keeping them out of the header keeps that exception path out of the translation units that
+    // compile the hot multiply and solve kernels (an in-header throw was measured to perturb such a
+    // loop's codegen). The default constructor and the inline accessors below stay in the header.
+    explicit Vector(std::size_t size);
+    Vector(std::size_t size, std::vector<Val> val);
 
     std::size_t size() const { return mSize; }
 

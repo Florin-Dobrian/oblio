@@ -1,17 +1,13 @@
 #include "oblio/Permutation.h"
 
-#include "oblio/Types.h"   // MAX_IDX
-
-#include <stdexcept>   // std::length_error
+#include "oblio/Types.h"   // checkIndexRange
 
 namespace Oblio {
 
 Permutation::Permutation(std::size_t size) {
-    // Size is fixed here (a permutation of `size` elements); guard it once so the
-    // index casts in setIdentity()/fills can never wrap. Indices are std::int32_t.
-    if (size > MAX_IDX)
-        throw std::length_error(
-            "Permutation: size exceeds the std::int32_t index range");
+    // Size is fixed here (a permutation of `size` elements); guard it once, before the resizes, so
+    // the index casts in setIdentity()/fills can never wrap. Indices are std::int32_t.
+    checkIndexRange(size, "Permutation size");
     mOldToNew.resize(size);
     mNewToOld.resize(size);
     setIdentity();

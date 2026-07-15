@@ -21,6 +21,7 @@
 // which walks the raw buffers on purpose. The general path reaches columns through the public
 // per-column lookups above and needs no friendship.
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -73,9 +74,7 @@ public:
             return false;
         if (val.size() != colSize(j))
             return false;
-        const std::size_t cp = mColPtr[j];
-        for (std::size_t k = 0; k < val.size(); ++k)
-            mVal[cp + k] = val[k];
+        std::copy(val.begin(), val.end(), mVal.begin() + mColPtr[j]);
         return true;
     }
 

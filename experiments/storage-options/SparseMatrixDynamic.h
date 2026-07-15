@@ -27,6 +27,7 @@
 // (rowIdx / val / colSize), the same ones the static sibling offers, so it needs no access to
 // the private storage.
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -71,8 +72,7 @@ public:
             return false;
         if (val.size() != mRowIdx[j].size())
             return false;
-        for (std::size_t k = 0; k < val.size(); ++k)
-            mVal[j][k] = val[k];
+        std::copy(val.begin(), val.end(), mVal[j].begin());
         return true;
     }
 
@@ -105,10 +105,10 @@ public:
     bool setColumn(std::int32_t j, std::vector<std::int32_t> rowIdx, std::vector<double> val) {
         if (j < 0 || static_cast<std::size_t>(j) >= mSize || rowIdx.size() != val.size())
             return false;
-        for (std::size_t k = 0; k < rowIdx.size(); ++k) {
-            if (rowIdx[k] < 0 || static_cast<std::size_t>(rowIdx[k]) >= mSize)
+        for (std::size_t cp = 0; cp < rowIdx.size(); ++cp) {
+            if (rowIdx[cp] < 0 || static_cast<std::size_t>(rowIdx[cp]) >= mSize)
                 return false;
-            if (k > 0 && rowIdx[k] <= rowIdx[k - 1])
+            if (cp > 0 && rowIdx[cp] <= rowIdx[cp - 1])
                 return false;   // must be sorted and distinct
         }
         mRowIdx[j] = std::move(rowIdx);

@@ -7,6 +7,7 @@
 
 #include "SparseMatrixDynamic.h"
 
+#include <numeric>     // std::accumulate
 #include <stdexcept>   // std::length_error
 #include <utility>     // std::move
 
@@ -15,14 +16,15 @@ namespace StorageOptions {
 SparseMatrixDynamic::SparseMatrixDynamic(std::size_t size,
                                          std::vector<std::vector<std::int32_t>> rowIdx,
                                          std::vector<std::vector<double>>       val)
-    : mSize(size), mRowIdx(std::move(rowIdx)), mVal(std::move(val)) {
-    // No flat buffer to read nnz from, so sum the column sizes once here and keep the total in mNnz
-    // (setColumn maintains it thereafter, so nnz() stays O(1)). Same cap as the static sibling and
-    // the main-code matrix: dimension and nnz must fit the std::int32_t index range, since nnz
-    // narrows to int at the AMD/MMD ordering boundary.
-    std::size_t sum = 0;
-    for (const auto& rowIdx : mRowIdx) sum += rowIdx.size();
-    mNnz = sum;
+    : mSize(size), mRowIdx(std::move(rowIdx)), mVal(std::move(val)),
+      mNnz(std::accumulate(mRowIdx.begin(), mRowIdx.end(), std::size_t{0},
+                           [](std::size_t sum, const auto& rowIdx) { return sum + rowIdx.size(); })) {
+    // mNnz is the sum of the per-column entry counts, seeded once here and maintained by setColumn
+    // thereafter, so nnz() stays O(1). The std::size_t{0} seed is load-bearing: it fixes the
+    // accumulator type, so the sum cannot silently overflow an int.
+    //
+    // Same cap as the static sibling and the main-code matrix: dimension and nnz must fit the
+    // std::int32_t index range, since nnz narrows to int at the AMD/MMD ordering boundary.
     if (mSize > MAX_IDX || mNnz > MAX_IDX)
         throw std::length_error(
             "SparseMatrixDynamic: dimension or nnz exceeds the std::int32_t index range");

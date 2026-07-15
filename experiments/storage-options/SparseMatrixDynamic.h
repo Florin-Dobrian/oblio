@@ -128,9 +128,9 @@ private:
         static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max());
 
     std::size_t                            mSize;
-    std::size_t                            mNnz = 0;   // sum of column sizes; set in ctor, kept by setColumn
     std::vector<std::vector<std::int32_t>> mRowIdx;    // one vector per column
     std::vector<std::vector<double>>       mVal;       // one vector per column
+    std::size_t                            mNnz;       // sum of column sizes; set in ctor, kept by setColumn
 };
 
 } // namespace StorageOptions

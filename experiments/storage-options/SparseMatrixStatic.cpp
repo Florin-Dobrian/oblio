@@ -19,7 +19,8 @@ SparseMatrixStatic::SparseMatrixStatic(std::size_t size,
                                        std::vector<std::int32_t> rowIdx,
                                        std::vector<double>       val)
     : mSize(size), mColPtr(std::move(colPtr)),
-      mRowIdx(std::move(rowIdx)), mVal(std::move(val)) {
+      mRowIdx(std::move(rowIdx)), mVal(std::move(val)),
+      mNnz(mRowIdx.size()) {
     // Row indices are std::int32_t, and nnz is cast to int at the AMD/MMD ordering boundary, so both
     // the dimension and the entry count must fit that range. Guard at construction so an over-range
     // input fails loudly here rather than wrapping silently at the first narrowing cast. This is the

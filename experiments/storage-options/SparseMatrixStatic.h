@@ -44,7 +44,7 @@ public:
                     std::vector<double>       val);
 
     std::size_t size() const { return mSize; }
-    std::size_t nnz()  const { return mRowIdx.size(); }
+    std::size_t nnz()  const { return mNnz; }
 
     // The raw CSC arrays, exposed as the main-code SparseMatrix exposes them. A consumer that knows
     // it holds CSC (the hand-written baseline, or any main-code-style raw walk) reads the flat
@@ -114,6 +114,7 @@ private:
     std::vector<std::size_t>  mColPtr;   // length mSize + 1
     std::vector<std::int32_t> mRowIdx;   // length nnz, one contiguous run
     std::vector<double>       mVal;      // length nnz, one contiguous run
+    std::size_t               mNnz;      // == mRowIdx.size(); stored for parity with the dynamic class
 };
 
 } // namespace StorageOptions

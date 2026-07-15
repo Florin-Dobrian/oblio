@@ -47,26 +47,34 @@ public:
     // that holds it, not to any consumer. This is the matrix-side twin of the factor's blockPtr,
     // and it is what lets a consumer read a column directly without the engine having to restate
     // where the flat buffer keeps things.
-    const std::int32_t* rowIdxPtr(std::size_t j) const { return mRowIdx.data() + mColPtr[j]; }
-    const double*       valPtr(std::size_t j)    const { return mVal.data()    + mColPtr[j]; }
-    std::size_t         colLen(std::size_t j)    const { return mColPtr[j + 1] - mColPtr[j]; }
+    const std::int32_t* rowIdxPtr(std::int32_t j) const { return mRowIdx.data() + mColPtr[j]; }
+    const double*       valPtr(std::int32_t j)    const { return mVal.data()    + mColPtr[j]; }
+    std::size_t         colLen(std::int32_t j)    const { return mColPtr[j + 1] - mColPtr[j]; }
 
-    // Replace the values, keeping the structure. Cheap: nothing moves.
+    // Replace one column's values, keeping its structure. Cheap: the column's values are the
+    // contiguous run mVal[colPtr[j] .. colPtr[j+1]-1], so overwriting them touches that run and
+    // nothing else, O(colLen), no shift. This is the value half of mutation, the numbers change and
+    // the pattern does not, which is what a solver does most often (a Newton iteration, a time step,
+    // refactorize). Its identical twin on SparseMatrixDynamic overwrites that column's inner vector.
     //
-    // This is the mutation the solver actually does most often, a Newton iteration, a time step,
-    // same pattern, new numbers, refactorize, and the flat layout is perfectly happy with it.
+    // The signature is the same on both classes on purpose: value mutation is cheap at column
+    // granularity on either layout, so both offer it the same way. Setting every value is a loop
+    // over columns, exactly as reading every column is a loop over the lookups. (A one-shot
+    // whole-matrix load would be the bulk form, storage-specific, and we do not need it.)
     //
     // **This does not invalidate any pointer.** The buffer stays where it is; only its contents
-    // change. That is worth saying, because its dynamic sibling's setColumn *does* invalidate, and
-    // the difference is not cosmetic: the rule is "structural mutation invalidates, value mutation
-    // does not", and it holds in both storages.
+    // change. That is the value-mutation half of the rule its dynamic sibling's setColumn completes:
+    // structural mutation invalidates, value mutation does not, and it holds in both storages.
     //
-    // Returns false if the count does not match, since a value array of the wrong length can only
-    // mean the caller thinks this is a different matrix.
-    bool setValues(std::vector<double> val) {
-        if (val.size() != mVal.size())
+    // Returns false if j is out of range, or if the value count does not match the column's length.
+    bool setValues(std::int32_t j, const std::vector<double>& val) {
+        if (j < 0 || static_cast<std::size_t>(j) >= mSize)
             return false;
-        mVal = std::move(val);
+        if (val.size() != colLen(j))
+            return false;
+        const std::size_t from = mColPtr[j];
+        for (std::size_t k = 0; k < val.size(); ++k)
+            mVal[from + k] = val[k];
         return true;
     }
 

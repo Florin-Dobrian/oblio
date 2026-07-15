@@ -52,19 +52,27 @@ public:
     // the static sibling it is an offset into one flat buffer. Same signature, same meaning,
     // different storage, which is exactly what lets a consumer read either matrix through one
     // storage-blind path.
-    const std::int32_t* rowIdxPtr(std::size_t j) const { return mRowIdx[j].data(); }
-    const double*       valPtr(std::size_t j)    const { return mVal[j].data(); }
-    std::size_t         colLen(std::size_t j)    const { return mRowIdx[j].size(); }
+    const std::int32_t* rowIdxPtr(std::int32_t j) const { return mRowIdx[j].data(); }
+    const double*       valPtr(std::int32_t j)    const { return mVal[j].data(); }
+    std::size_t         colLen(std::int32_t j)    const { return mRowIdx[j].size(); }
 
-    // Replace the values, keeping the structure. Cheap here as it is in the static sibling: this
-    // is the mutation both layouts support, because it moves nothing.
-    bool setValues(const std::vector<std::vector<double>>& val) {
-        if (val.size() != mVal.size())
+    // Replace one column's values, keeping its structure. Identical in signature to the static
+    // sibling, and cheap for the same reason: it overwrites this column's value buffer in place,
+    // mVal[j], touching nothing else. Value mutation at column granularity, the numbers change and
+    // the pattern does not.
+    //
+    // **This does not invalidate any pointer.** It overwrites the inner vector's contents and
+    // leaves the vector (and its data()) where it is, which is the value-mutation half of the rule
+    // setColumn completes: structural mutation invalidates, value mutation does not.
+    //
+    // Returns false if j is out of range, or if the value count does not match the column's length.
+    bool setValues(std::int32_t j, const std::vector<double>& val) {
+        if (j < 0 || static_cast<std::size_t>(j) >= mSize)
             return false;
-        for (std::size_t j = 0; j < val.size(); ++j)
-            if (val[j].size() != mRowIdx[j].size())
-                return false;
-        mVal = val;
+        if (val.size() != mRowIdx[j].size())
+            return false;
+        for (std::size_t k = 0; k < val.size(); ++k)
+            mVal[j][k] = val[k];
         return true;
     }
 
@@ -94,8 +102,8 @@ public:
     // Returns false if the row indices are out of range or not sorted, or if the two arrays
     // disagree in length. Sorted, because every consumer downstream assumes it and checking here
     // is cheaper than discovering it later.
-    bool setColumn(std::size_t j, std::vector<std::int32_t> rowIdx, std::vector<double> val) {
-        if (j >= mSize || rowIdx.size() != val.size())
+    bool setColumn(std::int32_t j, std::vector<std::int32_t> rowIdx, std::vector<double> val) {
+        if (j < 0 || static_cast<std::size_t>(j) >= mSize || rowIdx.size() != val.size())
             return false;
         for (std::size_t k = 0; k < rowIdx.size(); ++k) {
             if (rowIdx[k] < 0 || static_cast<std::size_t>(rowIdx[k]) >= mSize)

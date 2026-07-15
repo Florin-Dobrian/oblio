@@ -44,11 +44,14 @@ Columns build(std::size_t size, std::size_t bandwidth, std::mt19937& rng) {
     c.val.resize(size);
     std::uniform_real_distribution<double> uniform(-1.0, 1.0);
 
-    for (std::size_t j = 0; j < size; ++j)
-        for (std::size_t i = j; i < std::min(size, j + bandwidth); ++i) {
-            c.rowIdx[j].push_back(static_cast<std::int32_t>(i));
+    for (std::int32_t j = 0; j < static_cast<std::int32_t>(size); ++j) {
+        const std::int32_t hi = std::min(static_cast<std::int32_t>(size),
+                                         j + static_cast<std::int32_t>(bandwidth));
+        for (std::int32_t i = j; i < hi; ++i) {
+            c.rowIdx[j].push_back(i);
             c.val[j].push_back(uniform(rng));
         }
+    }
     return c;
 }
 
@@ -56,7 +59,7 @@ SparseMatrixStatic toCsc(const Columns& c) {
     std::vector<std::size_t>  colPtr(c.size + 1, 0);
     std::vector<std::int32_t> rowIdx;
     std::vector<double>       val;
-    for (std::size_t j = 0; j < c.size; ++j) {
+    for (std::int32_t j = 0; j < static_cast<std::int32_t>(c.size); ++j) {
         rowIdx.insert(rowIdx.end(), c.rowIdx[j].begin(), c.rowIdx[j].end());
         val.insert(val.end(), c.val[j].begin(), c.val[j].end());
         colPtr[j + 1] = rowIdx.size();
@@ -75,8 +78,8 @@ SparseMatrixDynamic toVv(const Columns& c) {
 // looks like once it has been *used*: in dynamic factorization, fronts grow and reallocate at
 // different times, and end up scattered. The version above flatters VV; this one does not.
 SparseMatrixDynamic toVvScattered(const Columns& c, std::mt19937& rng) {
-    std::vector<std::size_t> order(c.size);
-    for (std::size_t j = 0; j < c.size; ++j) order[j] = j;
+    std::vector<std::int32_t> order(c.size);
+    for (std::int32_t j = 0; j < static_cast<std::int32_t>(c.size); ++j) order[j] = j;
     std::shuffle(order.begin(), order.end(), rng);
 
     std::vector<std::vector<std::int32_t>> rowIdx(c.size);
@@ -84,8 +87,8 @@ SparseMatrixDynamic toVvScattered(const Columns& c, std::mt19937& rng) {
     std::vector<std::vector<double>>       spacer;   // pushes the next column elsewhere
     spacer.reserve(c.size);
 
-    for (std::size_t k = 0; k < c.size; ++k) {
-        const std::size_t j = order[k];
+    for (std::int32_t k = 0; k < static_cast<std::int32_t>(c.size); ++k) {
+        const std::int32_t j = order[k];
         rowIdx[j] = c.rowIdx[j];
         val[j]    = c.val[j];
         spacer.emplace_back(8, 0.0);
@@ -140,9 +143,10 @@ void testMutation() {
     };
 
     // setValues: BOTH support it, and it costs nothing in either. Same structure, new numbers, is
-    // the mutation the solver actually does most (a Newton step, a time step, refactorize).
-    const bool sOk = s.setValues({20,10, 10,30,10, 10,40});
-    const bool dOk = d.setValues({{20,10}, {10,30,10}, {10,40}});
+    // the mutation the solver actually does most (a Newton step, a time step, refactorize). The
+    // calls are now identical on both classes, which is the point of dropping to column granularity.
+    const bool sOk = s.setValues(0, {20,10}) && s.setValues(1, {10,30,10}) && s.setValues(2, {10,40});
+    const bool dOk = d.setValues(0, {20,10}) && d.setValues(1, {10,30,10}) && d.setValues(2, {10,40});
 
     run(s);
     const bool sVal = sOk && y[0]==30 && y[1]==50 && y[2]==50;
@@ -192,7 +196,7 @@ void testInvalidation() {
 
     // setValues: the buffers stay put. The old pointer still points at column 1, and now sees the
     // new numbers. Safe to keep, though few callers should want to.
-    d.setValues({{20,10}, {10,30,10}, {10,40}});
+    d.setValues(0, {20,10}); d.setValues(1, {10,30,10}); d.setValues(2, {10,40});
     const bool valueKept = (d.valPtr(1) == before);
     std::cout << "  setValues   pointer " << (valueKept ? "UNCHANGED" : "moved    ")
               << "   (buffer reused; contents overwritten in place)\n";
@@ -223,7 +227,7 @@ int main() {
     MultiplyEngine eng;
 
     std::vector<double> x(size);
-    for (std::size_t j = 0; j < size; ++j)
+    for (std::int32_t j = 0; j < static_cast<std::int32_t>(size); ++j)
         x[j] = 1.0 + 0.001 * static_cast<double>(j % 97);
 
     std::vector<double> yBase(size, 0.0), yCsc(size, 0.0), yVv(size, 0.0), yVvS(size, 0.0);

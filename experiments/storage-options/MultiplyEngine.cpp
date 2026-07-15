@@ -10,7 +10,7 @@ namespace StorageOptions {
 template <class Matrix>
 void MultiplyEngine::multiply(const Matrix& A, const double* x, double* y) const {
     const std::size_t size = A.size();
-    for (std::size_t j = 0; j < size; ++j) {
+    for (std::int32_t j = 0; j < static_cast<std::int32_t>(size); ++j) {
         const std::int32_t* rowIdx = A.rowIdxPtr(j);
         const double*       val    = A.valPtr(j);
         const std::size_t   n      = A.colLen(j);
@@ -38,7 +38,7 @@ void MultiplyEngine::multiplyStatic(const SparseMatrixStatic& A, const double* x
     const std::int32_t* rowIdx = A.mRowIdx.data();
     const double*       val    = A.mVal.data();
 
-    for (std::size_t j = 0; j < size; ++j) {
+    for (std::int32_t j = 0; j < static_cast<std::int32_t>(size); ++j) {
         const double xj = x[j];
         for (std::size_t p = colPtr[j]; p < colPtr[j + 1]; ++p)
             y[rowIdx[p]] += val[p] * xj;

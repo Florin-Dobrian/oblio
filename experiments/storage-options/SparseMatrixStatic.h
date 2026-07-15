@@ -25,18 +25,23 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace StorageOptions {
 
 class SparseMatrixStatic {
 public:
+    // Defined in SparseMatrixStatic.cpp, not here, on purpose: the constructor guards the
+    // dimension and nnz and can throw, and an in-header throw was measured to perturb the codegen
+    // of the templated multiply compiled in the same translation unit (it slowed the hot loop even
+    // though the loop's own source was unchanged). Keeping the throwing body in the .cpp confines
+    // the exception path there. This mirrors the main-code SparseMatrix, whose constructor is
+    // likewise in its .cpp.
     SparseMatrixStatic(std::size_t size,
                     std::vector<std::size_t>  colPtr,
                     std::vector<std::int32_t> rowIdx,
-                    std::vector<double>       val)
-        : mSize(size), mColPtr(std::move(colPtr)),
-          mRowIdx(std::move(rowIdx)), mVal(std::move(val)) {}
+                    std::vector<double>       val);
 
     std::size_t size() const { return mSize; }
     std::size_t nnz()  const { return mRowIdx.size(); }
@@ -100,6 +105,11 @@ public:
     //
     // The rule, in one line: **an object offers what its storage makes cheap, and nothing else.**
 private:
+    // Largest representable index, INT32_MAX: the ceiling both the dimension and nnz are checked
+    // against, since indices are std::int32_t and nnz narrows to int at the ordering boundary.
+    static constexpr std::size_t MAX_IDX =
+        static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max());
+
     std::size_t               mSize;
     std::vector<std::size_t>  mColPtr;   // length mSize + 1
     std::vector<std::int32_t> mRowIdx;   // length nnz, one contiguous run

@@ -67,6 +67,102 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-07-15, An in-header throwing constructor slowed a hot loop in the same translation unit
+
+A concrete, measured finding from the storage-options experiment, worth recording because it is
+counterintuitive and it informs where numfact puts its code.
+
+**Symptom.** After the matrix constructors gained the nnz/dimension guard (a `throw`), the static
+direct `multiply()` slowed from ~1.03x to ~1.20x of the hand-written baseline on the M4 (Accelerate,
+`g++ -O3`). Consistent across many runs, so not noise. The dynamic and baseline rows were unaffected.
+
+**Diagnosis.** The multiply loop's own source had not changed, and the constructor is never called
+anywhere near it. What changed is that the constructor, defined *inline in the header*, became a
+potentially-throwing body visible in the translation unit that compiles
+`multiply<SparseMatrixStatic>` (`MultiplyEngine.cpp`, which includes the matrix header for the
+explicit instantiations). The exception path it introduced perturbed the optimizer's treatment of
+the hot loop in that unit, even though the loop neither throws nor constructs anything.
+
+**Confirmation, both directions.** Commenting out the `throw` restored 1.03x. Moving the whole
+constructor into a `.cpp` (so the throwing body is no longer in the header, hence no longer in
+`MultiplyEngine.cpp`'s unit) also restored 1.03x, with the guard intact. Object-file check: with the
+constructor in its own `.cpp`, `MultiplyEngine.o` contains no `length_error` or `__cxa_throw`
+machinery at all; the exception path is gone from that unit.
+
+**Fix.** Both matrix constructors moved from their headers into `SparseMatrixStatic.cpp` /
+`SparseMatrixDynamic.cpp`; the headers declare only. Accessors and the non-throwing mutators
+(`setValues`, `setColumn`, which return false rather than throw) stay inline, since only the
+constructor carries an exception path. This mirrors the main-code `SparseMatrix`, whose constructor
+is already in `SparseMatrix.cpp`, so the experiment now matches the real tree here.
+
+**The lesson, and why it is a third reason.** The usual "small bodies in headers, large bodies in the
+`.cpp`" rule (CLAUDE.md, and the explicit-instantiation entry) is argued from inlining and build
+time. This adds a distinct, optimization-quality reason: an exception path anywhere in a translation
+unit can degrade the codegen of unrelated hot code in that same unit, at a cost that is not small
+(17% here). So a throwing body is "heavy" for header purposes even when it is textually short. The
+rule for numfact follows directly: keep throwing and heavy bodies out of the translation units that
+compile the numeric kernels, since the factorization and solve loops are exactly the hot code this
+would silently tax.
+
+---
+
+## 2026-07-15, The nnz cap is an ordering constraint, not a representability one; A is capped, L is not
+
+A follow-on to the index-types entry (2026-07-09), sharpening one thing it left blurred: it speaks
+of "the ~2.1-billion index cap" as if a single ceiling covered both indices and nnz. There are two
+ceilings, with different origins, equal today only by coincidence.
+
+**Two separate ceilings.** The *dimension/index* ceiling is representability: row and column ids are
+`std::int32_t`, so `n` and every id must fit `2^31 - 1`. Intrinsic to the id type. The *nnz(A)*
+ceiling is not that. nnz is a count, stored as `std::size_t` everywhere (`colPtr`, block offsets,
+every position), so nothing internal caps it at `2^31`. What caps it is the ordering handoff: the
+vendored AMD/MMD are the `int`-based build, and A's pattern reaches them as `int` arrays, `Ap` (with
+`Ap[n] = nnz`) and `Ai`. So `nnz(A)` must fit `int`, `<= 2^31 - 1`, only to be handed to the orderer.
+The two ceilings coincide at `INT32_MAX` solely because both are "largest value that fits a signed
+32-bit int," one as an id, one as a count in `Ap[n]`. That coincidence is why one constant,
+`MAX_IDX = INT32_MAX = 2^31 - 1`, does both jobs. It is a coincidence, not a shared fact.
+
+**int32 indices and size_t offsets are a self-consistent CSC pairing.** A fully dense matrix at int32
+dimension has `nnz = n^2 <= (2^31)^2 = 2^62`, and `size_t` holds `2^64`, so `colPtr[n] = nnz` is
+always representable. The condition is `offset_bits >= 2 * index_bits`, and `2 * 32 = 64` fits
+exactly (int64 indices would need 128-bit offsets and would *not* fit, which is a further reason int32
+is the comfortable resting point). Consequence: no storage or representability guardrail is needed on
+A at all; a dense A is representable, and memory is the only real limit. The dense int32 ceiling is
+~48 EiB (real), a formality no machine reaches this century. The only guardrail that exists is the
+ordering one.
+
+**Where the guard lives, and why only on the matrix.** The `SparseMatrix` constructor throws
+`std::length_error` when `mSize > MAX_IDX || nnz > MAX_IDX`. It belongs to the matrix because A is
+what gets ordered. It is a limit borrowed from a third-party interface, held at the one seam between
+the `int`-based orderer and our `size_t` world, not a limit of our own storage.
+
+**L is not capped, and the factor must not import the cap.** L, and the dynamic factor during
+elimination, is never handed to an orderer, so the nnz ceiling does not apply. Its offsets are
+`size_t`, its row ids are int32 (same id space, so L inherits the *dimension* bound but not the *nnz*
+bound), and it grows to memory. The factor's constructor carries no nnz cap and throws nothing. The
+one discipline: nothing on the numeric or solve path may narrow an L count or offset to `int` out of
+symmetry with A. The correct design for the factor is the *absence* of the guard. L cannot approach
+the dense ceiling regardless: it is triangular (`nnz(L) <= n^2/2`), and a dense block within it is
+bounded by `dimension^2` with per-side dimensions bounded by `n <= 2^31 - 1`, exactly what BLAS's
+`int` m/n/k accept, so no block dimension can overflow the `int` BLAS wants. That is foreclosed by the
+id type, not by any check we write.
+
+**Liftability.** The nnz(A) cap is cleanly removable: SuiteSparse ships a 64-bit
+(`SuiteSparse_long`) AMD build, so lifting it is a link-and-widen of the ordering interface, not an
+algorithm change, and the constructor's nnz guard then becomes a clean deletion (indices stay int32;
+only the orderer's integer width changes). The reason AMD/MMD store nnz in an `int` at all is not
+carelessness but a uniform-width choice: the orderer builds and mutates a quotient graph whose ids and
+offsets share one integer type, which is cache-friendly for a pointer-chasing kernel, and it ships two
+instantiations (`int` and `_long`) rather than mixing widths. So the "better design" is the `_long`
+build, a link choice, not a rewrite. Keeping our cap localized and honestly labeled (A-side,
+ordering-driven) is what makes its eventual removal a deletion rather than an archaeology problem.
+
+Recorded now because the storage-options experiment's matrix constructors just gained this guard
+(mirroring `SparseMatrix`), and it is the model for numfact: the matrix keeps the cap, the factor
+analog drops it.
+
+---
+
 ## 2026-07-14, Bulk versus direct access: direct wins, and bulk was never worth its one advantage
 
 A consumer that reads a CSC-style object can do it two ways. *Direct*: hold the object and ask it
@@ -1195,6 +1291,11 @@ C++ headers, same rule as every other stdlib type. Applied first to `SparseMatri
 (`rowIdx`→`int32_t`, `colPtr`→`size_t`); `Permutation` (maps→`int32_t`) and `ElmForest`
 (parent/etc.→`int32_t` with a shared `NIL`) follow. The graph code uses bare `int32_t`;
 it's the code to bring in line later, like the matching codebase was for `size_t`.
+
+**Later note (2026-07-15):** the "~2.1-billion index cap" above is really two separate ceilings that
+happen to meet at `INT32_MAX`, a dimension/index cap (representability, intrinsic to `int32`) and an
+nnz(A) cap (the `int`-based ordering interface, external and A-only). nnz(L) is not capped. See the
+ordering-constraint entry for the distinction.
 
 ## 2026-07-09, Friend grants write access; reads are public
 

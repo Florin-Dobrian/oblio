@@ -3,14 +3,11 @@
 // SparseMatrixDynamic.h - a sparse matrix whose structure may change. Stored as a vector of
 // vectors, one per column.
 //
-// **The name is aspirational, and this header says so rather than pretending.** Nothing in this
-// experiment mutates: both matrices are built once and read. What is being measured is what the
-// *layout* costs, not what the mutation buys. The layout is the one a mutable matrix would need,
-// which is why it carries that name.
-//
-// What would make the name honest is a `setColumn`: replace one column's pattern and values
-// without touching its neighbours. That is cheap here (the column owns its buffer) and expensive
-// in the flat sibling (every later column shifts). It is not written yet. One step at a time.
+// **Named for the purpose: its structure can change.** What makes the name honest is setColumn,
+// which replaces one column's pattern and values without touching its neighbours: cheap here (the
+// column owns its buffer), expensive in the flat sibling (every later column shifts). The timed
+// multiply does not mutate, both matrices are built once and read there, so the benchmark measures
+// what the *layout* costs; mutation is exercised separately in testMutation and testInvalidation.
 //
 // One std::vector of row indices per column, and one of values. No offset array: each column
 // carries its own length, and its own allocation.
@@ -30,23 +27,24 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace StorageOptions {
 
 class SparseMatrixDynamic {
 public:
+    // Defined in SparseMatrixDynamic.cpp, not here, on purpose: it sums the column sizes to seed
+    // mNnz and can throw on an over-range dimension/nnz, and an in-header throw was measured to
+    // perturb the codegen of the templated multiply compiled in the same translation unit. Keeping
+    // the throwing body in the .cpp confines the exception path there, matching the static sibling
+    // and the main-code SparseMatrix.
     SparseMatrixDynamic(std::size_t size,
                    std::vector<std::vector<std::int32_t>> rowIdx,
-                   std::vector<std::vector<double>>       val)
-        : mSize(size), mRowIdx(std::move(rowIdx)), mVal(std::move(val)) {}
+                   std::vector<std::vector<double>>       val);
 
     std::size_t size() const { return mSize; }
-    std::size_t nnz()  const {
-        std::size_t sum = 0;
-        for (const auto& rowIdx : mRowIdx) sum += rowIdx.size();
-        return sum;
-    }
+    std::size_t nnz()  const { return mNnz; }
 
     // Per-column accessors, the same three the static sibling offers, under the same names,
     // answered from this layout instead. Here each pointer is the inner vector's own data() and the
@@ -99,9 +97,11 @@ public:
     // invalidates; value mutation does not", which is the same rule the dynamic numeric factor
     // will live by when delayed pivoting grows a front.
     //
-    // Returns false if the row indices are out of range or not sorted, or if the two arrays
-    // disagree in length. Sorted, because every consumer downstream assumes it and checking here
-    // is cheaper than discovering it later.
+    // Returns false if the row indices are out of range or not sorted, if the two arrays disagree
+    // in length, or if the change would push nnz past the index cap. Unlike the constructor, which
+    // throws, a mutator reports the ceiling the same way it reports its other errors, by returning
+    // false. Sorted, because every consumer downstream assumes it and checking here is cheaper than
+    // discovering it later.
     bool setColumn(std::int32_t j, std::vector<std::int32_t> rowIdx, std::vector<double> val) {
         if (j < 0 || static_cast<std::size_t>(j) >= mSize || rowIdx.size() != val.size())
             return false;
@@ -111,14 +111,26 @@ public:
             if (cp > 0 && rowIdx[cp] <= rowIdx[cp - 1])
                 return false;   // must be sorted and distinct
         }
+        // nnz after swapping column j's old size for the new one. mNnz >= the old size, so the
+        // subtraction cannot underflow.
+        const std::size_t newNnz = mNnz - mRowIdx[j].size() + rowIdx.size();
+        if (newNnz > MAX_IDX)
+            return false;   // would push nnz past the std::int32_t index range
+        mNnz = newNnz;
         mRowIdx[j] = std::move(rowIdx);
         mVal[j]    = std::move(val);
         return true;
     }
 private:
+    // Largest representable index, INT32_MAX: the ceiling both the dimension and nnz are checked
+    // against, since indices are std::int32_t and nnz narrows to int at the ordering boundary.
+    static constexpr std::size_t MAX_IDX =
+        static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max());
+
     std::size_t                            mSize;
-    std::vector<std::vector<std::int32_t>> mRowIdx;   // one vector per column
-    std::vector<std::vector<double>>       mVal;      // one vector per column
+    std::size_t                            mNnz = 0;   // sum of column sizes; set in ctor, kept by setColumn
+    std::vector<std::vector<std::int32_t>> mRowIdx;    // one vector per column
+    std::vector<std::vector<double>>       mVal;       // one vector per column
 };
 
 } // namespace StorageOptions

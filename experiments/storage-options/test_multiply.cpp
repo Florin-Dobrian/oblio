@@ -272,7 +272,7 @@ int main() {
               << "  extractor and no pointer-array view, so nothing is owned and nothing dangles.\n"
               << "\n"
               << "  Reaching a column through the accessor is free. multiply() over the static\n"
-              << "  matrix matches the hand-written flat baseline, which calls no accessor at all\n"
+              << "  matrix matches the hand-written flat baseline, which calls no per-column accessor\n"
               << "  and walks colPtr raw, so the abstraction costs nothing on the layout we care\n"
               << "  most about.\n"
               << "\n"

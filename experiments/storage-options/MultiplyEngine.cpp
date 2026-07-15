@@ -35,16 +35,17 @@ template void MultiplyEngine::multiply<SparseMatrixStatic>(
 template void MultiplyEngine::multiply<SparseMatrixDynamic>(
     const SparseMatrixDynamic&, const double*, double*) const;
 
-// The baseline: the static matrix walked directly, no lookup call and no pointer array. It reaches
-// the raw buffers through friendship, and that rawness is the point: it is the reference the
-// templated multiply must match, so that "reaching a column through the lookup costs nothing" is a
-// measured claim rather than a hoped-for one. Same pure-multiply contract: y is overwritten, zeroed
-// once then accumulated, since it too is column-outer.
+// The baseline: the static matrix walked directly, no per-column accessor call and no pointer array.
+// It reads the raw CSC buffers through the class's public colPtr() / rowIdx() / val(), the same
+// arrays the main-code matrix exposes, so it needs no friendship. That rawness is the point: it is
+// the reference the templated multiply must match, so that "reaching a column through the accessor
+// costs nothing" is a measured claim rather than a hoped-for one. Same pure-multiply contract: y is
+// overwritten, zeroed once then accumulated, since it too is column-outer.
 void MultiplyEngine::multiplyStatic(const SparseMatrixStatic& A, const double* x, double* y) const {
-    const std::size_t                size   = A.mSize;
-    const std::vector<std::size_t>&  colPtr = A.mColPtr;
-    const std::vector<std::int32_t>& rowIdx = A.mRowIdx;
-    const std::vector<double>&       val    = A.mVal;
+    const std::size_t                size   = A.size();
+    const std::vector<std::size_t>&  colPtr = A.colPtr();
+    const std::vector<std::int32_t>& rowIdx = A.rowIdx();
+    const std::vector<double>&       val    = A.val();
 
     for (std::int32_t i = 0; i < static_cast<std::int32_t>(size); ++i)
         y[i] = 0.0;

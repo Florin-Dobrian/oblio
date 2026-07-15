@@ -71,10 +71,11 @@ public:
     template <class Matrix>
     void multiply(const Matrix& A, const double* x, double* y) const;
 
-    // The baseline. Hand-written flat: walks colPtr directly, no lookup call. This is what one
-    // would write if CSC were the only storage, and it is what the templated version must match to
-    // earn its keep. It reaches the raw buffers through friendship, which is exactly the honest
-    // reference the general path is measured against.
+    // The baseline. Hand-written flat: walks colPtr directly, no per-column accessor call. This is
+    // what one would write if CSC were the only storage, and it is what the templated version must
+    // match to earn its keep. It reads the raw buffers through the static class's public colPtr() /
+    // rowIdx() / val() (no friendship needed), which is exactly the honest reference the
+    // storage-blind path is measured against.
     void multiplyStatic(const SparseMatrixStatic& A, const double* x, double* y) const;
 };
 

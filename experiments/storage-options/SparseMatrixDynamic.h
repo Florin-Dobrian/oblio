@@ -43,9 +43,9 @@ public:
 
     std::size_t size() const { return mSize; }
     std::size_t nnz()  const {
-        std::size_t n = 0;
-        for (const auto& c : mRowIdx) n += c.size();
-        return n;
+        std::size_t sum = 0;
+        for (const auto& rowIdx : mRowIdx) sum += rowIdx.size();
+        return sum;
     }
 
     // Per-column accessors, the same three the static sibling offers, under the same names,

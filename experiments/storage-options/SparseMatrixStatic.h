@@ -17,9 +17,10 @@
 // &mRowIdx[mColPtr[j]] is where column j's row indices start, and it is a plain
 // const std::int32_t*. That is the observation this experiment turns on.
 //
-// MultiplyEngine is a friend, used now only by the hand-written flat baseline (multiplyStatic),
-// which walks the raw buffers on purpose. The general path reaches columns through the public
-// per-column lookups above and needs no friendship.
+// The raw CSC arrays are public (colPtr / rowIdx / val, exactly as the main-code matrix exposes
+// them), so the hand-written baseline reads the flat buffers straight through them. No friendship:
+// reading is public, and the storage-blind path reaches columns through the per-column accessors.
+// MultiplyEngine is a friend of neither class.
 
 #include <algorithm>
 #include <cstddef>
@@ -27,8 +28,6 @@
 #include <vector>
 
 namespace StorageOptions {
-
-class MultiplyEngine;
 
 class SparseMatrixStatic {
 public:
@@ -42,13 +41,23 @@ public:
     std::size_t size() const { return mSize; }
     std::size_t nnz()  const { return mRowIdx.size(); }
 
+    // The raw CSC arrays, exposed as the main-code SparseMatrix exposes them. A consumer that knows
+    // it holds CSC (the hand-written baseline, or any main-code-style raw walk) reads the flat
+    // buffers straight through these and needs no friendship, because reading is public. colPtr
+    // appears here, in the static class's own interface, and never in the storage-blind per-column
+    // interface below, which both classes share and which has no colPtr because the dynamic sibling
+    // has none.
+    const std::vector<std::size_t>&  colPtr() const { return mColPtr; }
+    const std::vector<std::int32_t>& rowIdx() const { return mRowIdx; }
+    const std::vector<double>&       val()    const { return mVal; }
+
     // Per-column accessors: where column j's row indices and values start, and how many entries it
     // has. Each returns an address (or a size) into the existing storage, O(1), no allocation,
     // nothing owned. This is a fact about the layout, so it belongs to the storage that holds it,
-    // not to any consumer, and it is the matrix-side twin of the factor's blockPtr. Named for what
-    // they return (a column's row indices, its values), not for the array behind them, so the
-    // dynamic sibling can offer the same three under the same names. colPtr never appears in a
-    // signature; it is a static-internal detail.
+    // and it is the matrix-side twin of the factor's blockPtr. Named for what they return (a
+    // column's row indices, its values), not for the array behind them, so the dynamic sibling can
+    // offer the same three under the same names. This is the storage-blind interface; colPtr is not
+    // in it (see the CSC-specific accessors just above).
     const std::int32_t* rowIdx(std::int32_t j)  const { return mRowIdx.data() + mColPtr[j]; }
     const double*       val(std::int32_t j)     const { return mVal.data()    + mColPtr[j]; }
     std::size_t         colSize(std::int32_t j) const { return mColPtr[j + 1] - mColPtr[j]; }
@@ -95,8 +104,6 @@ private:
     std::vector<std::size_t>  mColPtr;   // length mSize + 1
     std::vector<std::int32_t> mRowIdx;   // length nnz, one contiguous run
     std::vector<double>       mVal;      // length nnz, one contiguous run
-
-    friend class MultiplyEngine;
 };
 
 } // namespace StorageOptions

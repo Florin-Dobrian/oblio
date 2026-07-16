@@ -1,5 +1,7 @@
 #include "MultiplyEngine.h"
 
+#include <cstdint>   // std::int32_t
+
 // Fortran BLAS gemv. Declared here directly (underscore ABI, as used by Accelerate
 // on macOS and reference/OpenBLAS on Linux). The real tree routes these through a
 // BlasLapack layer with the OBLIO_BLAS_UNDERSCORE portability macro; kept inline here
@@ -42,9 +44,9 @@ template<class Val>
 Vector<Val> MultiplyEngine::multiplyByApi(const Matrix<Val>& A,
                                           const Vector<Val>& x) const {
     Vector<Val> y(A.rows());
-    for (std::size_t i = 0; i < A.rows(); ++i) {
+    for (std::int32_t i = 0; i < static_cast<std::int32_t>(A.rows()); ++i) {
         Val sum{0};
-        for (std::size_t j = 0; j < A.cols(); ++j)
+        for (std::int32_t j = 0; j < static_cast<std::int32_t>(A.cols()); ++j)
             sum += A(i, j) * x[j];
         y[i] = sum;
     }
@@ -64,10 +66,10 @@ Vector<Val> MultiplyEngine::multiplyDirectly(const Matrix<Val>& A,
     const Val* xp = x.mVals.data();
     Val*       yp = y.mVals.data();
 
-    for (std::size_t i = 0; i < rows; ++i) {
+    for (std::int32_t i = 0; i < static_cast<std::int32_t>(rows); ++i) {
         const Val* arow = a + i * cols;
         Val sum{0};
-        for (std::size_t j = 0; j < cols; ++j)
+        for (std::int32_t j = 0; j < static_cast<std::int32_t>(cols); ++j)
             sum += arow[j] * xp[j];
         yp[i] = sum;
     }

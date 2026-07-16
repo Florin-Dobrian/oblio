@@ -23,14 +23,14 @@ Two references, two roles: favor 10.12's *design*, verify against 0.9's *behavio
   decomposition, and interfaces wherever it reaches. It is unverified, so never assume
   its code is correct (it can carry bugs 0.9 does not). Take *shape* from 10.12 and
   *behavior* from 0.9, and fall back to 0.9 wherever 10.12 is silent or incomplete.
-- **PoC tree** (built in one day, 2026-03-07) is a proof of concept. It may inform, but its
-  code is not trusted and nothing is ported from it. Its remains are the top-level `src/` and
-  `include/`, which are on their way out; do not read them.
+- **PoC tree** (built in one day, 2026-03-07) was a proof of concept. It informed the
+  effort but was never trusted, and nothing was ported from it. It has since been removed
+  from the tree.
 
-**Where things live.** The 0.9, 10.12 and PoC sources live in **`reference/`**, which is
-gitignored and so absent from REPO_MAP; files are suffixed `-0_9`, `-10_12` and `-PoC`. All work
-happens in **`port/`** (`port/src/`, `port/include/oblio/`, `port/tests/`). Nothing else in the
-tree is either a reference or a target.
+**Where things live.** The 0.9 and 10.12 sources live in **`reference/`**, which is
+gitignored and so absent from REPO_MAP; files are suffixed `-0.9` and `-10.12`. All work
+happens at the top level (`src/`, `include/oblio/`, `tests/`). Nothing else in the tree is
+either a reference or a target.
 
 ## Process (every session)
 

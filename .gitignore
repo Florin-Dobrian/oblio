@@ -8,11 +8,7 @@
 build/
 cmake-build-*/
 
-# Executables (no extension)
-test_smoke_real
-test_smoke_complex
-test_extended_real
-test_extended_complex
+# Test executables (carry the _cpp suffix, per the coding convention)
 *_cpp
 
 # macOS

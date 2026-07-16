@@ -24,7 +24,7 @@ softer layer: conventions for consistency, not correctness.
 - **Package name is `Oblio`** (capital O), in prose, documentation, and the C++
   namespace (`namespace Oblio`, `Oblio::`). Lowercase `oblio` is reserved for path
   and artifact identifiers only: the `include/oblio/` directory and `#include
-  "oblio/…"` paths, `liboblio`, the CMake target, and existing lowercase filenames
+  "oblio/..."` paths, `liboblio`, the CMake target, and existing lowercase filenames
   (`oblio-new-devlog.md`, etc.). Macros are `OBLIO_`. Never write bare `oblio` as
   the package name in running text.
 
@@ -266,8 +266,8 @@ softer layer: conventions for consistency, not correctness.
 - **Standard-library types: use the `std::`-qualified name, from the C++ header that
   declares it**, not the bare name and not the C-style `<*.h>` header. Include only
   the header for the type you actually use (one header per need):
-  - `<cstddef>` → `std::size_t`, `std::ptrdiff_t`, `std::nullptr_t`, `std::byte`
-  - `<cstdint>` → fixed-width ints: `std::int32_t`, `std::uint64_t`, `std::int8_t`, …
+  - `<cstddef>` -> `std::size_t`, `std::ptrdiff_t`, `std::nullptr_t`, `std::byte`
+  - `<cstdint>` -> fixed-width ints: `std::int32_t`, `std::uint64_t`, `std::int8_t`, ...
 
   e.g. `std::size_t` comes from `<cstddef>` (which is all Permutation needs). The
   bare forms (`size_t`) rely on a global-namespace leak that isn't guaranteed by the
@@ -285,14 +285,21 @@ softer layer: conventions for consistency, not correctness.
   - **A position is a `std::size_t`.** It measures rather than names: an offset into a buffer,
     a count, a dimension. Never negative, never `NIL`, free to exceed 2^31. E.g.
     `SparseMatrix::colPtr`, `size()`, `nnz()`.
-  - **A loop counter takes the type of what it counts.** A loop over *entities* (columns,
-    supernodes) counts indices, so the counter is `std::int32_t` and the bound is cast once in
-    the condition: `for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(supSize); ++kk)`.
-    The cast is loop-invariant and costs nothing. A loop over *positions* (an offset into
-    `colPtr`, a descending count-down) counts nothing that has a name, so it is `std::size_t`:
-    `for (std::size_t ap = colPtr[ak]; ap < colPtr[ak + 1]; ++ap)`. What is forbidden is an
-    `int32_t` counter compared against a container size *without* the cast, which is where the
-    signed/unsigned warning comes from.
+  - **A loop counter takes the type of what it counts, and direction does not change the type.**
+    A loop over *entities* (columns, supernodes) counts indices, so the counter is `std::int32_t`
+    and the bound is cast once in the condition. Ascending:
+    `for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(supSize); ++kk)`. Descending is the
+    same rule with the cast on the start:
+    `for (std::int32_t jj = static_cast<std::int32_t>(supSize) - 1; jj >= 0; --jj)`; the loop exits
+    at `-1`, which `int32_t` represents, so a descending entity loop is a *direct* `int32_t`
+    reverse, not a `std::size_t` counter with `j = t - 1` inside (that trick is declined; see the
+    forward/reverse asymmetry in DESIGN_DECISIONS). The cast is loop-invariant and costs nothing. A
+    loop over *positions* (an offset into `colPtr`) counts nothing that has a name, so it is
+    `std::size_t`: `for (std::size_t ap = colPtr[ak]; ap < colPtr[ak + 1]; ++ap)`. A descending
+    *position* loop is still `std::size_t`, but must not test `p >= 0` (always true, it never
+    terminates); use `while (p-- > 0)` or an explicit guard. What is forbidden is an `int32_t`
+    counter compared against a container size *without* the cast, which is where the signed/unsigned
+    warning comes from.
 
   Three rules about casting, and they matter more than they look, since we got each of them
   wrong at least once.
@@ -314,6 +321,34 @@ softer layer: conventions for consistency, not correctness.
     `const std::int32_t n = static_cast<std::int32_t>(size);` is the same mistake wearing
     different clothes. It is easy to make precisely because a size feels too humble to need the
     rule.
+
+- **Constructors initialize every member in the member-initializer list, in declaration order.**
+  The body is left for work an initializer cannot do: a loop that fills, a call made for its side
+  effect (`setIdentity()`). A member set by assignment in the body is default-constructed first and
+  then overwritten, which for a `std::vector` is a wasted allocation the list would have avoided.
+  Where the initializer is not a plain copy, use an expression, not a body assignment and not a
+  helper with internal linkage: `mNnz(std::accumulate(rowIdx.begin(), rowIdx.end(), std::size_t{0},
+  ...))`, and note the `std::size_t{0}` seed is load-bearing, it fixes the accumulator type so the
+  sum does not overflow an `int`. Two consequences: the list runs in *declaration* order whatever
+  order it is written in, so declare a member after the ones it reads; and a guard on the first
+  member runs before any later member allocates, which is how check-before-allocate and init-list
+  purity coexist (see the next rule).
+
+- **A size-taking constructor guards its size against the index range before it allocates.** A
+  dimension or count that will size a `std::vector` of indices, or be stored as one, must fit
+  `std::int32_t`. It passes through `checkIndexRange(size, "<what> size")` (declared in `Types.h`,
+  defined in `Types.cpp`), which returns the size unchanged or throws `std::length_error` when it
+  exceeds `MAX_IDX` (`= 2^31 - 1`). Put the call in the member-initializer list on the *first*
+  member the size feeds, so it runs before any allocation:
+  `Vector(std::size_t size) : mSize(checkIndexRange(size, "Vector size")), mVal(size, Val(0)) {}`. Where the
+  constructor instead moves in already-built vectors (`SparseMatrix`), nothing is allocated from the
+  size, so the guard is a plain body check. The throw lives in `Types.cpp` and never inline in a
+  header: a throwing body in a widely-included header degrades codegen of unrelated hot loops in the
+  same translation unit (the in-header-throw finding in DESIGN_DECISIONS). A structure sized from
+  user input or from A carries the guard (`SparseMatrix`, `Vector`, `Permutation`); a structure
+  sized from already-guarded internal data does not re-check (the numeric factor, sized from the
+  symbolic factor, throws nothing). See DESIGN_DECISIONS for where the cap comes from and why it is
+  `2^31 - 1`, not `2^31`.
 
 - Beyond the spellings above, `.clang-tidy` (`modernize-*`) and `.clang-format` also
   handle idiom cleanups (e.g. `.data()` over raw-pointer extraction) and formatting.

@@ -12,33 +12,47 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(BLAS REQUIRED)
 find_package(LAPACK REQUIRED)
 
-# Detect whether BLAS symbols have trailing underscore (dpotrf_ vs dpotrf).
+# Detect whether the Fortran symbols have a trailing underscore (dpotrf_ vs
+# dpotrf). The probe calls dpotrf_, which is a LAPACK symbol, so it must link
+# LAPACK, not just BLAS: with a combined library (Accelerate) either works, but
+# with split reference libs dpotrf_ lives in liblapack, and linking BLAS alone
+# fails the probe and wrongly reports no underscore. BLAS and LAPACK share the
+# convention, so this one result drives the macro for both. Underscore is the
+# common case (Accelerate and the reference libs); the else branch is the rare
+# no-underscore build.
 include(CheckCSourceCompiles)
-set(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+set(CMAKE_REQUIRED_LIBRARIES ${LAPACK_LIBRARIES} ${BLAS_LIBRARIES})
 check_c_source_compiles("
     extern void dpotrf_(char*,int*,double*,int*,int*);
     int main(){ char u='L'; int n=1,lda=1,info=0; double a=1.0;
                 dpotrf_(&u,&n,&a,&lda,&info); return 0; }
 " OBLIO_BLAS_UNDERSCORE)
+unset(CMAKE_REQUIRED_LIBRARIES)
 
 # ----- Library ---------------------------------------------------------------
 # Source list matches REPO_MAP src/*.cpp. Amd.cpp and Mmd.cpp hold the ordering
 # implementations that OrderEngine.cpp dispatches to — omitting them link-fails
 # on mmd_order / amd_order.
 add_library(oblio STATIC
-    src/OrderEngine.cpp
-    src/Mmd.cpp
     src/Amd.cpp
-    src/Matrix.cpp
-    src/Vector.cpp
-    src/DenseMatrix.cpp
-    src/Factors.cpp
-    src/FactorEngine.cpp
+    src/BlasLapack.cpp
+    src/ElmForestEngine.cpp
+    src/Mmd.cpp
+    src/MultiplyEngine.cpp
+    src/NumFactorDynamic.cpp
+    src/NumFactorEngine.cpp
+    src/NumFactorStatic.cpp
+    src/OrderEngine.cpp
+    src/Permutation.cpp
     src/SolveEngine.cpp
-    src/OblioEngine.cpp
+    src/SparseMatrix.cpp
+    src/SymFactorEngine.cpp
+    src/Types.cpp
+    src/UpdateBlock.cpp
+    src/Vector.cpp
 )
 
-# Users #include "oblio/OblioEngine.h" (namespaced). PUBLIC so tests/examples
+# Users #include the "oblio/..." headers (namespaced). PUBLIC so tests/examples
 # that link oblio inherit the include path — no separate global include needed.
 target_include_directories(oblio PUBLIC include)
 target_link_libraries(oblio PUBLIC ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES})
@@ -50,14 +64,14 @@ endif()
 # ----- Tests -----------------------------------------------------------------
 enable_testing()
 
-# The four suites in tests/ (real/complex × smoke/extended). Each is a standalone
-# executable linking oblio.
-foreach(t test_smoke_real test_smoke_complex test_extended_real test_extended_complex)
+# The suites in tests/. Each is a standalone executable linking oblio.
+foreach(t smoke test_forest test_numfactor test_order test_permutation test_solve test_symfactor)
     add_executable(${t} tests/${t}.cpp)
     target_link_libraries(${t} PRIVATE oblio)
     add_test(NAME ${t} COMMAND ${t})
 endforeach()
 
 # ----- Examples --------------------------------------------------------------
-add_executable(example_basic examples/basic.cpp)
-target_link_libraries(example_basic PRIVATE oblio)
+# No example targets yet. examples/basic.cc sketches the intended OblioEngine driver
+# API, which is not ported, so it does not compile against the current library. Wire
+# example executables up here once the driver and real examples exist.

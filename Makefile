@@ -1,14 +1,13 @@
-# Parallel port tree, builds the new units and every test in tests/.
-# The PoC build (top-level CMake) is untouched; this compiles port/ in isolation.
+# Builds the Oblio units and every test in tests/. A simple alternative to the
+# CMake build (CMakeLists.txt); both compile the same src/ and tests/.
 #
 #   make            build all test executables
 #   make test       build and run them all
 #   make <name>_cpp build one test (e.g. make test_order_cpp)
 #   make clean
 #
-# -Iinclude points at port/include, so #include "oblio/X.h" resolves to the NEW
-# headers, never the PoC ones one level up. Executables carry the _cpp suffix
-# (coding convention) and are gitignored.
+# -Iinclude points at include/, so #include "oblio/X.h" resolves to the project
+# headers. Executables carry the _cpp suffix (coding convention) and are gitignored.
 
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O3 -Wall -Wextra -Iinclude

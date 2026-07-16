@@ -18,6 +18,389 @@ left-looking view, or to the *right* (`j > k`, a trailing column being updated) 
 right-looking view. Sums written `sum_{j<k}` run over `j = 1 .. k-1`.
 
 
+## 0. The direct solution of Ax = b
+
+Solving `A x = b` directly is three operations: forming a product `A x`, factoring `A`
+into triangular pieces, and solving triangular systems. All three come in the same two
+shapes, a **gather** that pulls finished values in and writes each output once, and a
+**scatter** that pushes each finished value out into the rest. The factorization
+schedules of Section 1 (left- and right-looking) are these same two shapes on a harder
+operation, so it helps to meet them first on the easy ones. Conventions are the front
+matter's: `A` is `n x n`, indexed `1 .. n`; `i` is a row, `j` and `k` are columns.
+
+### 0.1 Matrix-vector product
+
+`y = A x`. Two loop orders, differing only in which index is outer.
+
+**Row-oriented (dot product / "gather").** Each `y[i]` is the dot product of row `i` of
+`A` with `x`, computed and written once.
+
+```
+matvec_row(A, x) -> y:
+    for i = 1 .. n:          # row i
+        y[i] = 0
+        for j = 1 .. n:      # column j
+            y[i] = y[i] + A[i][j] * x[j]
+```
+
+**Column-oriented (axpy / "scatter").** Each column `j`, scaled by `x[j]`, is added into
+the whole of `y`; `y` starts at zero and accumulates across columns.
+
+```
+matvec_col(A, x) -> y:
+    for i = 1 .. n:
+        y[i] = 0
+    for j = 1 .. n:          # column j
+        for i = 1 .. n:      # row i
+            y[i] = y[i] + A[i][j] * x[j]
+```
+
+Row order reads `x` in full for each output and writes `y[i]` once (gather); column
+order reads `x[j]` once and updates every `y[i]` (scatter). Same arithmetic, transposed
+schedule, the distinction that runs through everything below.
+
+### 0.2 LU factorization
+
+For a general (nonsymmetric) `A`, LU computes a unit lower-triangular `L` (`L[i][i] = 1`)
+and an upper-triangular `U` with
+
+```
+A = L U
+```
+
+Matching entries of `L U` against `A`, with `k` the current column, gives the column-`k`
+entries of `U` (on and above the diagonal) and of `L` (below it):
+
+```
+U[i][k] = A[i][k] - sum_{j<i} L[i][j] * U[j][k]                 for i = 1 .. k
+L[i][k] = ( A[i][k] - sum_{j<k} L[i][j] * U[j][k] ) / U[k][k]   for i = k+1 .. n
+```
+
+`U[k][k]` is the pivot and must be nonzero (pivoting, which reorders rows to keep it away
+from zero, is omitted here). Cholesky is the symmetric special case: when `A` is SPD the
+two triangles carry the same information and only one is computed, `U = L^T` up to the
+diagonal (Section 1).
+
+As with Cholesky the two schedules compute the same `L` and `U` and differ only in *when*
+the cross-column contributions are applied. Both overwrite a working copy `LU` of `A`,
+leaving `U` in its upper triangle and `L` (minus the unit diagonal) in its strict lower
+triangle.
+
+**Left-looking (gather).** Column `k` waits, then pulls in every earlier column's
+contribution in one pass before its `L` part is normalized.
+
+```
+lu_left(A) -> (L, U):
+    LU = A
+    for k = 1 .. n:              # current column k
+        for j = 1 .. k-1:        # earlier column j
+            for i = j+1 .. n:    # LU[i][k] -= L[i][j] * U[j][k]
+                LU[i][k] = LU[i][k] - LU[i][j] * LU[j][k]
+        for i = k+1 .. n:        # normalize the L part by the pivot
+            LU[i][k] = LU[i][k] / LU[k][k]
+```
+
+**Right-looking (scatter).** The moment column `k` is finished, its multipliers push a
+rank-1 update into the entire trailing submatrix.
+
+```
+lu_right(A) -> (L, U):
+    LU = A
+    for k = 1 .. n:              # pivot column k
+        for i = k+1 .. n:        # multipliers: column k of L
+            LU[i][k] = LU[i][k] / LU[k][k]
+        for i = k+1 .. n:        # rank-1 update of the trailing block
+            for j = k+1 .. n:
+                LU[i][j] = LU[i][j] - LU[i][k] * LU[k][j]
+```
+
+Left-looking gathers `sum_{j<k} L[i][j] U[j][k]` into column `k` when it is reached;
+right-looking scatters `LU[i][k] * LU[k][j]` into every trailing `(i,j)` as soon as column
+`k` is done. That rank-1 update is the outer product of column `k`'s multipliers with row
+`k` of `U`, the unsymmetric analog of the Cholesky rank-1 update (a general `dgemm` in
+place of `dsyrk`).
+
+### 0.3 Triangular solves for LU factorization
+
+With `A = L U`, solving `A x = b` is two triangular solves: forward `L y = b`, then back
+`U x = y`. Each comes in the same two loop orders as the matvec, a row-oriented dot
+product (gather) and a column-oriented axpy (scatter).
+
+**Forward substitution, `L y = b`** (`L` unit lower-triangular, so no diagonal division).
+
+Row-oriented (gather), `y[i]` finished by subtracting the dot product of the already-known
+`y[1 .. i-1]`:
+
+```
+forward_row(L, b) -> y:
+    for i = 1 .. n:
+        y[i] = b[i]
+        for j = 1 .. i-1:
+            y[i] = y[i] - L[i][j] * y[j]
+```
+
+Column-oriented (scatter), each `y[j]` pushed into the later equations as soon as it is
+known:
+
+```
+forward_col(L, b) -> y:
+    for i = 1 .. n:
+        y[i] = b[i]
+    for j = 1 .. n:
+        for i = j+1 .. n:
+            y[i] = y[i] - L[i][j] * y[j]
+```
+
+**Back substitution, `U x = y`** (`U` upper-triangular; divide by the diagonal pivot).
+
+Row-oriented (gather):
+
+```
+back_row(U, y) -> x:
+    for i = n .. 1:
+        x[i] = y[i]
+        for j = i+1 .. n:
+            x[i] = x[i] - U[i][j] * x[j]
+        x[i] = x[i] / U[i][i]
+```
+
+Column-oriented (scatter):
+
+```
+back_col(U, y) -> x:
+    for i = 1 .. n:
+        x[i] = y[i]
+    for j = n .. 1:
+        x[j] = x[j] / U[j][j]
+        for i = 1 .. j-1:
+            x[i] = x[i] - U[i][j] * x[j]
+```
+
+Forward and back are mirror images across the diagonal: row order gathers the solved
+unknowns into the current one, column order scatters each unknown, once solved, into the
+rest. The gather/scatter pair that opened with the matvec closes the direct solve.
+
+### 0.4 LDL^T factorization
+
+For a symmetric `A`, LDL^T computes a unit lower-triangular `L` (`L[i][i] = 1`) and a
+diagonal `D` with
+
+```
+A = L D L^T
+```
+
+It is the LU factorization of 0.2 specialized to a symmetric `A`, with the pivots pulled
+out of the upper factor: `U = D L^T`, so `A = L U = L (D L^T) = L D L^T`, and only `L` and
+`D` are stored. Equivalently it is Cholesky without the square root, the pivots collected
+in `D` rather than taken under a root, so the factorization stays in the arithmetic of `A`
+and extends to the symmetric indefinite case (with pivoting, omitted here; the Cholesky
+relation `C = L D^{1/2}` is in 0.6). Only the lower triangle is computed; with `k` the
+current column,
+
+```
+D[k]    = A[k][k] - sum_{j<k} L[k][j]^2 * D[j]
+L[i][k] = ( A[i][k] - sum_{j<k} L[i][j] * D[j] * L[k][j] ) / D[k]   for i = k+1 .. n
+```
+
+Both schedules leave `D` on the diagonal of the working matrix `LD` and `L` (minus the
+unit diagonal) in its strict lower triangle.
+
+**Left-looking (gather).** Column `k` pulls in every earlier column's contribution, each
+scaled by that column's pivot `D[j] = LD[j][j]`, before its `L` part is normalized.
+
+```
+ldlt_left(A) -> (L, D):
+    LD[i][j] = A[i][j] for i >= j, else 0
+    for k = 1 .. n:              # current column k
+        for j = 1 .. k-1:        # earlier column j
+            for i = k .. n:      # LD[i][k] -= L[i][j] * D[j] * L[k][j]
+                LD[i][k] = LD[i][k] - LD[i][j] * LD[j][j] * LD[k][j]
+        for i = k+1 .. n:        # normalize the L part by the pivot D[k] = LD[k][k]
+            LD[i][k] = LD[i][k] / LD[k][k]
+```
+
+**Right-looking (scatter).** Once column `k`'s pivot and multipliers are set, they scatter
+a `D[k]`-scaled rank-1 update into the trailing lower triangle.
+
+```
+ldlt_right(A) -> (L, D):
+    LD[i][j] = A[i][j] for i >= j, else 0
+    for k = 1 .. n:              # pivot column k
+        for i = k+1 .. n:        # multipliers: column k of L
+            LD[i][k] = LD[i][k] / LD[k][k]
+        for j = k+1 .. n:        # rank-1 update of the trailing lower triangle
+            for i = j .. n:
+                LD[i][j] = LD[i][j] - LD[i][k] * LD[k][k] * LD[j][k]
+```
+
+Left-looking gathers `sum_{j<k} L[i][j] D[j] L[k][j]` into column `k`; right-looking
+scatters `LD[i][k] * D[k] * LD[j][k]` into the trailing `(i,j)`. The update is the symmetric
+rank-1 form of the LU outer product, touching only the lower triangle.
+
+### 0.5 Triangular solves with LDL^T factorization
+
+With `A = L D L^T`, solving `A x = b` is three steps: forward `L z = b`, a diagonal solve
+`D w = z`, then back `L^T x = w`. The two triangular steps use `L` (unit lower) and its
+transpose (unit upper), each in the two loop orders of 0.3; the diagonal step between them
+is a single loop.
+
+**Step 1, forward `L z = b`** (unit lower, no diagonal division).
+
+```
+forward_row(L, b) -> z:
+    for i = 1 .. n:
+        z[i] = b[i]
+        for j = 1 .. i-1:
+            z[i] = z[i] - L[i][j] * z[j]
+```
+
+```
+forward_col(L, b) -> z:
+    for i = 1 .. n:
+        z[i] = b[i]
+    for j = 1 .. n:
+        for i = j+1 .. n:
+            z[i] = z[i] - L[i][j] * z[j]
+```
+
+**Step 2, diagonal `D w = z`** (a single loop).
+
+```
+diag(D, z) -> w:
+    for k = 1 .. n:
+        w[k] = z[k] / D[k]
+```
+
+**Step 3, back `L^T x = w`** (unit upper, `L^T[i][j] = L[j][i]`, no diagonal division).
+
+```
+backT_row(L, w) -> x:
+    for i = n .. 1:
+        x[i] = w[i]
+        for j = i+1 .. n:
+            x[i] = x[i] - L[j][i] * x[j]
+```
+
+```
+backT_col(L, w) -> x:
+    for i = 1 .. n:
+        x[i] = w[i]
+    for j = n .. 1:
+        for i = 1 .. j-1:
+            x[i] = x[i] - L[j][i] * x[j]
+```
+
+The forward is the `L` solve of 0.3; the back reads `L`'s columns as the rows of `L^T`,
+the same entries accessed the other way. The diagonal solve between them is the one step
+with a single loop.
+
+### 0.6 Cholesky factorization
+
+For a symmetric positive definite `A`, Cholesky computes a lower-triangular `C` with
+
+```
+A = C C^T
+```
+
+It is the LDL^T factorization of 0.4 with the diagonal absorbed into the factor:
+`C = L D^{1/2}`, that is `C[i][k] = L[i][k] * sqrt(D[k])` and `C[k][k] = sqrt(D[k])`, so
+`A = C C^T = (L D^{1/2})(L D^{1/2})^T = L D L^T`. The square root needs `D > 0`, which is
+why Cholesky is the SPD case and LDL^T the general symmetric one. Unlike `L`, the factor
+`C` is not unit lower-triangular; its diagonal carries the pivots as `sqrt(D[k])`. With
+`k` the current column,
+
+```
+C[k][k] = sqrt( A[k][k] - sum_{j<k} C[k][j]^2 )
+C[i][k] = ( A[i][k] - sum_{j<k} C[i][j] * C[k][j] ) / C[k][k]   for i = k+1 .. n
+```
+
+**Left-looking (gather).**
+
+```
+chol_left(A) -> C:
+    C[i][j] = A[i][j] for i >= j, else 0
+    for k = 1 .. n:              # current column k
+        for j = 1 .. k-1:        # earlier column j
+            for i = k .. n:      # C[i][k] -= C[i][j] * C[k][j]
+                C[i][k] = C[i][k] - C[i][j] * C[k][j]
+        C[k][k] = sqrt(C[k][k])
+        for i = k+1 .. n:        # normalize by the pivot C[k][k]
+            C[i][k] = C[i][k] / C[k][k]
+```
+
+**Right-looking (scatter).**
+
+```
+chol_right(A) -> C:
+    C[i][j] = A[i][j] for i >= j, else 0
+    for k = 1 .. n:              # pivot column k
+        C[k][k] = sqrt(C[k][k])
+        for i = k+1 .. n:        # column k of C
+            C[i][k] = C[i][k] / C[k][k]
+        for j = k+1 .. n:        # rank-1 update of the trailing lower triangle
+            for i = j .. n:
+                C[i][j] = C[i][j] - C[i][k] * C[j][k]
+```
+
+Left-looking gathers `sum_{j<k} C[i][j] C[k][j]` into column `k`; right-looking scatters
+`C[i][k] * C[j][k]` into the trailing `(i,j)`, the same schedules as LU and LDL^T with a
+unit weight in place of `U[k][j]` or `D[k]`. Section 1 develops this same factorization in
+`L L^T` notation.
+
+### 0.7 Triangular solves with Cholesky factorization
+
+With `A = C C^T`, solving `A x = b` is two steps: forward `C y = b`, then back
+`C^T x = y`. There is no separate diagonal step, the `sqrt(D)` that was the LDL^T diagonal
+solve of 0.5 is folded into `C`'s diagonal, so each triangular solve divides by
+`C[i][i] = sqrt(D[i])` (the unit-diagonal `L` solves of 0.5 did not divide).
+
+**Step 1, forward `C y = b`** (lower triangular, divide by the diagonal).
+
+```
+forward_row(C, b) -> y:
+    for i = 1 .. n:
+        y[i] = b[i]
+        for j = 1 .. i-1:
+            y[i] = y[i] - C[i][j] * y[j]
+        y[i] = y[i] / C[i][i]
+```
+
+```
+forward_col(C, b) -> y:
+    for i = 1 .. n:
+        y[i] = b[i]
+    for j = 1 .. n:
+        y[j] = y[j] / C[j][j]
+        for i = j+1 .. n:
+            y[i] = y[i] - C[i][j] * y[j]
+```
+
+**Step 2, back `C^T x = y`** (upper triangular, `C^T[i][j] = C[j][i]`, divide by the
+diagonal).
+
+```
+backT_row(C, y) -> x:
+    for i = n .. 1:
+        x[i] = y[i]
+        for j = i+1 .. n:
+            x[i] = x[i] - C[j][i] * x[j]
+        x[i] = x[i] / C[i][i]
+```
+
+```
+backT_col(C, y) -> x:
+    for i = 1 .. n:
+        x[i] = y[i]
+    for j = n .. 1:
+        x[j] = x[j] / C[j][j]
+        for i = 1 .. j-1:
+            x[i] = x[i] - C[j][i] * x[j]
+```
+
+As with LDL^T the back solve reads `C`'s columns as the rows of `C^T`. The two Cholesky
+solves are the LDL^T three-step solve with its diagonal split evenly between them: each
+divides by `sqrt(D[i])`, and the two together account for the single `D[i]` division.
+
 ## 1. Cholesky
 
 ### 1.1 The factorization

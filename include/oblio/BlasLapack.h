@@ -1,203 +1,270 @@
 #pragma once
-#include "oblio/Types.h"
+
+// BlasLapack.h - the BLAS and LAPACK routines the numeric factorization uses, wrapped.
+//
+// Two jobs. The first is mechanical: BLAS is a Fortran interface, so every argument is passed by
+// address, and a call site without a wrapper reads
+//
+//     char uplo = 'L', trans = 'N';  int n = ..., k = ...;  double alpha = -1, beta = 1;
+//     dsyrk_(&uplo, &trans, &n, &k, &alpha, a, &lda, &beta, c, &ldc);
+//
+// The inline overloads below hide that, taking values and dispatching on the scalar type. 0.9
+// does the same and it is right.
+//
+// The second job is the one 0.9 gets wrong, and it is the reason this header is shaped the way
+// it is.
+//
+// **The wrappers name operations, not routines.** 0.9 wraps BLAS routine by routine (SYRK, GEMM,
+// TRSM, POTRF) and leaves the caller to pick 'T' versus 'C' and SYRK versus HERK. The convention
+// therefore leaks into the engine, and 0.9's engine gets it wrong: its *complex* Cholesky calls
+// SYRK, TRSM('T') and GEMM('N','T'), which are the complex-symmetric pattern, while its POTRF
+// maps to zpotrf_, which is Hermitian. There is no HERK anywhere in 0.9's BlasLapack. For
+// Hermitian A = LL^H the rank-k update must be L21 L21^H and the off-diagonal solve must be
+// against L11^H; a plain transpose is correct only when L11 is real. Almost certainly never
+// exercised on a genuinely complex Hermitian matrix.
+//
+// So `herk` here means **"A times A-conjugate-transpose"**, whatever that means for the scalar
+// type: dsyrk_ for double (transpose and conjugate-transpose coincide over the reals), zherk_ for
+// complex. And `Blas<Val>::conjTrans` is the character that means conjugate-transpose: 'T' for
+// double, 'C' for complex. The Cholesky kernel is then one piece of code, correct for both, and
+// 0.9's bug is unwriteable, because the engine never names SYRK or HERK and so cannot pick the
+// wrong one.
+//
+// `syrk` and a literal 'T' remain available for LDL^T, where a *plain* transpose is what the
+// mathematics asks for (complex LDL^T is the complex-symmetric case). There the algorithm asks
+// for them deliberately rather than inheriting them by accident. See the factorization-space
+// entry in DESIGN_DECISIONS for why symmetry is determined by (Val, factorization type) and is
+// never a separate parameter.
+
 #include <complex>
-#include <limits>
-#include <stdexcept>
-#include <cmath>
-
-namespace Oblio {
-inline int toBI(Size n) {
-    if (n > (Size)std::numeric_limits<int>::max())
-        throw std::overflow_error("dimension exceeds BLAS int");
-    return (int)n;
-}
-} // namespace Oblio
-
-// ---- Fortran symbol convention -------------------------------------------
-#ifdef OBLIO_BLAS_UNDERSCORE
-extern "C" {
-void dgemm_ (char*,char*,int*,int*,int*,double*,const double*,int*,const double*,int*,double*,double*,int*);
-void dsyrk_ (char*,char*,int*,int*,double*,const double*,int*,double*,double*,int*);
-void dtrsm_ (char*,char*,char*,char*,int*,int*,double*,const double*,int*,double*,int*);
-void dpotrf_(char*,int*,double*,int*,int*);
-void zgemm_ (char*,char*,int*,int*,int*,std::complex<double>*,const std::complex<double>*,int*,const std::complex<double>*,int*,std::complex<double>*,std::complex<double>*,int*);
-void zsyrk_ (char*,char*,int*,int*,std::complex<double>*,const std::complex<double>*,int*,std::complex<double>*,std::complex<double>*,int*);
-void zherk_ (char*,char*,int*,int*,double*,const std::complex<double>*,int*,double*,std::complex<double>*,int*);
-void ztrsm_ (char*,char*,char*,char*,int*,int*,std::complex<double>*,const std::complex<double>*,int*,std::complex<double>*,int*);
-void zpotrf_(char*,int*,std::complex<double>*,int*,int*);
-}
-#else
-extern "C" {
-void dgemm (char*,char*,int*,int*,int*,double*,const double*,int*,const double*,int*,double*,double*,int*);
-void dsyrk (char*,char*,int*,int*,double*,const double*,int*,double*,double*,int*);
-void dtrsm (char*,char*,char*,char*,int*,int*,double*,const double*,int*,double*,int*);
-void dpotrf(char*,int*,double*,int*,int*);
-void zgemm (char*,char*,int*,int*,int*,std::complex<double>*,const std::complex<double>*,int*,const std::complex<double>*,int*,std::complex<double>*,std::complex<double>*,int*);
-void zsyrk (char*,char*,int*,int*,std::complex<double>*,const std::complex<double>*,int*,std::complex<double>*,std::complex<double>*,int*);
-void zherk (char*,char*,int*,int*,double*,const std::complex<double>*,int*,double*,std::complex<double>*,int*);
-void ztrsm (char*,char*,char*,char*,int*,int*,std::complex<double>*,const std::complex<double>*,int*,std::complex<double>*,int*);
-void zpotrf(char*,int*,std::complex<double>*,int*,int*);
-}
-#endif
 
 namespace Oblio {
 
-// ---- BlasTraits<Val> -------------------------------------------------------
-template<class Val> struct BT;
+// ---------------------------------------------------------------------------------------------
+// The Fortran symbols. OBLIO_BLAS_UNDERSCORE selects the trailing-underscore convention, which
+// is what Accelerate and the reference BLAS use.
+// ---------------------------------------------------------------------------------------------
 
-template<> struct BT<double> {
-    static void gemm(char ta,char tb,int m,int n,int k,double a,const double*A,int lda,const double*B,int ldb,double b,double*C,int ldc){
 #ifdef OBLIO_BLAS_UNDERSCORE
-        dgemm_(&ta,&tb,&m,&n,&k,&a,A,&lda,B,&ldb,&b,C,&ldc);
+#define OBLIO_BLAS(name) name##_
 #else
-        dgemm (&ta,&tb,&m,&n,&k,&a,A,&lda,B,&ldb,&b,C,&ldc);
+#define OBLIO_BLAS(name) name
 #endif
-    }
-    static void syrk(char up,char tr,int n,int k,double a,const double*A,int lda,double b,double*C,int ldc){
-#ifdef OBLIO_BLAS_UNDERSCORE
-        dsyrk_(&up,&tr,&n,&k,&a,A,&lda,&b,C,&ldc);
-#else
-        dsyrk (&up,&tr,&n,&k,&a,A,&lda,&b,C,&ldc);
-#endif
-    }
-    // rankUpdate: A*A^T for real (syrk). Uniform interface used by Cholesky factor.
-    static void rankUpdate(char up,int n,int k,double a,const double*A,int lda,double b,double*C,int ldc){
-        syrk(up,'N',n,k,a,A,lda,b,C,ldc);
-    }
-    static void trsm(char s,char up,char ta,char d,int m,int n,double a,const double*A,int lda,double*B,int ldb){
-#ifdef OBLIO_BLAS_UNDERSCORE
-        dtrsm_(&s,&up,&ta,&d,&m,&n,&a,A,&lda,B,&ldb);
-#else
-        dtrsm (&s,&up,&ta,&d,&m,&n,&a,A,&lda,B,&ldb);
-#endif
-    }
-    static int potrf(char up,int n,double*A,int lda){
-        int info=0;
-#ifdef OBLIO_BLAS_UNDERSCORE
-        dpotrf_(&up,&n,A,&lda,&info);
-#else
-        dpotrf (&up,&n,A,&lda,&info);
-#endif
-        return info;
-    }
+
+using Cplx = std::complex<double>;
+
+extern "C" {
+
+// Cholesky of a symmetric (Hermitian) positive definite matrix.
+void OBLIO_BLAS(dpotrf)(const char* uplo, const int* n,
+                        double* a, const int* lda, int* info);
+void OBLIO_BLAS(zpotrf)(const char* uplo, const int* n,
+                        Cplx* a, const int* lda, int* info);
+
+// Triangular solve with multiple right-hand sides.
+void OBLIO_BLAS(dtrsm)(const char* side, const char* uplo, const char* transa, const char* diag,
+                       const int* m, const int* n,
+                       const double* alpha, const double* a, const int* lda,
+                       double* b, const int* ldb);
+void OBLIO_BLAS(ztrsm)(const char* side, const char* uplo, const char* transa, const char* diag,
+                       const int* m, const int* n,
+                       const Cplx* alpha, const Cplx* a, const int* lda,
+                       Cplx* b, const int* ldb);
+
+// Symmetric rank-k update: C := alpha A A^T + beta C.
+void OBLIO_BLAS(dsyrk)(const char* uplo, const char* trans,
+                       const int* n, const int* k,
+                       const double* alpha, const double* a, const int* lda,
+                       const double* beta, double* c, const int* ldc);
+void OBLIO_BLAS(zsyrk)(const char* uplo, const char* trans,
+                       const int* n, const int* k,
+                       const Cplx* alpha, const Cplx* a, const int* lda,
+                       const Cplx* beta, Cplx* c, const int* ldc);
+
+// Hermitian rank-k update: C := alpha A A^H + beta C. Note alpha and beta are *real*, which is
+// forced: the diagonal of a Hermitian matrix is real, so a complex scale would break the
+// symmetry. That is why the two herk() overloads below can share one signature.
+void OBLIO_BLAS(zherk)(const char* uplo, const char* trans,
+                       const int* n, const int* k,
+                       const double* alpha, const Cplx* a, const int* lda,
+                       const double* beta, Cplx* c, const int* ldc);
+
+// General matrix multiply: C := alpha op(A) op(B) + beta C.
+void OBLIO_BLAS(dgemm)(const char* transa, const char* transb,
+                       const int* m, const int* n, const int* k,
+                       const double* alpha, const double* a, const int* lda,
+                       const double* b, const int* ldb,
+                       const double* beta, double* c, const int* ldc);
+void OBLIO_BLAS(zgemm)(const char* transa, const char* transb,
+                       const int* m, const int* n, const int* k,
+                       const Cplx* alpha, const Cplx* a, const int* lda,
+                       const Cplx* b, const int* ldb,
+                       const Cplx* beta, Cplx* c, const int* ldc);
+
+}   // extern "C"
+
+// ---------------------------------------------------------------------------------------------
+// The scalar-type traits. One member, and it is the whole of what the scalar type decides.
+// ---------------------------------------------------------------------------------------------
+
+template<class Val>
+struct Blas;
+
+template<>
+struct Blas<double> {
+    // Conjugate-transpose. Over the reals conjugation is the identity, so this is the plain
+    // transpose, and 'T' and 'C' would in fact behave identically in dtrsm/dgemm. We write 'T'
+    // because it is what the operation *is* here, not because 'C' would fail.
+    static constexpr char conjTrans = 'T';
 };
 
-template<> struct BT<std::complex<double>> {
-    using C=std::complex<double>;
-    static void gemm(char ta,char tb,int m,int n,int k,C a,const C*A,int lda,const C*B,int ldb,C b,C*Cv,int ldc){
-#ifdef OBLIO_BLAS_UNDERSCORE
-        zgemm_(&ta,&tb,&m,&n,&k,&a,A,&lda,B,&ldb,&b,Cv,&ldc);
-#else
-        zgemm (&ta,&tb,&m,&n,&k,&a,A,&lda,B,&ldb,&b,Cv,&ldc);
-#endif
-    }
-    static void syrk(char up,char tr,int n,int k,C a,const C*A,int lda,C b,C*Cv,int ldc){
-#ifdef OBLIO_BLAS_UNDERSCORE
-        zsyrk_(&up,&tr,&n,&k,&a,A,&lda,&b,Cv,&ldc);
-#else
-        zsyrk (&up,&tr,&n,&k,&a,A,&lda,&b,Cv,&ldc);
-#endif
-    }
-    // rankUpdate: A*A^H for complex (herk). Uniform interface used by Cholesky factor.
-    // Note: zherk takes real alpha/beta, not complex.
-    static void rankUpdate(char up,int n,int k,C a,const C*A,int lda,C b,C*Cv,int ldc){
-        double ra=std::real(a), rb=std::real(b); char nt='N';
-#ifdef OBLIO_BLAS_UNDERSCORE
-        zherk_(&up,&nt,&n,&k,&ra,A,&lda,&rb,Cv,&ldc);
-#else
-        zherk (&up,&nt,&n,&k,&ra,A,&lda,&rb,Cv,&ldc);
-#endif
-    }
-    static void trsm(char s,char up,char ta,char d,int m,int n,C a,const C*A,int lda,C*B,int ldb){
-#ifdef OBLIO_BLAS_UNDERSCORE
-        ztrsm_(&s,&up,&ta,&d,&m,&n,&a,A,&lda,B,&ldb);
-#else
-        ztrsm (&s,&up,&ta,&d,&m,&n,&a,A,&lda,B,&ldb);
-#endif
-    }
-    static int potrf(char up,int n,C*A,int lda){
-        int info=0;
-#ifdef OBLIO_BLAS_UNDERSCORE
-        zpotrf_(&up,&n,A,&lda,&info);
-#else
-        zpotrf (&up,&n,A,&lda,&info);
-#endif
-        return info;
-    }
+template<>
+struct Blas<Cplx> {
+    static constexpr char conjTrans = 'C';
 };
 
-// ---- Custom oblio kernels (ported from 0.9 BlasLapack.cc) -----------------
+// ---------------------------------------------------------------------------------------------
+// The operations.
+// ---------------------------------------------------------------------------------------------
 
-// oblioComputeU: U(n x k) = D(diag k x k) * L^T(k x n)
-// L is n x k col-major (ldl), D is k x k col-major (ldd, only diagonal used),
-// U is k x n col-major (ldu).
-template<class Val>
-inline void oblioComputeU(int n,int k,
-    const Val*l,int ldl, Val*u,int ldu, const Val*d,int ldd)
-{
-    for(int i=0,lp=0,up=0,dp=0;i<k;i++,lp+=ldl,up++,dp+=ldd+1)
-        for(int j=0,lq=lp,uq=up;j<n;j++,lq++,uq+=ldu)
-            u[uq]=d[dp]*l[lq];
+// Cholesky of the leading n x n block: A = L L^H (which for real is L L^T). On return the lower
+// triangle holds L. info > 0 means the leading minor of that order is not positive definite,
+// which is how a bad pivot is reported.
+inline void potrf(char uplo, int n, double* a, int lda, int* info) {
+    OBLIO_BLAS(dpotrf)(&uplo, &n, a, &lda, info);
+}
+inline void potrf(char uplo, int n, Cplx* a, int lda, int* info) {
+    OBLIO_BLAS(zpotrf)(&uplo, &n, a, &lda, info);
 }
 
-// oblioGemm: A(n x n, lower tri) -= L(n x k) * U(k x n)
-template<class Val>
-inline void oblioGemm(int n,int k,
-    const Val*l,int ldl, const Val*u,int ldu, Val*a,int lda)
-{
-    if(n==1){Val a1=-1,b1=1; BT<Val>::gemm('N','N',1,1,k,a1,l,ldl,u,ldu,b1,a,lda);return;}
-    int n1=n/2,n2=n-n1;
-    const Val*l11=l,*l21=l+n1,*u11=u,*u12=u+ldu*n1;
-    Val*a11=a,*a21=a+n1,*a22=a21+lda*n1;
-    oblioGemm(n1,k,l11,ldl,u11,ldu,a11,lda);
-    Val am1=-1,b1=1;
-    BT<Val>::gemm('N','N',n2,n1,k,am1,l21,ldl,u11,ldu,b1,a21,lda);
-    oblioGemm(n2,k,l21,ldl,u12,ldu,a22,lda);
+// Triangular solve. B := alpha op(A)^-1 B, or B := alpha B op(A)^-1 for side == 'R'.
+inline void trsm(char side, char uplo, char transa, char diag,
+                 int m, int n, double alpha, const double* a, int lda,
+                 double* b, int ldb) {
+    OBLIO_BLAS(dtrsm)(&side, &uplo, &transa, &diag, &m, &n, &alpha, a, &lda, b, &ldb);
+}
+inline void trsm(char side, char uplo, char transa, char diag,
+                 int m, int n, Cplx alpha, const Cplx* a, int lda,
+                 Cplx* b, int ldb) {
+    OBLIO_BLAS(ztrsm)(&side, &uplo, &transa, &diag, &m, &n, &alpha, a, &lda, b, &ldb);
 }
 
-// oblioPotrfCC: recursive blocked Cholesky (no LAPACK required).
-template<class Val>
-inline int oblioPotrfCC(int n,Val*a,int lda)
-{
-    if(n==1){if(std::real(*a)<=0)return 1;return 0;}
-    int n1=n/2,n2=n-n1;
-    Val*a11=a,*a12=a+lda*n1,*a21=a+n1,*a22=a21+lda*n1;
-    int info=oblioPotrfCC(n1,a11,lda); if(info>0)return info;
-    Val one=1; BT<Val>::trsm('R','U','N','N',n2,n1,one,a11,lda,a21,lda);
-    oblioComputeU(n2,n1,a21,lda,a12,lda,a11,lda);
-    oblioGemm(n2,n1,a21,lda,a12,lda,a22,lda);
-    return oblioPotrfCC(n2,a22,lda);
+// Rank-k update with a CONJUGATE transpose: C := alpha A A^H + beta C, taking the lower triangle.
+//
+// This is the operation Cholesky needs, in both scalar types. For double, A^H is A^T and dsyrk_
+// is the routine; for complex it is genuinely conjugate and zherk_ is. The engine asks for the
+// operation and never learns which routine ran, which is precisely the point.
+//
+// alpha and beta are real in both overloads. For zherk_ that is forced by the mathematics (see
+// above); for dsyrk_ it is simply what the routine takes. The signatures therefore agree, and one
+// call site serves both.
+inline void herk(char uplo, char trans, int n, int k,
+                 double alpha, const double* a, int lda,
+                 double beta, double* c, int ldc) {
+    OBLIO_BLAS(dsyrk)(&uplo, &trans, &n, &k, &alpha, a, &lda, &beta, c, &ldc);
+}
+inline void herk(char uplo, char trans, int n, int k,
+                 double alpha, const Cplx* a, int lda,
+                 double beta, Cplx* c, int ldc) {
+    OBLIO_BLAS(zherk)(&uplo, &trans, &n, &k, &alpha, a, &lda, &beta, c, &ldc);
 }
 
-// oblioPotrfLDL: same but with diagonal perturbation (StaticLDL).
-template<class Val>
-inline int oblioPotrfLDL(int n,Val*a,int lda,RVal eps,int*npert)
-{
-    if(n==1){if(std::abs(*a)<std::abs(eps)){*a=Val{eps};(*npert)++;}return 0;}
-    int n1=n/2,n2=n-n1;
-    Val*a11=a,*a12=a+lda*n1,*a21=a+n1,*a22=a21+lda*n1;
-    int info=oblioPotrfLDL(n1,a11,lda,eps,npert); if(info>0)return info;
-    Val one=1; BT<Val>::trsm('R','U','N','N',n2,n1,one,a11,lda,a21,lda);
-    oblioComputeU(n2,n1,a21,lda,a12,lda,a11,lda);
-    oblioGemm(n2,n1,a21,lda,a12,lda,a22,lda);
-    return oblioPotrfLDL(n2,a22,lda,eps,npert);
+// Rank-k update with a PLAIN transpose: C := alpha A A^T + beta C, taking the lower triangle.
+//
+// Not used by Cholesky, and deliberately so. It is what LDL^T wants, where the complex case is
+// complex-symmetric and a plain transpose is the correct operation. Kept here so that when LDL
+// arrives it asks for this explicitly, rather than Cholesky reaching for it by accident, which is
+// exactly the mistake 0.9 makes.
+inline void syrk(char uplo, char trans, int n, int k,
+                 double alpha, const double* a, int lda,
+                 double beta, double* c, int ldc) {
+    OBLIO_BLAS(dsyrk)(&uplo, &trans, &n, &k, &alpha, a, &lda, &beta, c, &ldc);
+}
+inline void syrk(char uplo, char trans, int n, int k,
+                 Cplx alpha, const Cplx* a, int lda,
+                 Cplx beta, Cplx* c, int ldc) {
+    OBLIO_BLAS(zsyrk)(&uplo, &trans, &n, &k, &alpha, a, &lda, &beta, c, &ldc);
 }
 
+// General matrix multiply. The transpose characters are the caller's, so a Cholesky call site
+// passes Blas<Val>::conjTrans and an LDL one passes 'T'.
+inline void gemm(char transa, char transb, int m, int n, int k,
+                 double alpha, const double* a, int lda,
+                 const double* b, int ldb,
+                 double beta, double* c, int ldc) {
+    OBLIO_BLAS(dgemm)(&transa, &transb, &m, &n, &k, &alpha, a, &lda, b, &ldb, &beta, c, &ldc);
+}
+inline void gemm(char transa, char transb, int m, int n, int k,
+                 Cplx alpha, const Cplx* a, int lda,
+                 const Cplx* b, int ldb,
+                 Cplx beta, Cplx* c, int ldc) {
+    OBLIO_BLAS(zgemm)(&transa, &transb, &m, &n, &k, &alpha, a, &lda, b, &ldb, &beta, c, &ldc);
+}
+
+// ---------------------------------------------------------------------------------------------
+// What BLAS does not provide.
+//
+// LDL^T needs three things BLAS has no routine for, so 0.9 wrote them and we port them. They live
+// here, with the BLAS wrappers, because they are dense block kernels built on BLAS and belong
+// beside it, which is where 0.9 keeps them too.
+//
+// Why LAPACK cannot help: there is **no unpivoted LDL^T in LAPACK**. `?sytrf` is Bunch-Kaufman,
+// which pivots, and pivoting is precisely what a *static* factorization does not do. So the
+// kernel is ours.
+//
+// The storage, which is the thing to hold in mind. In a factored block:
+//
+//     the diagonal        holds D          (where L's implicit 1s would be)
+//     the lower triangle  holds L          unit lower triangular
+//     the upper triangle  holds U = D L^T  (or D L^H)
+//
+// So an LDL block uses the whole rectangle, where Cholesky leaves the upper triangle as zeros.
+// U is not redundant: the recursion needs D L^T in two places (to solve for the next L, and to
+// form the Schur complement), and computing it once and keeping it is cheaper than recomputing.
+//
+// The T/H distinction runs through all three. For `Factorization::StaticLDLT` the transpose is
+// plain and D comes out complex; for `StaticLDLH` it is conjugate and D comes out real. Over the
+// reals they are the same computation.
+// ---------------------------------------------------------------------------------------------
+
+// Unpivoted LDL of a dense n x n block, in place. 0.9's OBLIO_POTRF2.
+//
+// Recursive: split in half, factor the leading block, solve for the off-diagonal, form its upper
+// counterpart, take the Schur complement, recurse. The base case is where the two variants of
+// 0.9's kernel differ, and it is the only place they differ:
+//
+//   OBLIO_POTRF1   fails if the pivot is not positive        (its stand-in for Cholesky)
+//   OBLIO_POTRF2   replaces a tiny pivot and counts it       (static LDL)
+//
+// We need only the second. **Perturbation is not an optional refinement**: a static factorization
+// cannot pivot, so a tiny pivot has no remedy but replacement. We then factor a slightly different
+// matrix, and say how many entries we moved, which is honest. `perturbation` is the threshold and
+// the replacement value both; `numPerturbations` counts them.
+//
+// Returns 0 always (unlike Cholesky, which can fail): there is no positive-definiteness to violate.
 template<class Val>
-inline RVal absv(Val v){return std::abs(v);}
+int ldl(int n, Val* a, int lda, double perturbation, int* numPerturbations, bool hermitian);
 
-// conjTrans<Val>() — returns the BLAS transpose character for the
-// conjugate-transpose of a Val matrix:
-//   real:    'T'  (transpose == conjugate-transpose)
-//   complex: 'C'  (conjugate-transpose)
-// Needed because zpotrf produces L s.t. A = L*L^H, so factor and
-// backward solve must use L^H (not L^T) for complex types.
-template<class Val> inline char conjTrans() { return 'T'; }
-template<> inline char conjTrans<std::complex<double>>() { return 'C'; }
+// U := D L^T (or D L^H), into the upper triangle. 0.9's OBLIO_COMPUTE_U.
+//
+// `l` is the n x k lower block, `d` the diagonal of the factored leading block, `u` the k x n
+// upper block to fill. Note U is the *transpose* shape of L, which is why the index walk is what
+// it is.
+template<class Val>
+void formUpper(int n, int k, const Val* l, int ldl, Val* u, int ldu,
+               const Val* d, int ldd, bool hermitian);
 
-// conjv<Val>(x) — conjugate that stays in type Val.
-// For real Val, conj is identity. For complex, uses std::conj.
-template<class Val> inline Val conjv(Val x) { return x; }
-template<> inline std::complex<double> conjv(std::complex<double> x) { return std::conj(x); }
+// A -= L U, filling **only the lower triangle**, because the product is symmetric. 0.9's
+// OBLIO_GEMM.
+//
+// BLAS has no such routine: `syrk` does A A^T, and there is no "A B with the result known
+// symmetric". So this recurses, calling a plain GEMM on the off-diagonal blocks (which are not
+// symmetric) and itself on the diagonal ones (which are).
+//
+// It bottoms out at n == 1, which means one BLAS call per scalar on the diagonal. That is 0.9's
+// structure and we port it; whether to bottom out earlier is a performance question for later, not
+// a correctness one.
+template<class Val>
+void gemmLower(int n, int k, const Val* l, int ldl, const Val* u, int ldu, Val* a, int lda);
 
-} // namespace Oblio
+}   // namespace Oblio

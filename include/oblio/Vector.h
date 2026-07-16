@@ -1,53 +1,69 @@
 #pragma once
+
+// Vector.h - a dense vector of scalars, one column.
+//
+// The right-hand side of a solve, and its solution. Nothing more: no arithmetic, no BLAS, no
+// cleverness. The engines do the work.
+//
+// **One column, for now.** 0.9 has two vector classes, and the split is principled: with a single
+// right-hand side there is no level-3 BLAS to be had, so its solve is scalar and works directly on
+// the vector with indirect indexing. With *many* right-hand sides a supernode's rows become a
+// dense block, and the solve becomes TRSM and GEMM, which is worth the gather and scatter that
+// packing demands. 0.9's `SingleVector` and `MultipleVector` are those two cases. 10.12 kept only
+// the first, and so do we.
+//
+// A multi-column version is a real thing to add later, not a hypothetical: it is where the solve
+// phase gets its level-3 BLAS. But it is a performance path, not a correctness one, and the single
+// column is what a residual check needs.
+
 #include "oblio/Types.h"
-#include <vector>
+
 #include <complex>
-#include <initializer_list>
+#include <cstddef>
+#include <vector>
 
 namespace Oblio {
 
-// Vector<Val> — dense vector of length n, owns its storage.
-// Thin wrapper over a contiguous Val array; provides the interface
-// consumed by SolveEngine and OblioEngine.
+class MultiplyEngine;
+class SolveEngine;
 
 template<class Val>
 class Vector {
 public:
-    // ---- construction ----
-    Vector();
-    explicit Vector(Size n);                      // zero-initialised
-    Vector(Size n, Val fill);                     // filled with fill
-    Vector(Size n, const Val* data);              // copy from raw array
-    Vector(std::initializer_list<Val> il);
-    explicit Vector(const std::vector<Val>& v);   // copy from std::vector
-    Vector(const Vector&);
-    Vector(Vector&&) noexcept;
-    Vector& operator=(const Vector&);
-    Vector& operator=(Vector&&) noexcept;
-    ~Vector() = default;
+    Vector() = default;
 
-    // ---- size / data access ----
-    Size        size()                  const;
-    bool        empty()                 const;
-    Val*        data();
-    const Val*  data()                  const;
-    Val&        operator[](Size i);
-    const Val&  operator[](Size i)      const;
+    // Defined in Vector.cpp, not here: both guard the size (via checkIndexRange) and so can throw,
+    // and keeping them out of the header keeps that exception path out of the translation units that
+    // compile the hot multiply and solve kernels (an in-header throw was measured to perturb such a
+    // loop's codegen). The default constructor and the inline accessors below stay in the header.
+    explicit Vector(std::size_t size);
+    Vector(std::size_t size, std::vector<Val> val);
 
-    // ---- mutators ----
-    void        resize(Size n);                   // preserves existing values up to min(old,new)
-    void        resize(Size n, Val fill);         // new slots filled with fill
-    void        setZero();
-    void        fill(Val v);
+    std::size_t size() const { return mSize; }
 
-    // ---- conversion ----
-    std::vector<Val> toStdVector()      const;
+    const std::vector<Val>& val() const { return mVal; }
+    std::vector<Val>&       val()       { return mVal; }
+
+    Val  operator[](std::size_t i) const { return mVal[i]; }
+    Val& operator[](std::size_t i)       { return mVal[i]; }
+
+    // The two-norm. Used for residuals, where the ratio is what matters, so the square root is
+    // worth taking rather than leaving the caller to.
+    double norm() const {
+        double s = 0;
+        for (const Val& v : mVal)
+            s += std::norm(v);   // |v|^2, for both double and complex
+        return std::sqrt(s);
+    }
 
 private:
-    std::vector<Val> mData;
+    std::size_t      mSize = 0;
+    std::vector<Val> mVal;
+
+    friend class MultiplyEngine;
+    friend class SolveEngine;
 };
 
-// Explicit instantiation declarations — definitions in Vector.cc
 extern template class Vector<double>;
 extern template class Vector<std::complex<double>>;
 

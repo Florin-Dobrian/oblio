@@ -117,15 +117,8 @@ void ElmForestEngine::finalizeLinks(ElmForest& f) const {
     // For each supernode in decreasing order, front-insert it into its parent's child list,
     // or into the root list if it has no parent. Front-insertion of decreasing labels leaves
     // both the child lists and the root list in increasing label order.
-    //
-    // The loop counts down rather than indexing down. A std::size_t cannot express a negative
-    // guard, so `for (jj = supSize - 1; jj >= 0; --jj)` never terminates: jj wraps to SIZE_MAX
-    // instead of going below zero. Counting the supernodes remaining, from supSize down to 1,
-    // keeps the guard in a range std::size_t can represent, and the index jj = t - 1 is then
-    // always in bounds.
-    for (std::size_t t = f.mSupSize; t > 0; --t) {
-        const std::int32_t jj = static_cast<std::int32_t>(t - 1);   // supernode inserted
-        const std::int32_t kk = f.mParent[jj];                      // its parent, or NIL
+    for (std::int32_t jj = static_cast<std::int32_t>(f.mSupSize) - 1; jj >= 0; --jj) {
+        const std::int32_t kk = f.mParent[jj];   // its parent, or NIL
 
         if (kk == NIL) {
             // jj is a tree root.
@@ -292,8 +285,7 @@ void ElmForestEngine::compressFundamental(ElmForest& f) const {
     // The column convention lj < lk survives, since a parent's column is numbered above its
     // child's, and the assignment then reads as the fact it derives: the supernode of lj's
     // parent column is the parent of lj's supernode.
-    for (std::size_t t = size; t > 0; --t) {
-        const std::int32_t lj  = static_cast<std::int32_t>(t - 1);   // column scanned
+    for (std::int32_t lj = static_cast<std::int32_t>(size) - 1; lj >= 0; --lj) {
         const std::int32_t jj = idxToSupIdx[lj];                     // its supernode
 
         ++frontSize[jj];   // every column of jj adds one to it
@@ -407,8 +399,7 @@ void ElmForestEngine::compressThreshold(ElmForest& f, std::size_t threshold) con
     // Resolve chains: a supernode may have been absorbed into one that was itself absorbed.
     // Decreasing order, so an absorber (whose label exceeds its children's) is resolved before
     // the children that point at it.
-    for (std::size_t t = supSize; t > 0; --t) {
-        const std::int32_t jj = static_cast<std::int32_t>(t - 1);
+    for (std::int32_t jj = static_cast<std::int32_t>(supSize) - 1; jj >= 0; --jj) {
         const std::int32_t kk = supOldToNew[jj];
         if (kk != jj)
             supOldToNew[jj] = supOldToNew[kk];
@@ -441,8 +432,7 @@ void ElmForestEngine::compressThreshold(ElmForest& f, std::size_t threshold) con
     std::vector<std::size_t>  newUpdateSize(numSup, 0);
     std::vector<bool>         seen(numSup, false);
 
-    for (std::size_t t = supSize; t > 0; --t) {
-        const std::int32_t jj    = static_cast<std::int32_t>(t - 1);
+    for (std::int32_t jj = static_cast<std::int32_t>(supSize) - 1; jj >= 0; --jj) {
         const std::int32_t jjNew = supOldToNew[jj];
 
         newFrontSize[jjNew] += f.mFrontSize[jj];

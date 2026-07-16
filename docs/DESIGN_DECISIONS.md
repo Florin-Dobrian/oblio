@@ -135,6 +135,38 @@ is `n - 1 = 2^31 - 2`), sacrificed to keep the `int32` entity-loop convention so
 guarded constructors reject `size > MAX_IDX` (not `>=`), and it is the same ceiling nnz(A) meets from
 the other direction.
 
+**The cap is a forward-iteration limit; a reverse loop could reach `2^31`.** The overflow above is
+specific to counting up. A reverse entity loop,
+`for (std::int32_t jj = static_cast<std::int32_t>(size) - 1; jj >= 0; --jj)`, has no such problem: `jj`
+runs from `size - 1` down to the exit value `-1`, and both ends fit `int32` even at `size = 2^31` (the
+top is `2^31 - 1 = INT32_MAX`, the bottom is `-1`). The asymmetry is that each direction, on exit,
+spills one step past its range of valid indices, and the two spills land on opposite sides of the
+`int32` range: the reverse loop spills to `-1`, which `int32` represents fine, while the forward loop
+spills to `size` itself, which at `size = 2^31` is `2^31`, one past `INT32_MAX` and not representable.
+So the exit value, `-1` counting down versus `n` counting up, is what decides whether `n = 2^31` is
+reachable. A codebase iterating entities purely in reverse could cap at `2^31`; ours iterates them
+predominantly forward, so `2^31 - 1` is the honest cap and we keep it.
+
+**The `size_t` counter trick, declined in both directions.** The spill can be absorbed by holding the
+counter in `size_t`, which represents the spill value that `int32` cannot, and converting to an `int32`
+index inside the body where only valid values occur. It takes a different form each way. Reverse:
+`for (std::size_t t = size; t > 0; --t) { const std::int32_t j = static_cast<std::int32_t>(t - 1); ... }`,
+with `t` walking `size` down to `1` and `j = t - 1` the index. Forward:
+`for (std::size_t t = 0; t < size; ++t) { const std::int32_t j = static_cast<std::int32_t>(t); ... }`,
+with `t` walking `0` up to `size` and `j = t` the index. In each, `t` absorbs the spill value (both
+`size` and `0` fit `size_t`) and `j` converts only the valid indices `0 .. 2^31 - 1`, never the spill,
+since the spill sits at the exit test after the last body. So either form would lift the cap to `2^31`.
+
+We use neither, for opposite reasons. The reverse form is unnecessary: a direct `int32` reverse loop
+already reaches `2^31` (its spill is `-1`, which `int32` holds), so `t` buys nothing and only adds a
+variable. That is why the reverse countdowns in ElmForestEngine and SolveEngine were rewritten from this
+`t` form to the direct `int32` reverse loop. The forward form is unwanted: it is the only way a forward
+loop reaches `2^31` (a direct `int32` forward loop cannot), but it would add a second variable and a
+cast to every entity loop, permanently and everywhere, to recover a single index at the very top of the
+range that no real problem reaches (the memory wall sits far below it). Either way the answer is the
+direct `int32` loop, and one unusable index is a cheap price for keeping every loop in its clean
+one-variable form, which is the shape the whole convention is built on.
+
 **int32 indices and size_t offsets are a self-consistent CSC pairing.** A fully dense matrix at int32
 dimension has `nnz = n^2 <= (2^31)^2 = 2^62`, and `size_t` holds `2^64`, so `colPtr[n] = nnz` is
 always representable. The condition is `offset_bits >= 2 * index_bits`, and `2 * 32 = 64` fits

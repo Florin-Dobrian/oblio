@@ -33,7 +33,7 @@ bool MultiplyEngine::residual(const SparseMatrix<Val>& A, const Vector<Val>& x,
         return false;
     if (!compute(A, x, r))
         return false;
-    for (std::size_t i = 0; i < r.mSize; ++i)
+    for (std::int32_t i = 0; i < static_cast<std::int32_t>(r.mSize); ++i)
         r.mVal[i] -= b.mVal[i];
     return true;
 }

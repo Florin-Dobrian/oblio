@@ -44,7 +44,7 @@ bool OrderEngine::compute(const std::vector<std::size_t>&  colPtr,
     for (std::int32_t aj = 0; aj < static_cast<std::int32_t>(size); ++aj)
         for (std::size_t cp = colPtr[aj]; cp < colPtr[aj + 1]; ++cp)
             if (rowIdx[cp] != aj) colPtrOff[aj + 1]++;
-    for (std::size_t j = 0; j < size; ++j) colPtrOff[j + 1] += colPtrOff[j];
+    for (std::int32_t aj = 0; aj < static_cast<std::int32_t>(size); ++aj) colPtrOff[aj + 1] += colPtrOff[aj];
     std::vector<std::int32_t> rowIdxOff(colPtrOff[size]);
     std::vector<std::size_t> cur(colPtrOff.begin(), colPtrOff.end());
     for (std::int32_t aj = 0; aj < static_cast<std::int32_t>(size); ++aj)

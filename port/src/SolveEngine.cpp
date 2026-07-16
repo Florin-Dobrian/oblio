@@ -81,8 +81,7 @@ void SolveEngine::backward(const NumFactorStatic<Val>& f, Vector<Val>& y) const 
 
     // Descending, the mirror of the forward pass: a supernode's columns are solved only once
     // everything below them is known.
-    for (std::size_t t = f.mSupSize; t > 0; --t) {
-        const std::int32_t  kk        = static_cast<std::int32_t>(t - 1);
+    for (std::int32_t kk = static_cast<std::int32_t>(f.mSupSize) - 1; kk >= 0; --kk) {
         const std::size_t   frontSize = f.mFrontSize[kk];
         const std::size_t   numIdx    = frontSize + f.mUpdateSize[kk];
         const std::int32_t* rowIdx    = f.mRowIdx.data() + f.mSupPtr[kk];

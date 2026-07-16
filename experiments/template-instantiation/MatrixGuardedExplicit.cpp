@@ -1,4 +1,4 @@
-// MatrixGuardedExplicit.cpp — Guarded explicit: plain explicit + extern template guard
+// MatrixGuardedExplicit.cpp - Guarded explicit: plain explicit + extern template guard
 //
 // Full template implementation lives here, not in the header. This translation
 // unit is compiled once. The two explicit instantiations at the bottom cause
@@ -39,7 +39,7 @@ std::size_t Matrix<Val>::rows() const { return mRows; }
 template<class Val>
 std::size_t Matrix<Val>::cols() const { return mCols; }
 
-// ── Explicit instantiations ───────────────────────────────────────────────
+// -- Explicit instantiations -----------------------------------------------
 // Compiled once. All other .cpp files link against these.
 // To add float support: append one line below and one extern template in
 // MatrixGuardedExplicit.h. No other files need to change.

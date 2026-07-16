@@ -9,7 +9,7 @@ part of the main Oblio build.
 Oblio's value-dependent classes are templated on the scalar type but only ever used
 with a small, fixed set (`double`, `complex<double>`). How should those templates be
 compiled? This example builds the same tiny stack, `Matrix`, `Vector`, and a
-`MultiplyEngine` doing dense `y = A·x`, three ways, and shows they produce identical
+`MultiplyEngine` doing dense `y = A*x`, three ways, and shows they produce identical
 results while differing only in *how* the code is compiled.
 
 ## The three variants

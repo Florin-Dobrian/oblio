@@ -1,12 +1,12 @@
 #pragma once
 
-// MultiplyEngineGuardedExplicit.h — Guarded explicit: plain explicit + extern template guard
+// MultiplyEngineGuardedExplicit.h - Guarded explicit: plain explicit + extern template guard
 //
 // MultiplyEngine itself is a non-templated class. Only its Multiply member
 // function is a template, so extern template applies at the function level
 // rather than the class level. The function body lives in MultiplyEngineGuardedExplicit.cpp.
 //
-// Note: this is the pattern that applies to most of Oblio's engine classes —
+// Note: this is the pattern that applies to most of Oblio's engine classes,
 // the class itself does not need to be templated, only the methods that touch
 // Val-typed data.
 

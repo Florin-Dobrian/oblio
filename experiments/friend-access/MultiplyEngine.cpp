@@ -31,7 +31,7 @@ void blasGemvTrans(int blasM, int blasN, const double* a, const double* x, doubl
 }
 void blasGemvTrans(int blasM, int blasN, const std::complex<double>* a,
                    const std::complex<double>* x, std::complex<double>* y) {
-    const char trans = 'T';   // 'T' = transpose, NOT 'C' — no conjugation
+    const char trans = 'T';   // 'T' = transpose, NOT 'C', no conjugation
     const int  one   = 1;
     const std::complex<double> alpha(1.0, 0.0), beta(0.0, 0.0);
     zgemv_(&trans, &blasM, &blasN, &alpha, a, &blasM, x, &one, &beta, y, &one);
@@ -78,7 +78,7 @@ Vector<Val> MultiplyEngine::multiplyDirectly(const Matrix<Val>& A,
 
 // BLAS path: same friend access to the raw block, then gemv. Our matrix is row-major
 // (rows x cols); the same buffer is column-major A^T (cols x rows). gemv with TRANS='T'
-// on that computes (A^T)^T x = A x — so BLAS M = cols, N = rows, lda = cols.
+// on that computes (A^T)^T x = A x, so BLAS M = cols, N = rows, lda = cols.
 // (The real solver stores dense blocks column-major to feed BLAS with no transpose;
 // the transpose here is only because this example reuses the row-major Matrix.)
 template<class Val>

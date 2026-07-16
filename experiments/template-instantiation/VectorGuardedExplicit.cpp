@@ -1,4 +1,4 @@
-// VectorGuardedExplicit.cpp — Guarded explicit: plain explicit + extern template guard
+// VectorGuardedExplicit.cpp - Guarded explicit: plain explicit + extern template guard
 
 #include "VectorGuardedExplicit.h"
 #include <cassert>
@@ -28,7 +28,7 @@ const Val& Vector<Val>::operator[](std::size_t i) const {
 template<class Val>
 std::size_t Vector<Val>::size() const { return mSize; }
 
-// ── Explicit instantiations ───────────────────────────────────────────────
+// -- Explicit instantiations -----------------------------------------------
 
 template class Vector<double>;
 template class Vector<std::complex<double>>;

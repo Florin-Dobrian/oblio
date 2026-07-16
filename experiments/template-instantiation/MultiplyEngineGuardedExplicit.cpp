@@ -1,9 +1,9 @@
-// MultiplyEngineGuardedExplicit.cpp — Guarded explicit: plain explicit + extern template guard
+// MultiplyEngineGuardedExplicit.cpp - Guarded explicit: plain explicit + extern template guard
 //
 // The Multiply function body is defined here and compiled once per scalar
 // type. Other translation units that call Multiply<double>() or
 // Multiply<complex<double>>() resolve the symbol from this object file at
-// link time — they never compile the function body themselves.
+// link time, they never compile the function body themselves.
 
 #include "MultiplyEngineGuardedExplicit.h"
 #include <cassert>
@@ -26,7 +26,7 @@ Vector<Val> MultiplyEngine::Multiply(const Matrix<Val>& A,
     return y;
 }
 
-// ── Explicit instantiations ───────────────────────────────────────────────
+// -- Explicit instantiations -----------------------------------------------
 // Each line below causes the compiler to emit a complete, linkable definition
 // of Multiply for that scalar type. This is the only place it is compiled.
 

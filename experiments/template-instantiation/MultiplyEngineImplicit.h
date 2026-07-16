@@ -1,6 +1,6 @@
 #pragma once
 
-// MultiplyEngineImplicit.h — Implicit: template inclusion (body in header)
+// MultiplyEngineImplicit.h - Implicit: template inclusion (body in header)
 //
 // The Multiply member function template is defined entirely here. Any .cpp
 // that includes this header and calls Multiply<double>() or

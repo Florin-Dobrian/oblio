@@ -1,6 +1,6 @@
 #pragma once
 
-// MatrixGuardedExplicit.h — Guarded explicit: plain explicit + extern template guard
+// MatrixGuardedExplicit.h - Guarded explicit: plain explicit + extern template guard
 //
 // The header contains only the class declaration. The implementation lives in
 // MatrixGuardedExplicit.cpp, which is compiled exactly once. extern template tells every

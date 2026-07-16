@@ -1,15 +1,15 @@
-// test_multiply.cpp — the Matrix / Vector / MultiplyEngine template-instantiation
+// test_multiply.cpp - the Matrix / Vector / MultiplyEngine template-instantiation
 // example (dense mat-vec, exercised across all three instantiation strategies).
 //
 // ONE source, THREE build configurations selected by macro (TI = template
 // instantiation). The point of the example is that the variants differ only in HOW
-// the code is compiled, never in WHAT it computes — so all builds must produce
+// the code is compiled, never in WHAT it computes, so all builds must produce
 // identical results.
 //
-//   -DOBLIO_TI_IMPLICIT        : implicit — body in header. Nothing to link.
-//   -DOBLIO_TI_PLAIN_EXPLICIT  : plain explicit — bodies in .cpp, header signatures
+//   -DOBLIO_TI_IMPLICIT        : implicit - body in header. Nothing to link.
+//   -DOBLIO_TI_PLAIN_EXPLICIT  : plain explicit - bodies in .cpp, header signatures
 //                                only. Link the three _PlainExplicit.cpp.
-//   -DOBLIO_TI_GUARDED_EXPLICIT: guarded explicit — plain explicit + extern template
+//   -DOBLIO_TI_GUARDED_EXPLICIT: guarded explicit - plain explicit + extern template
 //                                guard. Link the three _GuardedExplicit.cpp.
 //
 // Build & run (from the example folder), e.g.:
@@ -23,7 +23,7 @@
 // Or just: make test   (builds and runs all three)
 //
 // Bonus check: build the plain explicit or guarded explicit variant WITHOUT its
-// .cpp files. Both must fail at link with undefined references — proof the bodies
+// .cpp files. Both must fail at link with undefined references, proof the bodies
 // live only in the .o files.
 
 #include <complex>
@@ -95,7 +95,7 @@ int main() {
 
     std::cout << "=== MultiplyEngine example (" OBLIO_TI_VARIANT ") ===" << std::endl;
 
-    // Real, non-square, distinct entries — catches row/col and index slips.
+    // Real, non-square, distinct entries, catches row/col and index slips.
     // A = [[1,2],[3,4],[5,6]] (3x2), x = [7,8]  ->  y = [23,53,83]
     checkMultiply<double>("real 3x2   ", 3, 2,
         {1,2, 3,4, 5,6}, {7,8}, {23,53,83});

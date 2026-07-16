@@ -1,6 +1,6 @@
 #pragma once
 
-// VectorImplicit.h — Implicit: template inclusion (body in header)
+// VectorImplicit.h - Implicit: template inclusion (body in header)
 //
 // Same pattern as MatrixImplicit.h. Full implementation in the header.
 // Implicitly instantiated for every Val type in every .cpp that includes this.

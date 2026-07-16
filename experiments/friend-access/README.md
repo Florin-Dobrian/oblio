@@ -43,8 +43,8 @@ make clean
 
 - All three methods agree with each other and with hand-computed results (real +
   complex, the complex path uses gemv `TRANS='T'`, i.e. no conjugation).
-- On a 2000×2000 dense matrix, `multiplyDirectly` runs several times faster than
-  `multiplyByApi`, measured ~6× on Apple Silicon (M4 / AppleClang, release), ~3× on
+- On a 2000x2000 dense matrix, `multiplyDirectly` runs several times faster than
+  `multiplyByApi`, measured ~6x on Apple Silicon (M4 / AppleClang, release), ~3x on
   x86 / g++. It varies with how well the machine vectorizes the direct path: the API
   path stays call-bound (~17 ms) on both, while the direct path is much faster on
   stronger SIMD (~3 ms on the M4), so the ratio grows on better hardware.
@@ -56,14 +56,14 @@ make clean
 - `multiplyWithBlas` vs `multiplyDirectly` depends heavily on the BLAS. With
   reference (Netlib) BLAS the two tie (reference gemv is an unoptimized loop). With a
   tuned BLAS the difference is large: on Apple Silicon (M4, Accelerate) `multiplyWithBlas`
-  ran **~0.5 ms vs ~3.2 ms** for the hand loop, **~6× faster**, and ~36× over the API
+  ran **~0.5 ms vs ~3.2 ms** for the hand loop, **~6x faster**, and ~36x over the API
   path. Mat-vec is bandwidth-bound *per core*, but Accelerate breaks past a single
   core's ceiling (multithreading across cores, plus better prefetch/blocking), which a
   single-threaded hand loop can't. So even for mat-vec, handing the raw block to BLAS
   wins decisively on real hardware.
 - Takeaway for the standard: the hand-written direct loop is a good teaching baseline
   and fallback, but wherever a BLAS call exists, the `friend`-obtained raw block should
-  go to BLAS, not a hand loop. The advantage only grows for the compute-bound O(n³)
+  go to BLAS, not a hand loop. The advantage only grows for the compute-bound O(n^3)
   kernels (`dgemm`/`syrk`/`trsm`) the factorization actually leans on.
 
 ## Not a verdict against the API

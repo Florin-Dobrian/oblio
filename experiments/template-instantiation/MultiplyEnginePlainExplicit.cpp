@@ -1,8 +1,8 @@
-// MultiplyEnginePlainExplicit.cpp — Plain explicit: bodies in .cpp, header signatures only
+// MultiplyEnginePlainExplicit.cpp - Plain explicit: bodies in .cpp, header signatures only
 //
 // The Multiply function body is defined here and compiled once per scalar type.
 // Other translation units that call Multiply<double>() or Multiply<complex<double>>()
-// see only the declaration in the header, so they cannot implicitly instantiate —
+// see only the declaration in the header, so they cannot implicitly instantiate,
 // they resolve the symbol from this object file at link time.
 
 #include "MultiplyEnginePlainExplicit.h"
@@ -26,7 +26,7 @@ Vector<Val> MultiplyEngine::Multiply(const Matrix<Val>& A,
     return y;
 }
 
-// ── Explicit instantiations ───────────────────────────────────────────────
+// -- Explicit instantiations -----------------------------------------------
 // Each line forces a complete, linkable definition of Multiply for that scalar
 // type. This is the only place it is compiled. Adding float support = one more
 // line here; nothing changes in the header.

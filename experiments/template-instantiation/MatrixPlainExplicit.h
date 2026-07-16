@@ -1,17 +1,17 @@
 #pragma once
 
-// MatrixPlainExplicit.h — Plain explicit: bodies in .cpp, header signatures only
+// MatrixPlainExplicit.h - Plain explicit: bodies in .cpp, header signatures only
 //
 // The header contains only the class declaration; the implementation lives in
 // MatrixPlainExplicit.cpp. Because no member bodies are visible here, a translation unit
-// that includes this header cannot implicitly instantiate Matrix<Val> — it emits
+// that includes this header cannot implicitly instantiate Matrix<Val>, it emits
 // undefined references and resolves them at link time against the explicit
 // instantiations forced in MatrixPlainExplicit.cpp. No `extern template` is needed: the
 // build win comes from the definitions being absent from the header, not from
 // suppressing instantiation.
 //
 // (The _GuardedExplicit variant keeps this exact layout and adds `extern template`
-// lines. With a declaration-only header those lines suppress nothing — they are
+// lines. With a declaration-only header those lines suppress nothing, they are
 // documentation, taking effect only if definitions were later kept in the header.)
 //
 // Adding a new scalar type (e.g. float) = one new explicit instantiation line in

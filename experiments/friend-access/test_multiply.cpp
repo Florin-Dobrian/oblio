@@ -1,9 +1,9 @@
-// test_multiply.cpp — friend-access experiment.
+// test_multiply.cpp - friend-access experiment.
 //
 // (1) Correctness: multiplyByApi and multiplyDirectly must agree with each other and
 //     with hand-computed results, for real and complex.
 // (2) Timing: on a large dense matrix, show the direct (friend) path is faster than
-//     the API path. Indicative only — a single timed run, not a rigorous benchmark.
+//     the API path. Indicative only, a single timed run, not a rigorous benchmark.
 //
 // Build & run:  make test   (produces ./test_multiply_cpp)
 
@@ -81,7 +81,7 @@ int main() {
     std::cout << "Correctness: " << gPass << "/" << (gPass + gFail)
               << " passed\n" << std::endl;
 
-    // --- timing (double, n x n dense) — indicative, not a rigorous benchmark ---
+    // --- timing (double, n x n dense), indicative, not a rigorous benchmark ---
     const std::size_t n = 2000;
     std::cout << "=== timing (double, " << n << "x" << n << " dense) ===" << std::endl;
 

@@ -1,10 +1,10 @@
 #pragma once
 
-// Matrix.h — dense row-major matrix (guarded-explicit instantiation).
+// Matrix.h - dense row-major matrix (guarded-explicit instantiation).
 //
 // Public API: operator()(i,j) for convenient, bounds-checked element access.
 // MultiplyEngine is a `friend`, so the performance path can reach the contiguous
-// storage (mVals) directly — no per-element calls, no bounds checks — while the
+// storage (mVals) directly, no per-element calls, no bounds checks, while the
 // public API stays available for readable, non-hot-path use. Both coexist by design.
 
 #include <vector>

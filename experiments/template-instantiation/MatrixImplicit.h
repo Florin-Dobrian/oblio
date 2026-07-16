@@ -1,6 +1,6 @@
 #pragma once
 
-// MatrixImplicit.h — Implicit: template inclusion (body in header)
+// MatrixImplicit.h - Implicit: template inclusion (body in header)
 //
 // The full implementation lives here in the header. Every translation unit
 // that includes this file will implicitly instantiate the template for every

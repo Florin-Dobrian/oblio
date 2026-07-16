@@ -1,10 +1,10 @@
-// MatrixPlainExplicit.cpp — Plain explicit: bodies in .cpp, header signatures only
+// MatrixPlainExplicit.cpp - Plain explicit: bodies in .cpp, header signatures only
 //
 // Full template implementation lives here, not in the header. This translation
 // unit is compiled once. The two explicit instantiations at the bottom force the
 // compiler to emit object code for double and complex<double>. Other translation
 // units see only declarations in MatrixPlainExplicit.h, so they cannot implicitly
-// instantiate — they pick up these symbols at link time via MatrixPlainExplicit.o.
+// instantiate, they pick up these symbols at link time via MatrixPlainExplicit.o.
 
 #include "MatrixPlainExplicit.h"
 #include <cassert>
@@ -40,9 +40,9 @@ std::size_t Matrix<Val>::rows() const { return mRows; }
 template<class Val>
 std::size_t Matrix<Val>::cols() const { return mCols; }
 
-// ── Explicit instantiations ───────────────────────────────────────────────
+// -- Explicit instantiations -----------------------------------------------
 // Compiled once. All other .cpp files link against these.
-// To add float support: append one line below. Nothing else changes — unlike
+// To add float support: append one line below. Nothing else changes, unlike
 // the guarded explicit variant has no extern template line in the header to keep in sync.
 
 template class Matrix<double>;

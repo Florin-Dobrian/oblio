@@ -1,6 +1,6 @@
 #pragma once
 
-// Vector.h — dense vector (guarded-explicit instantiation).
+// Vector.h - dense vector (guarded-explicit instantiation).
 //
 // Public API: operator[] for convenient, bounds-checked access. MultiplyEngine is a
 // `friend` for direct access to the contiguous storage (mVals) on the fast path.

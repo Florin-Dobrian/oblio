@@ -1,4 +1,4 @@
-# friend-access experiment — matvec via public API vs friend direct access vs BLAS.
+# friend-access experiment - matvec via public API vs friend direct access vs BLAS.
 # Reference/teaching only; not part of the main Oblio build.
 #
 #   make        build the test executable
@@ -10,7 +10,7 @@
 # NDEBUG is on deliberately: this experiment measures performance, so asserts are
 # compiled out (release build). The gap it shows is then the structural cost of the
 # API path (non-inlined cross-TU calls, no vectorization), not assertion overhead.
-# (The template-instantiation experiment omits NDEBUG — its goal is different.)
+# (The template-instantiation experiment omits NDEBUG, its goal is different.)
 #
 # BLAS: Accelerate on macOS, the system BLAS on Linux. multiplyWithBlas calls the
 # Fortran gemv (dgemv_/zgemv_), which both provide.

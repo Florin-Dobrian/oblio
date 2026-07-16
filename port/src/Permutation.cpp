@@ -4,12 +4,12 @@
 
 namespace Oblio {
 
-Permutation::Permutation(std::size_t size) {
-    // Size is fixed here (a permutation of `size` elements); guard it once, before the resizes, so
-    // the index casts in setIdentity()/fills can never wrap. Indices are std::int32_t.
-    checkIndexRange(size, "Permutation size");
-    mOldToNew.resize(size);
-    mNewToOld.resize(size);
+// checkIndexRange guards the size in the first member's initializer, so it throws before either map
+// allocates; the maps are then sized in the init list and setIdentity fills them. Indices are
+// std::int32_t, so the bounded size keeps the casts in setIdentity from wrapping.
+Permutation::Permutation(std::size_t size)
+    : mOldToNew(checkIndexRange(size, "Permutation size")),
+      mNewToOld(size) {
     setIdentity();
 }
 

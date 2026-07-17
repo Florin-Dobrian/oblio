@@ -8,7 +8,7 @@
 build/
 cmake-build-*/
 
-# Test executables (carry the _cpp suffix, per the coding convention)
+# Test and example executables (carry the _cpp suffix, per the coding convention)
 *_cpp
 
 # macOS

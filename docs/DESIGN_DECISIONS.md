@@ -545,7 +545,7 @@ the caller to ask for.
 
 ```cpp
 enum class Factorization {
-    Cholesky,      // always A = LL^H. There is no LL^T variant to name.
+    Cholesky,      // always A = CC^H. There is no CC^T variant to name.
     StaticLDLT, StaticLDLH,
     DynamicLDLT, DynamicLDLH
 };
@@ -700,7 +700,7 @@ a genuine choice.**
 
 ```cpp
 enum class Factorization {
-    Cholesky,      // A = LL^H  (LL^T for real). Positive definite, hence Hermitian.
+    Cholesky,      // A = CC^H  (CC^T for real). Positive definite, hence Hermitian.
     StaticLDLT,    // A = LDL^T          complex: D complex
     StaticLDLH,    // A = LDL^H          complex: D real
     DynamicLDLT,
@@ -786,7 +786,7 @@ What is wrong is *what it wraps*. 0.9 wraps BLAS **routine by routine**: `SYRK`,
 therefore leaks into the engine, and the engine gets it wrong: **0.9's complex Cholesky calls
 `SYRK` and `TRSM('T')` and `GEMM('N','T')`, all of which are the complex *symmetric* pattern,
 while `POTRF` maps to `zpotrf_`, which is Hermitian.** There is no `HERK` anywhere in 0.9's
-`BlasLapack`. For Hermitian `A = LL^H` the update must be `L21 L21^H` and the off-diagonal solve
+`BlasLapack`. For Hermitian `A = CC^H` the update must be `L21 L21^H` and the off-diagonal solve
 must be against `L11^H`; using `'T'` is correct only when `L11` is real. Almost certainly never
 exercised on a genuinely complex Hermitian matrix.
 

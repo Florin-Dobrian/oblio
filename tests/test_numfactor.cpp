@@ -148,8 +148,8 @@ double compare(const SparseMatrix<Val>& A, const Permutation& p,
 
     double worst = 0;
     for (std::size_t kk = 0; kk < nf.snodeSize(); ++kk) {
-        const std::size_t   frontSize = nf.frontSize()[kk];
-        const std::size_t   numNodeIdx = frontSize + nf.updateSize()[kk];
+        const std::size_t   frontSize = nf.frontSize(kk);
+        const std::size_t   numNodeIdx = frontSize + nf.updateSize(kk);
         const std::int32_t* nodeIdx    = nf.nodeIdx().data() + nf.snodeNodeIdxPtr()[kk];
         const Val*          block     = nf.val().data() + nf.snodeValPtr()[kk];
 
@@ -245,8 +245,8 @@ double reconstructLdl(const NumFactorStatic<Val>& f,
     std::vector<Val> D(n, Val(0));
 
     for (std::size_t kk = 0; kk < f.snodeSize(); ++kk) {
-        const std::size_t   frontSize = f.frontSize()[kk];
-        const std::size_t   numNodeIdx = frontSize + f.updateSize()[kk];
+        const std::size_t   frontSize = f.frontSize(kk);
+        const std::size_t   numNodeIdx = frontSize + f.updateSize(kk);
         const std::int32_t* nodeIdx    = f.nodeIdx().data() + f.snodeNodeIdxPtr()[kk];
         const Val*          block     = f.val().data() + f.snodeValPtr()[kk];
 

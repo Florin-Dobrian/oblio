@@ -151,7 +151,7 @@ bool NumFactorEngine::factorSupernode(std::size_t frontSize, std::size_t numNode
     // what a *static* factorization refuses to do). It cannot fail, because there is no positive
     // definiteness to violate; a pivot too small to divide by is perturbed and counted.
     int numPert = 0;
-    ldl(f, block, ld, mPerturbation, &numPert, hermitian());
+    ldl(f, block, ld, mPerturbation, &numPert, hermitian(mFactorization));
     numPerturbations += static_cast<std::size_t>(numPert);
 
     // The update rows: L21 = A21 U11^-1, where U11 = D11 L11^H sits in the front's *upper*
@@ -200,7 +200,7 @@ void NumFactorEngine::updateSupernode(std::size_t frontSize, std::size_t numNode
     // So form U := D L21'^H explicitly, into a scratch, and then two multiplies. The scratch is
     // f by width, and it is the whole price of the D.
     std::vector<Val> upper(static_cast<std::size_t>(f) * static_cast<std::size_t>(width), Val(0));
-    formUpper(width, f, L21, ld, upper.data(), f, block, ld, hermitian());
+    formUpper(width, f, L21, ld, upper.data(), f, block, ld, hermitian(mFactorization));
 
     // The square part: symmetric, so only its lower triangle is filled. BLAS has nothing for this
     // either (syrk does A A^T, not A B with B known to make the product symmetric), so gemmLower

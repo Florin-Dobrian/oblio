@@ -84,6 +84,15 @@ supernode, parent, child) when discussing the elimination forest, and the neutra
 neutral: a node is neither row nor column (the structure is symmetric), so a supernode of nodes
 commits to neither.
 
+**The Cholesky factor is `C`, the LDL factor is `L`.** Cholesky is `A = CC^H` (`CC^T` in real);
+LDL is `A = LDL^H` (or `LDL^T`). The letter carries the distinction the two turn on: `C` holds its
+own diagonal, whereas `L` is *unit* lower triangular with the diagonal pulled out into `D`. Writing
+both as `L` erases that contrast; "for Cholesky the diagonal holds the factor's own, for LDL it
+holds `D`" says itself once it reads as `C` against `L`. This is already the notation of the design
+notes (`CC^H` throughout); the rule only makes it bind on comments too. The one exception is the
+shared numeric-kernel blocks `L11`, `L21`: a single kernel computes them for both factorizations,
+so they are generic and stay `L`.
+
 ## Dated entries (DESIGN_DECISIONS, CHANGELOG, the devlog)
 
 **Read the date before writing it.** An entry is stamped with the date it is *written*, and that

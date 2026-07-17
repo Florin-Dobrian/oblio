@@ -1,8 +1,8 @@
-// examples/basic.cc
+// examples/basic.cpp
 // Minimal usage example: build a 4x4 tridiagonal matrix, factor it, solve.
 //
 // Compile (from repo root, after cmake build):
-//   g++ -std=c++17 -I include examples/basic.cc -L build -loblio -lblas -llapack -o basic
+//   g++ -std=c++17 -I include examples/basic.cpp -L build -loblio -lblas -llapack -o basic
 
 #include "oblio/OblioEngine.h"
 #include <cstdio>

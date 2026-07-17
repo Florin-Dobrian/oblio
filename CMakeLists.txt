@@ -72,6 +72,10 @@ foreach(t smoke test_forest test_numfactor test_order test_permutation test_solv
 endforeach()
 
 # ----- Examples --------------------------------------------------------------
-# No example targets yet. examples/basic.cc sketches the intended OblioEngine driver
-# API, which is not ported, so it does not compile against the current library. Wire
-# example executables up here once the driver and real examples exist.
+# Each builds a standalone driver linking oblio. basic.cpp sketches the intended OblioEngine facade,
+# which is not ported and does not compile against the current library, so it is not listed here;
+# add it once that driver exists.
+foreach(e pipeline)
+    add_executable(${e} examples/${e}.cpp)
+    target_link_libraries(${e} PRIVATE oblio)
+endforeach()

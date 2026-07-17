@@ -53,8 +53,8 @@ static bool matchesOracle(const SparseMatrix<double>& A, const Permutation& p,
         std::vector<std::int32_t> got(s.nodeIdx().begin()+static_cast<std::ptrdiff_t>(s.snodePtr()[k]),
                                       s.nodeIdx().begin()+static_cast<std::ptrdiff_t>(s.snodePtr()[k+1]));
         if(got != pattern[lowest]) return false;                 // index set, sorted
-        if(s.frontSize()[k] != cols[k].size()) return false;     // front == own columns
-        if(s.frontSize()[k]+s.updateSize()[k] != pattern[lowest].size()) return false;
+        if(s.frontSize(k) != cols[k].size()) return false;     // front == own columns
+        if(s.frontSize(k)+s.updateSize(k) != pattern[lowest].size()) return false;
         // The front indices are the supernode's own columns, in order.
         for(std::size_t t=0; t<cols[k].size(); ++t)
             if(got[t] != static_cast<std::int32_t>(cols[k][t])) return false;
@@ -182,7 +182,7 @@ int main(){
       Permutation p(4); ElmForest f; SymFactor s;
       bool ok = feng.compute(A,p,f) && seng.compute(A,p,f,s);
       std::vector<std::int32_t> idx(s.nodeIdx().begin(), s.nodeIdx().end());
-      ck(ok && s.snodeSize()==1 && s.frontSize()[0]==4 && s.updateSize()[0]==0
+      ck(ok && s.snodeSize()==1 && s.frontSize(0)==4 && s.updateSize(0)==0
          && s.numNodeIdx()==4 && idx==std::vector<std::int32_t>({0,1,2,3}),
          "dense n=4 natural   : one supernode, 4 front columns"); }
 
@@ -192,8 +192,8 @@ int main(){
       ElmForestEngine feng; SymFactorEngine seng;
       Permutation p(5); ElmForest f; SymFactor s;
       bool ok = feng.compute(A,p,f) && seng.compute(A,p,f,s);
-      ck(ok && s.snodeSize()==2 && s.frontSize()[0]==1 && s.updateSize()[0]==1
-         && s.frontSize()[1]==4 && s.updateSize()[1]==0,
+      ck(ok && s.snodeSize()==2 && s.frontSize(0)==1 && s.updateSize(0)==1
+         && s.frontSize(1)==4 && s.updateSize(1)==0,
          "tail n=5 natural    : supernodes {0} and {1,2,3,4}"); }
 
     { auto A=fromEdges(5,{{0,1},{1,2},{2,3},{3,4}}); Permutation p(5);
@@ -208,7 +208,7 @@ int main(){
       Permutation p(4); ElmForest f; SymFactor s;
       bool ok = feng.compute(A,p,f) && seng.compute(A,p,f,s);
       bool allOne = true;
-      for(std::size_t k=0;k<s.snodeSize();++k) if(s.frontSize()[k]!=1) allOne=false;
+      for(std::size_t k=0;k<s.snodeSize();++k) if(s.frontSize(k)!=1) allOne=false;
       ck(ok && s.snodeSize()==4 && allOne && s.nodeToSnode()==std::vector<std::int32_t>({0,1,2,3})
          && columnPatternsMatch(A,p,s),
          "dense n=4 nodal     : no merging, identity map, same factor"); }

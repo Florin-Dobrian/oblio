@@ -19,7 +19,7 @@
 // therefore leaks into the engine, and 0.9's engine gets it wrong: its *complex* Cholesky calls
 // SYRK, TRSM('T') and GEMM('N','T'), which are the complex-symmetric pattern, while its POTRF
 // maps to zpotrf_, which is Hermitian. There is no HERK anywhere in 0.9's BlasLapack. For
-// Hermitian A = LL^H the rank-k update must be L21 L21^H and the off-diagonal solve must be
+// Hermitian A = CC^H the rank-k update must be L21 L21^H and the off-diagonal solve must be
 // against L11^H; a plain transpose is correct only when L11 is real. Almost certainly never
 // exercised on a genuinely complex Hermitian matrix.
 //
@@ -127,8 +127,8 @@ struct Blas<Cplx> {
 // The operations.
 // ---------------------------------------------------------------------------------------------
 
-// Cholesky of the leading n x n block: A = L L^H (which for real is L L^T). On return the lower
-// triangle holds L. info > 0 means the leading minor of that order is not positive definite,
+// Cholesky of the leading n x n block: A = C C^H (which for real is C C^T). On return the lower
+// triangle holds C. info > 0 means the leading minor of that order is not positive definite,
 // which is how a bad pivot is reported.
 inline void potrf(char uplo, int n, double* a, int lda, int* info) {
     OBLIO_BLAS(dpotrf)(&uplo, &n, a, &lda, info);

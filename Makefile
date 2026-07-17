@@ -1,8 +1,10 @@
 # Builds the Oblio units and every test in tests/. A simple alternative to the
 # CMake build (CMakeLists.txt); both compile the same src/ and tests/.
 #
-#   make            build all test executables
-#   make test       build and run them all
+#   make            build everything (tests and examples)
+#   make tests      build the test executables
+#   make test       build and run the tests
+#   make examples   build the example programs (examples/*.cpp)
 #   make <name>_cpp build one test (e.g. make test_order_cpp)
 #   make clean
 #
@@ -62,9 +64,17 @@ LIB_OBJS    = $(OBLIO_OBJS) $(VENDOR_OBJS)
 TEST_SRCS = $(wildcard tests/*.cpp)
 TEST_BINS = $(patsubst tests/%.cpp,%_cpp,$(TEST_SRCS))
 
-.PHONY: all test clean
+# One executable per examples/*.cpp file, named example_<stem>_cpp (the _cpp suffix folds them into
+# the same gitignore rule as the tests). basic.cpp sketches the not-yet-ported OblioEngine facade
+# and does not compile, so it is filtered out until that driver exists.
+EXAMPLE_SRCS = $(filter-out examples/basic.cpp,$(wildcard examples/*.cpp))
+EXAMPLE_BINS = $(patsubst examples/%.cpp,example_%_cpp,$(EXAMPLE_SRCS))
 
-all: $(TEST_BINS)
+.PHONY: all tests test examples clean
+
+all: tests examples
+
+tests: $(TEST_BINS)
 
 $(OBLIO_OBJS): %.o: %.cpp $(LIB_HDRS)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -75,8 +85,13 @@ $(VENDOR_OBJS): %.o: %.cpp
 %_cpp: tests/%.cpp $(LIB_OBJS) $(LIB_HDRS) $(wildcard tests/*.h)
 	$(CXX) $(CXXFLAGS) tests/$*.cpp $(LIB_OBJS) $(BLAS_LIBS) -o $@
 
-test: all
+example_%_cpp: examples/%.cpp $(LIB_OBJS) $(LIB_HDRS)
+	$(CXX) $(CXXFLAGS) examples/$*.cpp $(LIB_OBJS) $(BLAS_LIBS) -o $@
+
+test: tests
 	@for t in $(TEST_BINS); do echo "== $$t =="; ./$$t || exit 1; echo; done
 
+examples: $(EXAMPLE_BINS)
+
 clean:
-	rm -f $(TEST_BINS) $(LIB_OBJS)
+	rm -f $(TEST_BINS) $(EXAMPLE_BINS) $(LIB_OBJS)

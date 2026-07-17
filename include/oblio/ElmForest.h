@@ -69,6 +69,8 @@ public:
     // Per-supernode sizes (length snodeSize()).
     const std::vector<std::size_t>&  frontSize()   const { return mFrontSize; }
     const std::vector<std::size_t>&  updateSize()  const { return mUpdateSize; }
+    std::size_t frontSize(std::int32_t kk)  const { return mFrontSize[kk]; }
+    std::size_t updateSize(std::int32_t kk) const { return mUpdateSize[kk]; }
 
 private:
     // Dimensions and tree attributes.

@@ -42,7 +42,7 @@ std::size_t checkIndexRange(std::size_t size, const char* what);
 // What the numeric factorization computes. **The symmetry is part of this, not a separate
 // setting.**
 //
-// For Cholesky there is nothing to choose: `A = LL^H` always, and over the reals `L^H` is `L^T`,
+// For Cholesky there is nothing to choose: `A = CC^H` always, and over the reals `C^H` is `C^T`,
 // so real symmetric and real Hermitian are the same case. But for LDL, a complex matrix may be
 // symmetric (`A = A^T`, `D` complex) or Hermitian (`A = A^H`, `D` real), and those are genuinely
 // different factorizations. So the transpose is named:
@@ -64,12 +64,26 @@ std::size_t checkIndexRange(std::size_t size, const char* what);
 // recover with, because not needing pivoting is the entire point of Cholesky, and that guarantee
 // comes from positive definiteness. LAPACK has no complex-symmetric Cholesky for this reason.)
 enum class Factorization {
-    Cholesky,      // A = LL^H  (LL^T for real). Requires positive definiteness, hence Hermitian.
+    Cholesky,      // A = CC^H  (CC^T for real). Requires positive definiteness, hence Hermitian.
     StaticLDLT,    // A = LDL^T, pivots fixed by the symbolic structure. Complex: D complex.
     StaticLDLH,    // A = LDL^H, ditto.                                  Complex: D real.
     DynamicLDLT,   // A = LDL^T, with 2x2 pivoting and delayed columns.
     DynamicLDLH    // A = LDL^H, ditto.
 };
+
+// Two facts a factorization implies, answerable from the enum alone. `hermitian` is true when the
+// factorization conjugates: Cholesky always (A = CC^H), LDLH yes, LDLT no. Over the reals the
+// conjugate is the identity, so the flag is harmless there. `separateDiagonal` is true when the
+// diagonal is a pass of its own: LDL keeps L unit and holds D apart, while Cholesky folds its own
+// diagonal into C.
+inline bool hermitian(Factorization factorization) {
+    return factorization == Factorization::Cholesky
+        || factorization == Factorization::StaticLDLH
+        || factorization == Factorization::DynamicLDLH;
+}
+inline bool separateDiagonal(Factorization factorization) {
+    return factorization != Factorization::Cholesky;
+}
 
 // How the supernodes are traversed. All three compute the same factor; they differ in when the
 // updates are formed and where they are kept.

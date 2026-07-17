@@ -135,14 +135,6 @@ private:
     void updateSupernode(std::size_t frontSize, std::size_t numIdx, const Val* block,
                          std::size_t offset, UpdateBlock<Val>& t) const;
 
-    // True when the factorization conjugates: Cholesky always (A = LL^H, and over the reals the
-    // conjugate is the identity), LDLH yes, LDLT no.
-    bool hermitian() const {
-        return mFactorization == Factorization::Cholesky
-            || mFactorization == Factorization::StaticLDLH
-            || mFactorization == Factorization::DynamicLDLH;
-    }
-
     // The two traversals. Same arithmetic, opposite direction.
     //
     //   Left-looking:  for each supernode, PULL every update owed to it, then factor.

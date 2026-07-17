@@ -4,10 +4,10 @@
 //
 // Three passes, and which of them run depends on the factorization:
 //
-//   Cholesky   A = L L^H       forward:  L y = b        backward: L^H x = y
+//   Cholesky   A = C C^H       forward:  C y = b        backward: C^H x = y
 //   LDL        A = L D L^H     forward:  L y = b        diagonal: D z = y        backward: L^H x = z
 //
-// For Cholesky, L's diagonal holds the factor's own diagonal, so the forward pass divides by it.
+// For Cholesky, C's diagonal holds the factor's own diagonal, so the forward pass divides by it.
 // For LDL, L is *unit* lower triangular (the 1s implicit), the diagonal holds D, and the division
 // is a separate pass. That is the whole difference, and it falls straight out of the storage.
 //
@@ -69,18 +69,6 @@ private:
     // L^H x = z (or L^T, for LDLT). Ascending, the mirror of the forward pass.
     template<class Val>
     void backward(const NumFactorStatic<Val>& nf, Vector<Val>& y) const;
-
-    // Whether the backward pass conjugates. The same rule the factorization uses, stated once.
-    static bool hermitian(Factorization factorization) {
-        return factorization == Factorization::Cholesky
-            || factorization == Factorization::StaticLDLH
-            || factorization == Factorization::DynamicLDLH;
-    }
-
-    // Whether the diagonal is a separate pass. Cholesky folds it into L; LDL does not.
-    static bool separateDiagonal(Factorization factorization) {
-        return factorization != Factorization::Cholesky;
-    }
 };
 
 } // namespace Oblio

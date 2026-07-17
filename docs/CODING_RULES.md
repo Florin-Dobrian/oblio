@@ -181,10 +181,10 @@ softer layer: conventions for consistency, not correctness.
   each, and they are connected by exactly one thing, the `Permutation`: `oldToNew[aj] == lj` and
   `newToOld[lk] == ak`. A line that converts between them should read as the conversion it is.
 
-  The distinction matters because `L` is not one matrix. Cholesky computes an `L` with
-  `A = LL^T`; static and dynamic LDL compute a different `L` with `A = LDL^T`, unit lower
-  triangular, not absorbing the square root of `D`. Numerically these are different factors, and
-  some texts write `A = CC^T` for the first precisely to keep `L` free for the second. But they
+  The distinction matters because the factor is not one matrix. Cholesky computes `C` with
+  `A = CC^T`; static and dynamic LDL compute `L` with `A = LDL^T`, unit lower triangular, not
+  absorbing the square root of `D`. Numerically these are different factors, and we write `C`
+  for the first precisely to keep `L` for the second (WRITING_RULES). But they
   share one structure and one index space, which is why the elimination forest and the symbolic
   factorization are computed once and serve all three. So `lk` means the same thing regardless of
   which factorization is running, and it should: an index has no business knowing.

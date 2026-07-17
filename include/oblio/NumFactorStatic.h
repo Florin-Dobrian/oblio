@@ -72,6 +72,8 @@ public:
     // Per supernode: its own columns, and the rows below them.
     const std::vector<std::size_t>& frontSize()  const { return mFrontSize; }
     const std::vector<std::size_t>& updateSize() const { return mUpdateSize; }
+    std::size_t frontSize(std::int32_t kk)  const { return mFrontSize[kk]; }
+    std::size_t updateSize(std::int32_t kk) const { return mUpdateSize[kk]; }
 
     // The index sets, flat: offsets (length snodeSize() + 1), then node indices.
     const std::vector<std::size_t>&  snodeNodeIdxPtr() const { return mSnodeNodeIdxPtr; }

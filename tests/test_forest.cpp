@@ -103,8 +103,8 @@ static bool validSupernodes(const SparseMatrix<double>& A, const Permutation& p,
     for(std::size_t s=0; s<f.snodeSize(); ++s){
         if(cols[s].empty()) return false;
         const std::size_t lowest = cols[s].front();     // collected in increasing order
-        if(f.frontSize()[s]!=cols[s].size()) return false;
-        if(f.frontSize()[s]+f.updateSize()[s]!=pattern[lowest].size()) return false;
+        if(f.frontSize(s)!=cols[s].size()) return false;
+        if(f.frontSize(s)+f.updateSize(s)!=pattern[lowest].size()) return false;
         // Every column of the supernode must appear in the lowest column's pattern.
         for(std::size_t c : cols[s])
             if(std::find(pattern[lowest].begin(), pattern[lowest].end(),
@@ -139,8 +139,8 @@ int main(){
       reqSym(A,"arrow 6x6           : symmetric");
       Permutation p(6); ElmForest f; eng.compute(A,p,f);
       // The hub is eliminated first, so every later column is dense: one supernode.
-      ck(eq(f.parent(),{NP}) && f.snodeSize()==1 && f.frontSize()[0]==6
-         && f.updateSize()[0]==0 && f.height()==1, "arrow 6x6 natural   : one supernode"); }
+      ck(eq(f.parent(),{NP}) && f.snodeSize()==1 && f.frontSize(0)==6
+         && f.updateSize(0)==0 && f.height()==1, "arrow 6x6 natural   : one supernode"); }
     { std::vector<std::size_t> cp={0,2,5,7,9,12,14};
       std::vector<std::int32_t> ri={0,1, 0,1,2, 1,2, 3,4, 3,4,5, 4,5};
       std::vector<double> v(ri.size(),1.0); SparseMatrix<double> A(6,cp,ri,v);
@@ -241,7 +241,7 @@ int main(){
       SparseMatrix<double> A(9,cp,ri,v); Permutation p(9);
       ElmForest f0, f1; ElmForestEngine e1; e1.setThreshold(0);
       eng.compute(A,p,f0); e1.compute(A,p,f1);
-      ck(f0.snodeSize()==7 && f1.snodeSize()==6 && f1.frontSize()[5]==4,
+      ck(f0.snodeSize()==7 && f1.snodeSize()==6 && f1.frontSize(5)==4,
          "grid amalg(0)       : 7 supernodes -> 6, 4-column front"); }
 
     // The invariants that survive tie-breaking. Amalgamation is greedy and not canonical, so
@@ -286,7 +286,7 @@ int main(){
 
               // Every column belongs to exactly one supernode, and front sizes sum to size.
               std::size_t totalFront=0;
-              for(std::size_t k=0;k<f2.snodeSize();++k) totalFront += f2.frontSize()[k];
+              for(std::size_t k=0;k<f2.snodeSize();++k) totalFront += f2.frontSize(k);
               if(totalFront != size) ++bad;
 
               // Supernode labels stay topological.

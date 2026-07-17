@@ -20,8 +20,8 @@ std::complex<double> maybeConj(std::complex<double> v, bool h) { return h ? std:
 //     columns = frontSize
 //     ld      = the index-set size
 //
-// so entry (localRow, localCol) is at block[localCol * numIdx + localRow], and the global row it
-// stands for is rowIdx[localRow].
+// so entry (localRow, localCol) is at val[localCol * numNodeIdx + localRow], and the global row it
+// stands for is nodeIdx[localRow].
 //
 // For Cholesky the diagonal holds L's own diagonal. For LDL it holds D, and L is *unit* lower
 // triangular, its 1s implicit. That single difference is the whole of what separates the two
@@ -29,99 +29,101 @@ std::complex<double> maybeConj(std::complex<double> v, bool h) { return h ? std:
 // =================================================================================================
 
 template<class Val>
-void SolveEngine::forward(const NumFactorStatic<Val>& f, Vector<Val>& y) const {
-    const bool unitDiagonal = separateDiagonal(f.mFactorization);   // LDL: L has implicit 1s
+void SolveEngine::forward(const NumFactorStatic<Val>& nf, Vector<Val>& y) const {
+    const bool unitDiagonal = separateDiagonal(nf.factorization());   // LDL: L has implicit 1s
 
     // Ascending supernode order is a topological order, so a supernode's columns are finished
     // before any supernode below it needs them.
-    for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(f.mSupSize); ++kk) {
-        const std::size_t   frontSize = f.mFrontSize[kk];
-        const std::size_t   numIdx    = frontSize + f.mUpdateSize[kk];
-        const std::int32_t* rowIdx    = f.mRowIdx.data() + f.mSupPtr[kk];
-        const Val*          block     = f.blockPtr(kk);
+    for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(nf.snodeSize()); ++kk) {
+        const std::size_t   frontSize  = nf.frontSize()[kk];
+        const std::size_t   updateSize = nf.updateSize()[kk];
+        const std::size_t   numNodeIdx = frontSize + updateSize;
+        const std::int32_t* nodeIdx    = nf.nodeIdxPtr(kk);
+        const Val*          val        = nf.valPtr(kk);
 
-        for (std::size_t lclCol = 0; lclCol < frontSize; ++lclCol) {
-            const std::int32_t lk = rowIdx[lclCol];               // the global column
-            const Val*         col = block + lclCol * numIdx;
+        for (std::int32_t j = 0; j < static_cast<std::int32_t>(frontSize); ++j) {
+            const std::int32_t lj = nodeIdx[j];               // the global column
+            const Val*         col = val + j * numNodeIdx;
 
             // Divide by the diagonal, unless L is unit (LDL), where the diagonal holds D and is
             // dealt with in its own pass.
             if (!unitDiagonal)
-                y.mVal[lk] /= col[lclCol];
+                y.mVal[lj] /= col[j];
 
             // Scatter the column's contribution down. Note the rows run to the *end of the index
             // set*, not the end of the front: a supernode's update rows are exactly the rows of L
             // below its own columns, and they belong to supernodes not yet reached.
-            const Val yk = y.mVal[lk];
-            for (std::size_t lclRow = lclCol + 1; lclRow < numIdx; ++lclRow)
-                y.mVal[rowIdx[lclRow]] -= col[lclRow] * yk;
+            const Val yj = y.mVal[lj];
+            for (std::int32_t i = j + 1; i < static_cast<std::int32_t>(numNodeIdx); ++i)
+                y.mVal[nodeIdx[i]] -= col[i] * yj;
         }
     }
 }
 
 template<class Val>
-void SolveEngine::diagonal(const NumFactorStatic<Val>& f, Vector<Val>& y) const {
+void SolveEngine::diagonal(const NumFactorStatic<Val>& nf, Vector<Val>& y) const {
     // D z = y. LDL only, and while every pivot is 1x1 this is one division per column. Dynamic LDL
     // will bring 2x2 pivots, and then a pair of columns is solved together against a 2x2 block.
-    for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(f.mSupSize); ++kk) {
-        const std::size_t   frontSize = f.mFrontSize[kk];
-        const std::size_t   numIdx    = frontSize + f.mUpdateSize[kk];
-        const std::int32_t* rowIdx    = f.mRowIdx.data() + f.mSupPtr[kk];
-        const Val*          block     = f.blockPtr(kk);
+    for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(nf.snodeSize()); ++kk) {
+        const std::size_t   frontSize  = nf.frontSize()[kk];
+        const std::size_t   updateSize = nf.updateSize()[kk];
+        const std::size_t   numNodeIdx = frontSize + updateSize;
+        const std::int32_t* nodeIdx    = nf.nodeIdxPtr(kk);
+        const Val*          val        = nf.valPtr(kk);
 
-        for (std::size_t lclCol = 0; lclCol < frontSize; ++lclCol)
-            y.mVal[rowIdx[lclCol]] /= block[lclCol * numIdx + lclCol];
+        for (std::int32_t j = 0; j < static_cast<std::int32_t>(frontSize); ++j)
+            y.mVal[nodeIdx[j]] /= val[j * numNodeIdx + j];
     }
 }
 
 template<class Val>
-void SolveEngine::backward(const NumFactorStatic<Val>& f, Vector<Val>& y) const {
-    const bool unitDiagonal = separateDiagonal(f.mFactorization);
-    const bool conj         = hermitian(f.mFactorization);
+void SolveEngine::backward(const NumFactorStatic<Val>& nf, Vector<Val>& y) const {
+    const bool unitDiagonal = separateDiagonal(nf.factorization());
+    const bool conj         = hermitian(nf.factorization());
 
     // Descending, the mirror of the forward pass: a supernode's columns are solved only once
     // everything below them is known.
-    for (std::int32_t kk = static_cast<std::int32_t>(f.mSupSize) - 1; kk >= 0; --kk) {
-        const std::size_t   frontSize = f.mFrontSize[kk];
-        const std::size_t   numIdx    = frontSize + f.mUpdateSize[kk];
-        const std::int32_t* rowIdx    = f.mRowIdx.data() + f.mSupPtr[kk];
-        const Val*          block     = f.blockPtr(kk);
+    for (std::int32_t kk = static_cast<std::int32_t>(nf.snodeSize()) - 1; kk >= 0; --kk) {
+        const std::size_t   frontSize  = nf.frontSize()[kk];
+        const std::size_t   updateSize = nf.updateSize()[kk];
+        const std::size_t   numNodeIdx = frontSize + updateSize;
+        const std::int32_t* nodeIdx    = nf.nodeIdxPtr(kk);
+        const Val*          val        = nf.valPtr(kk);
 
-        for (std::size_t s = frontSize; s > 0; --s) {
-            const std::size_t  lclCol = s - 1;
-            const std::int32_t lk     = rowIdx[lclCol];
-            const Val*         col    = block + lclCol * numIdx;
+        for (std::int32_t j = static_cast<std::int32_t>(frontSize) - 1; j >= 0; --j) {
+            const std::int32_t lj  = nodeIdx[j];
+            const Val*         col = val + j * numNodeIdx;
 
             // Gather the contributions from below. **The conjugate is the point.** This pass
             // applies L^H, not L^T, whenever the factorization is Hermitian (Cholesky, LDLH), and
             // L^T when it is not (LDLT). 10.12 omits it, which is right for its complex-symmetric
             // LDL and wrong for its Cholesky, and nothing at the call site reveals that.
-            Val acc = y.mVal[lk];
-            for (std::size_t lclRow = lclCol + 1; lclRow < numIdx; ++lclRow)
-                acc -= maybeConj(col[lclRow], conj) * y.mVal[rowIdx[lclRow]];
+            Val acc = y.mVal[lj];
+            for (std::int32_t i = j + 1; i < static_cast<std::int32_t>(numNodeIdx); ++i)
+                acc -= maybeConj(col[i], conj) * y.mVal[nodeIdx[i]];
 
             // And divide, unless L is unit, in which case D was dealt with already.
-            y.mVal[lk] = unitDiagonal ? acc : acc / maybeConj(col[lclCol], conj);
+            y.mVal[lj] = unitDiagonal ? acc : acc / maybeConj(col[j], conj);
         }
     }
 }
 
 template<class Val>
-bool SolveEngine::compute(const NumFactorStatic<Val>& f, Vector<Val>& y) const {
-    if (y.size() != f.size())
+bool SolveEngine::compute(const NumFactorStatic<Val>& nf, Vector<Val>& y) const {
+    if (y.size() != nf.size())
         return false;
 
-    forward(f, y);
-    if (separateDiagonal(f.mFactorization))
-        diagonal(f, y);
-    backward(f, y);
+    forward(nf, y);
+    if (separateDiagonal(nf.factorization()))
+        diagonal(nf, y);
+    backward(nf, y);
     return true;
 }
 
 template<class Val>
-bool SolveEngine::compute(const Permutation& p, const NumFactorStatic<Val>& f,
+bool SolveEngine::compute(const Permutation& p, const NumFactorStatic<Val>& nf,
                           const Vector<Val>& b, Vector<Val>& x) const {
-    const std::size_t size = f.size();
+    const std::size_t size = nf.size();
     if (b.size() != size || p.size() != size)
         return false;
 
@@ -134,7 +136,7 @@ bool SolveEngine::compute(const Permutation& p, const NumFactorStatic<Val>& f,
     for (std::int32_t ai = 0; ai < static_cast<std::int32_t>(size); ++ai)
         y.mVal[oldToNew[ai]] = b.mVal[ai];
 
-    if (!compute(f, y))
+    if (!compute(nf, y))
         return false;
 
     x.mVal.assign(size, Val(0));

@@ -3,7 +3,7 @@
 // SymFactor.h - the symbolic factorization of a sparse matrix.
 //
 // The symbolic factorization is the sparsity pattern of the factor L, computed
-// per supernode: for every supernode, the set of factor row indices its columns
+// per supernode: for every supernode, the set of factor node indices its columns
 // touch. That index set splits into the front indices (the supernode's own
 // columns) and the update indices (the rows below it, which its children and it
 // itself update). Numeric factorization consumes this structure.
@@ -15,21 +15,23 @@
 //
 // Storage is flat, and deliberately the same shape as SparseMatrix. The index sets are
 // written once and their sizes are known in advance from the forest (front size + update
-// size per supernode), so they go in one contiguous array of row indices with per-supernode
+// size per supernode), so they go in one contiguous array of node indices with per-supernode
 // offsets. Exactly as in 0.9; 10.12 uses a vector of vectors here (see the flat-vs-VV
 // decision).
 //
-// The parallel with SparseMatrix is exact, and the names say so:
+// The parallel with SparseMatrix is exact in shape, with L's names marking the compression (see
+// the A-and-L naming decision): L holds one node index array with per-supernode offsets where A
+// holds one row index array with per-column offsets.
 //
-//   SparseMatrix:  rowIdx[colPtr[j] .. colPtr[j + 1])   the rows of column j
-//   SymFactor:       rowIdx[supPtr[s] .. supPtr[s + 1])   the rows of supernode s
+//   SparseMatrix:  rowIdx[colPtr[j] .. colPtr[j + 1])        the rows of column j
+//   SymFactor:     nodeIdx[snodePtr[s] .. snodePtr[s + 1])   the nodes of supernode s
 //
-// A supernode's rows are the pattern its columns share: the first frontSize(s) of them are
+// A supernode's nodes are the pattern its columns share: the first frontSize(s) of them are
 // its front indices (its own columns), the rest its update indices (the rows below). Within
 // a supernode they are sorted in increasing order.
 //
 // Index roles (see the index-types decision): supernode indices, column indices,
-// factor row indices and the links are IDs -> std::int32_t with NIL = -1; sizes,
+// factor node indices and the links are IDs -> std::int32_t with NIL = -1; sizes,
 // counts and offsets are std::size_t.
 
 #include "oblio/Types.h"
@@ -46,59 +48,59 @@ class SymFactor {
 public:
     SymFactor() = default;
 
-    std::size_t size()     const { return mSize; }       // number of columns
-    std::size_t supSize()  const { return mSupSize; }    // number of supernodes
-    std::size_t numTrees() const { return mNumTrees; }   // number of trees (roots)
-    std::size_t height()   const { return mHeight; }     // forest height (max depth + 1)
-    std::size_t numRowIdx()   const { return mNumRowIdx; }   // total row indices
+    std::size_t size()       const { return mSize; }         // number of columns
+    std::size_t snodeSize()  const { return mSnodeSize; }    // number of supernodes
+    std::size_t numTrees()   const { return mNumTrees; }     // number of trees (roots)
+    std::size_t height()     const { return mHeight; }       // forest height (max depth + 1)
+    std::size_t numNodeIdx() const { return mNumNodeIdx; }   // total node indices
 
-    std::int32_t firstRoot() const { return mFirstRoot; }   // first root supIdx, or NIL
-    std::int32_t lastRoot()  const { return mLastRoot; }    // last root supIdx, or NIL
+    std::int32_t firstRoot() const { return mFirstRoot; }   // first root snodeIdx, or NIL
+    std::int32_t lastRoot()  const { return mLastRoot; }    // last root snodeIdx, or NIL
 
-    // Column-indexed map (length size()).
-    const std::vector<std::int32_t>& idxToSupIdx() const { return mIdxToSupIdx; }
+    // Node-to-supernode map (length size()).
+    const std::vector<std::int32_t>& nodeToSnode() const { return mNodeToSnode; }
 
-    // Per-supernode links (length supSize()).
+    // Per-supernode links (length snodeSize()).
     const std::vector<std::int32_t>& parent()      const { return mParent; }
     const std::vector<std::int32_t>& firstChild()  const { return mFirstChild; }
     const std::vector<std::int32_t>& nextSibling() const { return mNextSibling; }
 
-    // Per-supernode sizes (length supSize()).
+    // Per-supernode sizes (length snodeSize()).
     const std::vector<std::size_t>&  frontSize()   const { return mFrontSize; }
     const std::vector<std::size_t>&  updateSize()  const { return mUpdateSize; }
 
-    // The index sets, flat: offsets (length supSize() + 1), then row indices
-    // (length numRowIdx()).
-    const std::vector<std::size_t>&  supPtr() const { return mSupPtr; }
-    const std::vector<std::int32_t>& rowIdx() const { return mRowIdx; }
+    // The index sets, flat: offsets (length snodeSize() + 1), then node indices
+    // (length numNodeIdx()).
+    const std::vector<std::size_t>&  snodePtr() const { return mSnodePtr; }
+    const std::vector<std::int32_t>& nodeIdx()         const { return mNodeIdx; }
 
 private:
     // Dimensions and tree attributes, copied from the forest.
     std::size_t  mSize      = 0;     // number of columns
-    std::size_t  mSupSize   = 0;     // number of supernodes
+    std::size_t  mSnodeSize = 0;     // number of supernodes
     std::size_t  mNumTrees  = 0;     // number of trees (roots)
     std::size_t  mHeight    = 0;     // forest height (max depth + 1)
-    std::int32_t mFirstRoot = NIL;   // first root supIdx, or NIL if empty
-    std::int32_t mLastRoot  = NIL;   // last root supIdx, or NIL if empty
+    std::int32_t mFirstRoot = NIL;   // first root snodeIdx, or NIL if empty
+    std::int32_t mLastRoot  = NIL;   // last root snodeIdx, or NIL if empty
 
     // Column-indexed (length mSize), copied from the forest.
-    std::vector<std::int32_t> mIdxToSupIdx;   // idx -> supIdx
+    std::vector<std::int32_t> mNodeToSnode;   // node -> snode
 
-    // Per-supernode links (length mSupSize), copied from the forest. Singly linked
+    // Per-supernode links (length mSnodeSize), copied from the forest. Singly linked
     // here: the child list is walked forward, which needs only these three.
-    std::vector<std::int32_t> mParent;        // parent supIdx, or NIL at a root
-    std::vector<std::int32_t> mFirstChild;    // first child supIdx, or NIL at a leaf
-    std::vector<std::int32_t> mNextSibling;   // next sibling supIdx, or NIL at last
+    std::vector<std::int32_t> mParent;        // parent snodeIdx, or NIL at a root
+    std::vector<std::int32_t> mFirstChild;    // first child snodeIdx, or NIL at a leaf
+    std::vector<std::int32_t> mNextSibling;   // next sibling snodeIdx, or NIL at last
 
-    // Per-supernode sizes (length mSupSize), copied from the forest. Together they
+    // Per-supernode sizes (length mSnodeSize), copied from the forest. Together they
     // give each supernode's index count, and frontSize splits its index set.
     std::vector<std::size_t>  mFrontSize;     // front indices (columns) in the supernode
     std::vector<std::size_t>  mUpdateSize;    // update indices below the supernode
 
     // The index sets, flat and computed here.
-    std::size_t               mNumRowIdx = 0;   // total row indices (== mSupPtr[mSupSize])
-    std::vector<std::size_t>  mSupPtr;          // offsets into mRowIdx (length mSupSize + 1)
-    std::vector<std::int32_t> mRowIdx;          // factor row indices (length mNumRowIdx)
+    std::size_t               mNumNodeIdx = 0;   // total node indices (== mSnodePtr[mSnodeSize])
+    std::vector<std::size_t>  mSnodePtr;   // offsets into mNodeIdx (length mSnodeSize + 1)
+    std::vector<std::int32_t> mNodeIdx;           // factor node indices (length mNumNodeIdx)
 
     friend class SymFactorEngine;   // fills the symbolic factorization via the engine
 };

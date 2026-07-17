@@ -33,7 +33,7 @@ softer layer: conventions for consistency, not correctness.
   documentation does, or a reader ends up carrying a translation table. It settles
   **numeric** factorization (not "numerical", which is reserved for the mathematics: numerical
   stability, numerical pivoting), **front** as the noun against **frontal** as the adjective,
-  and when to reach for matrix words, graph words, or the neutral `index` and `sup`.
+  and when to reach for matrix words, graph words, or the neutral `index` and `snode`.
 
 - **Data structures take the noun; functions may take the adjective.** Fields and accessors are
   strict: a supernode has a **front** (its columns), so the field is `mFrontSize` and the
@@ -43,7 +43,7 @@ softer layer: conventions for consistency, not correctness.
   since that is what a reader cross-references.
 
   Function names also spell words out where a field would abbreviate: `sortIndices`, not
-  `sortIdx`. Loop-local variables go the other way and abbreviate freely (`fp`, `sp`, `lk`),
+  `sortIdx`. Loop-local variables go the other way and abbreviate freely (`sfp`, `sp`, `lk`),
   because there they are read a hundred times and written once.
 
 - **Definition order follows declaration order.** The `.cpp` defines functions in the same
@@ -155,8 +155,9 @@ softer layer: conventions for consistency, not correctness.
   (*Offset* would also do, but it suggests a delta rather than a location, so position is
   better.)
 
-  **And `colPtr` is not a pointer.** Neither are `supPtr` or `frontSupPtr`. They hold positions,
-  `std::size_t` offsets into a flat array. The `Ptr` is inherited vocabulary, universal in sparse
+  **And `colPtr` is not a pointer.** Neither are `snodePtr` or `snodeFrontPtr`. They
+  hold positions, `std::size_t` offsets into a flat array. The `Ptr` is inherited vocabulary,
+  universal in sparse
   matrix codes (0.9, 10.12, CSparse, SuiteSparse all say `colptr` or `Ap`), and we keep it for
   that reason alone. It is a name, not a claim about the type.
 
@@ -197,22 +198,22 @@ softer layer: conventions for consistency, not correctness.
   | position | walks | one entry per | the data is |
   |---|---|---|---|
   | `cp` | `colPtr` / `rowIdx` | column | row indices |
-  | `sp` | `supPtr` / `rowIdx` | supernode | row indices |
-  | `rp` | `rowPtr` / `supIdx` | row | supernode indices |
-  | `fsp` | `frontSupPtr` / `frontRowIdx` | supernode | front (column) indices |
+  | `sp` | `snodePtr` / `nodeIdx` | supernode | node indices |
+  | `np` | `nodePtr` / `snodeIdx` | node | supernode indices |
+  | `sfp` | `snodeFrontPtr` / `frontNodeIdx` | supernode | front (column) indices |
 
   Read across the table and the CSC convention falls out: **the letter names what the array has
   one entry of, and the data is the other thing.** `colPtr` has one entry per column and holds
-  rows. `supPtr` has one per supernode and holds rows. `rowPtr` has one per row and holds
-  supernodes.
+  rows. `snodePtr` has one per supernode and holds nodes. `nodePtr` has one per node
+  and holds supernodes.
 
-  `sp` and `rp` are exact mirrors, and worth holding onto as the clearest case: `sp` is a *sup*
-  pointer, so its data is rows; `rp` is a *row* pointer, so its data is supernodes. That is why
+  `sp` and `np` are exact mirrors, and worth holding onto as the clearest case: `sp` is a *snode*
+  pointer, so its data is nodes; `np` is a *node* pointer, so its data is supernodes. That is why
   the two counting sorts in `sortIndices` are the same code with the roles exchanged, and why the
   names stay honest across both passes without needing a second set.
 
-  `fsp` is not an exception but the rule applied to a longer name: `frontSupPtr` -> `fsp`. It is a
-  `sp` restricted to the front, and the letters say so.
+  `sfp` is not an exception but the rule applied to a longer name: `snodeFrontPtr` -> `sfp`.
+  It is a `sp` restricted to the front, and the letters say so.
 
   The letters name the *array*, not the matrix. There is only one `colPtr` in the solver, so `cp`
   is unambiguous. Should two objects ever both carry one, qualify then and not before: `acp`,
@@ -225,7 +226,7 @@ softer layer: conventions for consistency, not correctness.
   **A position is not an index.** It cannot be compared with one, it means nothing outside its
   own array, and it is a `std::size_t` because it measures rather than names: never negative,
   never `NIL`, free to exceed 2^31, and outside the index-type rules below. The two meet only through a
-  dereference, `lk = frontRowIdx[fp]`, and code should make that step visible rather than nest
+  dereference, `lk = frontNodeIdx[sfp]`, and code should make that step visible rather than nest
   it.
 
   Scratch is `r` for the node a climb has reached and `t` for a general temporary.
@@ -288,9 +289,9 @@ softer layer: conventions for consistency, not correctness.
   - **A loop counter takes the type of what it counts, and direction does not change the type.**
     A loop over *entities* (columns, supernodes) counts indices, so the counter is `std::int32_t`
     and the bound is cast once in the condition. Ascending:
-    `for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(supSize); ++kk)`. Descending is the
+    `for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(snodeSize); ++kk)`. Descending is the
     same rule with the cast on the start:
-    `for (std::int32_t jj = static_cast<std::int32_t>(supSize) - 1; jj >= 0; --jj)`; the loop exits
+    `for (std::int32_t jj = static_cast<std::int32_t>(snodeSize) - 1; jj >= 0; --jj)`; the loop exits
     at `-1`, which `int32_t` represents, so a descending entity loop is a *direct* `int32_t`
     reverse, not a `std::size_t` counter with `j = t - 1` inside (that trick is declined; see the
     forward/reverse asymmetry in DESIGN_DECISIONS). The cast is loop-invariant and costs nothing. A

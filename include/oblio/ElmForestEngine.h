@@ -62,11 +62,11 @@ public:
     // a graph with no numbers attached can compute its elimination forest without inventing
     // a scalar type to satisfy the signature.
     template<class Val>
-    bool compute(const SparseMatrix<Val>& A, const Permutation& p, ElmForest& f) const;
+    bool compute(const SparseMatrix<Val>& A, const Permutation& p, ElmForest& ef) const;
 
     bool compute(const std::vector<std::size_t>&  colPtr,
                  const std::vector<std::int32_t>& rowIdx,
-                 const Permutation& p, ElmForest& f) const;
+                 const Permutation& p, ElmForest& ef) const;
 
 private:
     Supernodes                 mSupernodes = Supernodes::Fundamental;
@@ -78,28 +78,28 @@ private:
     // through its public accessors, and the ElmForest is written through friendship.
 
     // Parent links (etree) via Liu's path-compression construction, on the full-symmetric
-    // structure, in the permuted (factor) order. Writes f.mSize and f.mParent.
+    // structure, in the permuted (factor) order. Writes ef.mSize and ef.mParent.
     void computeParent(const std::vector<std::size_t>&  colPtr,
                        const std::vector<std::int32_t>& rowIdx,
                        const Permutation& p,
-                       ElmForest& f) const;
+                       ElmForest& ef) const;
 
     // Given the parent links, finalize the rest: the doubly-linked child/sibling structure
     // (first/last child, next/previous sibling) plus the tree count and the first/last
     // root. Front-insertion in decreasing order yields children and roots in increasing
     // label order.
     //
-    //   reads:   mSupSize, mParent
+    //   reads:   mSnodeSize, mParent
     //   writes:  mFirstChild, mLastChild, mNextSibling, mPreviousSibling,
     //            mNumTrees, mFirstRoot, mLastRoot
-    void finalizeLinks(ElmForest& f) const;
+    void finalizeLinks(ElmForest& ef) const;
 
     // Forest height by a roots-down breadth-first traversal: depth[s] =
     // depth[parent[s]] + 1, height = max depth + 1. Reads the doubly-linked child/sibling
     // structure, so it runs after the links are built. Returns the height rather than
     // storing it, so it stays a plain function of the forest, and takes it by const
     // reference to say so.
-    std::size_t computeHeight(const ElmForest& f) const;
+    std::size_t computeHeight(const ElmForest& ef) const;
 
     // The column sizes of a nodal forest: how many nonzeros each column of L holds.
     //
@@ -126,14 +126,14 @@ private:
     void computeColumnSizes(const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,
                             const Permutation& p,
-                            ElmForest& f) const;
+                            ElmForest& ef) const;
 
     // Merge the columns of a nodal forest into fundamental supernodes: maximal paths in
     // the forest whose columns share one sparsity pattern, each vertex on the path (bar
     // the bottom one) having exactly one child. Fundamental supernodes are unique for a
     // given forest.
     //
-    // Precondition: f is nodal, one column per supernode. That is the only useful input,
+    // Precondition: ef is nodal, one column per supernode. That is the only useful input,
     // since fundamental supernodes are maximal and a second pass would find nothing to
     // merge.
     //
@@ -142,7 +142,7 @@ private:
     // this rewrites the forest's shape, and what matters is which parts it leaves valid.
     //
     //   reads:   mParent, mFirstChild, mLastChild, mFrontSize, mUpdateSize
-    //   writes:  mSupSize, mIdxToSupIdx, mParent, mFrontSize, mUpdateSize
+    //   writes:  mSnodeSize, mNodeToSnode, mParent, mFrontSize, mUpdateSize
     //   stales:  mFirstChild, mLastChild, mNextSibling, mPreviousSibling,
     //            mNumTrees, mFirstRoot, mLastRoot   (caller rebuilds with finalizeLinks)
     //   leaves:  mSize, mHeight   (height is computed once, afterwards)
@@ -150,7 +150,7 @@ private:
     // The stale set is the point. A const& parameter would have said "not written", which
     // reads as "still valid", and these links are precisely not that: they describe the
     // nodal forest and are wrong for the compressed one until rebuilt.
-    void compressFundamental(ElmForest& f) const;
+    void compressFundamental(ElmForest& ef) const;
 
     // Amalgamate: merge a supernode with several of its children, paying explicitly stored
     // zeros for a wider front. The threshold is the budget, in zeros.
@@ -166,11 +166,11 @@ private:
     // asks only that the child's pattern match, while a fundamental merge additionally
     // demands that the child be an only child.
     //
-    //   reads:   mSize, mSupSize, mIdxToSupIdx, mParent, mFirstChild, mNextSibling,
+    //   reads:   mSize, mSnodeSize, mNodeToSnode, mParent, mFirstChild, mNextSibling,
     //            mFrontSize, mUpdateSize
-    //   writes:  mSupSize, mIdxToSupIdx, mParent, mFrontSize, mUpdateSize
+    //   writes:  mSnodeSize, mNodeToSnode, mParent, mFrontSize, mUpdateSize
     //   stales:  the child, sibling and root links, as above
-    void compressThreshold(ElmForest& f, std::size_t threshold) const;
+    void compressThreshold(ElmForest& ef, std::size_t threshold) const;
 };
 
 extern template bool ElmForestEngine::compute(const SparseMatrix<double>&, const Permutation&, ElmForest&) const;

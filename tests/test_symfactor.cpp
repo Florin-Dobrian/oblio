@@ -43,15 +43,15 @@ static bool matchesOracle(const SparseMatrix<double>& A, const Permutation& p,
     if(s.size()!=size) return false;
 
     // Collect each supernode's columns from the map (increasing, so front() is lowest).
-    std::vector<std::vector<std::size_t>> cols(s.supSize());
+    std::vector<std::vector<std::size_t>> cols(s.snodeSize());
     for(std::size_t lc=0; lc<size; ++lc)
-        cols[static_cast<std::size_t>(s.idxToSupIdx()[lc])].push_back(lc);
+        cols[static_cast<std::size_t>(s.nodeToSnode()[lc])].push_back(lc);
 
-    for(std::size_t k=0; k<s.supSize(); ++k){
+    for(std::size_t k=0; k<s.snodeSize(); ++k){
         if(cols[k].empty()) return false;
         const std::size_t lowest = cols[k].front();
-        std::vector<std::int32_t> got(s.rowIdx().begin()+static_cast<std::ptrdiff_t>(s.supPtr()[k]),
-                                      s.rowIdx().begin()+static_cast<std::ptrdiff_t>(s.supPtr()[k+1]));
+        std::vector<std::int32_t> got(s.nodeIdx().begin()+static_cast<std::ptrdiff_t>(s.snodePtr()[k]),
+                                      s.nodeIdx().begin()+static_cast<std::ptrdiff_t>(s.snodePtr()[k+1]));
         if(got != pattern[lowest]) return false;                 // index set, sorted
         if(s.frontSize()[k] != cols[k].size()) return false;     // front == own columns
         if(s.frontSize()[k]+s.updateSize()[k] != pattern[lowest].size()) return false;
@@ -82,16 +82,16 @@ static bool columnPatternsMatch(const SparseMatrix<double>& A, const Permutation
                                 const SymFactor& s){
     const auto pattern = OblioTest::denseFactorPattern(A,p);
     std::vector<std::size_t> posInFront(s.size(), 0);
-    std::vector<std::size_t> cursor(s.supSize(), 0);
+    std::vector<std::size_t> cursor(s.snodeSize(), 0);
     for(std::size_t lc=0; lc<s.size(); ++lc){
-        const std::size_t k = static_cast<std::size_t>(s.idxToSupIdx()[lc]);
+        const std::size_t k = static_cast<std::size_t>(s.nodeToSnode()[lc]);
         posInFront[lc] = cursor[k]++;
     }
     for(std::size_t lc=0; lc<s.size(); ++lc){
-        const std::size_t k = static_cast<std::size_t>(s.idxToSupIdx()[lc]);
-        const std::size_t from = s.supPtr()[k] + posInFront[lc];
-        std::vector<std::int32_t> got(s.rowIdx().begin()+static_cast<std::ptrdiff_t>(from),
-                                      s.rowIdx().begin()+static_cast<std::ptrdiff_t>(s.supPtr()[k+1]));
+        const std::size_t k = static_cast<std::size_t>(s.nodeToSnode()[lc]);
+        const std::size_t from = s.snodePtr()[k] + posInFront[lc];
+        std::vector<std::int32_t> got(s.nodeIdx().begin()+static_cast<std::ptrdiff_t>(from),
+                                      s.nodeIdx().begin()+static_cast<std::ptrdiff_t>(s.snodePtr()[k+1]));
         if(got != pattern[lc]) return false;
     }
     return true;
@@ -104,9 +104,9 @@ static bool runCase(const SparseMatrix<double>& A, const Permutation& p, std::si
     if(!feng.compute(A,p,f)) return false;
     if(!seng.compute(A,p,f,s)) return false;
     // The offsets must bracket the index array exactly.
-    if(s.supPtr().size()!=s.supSize()+1) return false;
-    if(s.supPtr()[s.supSize()]!=s.numRowIdx()) return false;
-    if(s.rowIdx().size()!=s.numRowIdx()) return false;
+    if(s.snodePtr().size()!=s.snodeSize()+1) return false;
+    if(s.snodePtr()[s.snodeSize()]!=s.numNodeIdx()) return false;
+    if(s.nodeIdx().size()!=s.numNodeIdx()) return false;
     if(!columnPatternsMatch(A,p,s)) return false;
     return matchesOracle(A,p,s,fillOut);
 }
@@ -181,9 +181,9 @@ int main(){
       ElmForestEngine feng; SymFactorEngine seng;
       Permutation p(4); ElmForest f; SymFactor s;
       bool ok = feng.compute(A,p,f) && seng.compute(A,p,f,s);
-      std::vector<std::int32_t> idx(s.rowIdx().begin(), s.rowIdx().end());
-      ck(ok && s.supSize()==1 && s.frontSize()[0]==4 && s.updateSize()[0]==0
-         && s.numRowIdx()==4 && idx==std::vector<std::int32_t>({0,1,2,3}),
+      std::vector<std::int32_t> idx(s.nodeIdx().begin(), s.nodeIdx().end());
+      ck(ok && s.snodeSize()==1 && s.frontSize()[0]==4 && s.updateSize()[0]==0
+         && s.numNodeIdx()==4 && idx==std::vector<std::int32_t>({0,1,2,3}),
          "dense n=4 natural   : one supernode, 4 front columns"); }
 
     { // A single column hanging off a dense block: supernodes {0} and {1,2,3,4}.
@@ -192,7 +192,7 @@ int main(){
       ElmForestEngine feng; SymFactorEngine seng;
       Permutation p(5); ElmForest f; SymFactor s;
       bool ok = feng.compute(A,p,f) && seng.compute(A,p,f,s);
-      ck(ok && s.supSize()==2 && s.frontSize()[0]==1 && s.updateSize()[0]==1
+      ck(ok && s.snodeSize()==2 && s.frontSize()[0]==1 && s.updateSize()[0]==1
          && s.frontSize()[1]==4 && s.updateSize()[1]==0,
          "tail n=5 natural    : supernodes {0} and {1,2,3,4}"); }
 
@@ -208,8 +208,8 @@ int main(){
       Permutation p(4); ElmForest f; SymFactor s;
       bool ok = feng.compute(A,p,f) && seng.compute(A,p,f,s);
       bool allOne = true;
-      for(std::size_t k=0;k<s.supSize();++k) if(s.frontSize()[k]!=1) allOne=false;
-      ck(ok && s.supSize()==4 && allOne && s.idxToSupIdx()==std::vector<std::int32_t>({0,1,2,3})
+      for(std::size_t k=0;k<s.snodeSize();++k) if(s.frontSize()[k]!=1) allOne=false;
+      ck(ok && s.snodeSize()==4 && allOne && s.nodeToSnode()==std::vector<std::int32_t>({0,1,2,3})
          && columnPatternsMatch(A,p,s),
          "dense n=4 nodal     : no merging, identity map, same factor"); }
 
@@ -232,9 +232,9 @@ int main(){
 
           ElmForestEngine nodal(Supernodes::Nodal), fund(Supernodes::Fundamental);
           ElmForest fn, ff; nodal.compute(A,p,fn); fund.compute(A,p,ff);
-          if(fn.supSize()!=size) ++bad;              // nodal: one supernode per column
-          if(ff.supSize()>fn.supSize()) ++bad;       // compression never grows the count
-          nodalSnodes += fn.supSize(); fundSnodes += ff.supSize();
+          if(fn.snodeSize()!=size) ++bad;              // nodal: one supernode per column
+          if(ff.snodeSize()>fn.snodeSize()) ++bad;       // compression never grows the count
+          nodalSnodes += fn.snodeSize(); fundSnodes += ff.snodeSize();
       }
       ck(bad==0, "random x200 both    : nodal and fundamental give the same factor");
       ck(fundSnodes<nodalSnodes,
@@ -294,13 +294,13 @@ int main(){
           // Every true nonzero of every column must still be present. The stored zeros may add
           // more, but nothing may be lost: losing an index is exactly the failure mode of
           // taking the fast path when it does not apply.
-          std::vector<std::size_t> pos(s.size(),0), cur(s.supSize(),0);
-          for(std::size_t lk=0; lk<s.size(); ++lk) pos[lk] = cur[s.idxToSupIdx()[lk]]++;
+          std::vector<std::size_t> pos(s.size(),0), cur(s.snodeSize(),0);
+          for(std::size_t lk=0; lk<s.size(); ++lk) pos[lk] = cur[s.nodeToSnode()[lk]]++;
           for(std::size_t lk=0; lk<s.size(); ++lk){
-              const std::size_t kk = s.idxToSupIdx()[lk];
+              const std::size_t kk = s.nodeToSnode()[lk];
               std::vector<std::int32_t> got(
-                  s.rowIdx().begin()+static_cast<std::ptrdiff_t>(s.supPtr()[kk]+pos[lk]),
-                  s.rowIdx().begin()+static_cast<std::ptrdiff_t>(s.supPtr()[kk+1]));
+                  s.nodeIdx().begin()+static_cast<std::ptrdiff_t>(s.snodePtr()[kk]+pos[lk]),
+                  s.nodeIdx().begin()+static_cast<std::ptrdiff_t>(s.snodePtr()[kk+1]));
               std::size_t w=0;
               for(std::int32_t g : got) if(w<pattern[lk].size() && pattern[lk][w]==g) ++w;
               if(w != pattern[lk].size()) ++bad;   // a true nonzero went missing

@@ -147,21 +147,21 @@ double compare(const SparseMatrix<Val>& A, const Permutation& p,
     const std::vector<std::vector<Val>> L = denseCholesky(permuted);
 
     double worst = 0;
-    for (std::size_t kk = 0; kk < nf.supSize(); ++kk) {
+    for (std::size_t kk = 0; kk < nf.snodeSize(); ++kk) {
         const std::size_t   frontSize = nf.frontSize()[kk];
-        const std::size_t   numIdx    = frontSize + nf.updateSize()[kk];
-        const std::int32_t* rowIdx    = nf.rowIdx().data() + nf.supPtr()[kk];
-        const Val*          block     = nf.val().data() + nf.valPtr()[kk];
+        const std::size_t   numNodeIdx = frontSize + nf.updateSize()[kk];
+        const std::int32_t* nodeIdx    = nf.nodeIdx().data() + nf.snodeNodeIdxPtr()[kk];
+        const Val*          block     = nf.val().data() + nf.snodeValPtr()[kk];
 
-        // The block is column-major, numIdx by frontSize. Only its lower part is meaningful: the
+        // The block is column-major, numNodeIdx by frontSize. Only its lower part is meaningful: the
         // strictly upper triangle of the front is allocated and left zero, so BLAS can take the
         // whole rectangle.
         for (std::size_t lclCol = 0; lclCol < frontSize; ++lclCol) {
-            const std::size_t col = static_cast<std::size_t>(rowIdx[lclCol]);
-            for (std::size_t lclRow = lclCol; lclRow < numIdx; ++lclRow) {
-                const std::size_t row = static_cast<std::size_t>(rowIdx[lclRow]);
+            const std::size_t col = static_cast<std::size_t>(nodeIdx[lclCol]);
+            for (std::size_t lclRow = lclCol; lclRow < numNodeIdx; ++lclRow) {
+                const std::size_t row = static_cast<std::size_t>(nodeIdx[lclRow]);
                 worst = std::max(worst,
-                                 std::abs(block[lclCol * numIdx + lclRow] - L[row][col]));
+                                 std::abs(block[lclCol * numNodeIdx + lclRow] - L[row][col]));
             }
         }
     }
@@ -244,19 +244,19 @@ double reconstructLdl(const NumFactorStatic<Val>& f,
     std::vector<std::vector<Val>> L(n, std::vector<Val>(n, Val(0)));
     std::vector<Val> D(n, Val(0));
 
-    for (std::size_t kk = 0; kk < f.supSize(); ++kk) {
+    for (std::size_t kk = 0; kk < f.snodeSize(); ++kk) {
         const std::size_t   frontSize = f.frontSize()[kk];
-        const std::size_t   numIdx    = frontSize + f.updateSize()[kk];
-        const std::int32_t* rowIdx    = f.rowIdx().data() + f.supPtr()[kk];
-        const Val*          block     = f.val().data() + f.valPtr()[kk];
+        const std::size_t   numNodeIdx = frontSize + f.updateSize()[kk];
+        const std::int32_t* nodeIdx    = f.nodeIdx().data() + f.snodeNodeIdxPtr()[kk];
+        const Val*          block     = f.val().data() + f.snodeValPtr()[kk];
 
         for (std::size_t lclCol = 0; lclCol < frontSize; ++lclCol) {
-            const std::size_t col = static_cast<std::size_t>(rowIdx[lclCol]);
-            D[col]      = block[lclCol * numIdx + lclCol];
+            const std::size_t col = static_cast<std::size_t>(nodeIdx[lclCol]);
+            D[col]      = block[lclCol * numNodeIdx + lclCol];
             L[col][col] = Val(1);
-            for (std::size_t lclRow = lclCol + 1; lclRow < numIdx; ++lclRow)
-                L[static_cast<std::size_t>(rowIdx[lclRow])][col] =
-                    block[lclCol * numIdx + lclRow];
+            for (std::size_t lclRow = lclCol + 1; lclRow < numNodeIdx; ++lclRow)
+                L[static_cast<std::size_t>(nodeIdx[lclRow])][col] =
+                    block[lclCol * numNodeIdx + lclRow];
         }
     }
 
@@ -397,11 +397,11 @@ int main() {
             if (g == 10) {
                 ElmForest f; ElmForestEngine fe; fe.compute(AR, pNat, f);
                 SymFactor s; SymFactorEngine se; se.compute(AR, pNat, f, s);
-                supNat = s.supSize(); idxNat = s.numRowIdx(); heightNat = f.height();
+                supNat = s.snodeSize(); idxNat = s.numNodeIdx(); heightNat = f.height();
 
                 ElmForest fa; fe.compute(AR, pAmd, fa);
                 SymFactor sa; se.compute(AR, pAmd, fa, sa);
-                supAmd = sa.supSize(); idxAmd = sa.numRowIdx();
+                supAmd = sa.snodeSize(); idxAmd = sa.numNodeIdx();
             }
 
             for (const Permutation& p : {pNat, pAmd})

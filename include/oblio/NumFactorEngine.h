@@ -64,8 +64,8 @@ public:
     // found a non-positive pivot), or if the matrix does not match the structure the symbolic
     // factorization predicted.
     template<class Val>
-    bool compute(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& s,
-                 NumFactorStatic<Val>& f) const;
+    bool compute(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& sf,
+                 NumFactorStatic<Val>& nf) const;
 
 private:
     Factorization mFactorization = Factorization::Cholesky;
@@ -79,7 +79,7 @@ private:
     // upper triangle of the front is allocated and left zero, which is what lets the whole block
     // go to a level-3 BLAS call with a leading dimension.
     template<class Val>
-    void setSymFactor(const SymFactor& s, NumFactorStatic<Val>& f) const;
+    void setSymFactor(const SymFactor& sf, NumFactorStatic<Val>& nf) const;
 
     // A supernode's rows, in *its own* local coordinates: gblToLcl[globalRow] = local position.
     // Set before working on a supernode, cleared after, so the array is allocated once and reused
@@ -151,11 +151,11 @@ private:
     //   Right-looking: for each supernode, factor, then PUSH its update to every ancestor.
     //                  Needs no lists at all.
     template<class Val>
-    bool factorLeftLooking(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& s,
-                           NumFactorStatic<Val>& f) const;
+    bool factorLeftLooking(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& sf,
+                           NumFactorStatic<Val>& nf) const;
     template<class Val>
-    bool factorRightLooking(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& s,
-                            NumFactorStatic<Val>& f) const;
+    bool factorRightLooking(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& sf,
+                            NumFactorStatic<Val>& nf) const;
 };
 
 } // namespace Oblio

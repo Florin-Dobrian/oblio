@@ -14,7 +14,7 @@
 //
 // Which is why the storage differs, and only the storage differs:
 //
-//   NumFactorStatic    one flat buffer,  valPtr[kk] an offset into it       nothing grows
+//   NumFactorStatic    one flat buffer,  snodeValPtr[kk] an offset into it  nothing grows
 //   NumFactorDynamic   one buffer per supernode, val[kk] its own vector     one may grow
 //
 // Everything above the values is identical, and identically copied from SymFactor. There is
@@ -40,7 +40,6 @@
 namespace Oblio {
 
 class NumFactorEngine;
-class SolveEngine;
 
 template<class Val>
 class NumFactorDynamic {
@@ -48,54 +47,63 @@ public:
     NumFactorDynamic() = default;
 
     std::size_t   size()          const { return mSize; }
-    std::size_t   supSize()       const { return mSupSize; }
+    std::size_t   snodeSize()     const { return mSnodeSize; }
     Factorization factorization() const { return mFactorization; }
 
-    std::size_t numRowIdx() const { return mNumRowIdx; }
+    std::size_t numNodeIdx() const { return mNumNodeIdx; }
 
-    const std::vector<std::int32_t>& idxToSupIdx() const { return mIdxToSupIdx; }
+    const std::vector<std::int32_t>& nodeToSnode() const { return mNodeToSnode; }
 
     const std::vector<std::size_t>& frontSize()  const { return mFrontSize; }
     const std::vector<std::size_t>& updateSize() const { return mUpdateSize; }
 
-    const std::vector<std::size_t>&  supPtr() const { return mSupPtr; }
-    const std::vector<std::int32_t>& rowIdx() const { return mRowIdx; }
+    const std::vector<std::size_t>&  snodeNodeIdxPtr() const { return mSnodeNodeIdxPtr; }
+    const std::vector<std::int32_t>& nodeIdx()         const { return mNodeIdx; }
 
     // The values, one dense block per supernode. Supernode kk's block is val()[kk], column-major,
     // with the same shape as the static case: indexSize rows by frontSize columns. It differs in
     // that it may be resized while the factorization runs.
     const std::vector<std::vector<Val>>& val() const { return mVal; }
 
-private:
+    // Where supernode kk's node indices start. Flat, exactly as in the static factor: the index
+    // sets are stored identically between the two, only the values differ.
+    const std::int32_t* nodeIdxPtr(std::int32_t kk) const { return mNodeIdx.data() + mSnodeNodeIdxPtr[kk]; }
+
     // Where supernode kk's dense block lives. The static factor's counterpart computes an offset
     // into one flat buffer; this one hands over the column's own vector. Same question, same
     // signature, different storage, and the engines cannot tell which they are talking to.
     //
+    // Reading is public, as in the static factor: a consumer that only reads (SolveEngine) reaches
+    // these const overloads and needs no friendship; the mutable overloads stay private.
+    //
     // **Call it at the moment of use, never hoist it.** Here the warning is not theoretical: a
     // delayed pivot grows an ancestor's front, which resizes its vector, which dangles every
     // pointer previously taken into it.
-    Val*       blockPtr(std::int32_t kk)       { return mVal[kk].data(); }
-    const Val* blockPtr(std::int32_t kk) const { return mVal[kk].data(); }
+    const Val*          valPtr(std::int32_t kk)     const { return mVal[kk].data(); }
 
-    std::size_t   mSize    = 0;
-    std::size_t   mSupSize = 0;
+private:
+    // The write path, reached only through friendship: NumFactorEngine fills each block.
+    std::int32_t*       nodeIdxPtr(std::int32_t kk) { return mNodeIdx.data() + mSnodeNodeIdxPtr[kk]; }
+    Val*                valPtr(std::int32_t kk)     { return mVal[kk].data(); }
+
+    std::size_t   mSize      = 0;
+    std::size_t   mSnodeSize = 0;
     Factorization mFactorization = Factorization::DynamicLDLT;
 
     // Copied from SymFactor, exactly as in NumFactorStatic. Under delayed pivoting the index sets
     // themselves grow, which is the second reason the factor owns a copy rather than referring
     // back: SymFactor's sets are the *predicted* ones and must not be disturbed.
-    std::vector<std::int32_t> mIdxToSupIdx;
+    std::vector<std::int32_t> mNodeToSnode;
     std::vector<std::size_t>  mFrontSize;
     std::vector<std::size_t>  mUpdateSize;
-    std::size_t               mNumRowIdx = 0;
-    std::vector<std::size_t>  mSupPtr;
-    std::vector<std::int32_t> mRowIdx;
+    std::size_t               mNumNodeIdx = 0;
+    std::vector<std::size_t>  mSnodeNodeIdxPtr;
+    std::vector<std::int32_t> mNodeIdx;
 
     // One buffer per supernode, so a front can grow without moving its neighbours.
     std::vector<std::vector<Val>> mVal;
 
     friend class NumFactorEngine;
-    friend class SolveEngine;
 };
 
 extern template class NumFactorDynamic<double>;

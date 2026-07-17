@@ -94,7 +94,7 @@ denseFactorPattern(const Oblio::SparseMatrix<Val>& A, const Oblio::Permutation& 
 template<class Val>
 std::vector<std::int32_t>
 fundamentalSupernodes(const Oblio::SparseMatrix<Val>& A, const Oblio::Permutation& p,
-                      std::size_t& supSizeOut) {
+                      std::size_t& snodeSizeOut) {
     const auto pattern = denseFactorPattern(A, p);
     const std::size_t size = A.size();
 
@@ -111,7 +111,7 @@ fundamentalSupernodes(const Oblio::SparseMatrix<Val>& A, const Oblio::Permutatio
 
     // Merge k into its child j when j is k's only child and their patterns agree.
     std::vector<std::int32_t> map(size, Oblio::NIL);
-    std::size_t supSize = 0;
+    std::size_t snodeSize = 0;
     for (std::size_t k = 0; k < size; ++k) {
         std::int32_t onlyChild = Oblio::NIL;
         if (numChildren[k] == 1) {
@@ -127,9 +127,9 @@ fundamentalSupernodes(const Oblio::SparseMatrix<Val>& A, const Oblio::Permutatio
         if (merge)
             map[k] = map[static_cast<std::size_t>(onlyChild)];
         else
-            map[k] = static_cast<std::int32_t>(supSize++);
+            map[k] = static_cast<std::int32_t>(snodeSize++);
     }
-    supSizeOut = supSize;
+    snodeSizeOut = snodeSize;
     return map;
 }
 

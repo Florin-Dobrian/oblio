@@ -67,6 +67,64 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-07-17, Naming A and L: `val` stays `val`, and `nodeIdx` unifies row and column
+
+A and L are both column oriented, and the names should show them to be the same idea, with L adding
+one thing on top: a compressed structural view, for efficiency. Seeing exactly how far that
+compression reaches, and where it stops, fixes every name.
+
+**A is the base case: a column points at two parallel arrays.** `colPtr` brackets, per column, a run
+of `rowIdx` (which rows are nonzero) and a run of `val` (their values). One offset serves both,
+because the arrays are parallel: entry k of `rowIdx` and entry k of `val` are the same nonzero.
+
+**L keeps the idea and compresses it, and the compression goes two separate ways.** A supernode holds
+a set of columns together, and that has different consequences for values and for indices.
+
+- **Values are held together, but not compressed.** Inside a supernode there are still row values,
+  but now over more than one column, so `rowVal` would misread it: the run is a dense block spanning
+  several columns, not one column's rows. So the value array stays **`val`**. And because we want
+  `val` on L, we keep `val` on A as well, rather than split a matching pair of arrays into `rowVal`
+  on A and `val` on L for no gain. In isolation A's values could read `rowVal`, and arguably that is
+  a hair more descriptive, but consistency across A and L wins, and L's block reading settles it.
+
+- **Indices are compressed.** Values cannot be compressed; indices can, and in L they are. The
+  compressed set is then a mix of row and column indices. `rowColIdx` would be perfectly valid, and
+  we shorten it: represent both a row and a column by a **node**, giving **`nodeIdx`**. Beyond being
+  short, the word does two jobs. It unifies row and column, since in a symmetric structure a node is
+  neither and both. And it hints at L's special structure, with nodes coming from the elimination
+  forest view and supernodes from node compression.
+
+**The offsets follow from what they bracket, and a qualifier is added only to tell siblings apart.**
+A collapses to a single offset (`colPtr`) precisely because its two arrays are parallel: one offset
+serves both `rowIdx` and `val`, so it is named for its entity alone, `colPtr`, not `colRowIdxPtr`.
+The symbolic factor is in the same position. It holds the index array and nothing else, no values,
+so it too needs one offset, and it too is entity-named: `snodePtr`. Moving from symbolic to numeric
+is what forces a split. The numeric factor's indices are compressed and its values are not the same
+shape (one `nodeIdx` entry is a whole row of a dense block, not a single value), so a single offset
+cannot serve both and it carries two. Only now, with two offsets to keep apart, does each earn a
+payload qualifier: `snodeNodeIdxPtr` (a supernode's slice of `nodeIdx`) and `snodeValPtr` (a
+supernode's slice of `val`). So the rule is one line: an offset is named for its entity, and takes a
+payload qualifier only when a sibling offset exists to disambiguate. The inverse map, from a node to
+the supernode that owns it, is `nodeToSnode`.
+
+So it is one spine, with the numeric factor the only place a second offset is needed:
+
+| | index offset | indices | value offset | values | inverse map |
+|---|---|---|---|---|---|
+| **A** | `colPtr` | `rowIdx` | `colPtr` | `val` | |
+| **L, symbolic** | `snodePtr` | `nodeIdx` | | | `nodeToSnode` |
+| **L, numeric** | `snodeNodeIdxPtr` | `nodeIdx` | `snodeValPtr` | `val` | `nodeToSnode` |
+
+This is settled and now carried by both factors, the symbolic (`SymFactor`) and the numeric, and
+the elimination forest shares the same names for what it hands across, `snodeSize` and
+`nodeToSnode`, so copying the forest's attributes into the factor is a name-for-name transfer
+(`sf.mNodeToSnode = ef.nodeToSnode()`). The engine's own scratch offsets are entity-named for the
+same reason, single-purpose so unqualified, and the transpose in `sortIndices` reads as a clean
+mirror: `snodePtr -> nodeIdx` (a supernode and the nodes it holds) against `nodePtr -> snodeIdx` (a
+node and the supernodes that hold it).
+
+---
+
 ## 2026-07-15, An in-header throwing constructor slowed a hot loop in the same translation unit
 
 A concrete, measured finding from the storage-options experiment, worth recording because it is
@@ -212,7 +270,7 @@ analog drops it.
 
 A consumer that reads a CSC-style object can do it two ways. *Direct*: hold the object and ask it
 for one column's (or one supernode's) pointer and length at the moment of use, through the storage's
-own lookup (`rowIdx` / `val` / `colSize` on the matrix, `blockPtr` on the factor). *Bulk*:
+own lookup (`rowIdx` / `val` / `colSize` on the matrix, `valPtr` on the factor). *Bulk*:
 extract every pointer up front into three plain arrays, then run a kernel that takes nothing but
 those arrays, so the object is out of the picture and its dimensions must be extracted alongside.
 
@@ -331,7 +389,7 @@ forbids.
 
 The generalization was too broad. The two things are not the same kind of thing:
 
-| | `columnPointers` | `blockPtr` |
+| | `columnPointers` | `valPtr` |
 |---|---|---|
 | what it does | **materializes** three new arrays | **computes an address** in the existing storage |
 | cost | `O(n)`, called once | `O(1)`, called in the hot loop |
@@ -343,22 +401,22 @@ algorithm would want a different one, so putting it on the matrix would grow the
 per consumer, each committing it to a format chosen for somebody else. **A view belongs to the
 consumer.**
 
-`blockPtr` is a **lookup**: it answers "where does supernode kk's block live", and the answer is a
+`valPtr` is a **lookup**: it answers "where does supernode kk's block live", and the answer is a
 fact about the layout, not a shape chosen by anyone. The layout (one flat buffer with offsets, or
 one vector per supernode) is the factor's own business, and no consumer should have to restate it.
 **A lookup belongs to the storage.**
 
-So `blockPtr` now lives on `NumFactorStatic` and `NumFactorDynamic`, private, with the engines as
+So `valPtr` now lives on `NumFactorStatic` and `NumFactorDynamic`, private, with the engines as
 friends. One definition per storage rather than one per engine, and the engines cannot tell the two
-factors apart. It still inlines to nothing (no `blockPtr` symbol survives in either object file), so
+factors apart. It still inlines to nothing (no `valPtr` symbol survives in either object file), so
 the move is free.
 
 **Amendment (2026-07-14, later the same day): the view was not a view, and the right answer was no
-extractor at all.** The rule above is right and `blockPtr` is right, but it mis-cast
+extractor at all.** The rule above is right and `valPtr` is right, but it mis-cast
 `columnPointers`. Calling it a view and leaving it on the engine treated it as a genuine
 algorithm-shaped structure, which it is not: the three arrays it builds are a bulk copy of the
 per-column lookups the matrix already answers (`rowIdx` / `val` / `colSize`, the matrix-side
-twin of `blockPtr`, added to the storage after this entry was written). Once those lookups exist a
+twin of `valPtr`, added to the storage after this entry was written). Once those lookups exist a
 consumer reads a column directly, at the point of use, and the extractor is pure redundancy: an
 `O(n)` up-front copy of what the storage already holds, carrying an invalidation hazard that exists
 only because something was extracted. Its one property, a single storage-blind compiled kernel, has

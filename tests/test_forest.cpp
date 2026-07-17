@@ -38,7 +38,7 @@ static bool validEtree(const std::vector<std::int32_t>& par, std::size_t& roots)
 // each node's children are exactly the nodes naming it as parent, the forward and
 // backward sibling chains are inverses, and the root list is itself a sibling chain.
 static bool validLinks(const ElmForest& f){
-    const std::size_t n=f.supSize();
+    const std::size_t n=f.snodeSize();
     const auto& par=f.parent(); const auto& fc=f.firstChild(); const auto& lc=f.lastChild();
     const auto& ns=f.nextSibling(); const auto& ps=f.previousSibling();
     std::vector<std::size_t> seen(n,0);
@@ -68,7 +68,7 @@ static bool validLinks(const ElmForest& f){
 
 // Height, recomputed independently by climbing each node to its root.
 static bool validHeight(const ElmForest& f){
-    const std::size_t n=f.supSize(); const auto& par=f.parent();
+    const std::size_t n=f.snodeSize(); const auto& par=f.parent();
     std::size_t h=0;
     for(std::size_t s=0;s<n;++s){ std::size_t d=1;
         for(std::int32_t a=par[s]; a!=NP; a=par[static_cast<std::size_t>(a)]) ++d;
@@ -84,23 +84,23 @@ static bool validSupernodes(const SparseMatrix<double>& A, const Permutation& p,
     const auto pattern = OblioTest::denseFactorPattern(A,p);
 
     if(mode==Supernodes::Fundamental){
-        std::size_t wantSupSize=0;
-        const auto wantMap = OblioTest::fundamentalSupernodes(A,p,wantSupSize);
-        if(f.supSize()!=wantSupSize) return false;
-        if(f.idxToSupIdx()!=wantMap) return false;      // same merges, same labels
+        std::size_t wantSnodeSize=0;
+        const auto wantMap = OblioTest::fundamentalSupernodes(A,p,wantSnodeSize);
+        if(f.snodeSize()!=wantSnodeSize) return false;
+        if(f.nodeToSnode()!=wantMap) return false;      // same merges, same labels
     } else {
         // Nodal: one supernode per column, identity map.
-        if(f.supSize()!=f.size()) return false;
+        if(f.snodeSize()!=f.size()) return false;
         for(std::size_t lc=0; lc<f.size(); ++lc)
-            if(f.idxToSupIdx()[lc]!=static_cast<std::int32_t>(lc)) return false;
+            if(f.nodeToSnode()[lc]!=static_cast<std::int32_t>(lc)) return false;
     }
 
     // Collect each supernode's columns from the map.
-    std::vector<std::vector<std::size_t>> cols(f.supSize());
+    std::vector<std::vector<std::size_t>> cols(f.snodeSize());
     for(std::size_t lc=0; lc<f.size(); ++lc)
-        cols[static_cast<std::size_t>(f.idxToSupIdx()[lc])].push_back(lc);
+        cols[static_cast<std::size_t>(f.nodeToSnode()[lc])].push_back(lc);
 
-    for(std::size_t s=0; s<f.supSize(); ++s){
+    for(std::size_t s=0; s<f.snodeSize(); ++s){
         if(cols[s].empty()) return false;
         const std::size_t lowest = cols[s].front();     // collected in increasing order
         if(f.frontSize()[s]!=cols[s].size()) return false;
@@ -111,7 +111,7 @@ static bool validSupernodes(const SparseMatrix<double>& A, const Permutation& p,
                          static_cast<std::int32_t>(c))==pattern[lowest].end()) return false;
     }
     // Supernode labels must stay topological: a parent's label exceeds its children's.
-    for(std::size_t s=0; s<f.supSize(); ++s)
+    for(std::size_t s=0; s<f.snodeSize(); ++s)
         if(f.parent()[s]!=NP && f.parent()[s]<=static_cast<std::int32_t>(s)) return false;
     return true; }
 
@@ -126,20 +126,20 @@ int main(){
     { auto A=tridiagFull(4); reqSym(A,"tridiag n=4         : symmetric");
       Permutation p(4); ElmForest f;
       // Columns 2 and 3 share a pattern ({2,3} and {3}), so they merge: 3 supernodes.
-      ck(eng.compute(A,p,f) && eq(f.parent(),{1,2,NP}) && f.supSize()==3
-         && eq(f.idxToSupIdx(),{0,1,2,2}), "tridiag n=4 natural : path, 2+3 merged"); }
+      ck(eng.compute(A,p,f) && eq(f.parent(),{1,2,NP}) && f.snodeSize()==3
+         && eq(f.nodeToSnode(),{0,1,2,2}), "tridiag n=4 natural : path, 2+3 merged"); }
     { auto A=tridiagFull(6); reqSym(A,"tridiag n=6         : symmetric");
       Permutation p(6); ElmForest f; eng.compute(A,p,f);
       // Only the last two columns merge, as in the n=4 case: 5 supernodes.
-      ck(eq(f.parent(),{1,2,3,4,NP}) && f.supSize()==5
-         && eq(f.idxToSupIdx(),{0,1,2,3,4,4}), "tridiag n=6 natural : path, 4+5 merged"); }
+      ck(eq(f.parent(),{1,2,3,4,NP}) && f.snodeSize()==5
+         && eq(f.nodeToSnode(),{0,1,2,3,4,4}), "tridiag n=6 natural : path, 4+5 merged"); }
     { std::vector<std::size_t> cp={0,6,8,10,12,14,16};
       std::vector<std::int32_t> ri={0,1,2,3,4,5, 0,1, 0,2, 0,3, 0,4, 0,5};
       std::vector<double> v(ri.size(),1.0); SparseMatrix<double> A(6,cp,ri,v);
       reqSym(A,"arrow 6x6           : symmetric");
       Permutation p(6); ElmForest f; eng.compute(A,p,f);
       // The hub is eliminated first, so every later column is dense: one supernode.
-      ck(eq(f.parent(),{NP}) && f.supSize()==1 && f.frontSize()[0]==6
+      ck(eq(f.parent(),{NP}) && f.snodeSize()==1 && f.frontSize()[0]==6
          && f.updateSize()[0]==0 && f.height()==1, "arrow 6x6 natural   : one supernode"); }
     { std::vector<std::size_t> cp={0,2,5,7,9,12,14};
       std::vector<std::int32_t> ri={0,1, 0,1,2, 1,2, 3,4, 3,4,5, 4,5};
@@ -148,8 +148,8 @@ int main(){
       Permutation p(6); ElmForest f; eng.compute(A,p,f);
       std::size_t roots=0; bool inv=validEtree(f.parent(),roots);
       // Each block compresses {0},{1,2} and {3},{4,5}: 4 supernodes, still 2 trees.
-      ck(inv && roots==2 && eq(f.parent(),{1,NP,3,NP}) && f.supSize()==4
-         && eq(f.idxToSupIdx(),{0,1,1,2,3,3}), "two blocks natural  : 2 trees, compressed"); }
+      ck(inv && roots==2 && eq(f.parent(),{1,NP,3,NP}) && f.snodeSize()==4
+         && eq(f.nodeToSnode(),{0,1,1,2,3,3}), "two blocks natural  : 2 trees, compressed"); }
     { auto A=tridiagFull(30); reqSym(A,"tridiag n=30        : symmetric");
       OrderEngine ord(OrderMethod::AMD); Permutation p; ord.compute(A,p);
       ElmForest f; bool ok=eng.compute(A,p,f); std::size_t roots=0; bool inv=validEtree(f.parent(),roots);
@@ -224,7 +224,7 @@ int main(){
       Permutation p(3);
       ElmForest f0, f1; ElmForestEngine e1; e1.setThreshold(0);
       eng.compute(A,p,f0); e1.compute(A,p,f1);
-      ck(f0.supSize()==3 && f1.supSize()==2 && eq2(f1.frontSize(),{1,2}),
+      ck(f0.snodeSize()==3 && f1.snodeSize()==2 && eq2(f1.frontSize(),{1,2}),
          "star n=3 amalg(0)   : 3 supernodes -> 2, no fill"); }
 
     { // The grid of the notes. Fundamental gives 7 supernodes (the separator {7,8,9}).
@@ -241,7 +241,7 @@ int main(){
       SparseMatrix<double> A(9,cp,ri,v); Permutation p(9);
       ElmForest f0, f1; ElmForestEngine e1; e1.setThreshold(0);
       eng.compute(A,p,f0); e1.compute(A,p,f1);
-      ck(f0.supSize()==7 && f1.supSize()==6 && f1.frontSize()[5]==4,
+      ck(f0.snodeSize()==7 && f1.snodeSize()==6 && f1.frontSize()[5]==4,
          "grid amalg(0)       : 7 supernodes -> 6, 4-column front"); }
 
     // The invariants that survive tie-breaking. Amalgamation is greedy and not canonical, so
@@ -281,19 +281,19 @@ int main(){
 
               // Amalgamation never increases the supernode count, and a larger budget never
               // increases it either.
-              if(f1.supSize() > f0.supSize()) ++bad;
-              if(f2.supSize() > f1.supSize()) ++bad;
+              if(f1.snodeSize() > f0.snodeSize()) ++bad;
+              if(f2.snodeSize() > f1.snodeSize()) ++bad;
 
               // Every column belongs to exactly one supernode, and front sizes sum to size.
               std::size_t totalFront=0;
-              for(std::size_t k=0;k<f2.supSize();++k) totalFront += f2.frontSize()[k];
+              for(std::size_t k=0;k<f2.snodeSize();++k) totalFront += f2.frontSize()[k];
               if(totalFront != size) ++bad;
 
               // Supernode labels stay topological.
-              for(std::size_t k=0;k<f2.supSize();++k)
+              for(std::size_t k=0;k<f2.snodeSize();++k)
                   if(f2.parent()[k]!=NP && f2.parent()[k] <= static_cast<std::int32_t>(k)) ++bad;
 
-              if(which==0){ fund += f0.supSize(); at8 += f2.supSize(); }
+              if(which==0){ fund += f0.snodeSize(); at8 += f2.snodeSize(); }
           }
       }
       ck(bad==0, "random x200 amalg   : links, height, labels valid; count never grows");
@@ -323,7 +323,7 @@ int main(){
       ck(fNodal.exactPatterns(), "exactPatterns       : nodal, trivially true");
       ck(fFund.exactPatterns(),  "exactPatterns       : fundamental, true by definition");
       ck(fAmal0.exactPatterns(), "exactPatterns       : amalgamation at 0 buys nothing, still true");
-      ck(!fAmal8.exactPatterns() || fAmal8.supSize()==fFund.supSize(),
+      ck(!fAmal8.exactPatterns() || fAmal8.snodeSize()==fFund.snodeSize(),
          "exactPatterns       : false once a zero is stored"); }
 
     std::cout<<"\nElmForest tests: "<<pass<<"/"<<(pass+fail)<<" passed\n";

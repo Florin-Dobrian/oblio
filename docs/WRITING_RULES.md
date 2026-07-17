@@ -80,8 +80,9 @@ all three are legitimate; the structure is symmetric, so an index is an index, a
 column `k` and vertex `k` are the same `k`. Prefer the vocabulary of the context: matrix words
 (row, column, `colPtr`, `rowIdx`) when discussing `A` or `L` as matrices, graph words (node,
 supernode, parent, child) when discussing the elimination forest, and the neutral **index** and
-**sup** where the two meet, which is most of the symbolic factorization. `sup` is deliberately
-neutral: it reads as supernode or as supercolumn, and commits to neither.
+**snode** where the two meet, which is most of the symbolic factorization. `snode` is deliberately
+neutral: a node is neither row nor column (the structure is symmetric), so a supernode of nodes
+commits to neither.
 
 ## Dated entries (DESIGN_DECISIONS, CHANGELOG, the devlog)
 

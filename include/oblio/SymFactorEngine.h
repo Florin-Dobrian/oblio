@@ -31,7 +31,7 @@ class SymFactorEngine {
 public:
     SymFactorEngine() = default;
 
-    // Compute the symbolic factorization of A under p, from the forest f.
+    // Compute the symbolic factorization of A under p, from the forest ef.
     //
     // The factor's pattern depends on A's pattern alone, never on its values, so the
     // implementation is the non-templated overload, taking colPtr and rowIdx, compiled
@@ -40,11 +40,11 @@ public:
     // factorization without inventing a scalar type to satisfy the signature.
     template<class Val>
     bool compute(const SparseMatrix<Val>& A, const Permutation& p,
-                 const ElmForest& f, SymFactor& s) const;
+                 const ElmForest& ef, SymFactor& sf) const;
 
     bool compute(const std::vector<std::size_t>&  colPtr,
                  const std::vector<std::int32_t>& rowIdx,
-                 const Permutation& p, const ElmForest& f, SymFactor& s) const;
+                 const Permutation& p, const ElmForest& ef, SymFactor& sf) const;
 
 private:
     // The front indices of each supernode, laid out contiguously. The map runs column to
@@ -69,16 +69,16 @@ private:
     // fails and every front column must genuinely be read.
     //
     // So the alternative (getFirstFrontalIndex, below) differs in *size*, not in passes: it
-    // produces the lowest column of each supernode, supSize entries, where this produces all
+    // produces the lowest column of each supernode, snodeSize entries, where this produces all
     // front columns, size entries. Both references take this general path unconditionally, and
     // 0.9's comment says exactly why one must when amalgamation is on. See Section 4.6 of the
     // sparse-factorization notes.
-    void getFrontalIndices(const SymFactor& s,
-                              std::vector<std::size_t>&  frontSupPtr,
-                              std::vector<std::int32_t>& frontRowIdx) const;
+    void getFrontalIndices(const SymFactor& sf,
+                              std::vector<std::size_t>&  snodeFrontPtr,
+                              std::vector<std::int32_t>& frontNodeIdx) const;
 
     // The specialization: the lowest front column of each supernode, and nothing else. One
-    // vector of supSize entries, no offsets, since each supernode has exactly one and the
+    // vector of snodeSize entries, no offsets, since each supernode has exactly one and the
     // position is the supernode.
     //
     // Correct exactly when the forest reports exactPatterns(): a supernode's columns then share
@@ -97,12 +97,12 @@ private:
     // 4.6 of the notes, which works this through on a three-column example.
     //
     // What it saves is a great deal of A. getFrontalIndices makes the union read every column of
-    // A, all `size` of them; this one makes it read `supSize`, one per supernode. On a forest
+    // A, all `size` of them; this one makes it read `snodeSize`, one per supernode. On a forest
     // that compresses well that is most of the traversal of A.
-    void getFirstFrontalIndex(const SymFactor& s,
-                                   std::vector<std::int32_t>& firstFrontRowIdx) const;
+    void getFirstFrontalIndex(const SymFactor& sf,
+                                   std::vector<std::int32_t>& firstFrontNodeIdx) const;
 
-    void sortIndices(SymFactor& s) const;
+    void sortIndices(SymFactor& sf) const;
 };
 
 extern template bool SymFactorEngine::compute(const SparseMatrix<double>&, const Permutation&, const ElmForest&, SymFactor&) const;

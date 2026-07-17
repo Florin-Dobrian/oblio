@@ -47,28 +47,28 @@ public:
     // Rarely what a caller wants directly, but it is the whole of the arithmetic, and the
     // permuting overload below is a thin wrapper on it.
     template<class Val>
-    bool compute(const NumFactorStatic<Val>& f, Vector<Val>& y) const;
+    bool compute(const NumFactorStatic<Val>& nf, Vector<Val>& y) const;
 
     // Solve A x = b, in A's ordering. Permutes b into the factor's ordering, solves, and permutes
     // back. This is the one to call.
     template<class Val>
-    bool compute(const Permutation& p, const NumFactorStatic<Val>& f,
+    bool compute(const Permutation& p, const NumFactorStatic<Val>& nf,
                  const Vector<Val>& b, Vector<Val>& x) const;
 
 private:
     // L y = b. Descending the supernodes, which is a topological order, so a supernode's own
     // columns are solved before anything below them is updated.
     template<class Val>
-    void forward(const NumFactorStatic<Val>& f, Vector<Val>& y) const;
+    void forward(const NumFactorStatic<Val>& nf, Vector<Val>& y) const;
 
     // D z = y. LDL only. Trivial while pivots are 1x1; a 2x2 block solve when dynamic LDL brings
     // them.
     template<class Val>
-    void diagonal(const NumFactorStatic<Val>& f, Vector<Val>& y) const;
+    void diagonal(const NumFactorStatic<Val>& nf, Vector<Val>& y) const;
 
     // L^H x = z (or L^T, for LDLT). Ascending, the mirror of the forward pass.
     template<class Val>
-    void backward(const NumFactorStatic<Val>& f, Vector<Val>& y) const;
+    void backward(const NumFactorStatic<Val>& nf, Vector<Val>& y) const;
 
     // Whether the backward pass conjugates. The same rule the factorization uses, stated once.
     static bool hermitian(Factorization factorization) {

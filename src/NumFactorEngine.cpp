@@ -66,6 +66,30 @@ void NumFactorEngine::setSymFactor(const SymFactor& sf, NumFactorStatic<Val>& nf
 }
 
 template<class Val>
+void NumFactorEngine::setSymFactor(const SymFactor& sf, NumFactorDynamic<Val>& nf) const {
+    nf.mSize          = sf.size();
+    nf.mSnodeSize     = sf.snodeSize();
+    nf.mFactorization = mFactorization;
+
+    // The structure, copied, exactly as for the static factor.
+    nf.mNodeToSnode     = sf.nodeToSnode();
+    nf.mFrontSize       = sf.frontSize();
+    nf.mUpdateSize      = sf.updateSize();
+    nf.mNumNodeIdx      = sf.numNodeIdx();
+    nf.mSnodeNodeIdxPtr = sf.snodePtr();
+    nf.mNodeIdx         = sf.nodeIdx();
+
+    // The value blocks. Same shape as the static factor, indexSize rows by frontSize columns, but
+    // one vector per supernode rather than offsets into one flat buffer, so a front can later grow
+    // without moving its neighbours. Each zeroed, because assembly adds into it.
+    nf.mVal.resize(nf.mSnodeSize);
+    for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(nf.mSnodeSize); ++kk) {
+        const std::size_t numNodeIdx = nf.mFrontSize[kk] + nf.mUpdateSize[kk];
+        nf.mVal[kk].assign(numNodeIdx * nf.mFrontSize[kk], Val(0));
+    }
+}
+
+template<class Val>
 bool NumFactorEngine::assembleFromA(const SparseMatrix<Val>& A, const Permutation& p,
                                     const std::vector<std::int32_t>& gblToLcl,
                                     std::size_t frontSize, std::size_t numNodeIdx,
@@ -229,13 +253,13 @@ void NumFactorEngine::updateSupernode(std::size_t frontSize, std::size_t numNode
 // an update. No search, no scan over descendants.
 // =================================================================================================
 
-template<class Val>
+template<class Val, class Factor>
 bool NumFactorEngine::factorLeftLooking(const SparseMatrix<Val>& A, const Permutation& p,
-                                        const SymFactor& sf, NumFactorStatic<Val>& nf) const {
+                                        const SymFactor& sf, Factor& nf) const {
     setSymFactor(sf, nf);
 
-    const std::size_t size    = nf.mSize;
-    const std::size_t snodeSize = nf.mSnodeSize;
+    const std::size_t size    = nf.size();
+    const std::size_t snodeSize = nf.snodeSize();
 
     std::vector<std::int32_t> gblToLcl(size, NIL);
 
@@ -243,12 +267,12 @@ bool NumFactorEngine::factorLeftLooking(const SparseMatrix<Val>& A, const Permut
     // main loop: the local map is set and cleared once per supernode either way, but this keeps
     // the traversal's own bookkeeping uncluttered.
     for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(snodeSize); ++kk) {
-        const std::size_t   numNodeIdx = nf.mFrontSize[kk] + nf.mUpdateSize[kk];
-        const std::int32_t* nodeIdx    = nf.mNodeIdx.data() + nf.mSnodeNodeIdxPtr[kk];
+        const std::size_t   numNodeIdx = nf.frontSize(kk) + nf.updateSize(kk);
+        const std::int32_t* nodeIdx    = nf.nodeIdxPtr(kk);
         Val*                block  = nf.valPtr(kk);
 
         setGlobalToLocal(numNodeIdx, nodeIdx, gblToLcl);
-        const bool ok = assembleFromA(A, p, gblToLcl, nf.mFrontSize[kk], numNodeIdx, nodeIdx, block);
+        const bool ok = assembleFromA(A, p, gblToLcl, nf.frontSize(kk), numNodeIdx, nodeIdx, block);
         clearGlobalToLocal(numNodeIdx, nodeIdx, gblToLcl);
         if (!ok)
             return false;
@@ -259,8 +283,8 @@ bool NumFactorEngine::factorLeftLooking(const SparseMatrix<Val>& A, const Permut
     std::vector<std::size_t>             pos(snodeSize, 0);
 
     for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(snodeSize); ++kk) {
-        const std::size_t   kkNumNodeIdx = nf.mFrontSize[kk] + nf.mUpdateSize[kk];
-        const std::int32_t* kkNodeIdx    = nf.mNodeIdx.data() + nf.mSnodeNodeIdxPtr[kk];
+        const std::size_t   kkNumNodeIdx = nf.frontSize(kk) + nf.updateSize(kk);
+        const std::int32_t* kkNodeIdx    = nf.nodeIdxPtr(kk);
         Val*                kkBlock  = nf.valPtr(kk);
 
         setGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
@@ -270,9 +294,9 @@ bool NumFactorEngine::factorLeftLooking(const SparseMatrix<Val>& A, const Permut
             const std::int32_t jj = owed[kk].front();
             owed[kk].pop_front();
 
-            const std::size_t   jjFrontSize = nf.mFrontSize[jj];
-            const std::size_t   jjNumNodeIdx = jjFrontSize + nf.mUpdateSize[jj];
-            const std::int32_t* jjNodeIdx    = nf.mNodeIdx.data() + nf.mSnodeNodeIdxPtr[jj];
+            const std::size_t   jjFrontSize = nf.frontSize(jj);
+            const std::size_t   jjNumNodeIdx = jjFrontSize + nf.updateSize(jj);
+            const std::int32_t* jjNodeIdx    = nf.nodeIdxPtr(jj);
             const Val*          jjBlock     = std::as_const(nf).valPtr(jj);
 
             // How many of jj's remaining rows belong to kk. They are contiguous, because jj's
@@ -281,7 +305,7 @@ bool NumFactorEngine::factorLeftLooking(const SparseMatrix<Val>& A, const Permut
             const std::size_t height = jjNumNodeIdx - from;
             std::size_t       width  = 0;
             while (from + width < jjNumNodeIdx
-                   && nf.mNodeToSnode[jjNodeIdx[from + width]] == kk)
+                   && nf.nodeToSnode()[jjNodeIdx[from + width]] == kk)
                 ++width;
 
             UpdateBlock<Val> t(height, width);
@@ -293,19 +317,19 @@ bool NumFactorEngine::factorLeftLooking(const SparseMatrix<Val>& A, const Permut
             // jj has discharged kk. Queue it against the next ancestor it owes.
             pos[jj] = from + width;
             if (pos[jj] < jjNumNodeIdx)
-                owed[nf.mNodeToSnode[jjNodeIdx[pos[jj]]]].push_back(jj);
+                owed[nf.nodeToSnode()[jjNodeIdx[pos[jj]]]].push_back(jj);
         }
 
-        if (!factorSupernode(nf.mFrontSize[kk], kkNumNodeIdx, kkBlock, nf.mNumPerturbations)) {
+        if (!factorSupernode(nf.frontSize(kk), kkNumNodeIdx, kkBlock, nf.numPerturbations())) {
             clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
             return false;   // not positive definite (Cholesky only; LDL perturbs instead)
         }
 
         // kk is factored, so it now owes updates of its own. Its front rows are its own columns
         // and update nobody; the first update row names the first ancestor it owes.
-        pos[kk] = nf.mFrontSize[kk];
+        pos[kk] = nf.frontSize(kk);
         if (pos[kk] < kkNumNodeIdx)
-            owed[nf.mNodeToSnode[kkNodeIdx[pos[kk]]]].push_back(kk);
+            owed[nf.nodeToSnode()[kkNodeIdx[pos[kk]]]].push_back(kk);
 
         clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
     }
@@ -322,50 +346,50 @@ bool NumFactorEngine::factorLeftLooking(const SparseMatrix<Val>& A, const Permut
 // once per supernode.
 // =================================================================================================
 
-template<class Val>
+template<class Val, class Factor>
 bool NumFactorEngine::factorRightLooking(const SparseMatrix<Val>& A, const Permutation& p,
-                                         const SymFactor& sf, NumFactorStatic<Val>& nf) const {
+                                         const SymFactor& sf, Factor& nf) const {
     setSymFactor(sf, nf);
 
-    const std::size_t size    = nf.mSize;
-    const std::size_t snodeSize = nf.mSnodeSize;
+    const std::size_t size    = nf.size();
+    const std::size_t snodeSize = nf.snodeSize();
 
     std::vector<std::int32_t> gblToLcl(size, NIL);
 
     for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(snodeSize); ++kk) {
-        const std::size_t   numNodeIdx = nf.mFrontSize[kk] + nf.mUpdateSize[kk];
-        const std::int32_t* nodeIdx    = nf.mNodeIdx.data() + nf.mSnodeNodeIdxPtr[kk];
+        const std::size_t   numNodeIdx = nf.frontSize(kk) + nf.updateSize(kk);
+        const std::int32_t* nodeIdx    = nf.nodeIdxPtr(kk);
         Val*                block  = nf.valPtr(kk);
 
         setGlobalToLocal(numNodeIdx, nodeIdx, gblToLcl);
-        const bool ok = assembleFromA(A, p, gblToLcl, nf.mFrontSize[kk], numNodeIdx, nodeIdx, block);
+        const bool ok = assembleFromA(A, p, gblToLcl, nf.frontSize(kk), numNodeIdx, nodeIdx, block);
         clearGlobalToLocal(numNodeIdx, nodeIdx, gblToLcl);
         if (!ok)
             return false;
     }
 
     for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(snodeSize); ++jj) {
-        const std::size_t   jjFrontSize = nf.mFrontSize[jj];
-        const std::size_t   jjNumNodeIdx = jjFrontSize + nf.mUpdateSize[jj];
-        const std::int32_t* jjNodeIdx    = nf.mNodeIdx.data() + nf.mSnodeNodeIdxPtr[jj];
+        const std::size_t   jjFrontSize = nf.frontSize(jj);
+        const std::size_t   jjNumNodeIdx = jjFrontSize + nf.updateSize(jj);
+        const std::int32_t* jjNodeIdx    = nf.nodeIdxPtr(jj);
         Val*                jjBlock     = nf.valPtr(jj);
 
-        if (!factorSupernode(jjFrontSize, jjNumNodeIdx, jjBlock, nf.mNumPerturbations))
+        if (!factorSupernode(jjFrontSize, jjNumNodeIdx, jjBlock, nf.numPerturbations()))
             return false;   // not positive definite (Cholesky only; LDL perturbs instead)
 
         // Walk jj's update rows. Each run of them belonging to one ancestor is one update.
         std::size_t from = jjFrontSize;
         while (from < jjNumNodeIdx) {
-            const std::int32_t kk = nf.mNodeToSnode[jjNodeIdx[from]];
+            const std::int32_t kk = nf.nodeToSnode()[jjNodeIdx[from]];
 
-            const std::size_t   kkNumNodeIdx = nf.mFrontSize[kk] + nf.mUpdateSize[kk];
-            const std::int32_t* kkNodeIdx    = nf.mNodeIdx.data() + nf.mSnodeNodeIdxPtr[kk];
+            const std::size_t   kkNumNodeIdx = nf.frontSize(kk) + nf.updateSize(kk);
+            const std::int32_t* kkNodeIdx    = nf.nodeIdxPtr(kk);
             Val*                kkBlock  = nf.valPtr(kk);
 
             const std::size_t height = jjNumNodeIdx - from;
             std::size_t       width  = 0;
             while (from + width < jjNumNodeIdx
-                   && nf.mNodeToSnode[jjNodeIdx[from + width]] == kk)
+                   && nf.nodeToSnode()[jjNodeIdx[from + width]] == kk)
                 ++width;
 
             UpdateBlock<Val> t(height, width);
@@ -414,5 +438,39 @@ template bool NumFactorEngine::compute(const SparseMatrix<double>&, const Permut
 template bool NumFactorEngine::compute(const SparseMatrix<std::complex<double>>&,
                                        const Permutation&, const SymFactor&,
                                        NumFactorStatic<std::complex<double>>&) const;
+
+template<class Val>
+bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& sf,
+                              NumFactorDynamic<Val>& nf) const {
+    if (A.size() != p.size() || A.size() != sf.size())
+        return false;
+
+    // The static factorizations run unchanged into per-supernode storage: same traversals, same
+    // kernels, only the block addresses differ. Dynamic LDL, which needs this storage to grow a
+    // front under a delayed pivot, is next; until then its cases are refused here as *not yet*,
+    // unlike the static overload, where they are refused permanently (a flat buffer cannot grow).
+    switch (mFactorization) {
+        case Factorization::Cholesky:
+        case Factorization::StaticLDLT:
+        case Factorization::StaticLDLH:
+            break;
+        case Factorization::DynamicLDLT:
+        case Factorization::DynamicLDLH:
+            return false;   // not implemented yet
+    }
+
+    switch (mTraversal) {
+        case Traversal::LeftLooking:  return factorLeftLooking(A, p, sf, nf);
+        case Traversal::RightLooking: return factorRightLooking(A, p, sf, nf);
+        case Traversal::Multifrontal: return false;   // not implemented
+    }
+    return false;
+}
+
+template bool NumFactorEngine::compute(const SparseMatrix<double>&, const Permutation&,
+                                       const SymFactor&, NumFactorDynamic<double>&) const;
+template bool NumFactorEngine::compute(const SparseMatrix<std::complex<double>>&,
+                                       const Permutation&, const SymFactor&,
+                                       NumFactorDynamic<std::complex<double>>&) const;
 
 } // namespace Oblio

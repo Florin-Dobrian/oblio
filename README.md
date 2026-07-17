@@ -46,44 +46,65 @@ eng.solve(B, X);
 
 ## Build
 
-```bash
-# macOS (Accelerate provides BLAS/LAPACK):
-g++ -std=c++17 -O3 -DOBLIO_BLAS_UNDERSCORE -I include \
-    tests/test_smoke_real.cpp src/*.cpp -framework Accelerate -o test_smoke_real
+The Makefile compiles the units in `src/` once and links each test or example against them.
 
-# Linux (system BLAS/LAPACK):
-g++ -std=c++17 -O3 -DOBLIO_BLAS_UNDERSCORE -I include \
-    tests/test_smoke_real.cpp src/*.cpp -lblas -llapack -lm -o test_smoke_real
+```bash
+make            # build everything (tests and examples)
+make test       # build and run the test suites
+make tests      # build the test binaries only
+make examples   # build the example programs
+make clean
 ```
 
-All source files live flat in `src/`, so `src/*.cpp` catches everything.
-Replace the test file to build each of the four test suites.
+To compile a single unit by hand (all sources are flat in `src/`, so `src/*.cpp` catches
+everything):
+
+```bash
+# macOS (Accelerate provides BLAS/LAPACK):
+g++ -std=c++17 -O3 -DOBLIO_BLAS_UNDERSCORE -Iinclude \
+    tests/test_solve.cpp src/*.cpp -framework Accelerate -o test_solve
+
+# Linux (system BLAS/LAPACK):
+g++ -std=c++17 -O3 -DOBLIO_BLAS_UNDERSCORE -Iinclude \
+    tests/test_solve.cpp src/*.cpp -lblas -llapack -lm -o test_solve
+```
+
+CMake is also supported: `cmake -B build && cmake --build build && ctest --test-dir build`.
 
 ## Structure
 
 ```
 include/oblio/      , public headers (declarations only)
-  Types.h           , primitive typedefs, enums
-  Matrix.h          , sparse symmetric CSC (lower triangle)
-  Vector.h          , dense vector
-  DenseMatrix.h     , dense column-major matrix
-  Permutation.h     , bidirectional index map
-  Symbolic.h        , supernodal elimination structure (data)
-  BlasLapack.h      , BLAS/LAPACK trait wrappers + custom kernels
-  OrderEngine.h     , fill-reducing ordering (MMD, Natural)
-  SymbolicEngine.h  , etree, column counts, supernode amalgamation
-  FactorEngine.h    , 9 factorization combinations
-  SolveEngine.h     , single and multi-RHS triangular solves
-  OblioEngine.h     , top-level driver (the only header users need)
-src/                , method bodies + explicit instantiations
-  Mmd.cpp            , MMD ordering (Liu/Sparspak via Oblio 0.9)
-  Amd.cpp            , AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
-tests/              , test suite
-  test_smoke_real.cpp           18 tests, real tridiagonal, quick sanity
-  test_smoke_complex.cpp        18 tests, complex tridiagonal, quick sanity
-  test_extended_real.cpp       123 tests, Laplacians, edge cases, all orderings
-  test_extended_complex.cpp    102 tests, complex Laplacians, all orderings
+  Types.h           , enums (Factorization, Traversal), factorization predicates, typedefs
+  SparseMatrix.h    , sparse symmetric matrix (CSC)
+  Vector.h          , dense vector (one right-hand side)
+  Permutation.h     , bidirectional index map (oldToNew / newToOld)
+  OrderEngine.h     , fill-reducing ordering (Natural, MMD, AMD)
+  ElmForest.h       , elimination forest and supernodes (data)
+  ElmForestEngine.h , builds the elimination forest
+  SymFactor.h       , symbolic factor: supernodal index structure (data)
+  SymFactorEngine.h , computes the symbolic factorization
+  NumFactorStatic.h , numeric factor, flat per-supernode storage (data)
+  NumFactorDynamic.h, numeric factor, vector-of-vectors storage (data; stub)
+  NumFactorEngine.h , computes the numeric factorization (Cholesky, static LDL)
+  UpdateBlock.h     , temporary update block used during numeric factorization
+  BlasLapack.h      , operation-named BLAS/LAPACK wrappers and custom kernels
+  MultiplyEngine.h  , sparse matrix-vector product and residual
+  SolveEngine.h     , triangular solves and right-hand-side permutation
+src/                , method bodies + explicit instantiations (flat layout)
+  Amd.cpp           , AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
+  Mmd.cpp           , MMD ordering (Sparspak/Liu, via Oblio 0.9)
+tests/              , test suites (111 tests)
+  smoke.cpp                    5,  quick end-to-end sanity
+  test_order.cpp              21,  ordering (Natural, MMD, AMD)
+  test_permutation.cpp        11,  permutation maps
+  test_forest.cpp             23,  elimination forest and supernodes
+  test_symfactor.cpp          29,  symbolic factorization
+  test_numfactor.cpp          14,  numeric factorization
+  test_solve.cpp               8,  end-to-end solve, residual at machine precision
 examples/           , usage examples
+  pipeline.cpp      , the pipeline by hand, every factorization / traversal / ordering
+  basic.cpp         , sketch of the planned OblioEngine facade (not yet compiling)
 ```
 
 ## History
@@ -115,22 +136,29 @@ in the factor and solve paths.
 ## Pipeline
 
 ```
-OrderEngine → SymbolicEngine → FactorEngine → SolveEngine
+OrderEngine -> ElmForestEngine -> SymFactorEngine -> NumFactorEngine -> SolveEngine
 ```
 
-All orchestrated by `OblioEngine<Val>`, the only header users need to include.
+`MultiplyEngine` supplies the sparse matvec and residual. Today the phases are wired by hand
+(see `examples/pipeline.cpp`); `OblioEngine<Val>` will orchestrate them behind a single header,
+as sketched in Quick Start.
 
 ## Status
 
-- [x] MMD ordering (fixed `xadj` conversion for general graphs)
-- [x] AMD ordering (SuiteSparse AMD 3.3.4, merged into single C++ file)
-- [x] Supernodal symbolic factorization (bottom-up row-merge, ported from 0.9)
-- [x] Cholesky, Static LDL, Dynamic LDL (Bunch-Kaufman 1×1 and 2×2 pivots)
-- [x] Left-looking, Right-looking, Multifrontal
+Done:
+
+- [x] MMD and AMD ordering (AMD from SuiteSparse 3.3.4; MMD via Oblio 0.9)
+- [x] Supernodal symbolic factorization (elimination forest + symbolic factor, ported from 0.9)
+- [x] Cholesky and static LDL, both LDL^T and LDL^H, left-looking and right-looking
 - [x] Single-RHS triangular solve (`Vector`)
-- [x] Multi-RHS triangular solve (`DenseMatrix`, batched BLAS per supernode)
+- [x] Complex arithmetic: Hermitian Cholesky, complex-symmetric LDL^T, complex-Hermitian LDL^H
 - [x] Namespaced headers (`include/oblio/`), explicit instantiation throughout
-- [x] Complex arithmetic (`std::complex<double>`, Hermitian Cholesky + symmetric LDL)
-- [x] Extended test suite: 2D Laplacian, n=1, block diagonal, indefinite, perturbation
-- [x] Validated against Oblio 0.9 reference implementation
-- [x] Complex extended tests (Hermitian Cholesky + symmetric LDL on Laplacians, all orderings)
+- [x] Validated against Oblio 0.9 as oracle; end-to-end residual at machine precision
+- [x] 111 tests across 7 phase suites
+
+Not yet:
+
+- [ ] Dynamic LDL, Bunch-Kaufman 1x1 / 2x2 pivots (`NumFactorDynamic` is a stub)
+- [ ] Multifrontal traversal
+- [ ] Multi-RHS solve (dense right-hand sides)
+- [ ] `OblioEngine<Val>` top-level driver (the Quick Start API)

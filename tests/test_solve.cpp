@@ -100,7 +100,7 @@ SparseMatrix<Val> toSparse(const std::vector<std::vector<Val>>& A) {
 // Manufacture b from a known x, solve, and measure ||A x - b|| / ||b||. Note this checks the
 // *residual*, not the distance to the manufactured x: they differ by the conditioning of A, and
 // the residual is the honest thing to require of a direct solver.
-template<class Val>
+template<class Val, class Factor = NumFactorStatic<Val>>
 double solveResidual(const std::vector<std::vector<Val>>& dense, std::mt19937& rng,
                      Factorization factorization, Traversal traversal, int& failures) {
     const std::size_t n = dense.size();
@@ -118,7 +118,7 @@ double solveResidual(const std::vector<std::vector<Val>>& dense, std::mt19937& r
     SymFactorEngine se;
     if (!se.compute(A, p, f, s)) { ++failures; return -1; }
 
-    NumFactorStatic<Val> nf;
+    Factor nf;
     NumFactorEngine ne(factorization, traversal);
     if (!ne.compute(A, p, s, nf)) { ++failures; return -1; }
 
@@ -145,6 +145,41 @@ double solveResidual(const std::vector<std::vector<Val>>& dense, std::mt19937& r
     return normB > 0 ? r.norm() / normB : r.norm();
 }
 
+// The whole pipeline, swept over every factorization and both traversals, into one storage. Run
+// once per factor type: the point of the storage split is that the solve does not care which
+// factor it is handed, so the residual must reach machine precision either way.
+template<template<class> class FactorT>
+void pipelineSweep(std::mt19937& rng, double tol, const std::string& storage) {
+    int failures = 0;
+    double wRC = 0, wRT = 0, wCC = 0, wCT = 0, wCH = 0;
+
+    for (int trial = 0; trial < 40; ++trial) {
+        const std::size_t n = 5 + rng() % 15;
+
+        const auto herm  = randomMatrix<double>(n, rng, true);    // real: symmetric = Hermitian
+        const auto cherm = randomMatrix<Cplx>(n, rng, true);      // complex Hermitian
+        const auto csym  = randomMatrix<Cplx>(n, rng, false);     // complex symmetric
+
+        for (Traversal tr : {Traversal::LeftLooking, Traversal::RightLooking}) {
+            wRC = std::max(wRC, solveResidual<double, FactorT<double>>(herm,  rng, Factorization::Cholesky,   tr, failures));
+            wRT = std::max(wRT, solveResidual<double, FactorT<double>>(herm,  rng, Factorization::StaticLDLT, tr, failures));
+            wCC = std::max(wCC, solveResidual<Cplx,   FactorT<Cplx>>  (cherm, rng, Factorization::Cholesky,   tr, failures));
+            wCH = std::max(wCH, solveResidual<Cplx,   FactorT<Cplx>>  (cherm, rng, Factorization::StaticLDLH, tr, failures));
+            wCT = std::max(wCT, solveResidual<Cplx,   FactorT<Cplx>>  (csym,  rng, Factorization::StaticLDLT, tr, failures));
+        }
+    }
+
+    ck(failures == 0, storage + " x40 x10  : every system solved");
+    ck(wRC < tol, storage + " real    Cholesky : ||Ax - b|| / ||b|| at machine precision");
+    ck(wRT < tol, storage + " real    LDLT     : ||Ax - b|| / ||b|| at machine precision");
+
+    // The complex Hermitian ones are where a missing conjugate would show, and 10.12's solve omits
+    // it: its backward pass applies L^-T where a Hermitian factor needs L^-H.
+    ck(wCC < tol, storage + " complex Cholesky : ||Ax - b|| / ||b|| at machine precision (Hermitian)");
+    ck(wCH < tol, storage + " complex LDLH     : ||Ax - b|| / ||b|| at machine precision (Hermitian)");
+    ck(wCT < tol, storage + " complex LDLT     : ||Ax - b|| / ||b|| at machine precision (symmetric)");
+}
+
 } // namespace
 
 int main() {
@@ -165,38 +200,9 @@ int main() {
            "multiply 3x3        : y = A x matches by hand");
     }
 
-    // The pipeline. Every factorization, both traversals, both scalar types.
-    {
-        int failures = 0;
-        double wRC = 0, wRT = 0, wCC = 0, wCT = 0, wCH = 0;
-
-        for (int trial = 0; trial < 40; ++trial) {
-            const std::size_t n = 5 + rng() % 15;
-
-            const auto herm  = randomMatrix<double>(n, rng, true);    // real: symmetric = Hermitian
-            const auto cherm = randomMatrix<Cplx>(n, rng, true);      // complex Hermitian
-            const auto csym  = randomMatrix<Cplx>(n, rng, false);     // complex symmetric
-
-            for (Traversal tr : {Traversal::LeftLooking, Traversal::RightLooking}) {
-                wRC = std::max(wRC, solveResidual(herm,  rng, Factorization::Cholesky,   tr, failures));
-                wRT = std::max(wRT, solveResidual(herm,  rng, Factorization::StaticLDLT, tr, failures));
-                wCC = std::max(wCC, solveResidual(cherm, rng, Factorization::Cholesky,   tr, failures));
-                wCH = std::max(wCH, solveResidual(cherm, rng, Factorization::StaticLDLH, tr, failures));
-                wCT = std::max(wCT, solveResidual(csym,  rng, Factorization::StaticLDLT, tr, failures));
-            }
-        }
-
-        ck(failures == 0, "random x40 x10      : every system solved");
-        ck(wRC < tol, "real    Cholesky    : ||Ax - b|| / ||b|| at machine precision");
-        ck(wRT < tol, "real    LDLT        : ||Ax - b|| / ||b|| at machine precision");
-
-        // The complex Hermitian ones are where a missing conjugate would show, and 10.12's solve
-        // omits it: its backward pass applies L^-T where a Hermitian factor needs L^-H.
-        ck(wCC < tol, "complex Cholesky    : ||Ax - b|| / ||b|| at machine precision (Hermitian)");
-        ck(wCH < tol, "complex LDLH        : ||Ax - b|| / ||b|| at machine precision (Hermitian)");
-
-        ck(wCT < tol, "complex LDLT        : ||Ax - b|| / ||b|| at machine precision (symmetric)");
-    }
+    // The pipeline, every factorization and both traversals, run into each factor storage in turn.
+    pipelineSweep<NumFactorStatic> (rng, tol, "static ");
+    pipelineSweep<NumFactorDynamic>(rng, tol, "dynamic");
 
     // A grid, which is where the structure is real: deep forest, genuine fill, an ordering that
     // matters. The residual has to survive all of it.
@@ -211,10 +217,12 @@ int main() {
                 if (y + 1 < g) { A[j][j + g] = -1.0; A[j + g][j] = -1.0; }
             }
         int failures = 0;
-        const double rc = solveResidual(A, rng, Factorization::Cholesky,   Traversal::LeftLooking,  failures);
-        const double rt = solveResidual(A, rng, Factorization::StaticLDLT, Traversal::RightLooking, failures);
-        ck(failures == 0 && rc < tol && rt < tol,
-           "10x10 grid          : ||Ax - b|| / ||b|| at machine precision, Cholesky and LDLT");
+        const double rcS = solveResidual<double, NumFactorStatic<double>> (A, rng, Factorization::Cholesky,   Traversal::LeftLooking,  failures);
+        const double rtS = solveResidual<double, NumFactorStatic<double>> (A, rng, Factorization::StaticLDLT, Traversal::RightLooking, failures);
+        const double rcD = solveResidual<double, NumFactorDynamic<double>>(A, rng, Factorization::Cholesky,   Traversal::LeftLooking,  failures);
+        const double rtD = solveResidual<double, NumFactorDynamic<double>>(A, rng, Factorization::StaticLDLT, Traversal::RightLooking, failures);
+        ck(failures == 0 && rcS < tol && rtS < tol && rcD < tol && rtD < tol,
+           "10x10 grid          : ||Ax - b|| / ||b|| at machine precision, static and dynamic");
     }
 
     std::cout << "\nSolve tests: " << pass << "/" << (pass + fail) << " passed\n";

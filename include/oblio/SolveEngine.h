@@ -29,7 +29,6 @@
 // calls TRSM and GEMM, and scatters. Many right-hand sides make a supernode a *matrix* operation,
 // and only then does the packing pay. That path is worth adding; it is not needed to be correct.
 
-#include "oblio/NumFactorStatic.h"
 #include "oblio/Permutation.h"
 #include "oblio/Types.h"
 #include "oblio/Vector.h"
@@ -46,29 +45,29 @@ public:
     //
     // Rarely what a caller wants directly, but it is the whole of the arithmetic, and the
     // permuting overload below is a thin wrapper on it.
-    template<class Val>
-    bool compute(const NumFactorStatic<Val>& nf, Vector<Val>& y) const;
+    template<class Val, class Factor>
+    bool compute(const Factor& nf, Vector<Val>& y) const;
 
     // Solve A x = b, in A's ordering. Permutes b into the factor's ordering, solves, and permutes
     // back. This is the one to call.
-    template<class Val>
-    bool compute(const Permutation& p, const NumFactorStatic<Val>& nf,
+    template<class Val, class Factor>
+    bool compute(const Permutation& p, const Factor& nf,
                  const Vector<Val>& b, Vector<Val>& x) const;
 
 private:
     // L y = b. Descending the supernodes, which is a topological order, so a supernode's own
     // columns are solved before anything below them is updated.
-    template<class Val>
-    void forward(const NumFactorStatic<Val>& nf, Vector<Val>& y) const;
+    template<class Val, class Factor>
+    void forward(const Factor& nf, Vector<Val>& y) const;
 
     // D z = y. LDL only. Trivial while pivots are 1x1; a 2x2 block solve when dynamic LDL brings
     // them.
-    template<class Val>
-    void diagonal(const NumFactorStatic<Val>& nf, Vector<Val>& y) const;
+    template<class Val, class Factor>
+    void diagonal(const Factor& nf, Vector<Val>& y) const;
 
     // L^H x = z (or L^T, for LDLT). Ascending, the mirror of the forward pass.
-    template<class Val>
-    void backward(const NumFactorStatic<Val>& nf, Vector<Val>& y) const;
+    template<class Val, class Factor>
+    void backward(const Factor& nf, Vector<Val>& y) const;
 };
 
 } // namespace Oblio

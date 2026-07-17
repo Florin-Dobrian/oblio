@@ -114,6 +114,11 @@ private:
     std::int32_t*       nodeIdxPtr(std::int32_t kk) { return mNodeIdx.data() + mSnodeNodeIdxPtr[kk]; }
     Val*                valPtr(std::int32_t kk)     { return mVal.data()     + mSnodeValPtr[kk]; }
 
+    // Also the write path: the engine accumulates the perturbation count through this reference
+    // (factorSupernode increments it). The const read overload above is public: the caller is
+    // entitled to the count.
+    std::size_t& numPerturbations() { return mNumPerturbations; }
+
     std::size_t   mSize      = 0;
     std::size_t   mSnodeSize = 0;
     Factorization mFactorization = Factorization::Cholesky;

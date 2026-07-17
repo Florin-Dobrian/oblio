@@ -52,10 +52,17 @@ public:
 
     std::size_t numNodeIdx() const { return mNumNodeIdx; }
 
+    // How many pivots the factorization had to replace. Meaningful when a *static* factorization
+    // (Cholesky, static LDL) runs into this storage, exactly as on the static factor. Dynamic LDL,
+    // when it lands, delays an unstable pivot instead of replacing it, and leaves this zero.
+    std::size_t numPerturbations() const { return mNumPerturbations; }
+
     const std::vector<std::int32_t>& nodeToSnode() const { return mNodeToSnode; }
 
     const std::vector<std::size_t>& frontSize()  const { return mFrontSize; }
     const std::vector<std::size_t>& updateSize() const { return mUpdateSize; }
+    std::size_t frontSize(std::int32_t kk)  const { return mFrontSize[kk]; }
+    std::size_t updateSize(std::int32_t kk) const { return mUpdateSize[kk]; }
 
     const std::vector<std::size_t>&  snodeNodeIdxPtr() const { return mSnodeNodeIdxPtr; }
     const std::vector<std::int32_t>& nodeIdx()         const { return mNodeIdx; }
@@ -86,6 +93,10 @@ private:
     std::int32_t*       nodeIdxPtr(std::int32_t kk) { return mNodeIdx.data() + mSnodeNodeIdxPtr[kk]; }
     Val*                valPtr(std::int32_t kk)     { return mVal[kk].data(); }
 
+    // Also the write path: the engine accumulates the perturbation count through this reference
+    // (factorSupernode increments it). The const read overload above is public.
+    std::size_t& numPerturbations() { return mNumPerturbations; }
+
     std::size_t   mSize      = 0;
     std::size_t   mSnodeSize = 0;
     Factorization mFactorization = Factorization::DynamicLDLT;
@@ -102,6 +113,8 @@ private:
 
     // One buffer per supernode, so a front can grow without moving its neighbours.
     std::vector<std::vector<Val>> mVal;
+
+    std::size_t mNumPerturbations = 0;
 
     friend class NumFactorEngine;
 };

@@ -1,5 +1,8 @@
 #include "oblio/SolveEngine.h"
 
+#include "oblio/NumFactorDynamic.h"
+#include "oblio/NumFactorStatic.h"
+
 #include <complex>
 
 namespace Oblio {
@@ -28,8 +31,8 @@ std::complex<double> maybeConjugate(std::complex<double> val, bool hermitian) { 
 // solves, and it is why the diagonal is a separate pass for one and not the other.
 // =================================================================================================
 
-template<class Val>
-void SolveEngine::forward(const NumFactorStatic<Val>& nf, Vector<Val>& y) const {
+template<class Val, class Factor>
+void SolveEngine::forward(const Factor& nf, Vector<Val>& y) const {
     const bool withSeparateDiagonal = separateDiagonal(nf.factorization());
 
     // Ascending supernode order is a topological order, so a supernode's columns are finished
@@ -60,8 +63,8 @@ void SolveEngine::forward(const NumFactorStatic<Val>& nf, Vector<Val>& y) const 
     }
 }
 
-template<class Val>
-void SolveEngine::diagonal(const NumFactorStatic<Val>& nf, Vector<Val>& y) const {
+template<class Val, class Factor>
+void SolveEngine::diagonal(const Factor& nf, Vector<Val>& y) const {
     // D z = y. LDL only, and while every pivot is 1x1 this is one division per column. Dynamic LDL
     // will bring 2x2 pivots, and then a pair of columns is solved together against a 2x2 block.
     for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(nf.snodeSize()); ++jj) {
@@ -76,8 +79,8 @@ void SolveEngine::diagonal(const NumFactorStatic<Val>& nf, Vector<Val>& y) const
     }
 }
 
-template<class Val>
-void SolveEngine::backward(const NumFactorStatic<Val>& nf, Vector<Val>& y) const {
+template<class Val, class Factor>
+void SolveEngine::backward(const Factor& nf, Vector<Val>& y) const {
     const bool withSeparateDiagonal = separateDiagonal(nf.factorization());
     const bool withHermitian        = hermitian(nf.factorization());
 
@@ -110,8 +113,8 @@ void SolveEngine::backward(const NumFactorStatic<Val>& nf, Vector<Val>& y) const
     }
 }
 
-template<class Val>
-bool SolveEngine::compute(const NumFactorStatic<Val>& nf, Vector<Val>& y) const {
+template<class Val, class Factor>
+bool SolveEngine::compute(const Factor& nf, Vector<Val>& y) const {
     if (y.size() != nf.size())
         return false;
 
@@ -122,8 +125,8 @@ bool SolveEngine::compute(const NumFactorStatic<Val>& nf, Vector<Val>& y) const 
     return true;
 }
 
-template<class Val>
-bool SolveEngine::compute(const Permutation& p, const NumFactorStatic<Val>& nf,
+template<class Val, class Factor>
+bool SolveEngine::compute(const Permutation& p, const Factor& nf,
                           const Vector<Val>& b, Vector<Val>& x) const {
     const std::size_t size = nf.size();
     if (b.size() != size || p.size() != size)
@@ -152,10 +155,19 @@ bool SolveEngine::compute(const Permutation& p, const NumFactorStatic<Val>& nf,
 template bool SolveEngine::compute(const NumFactorStatic<double>&, Vector<double>&) const;
 template bool SolveEngine::compute(const NumFactorStatic<std::complex<double>>&,
                                    Vector<std::complex<double>>&) const;
+template bool SolveEngine::compute(const NumFactorDynamic<double>&, Vector<double>&) const;
+template bool SolveEngine::compute(const NumFactorDynamic<std::complex<double>>&,
+                                   Vector<std::complex<double>>&) const;
 template bool SolveEngine::compute(const Permutation&, const NumFactorStatic<double>&,
                                    const Vector<double>&, Vector<double>&) const;
 template bool SolveEngine::compute(const Permutation&,
                                    const NumFactorStatic<std::complex<double>>&,
+                                   const Vector<std::complex<double>>&,
+                                   Vector<std::complex<double>>&) const;
+template bool SolveEngine::compute(const Permutation&, const NumFactorDynamic<double>&,
+                                   const Vector<double>&, Vector<double>&) const;
+template bool SolveEngine::compute(const Permutation&,
+                                   const NumFactorDynamic<std::complex<double>>&,
                                    const Vector<std::complex<double>>&,
                                    Vector<std::complex<double>>&) const;
 

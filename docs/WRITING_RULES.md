@@ -128,3 +128,14 @@ Conventions internal to a single document stay with that document, not here. For
 example the 1-indexed math, the `j < k` index roles, the lower-triangle `A`
 accesses, and the pseudocode comment style of `sparse_factorization.md` are that
 document's own style. This file holds only what applies across all prose.
+
+### README build targets
+
+The README's Build section lists the whole-project targets a user reaches for (`make`,
+`make test`, `make tests`, `make examples`, `make clean`). Single-unit and inner-loop targets,
+`make objs` and the per-file `%_cpp` / `example_%_cpp` rules, stay in the Makefile's own header
+comment, which is the exhaustive list; the README is the curated subset. The test: a target that
+acts on a whole category (all tests, all examples, the whole build) is user-facing and belongs in
+both; one that compiles a single unit or just checks that the core builds is a contributor
+convenience and stays in the Makefile. So updating the Makefile obliges a README edit only when a
+whole-category verb changes, which is why adding `objs` did not.

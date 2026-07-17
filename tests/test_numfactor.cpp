@@ -10,6 +10,7 @@
 // would catch. See the factorization-space entry in DESIGN_DECISIONS.
 
 #include "oblio/ElmForestEngine.h"
+#include "oblio/NumFactorDynamic.h"
 #include "oblio/NumFactorEngine.h"
 #include "oblio/NumFactorStatic.h"
 #include "oblio/OrderEngine.h"
@@ -22,6 +23,7 @@
 #include <random>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 using namespace Oblio;
@@ -289,7 +291,7 @@ double compareLdl(const SparseMatrix<Val>& A, const Permutation& p,
     NumFactorStatic<Val> nf;
     NumFactorEngine ne(factorization, traversal);
     if (!ne.compute(A, p, s, nf)) return -1;
-    perturbations += nf.numPerturbations();
+    perturbations += std::as_const(nf).numPerturbations();
 
     const std::size_t n = dense.size();
     const std::vector<std::int32_t>& newToOld = p.newToOld();
@@ -301,6 +303,41 @@ double compareLdl(const SparseMatrix<Val>& A, const Permutation& p,
     const bool hermitian = (factorization == Factorization::StaticLDLH
                             || factorization == Factorization::DynamicLDLH);
     return reconstructLdl(nf, permuted, hermitian);
+}
+
+// Factor the same matrix into the flat factor and the per-supernode factor, same factorization and
+// same traversal, and return the largest block difference. Both run identical arithmetic through
+// identical kernels; only where a block lives differs, so the two factors must come out bit for
+// bit the same, and the difference must be exactly zero. Returns -1 if either factorization is
+// refused, or if the two disagree on structure or perturbation count.
+template<class Val>
+double staticVsDynamic(const SparseMatrix<Val>& A, const Permutation& p,
+                       Factorization factorization, Traversal traversal) {
+    ElmForest f; ElmForestEngine fe;
+    if (!fe.compute(A, p, f)) return -1;
+    SymFactor s; SymFactorEngine se;
+    if (!se.compute(A, p, f, s)) return -1;
+
+    NumFactorEngine ne(factorization, traversal);
+    NumFactorStatic<Val>  sfac;
+    NumFactorDynamic<Val> dfac;
+    if (!ne.compute(A, p, s, sfac)) return -1;
+    if (!ne.compute(A, p, s, dfac)) return -1;
+
+    const NumFactorStatic<Val>&  cs = sfac;
+    const NumFactorDynamic<Val>& cd = dfac;
+    if (cs.snodeSize() != cd.snodeSize()) return -1;
+    if (cs.numPerturbations() != cd.numPerturbations()) return -1;
+
+    double worst = 0;
+    for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(cs.snodeSize()); ++kk) {
+        const std::size_t len = (cs.frontSize(kk) + cs.updateSize(kk)) * cs.frontSize(kk);
+        const Val* a = cs.valPtr(kk);
+        const Val* b = cd.valPtr(kk);
+        for (std::size_t t = 0; t < len; ++t)
+            worst = std::max(worst, std::abs(a[t] - b[t]));
+    }
+    return worst;
 }
 
 // A random complex SYMMETRIC matrix (A = A^T, not Hermitian), which is what LDLT is for and what
@@ -469,6 +506,47 @@ int main() {
 
         ck(perturbations == 0,
            "LDL                 : no perturbations needed (diagonally dominant input)");
+    }
+
+    // The static factorizations run into the dynamic factor. Same traversals, same kernels, only
+    // per-supernode storage in place of one flat buffer, so the factor must come out identical to
+    // the flat one, block for block. This exercises NumFactorDynamic's whole read/produce API
+    // (setSymFactor, the accessors, the friend write path) without any of the growth verbs dynamic
+    // LDL will add.
+    {
+        OrderEngine ord(OrderMethod::AMD);
+        int dynFail = 0;
+        double worst = 0;
+
+        for (int trial = 0; trial < 30; ++trial) {
+            const std::size_t n = 5 + rng() % 12;
+
+            const auto denseR  = randomHpd<double>(n, rng, 25);          // real symmetric / Hermitian
+            const auto denseCs = randomComplexSymmetric(n, rng);         // complex symmetric
+            const auto denseCh = randomHpd<Cplx>(n, rng, 25);            // complex Hermitian
+
+            const SparseMatrix<double> AR  = toSparse(denseR);
+            const SparseMatrix<Cplx>   ACs = toSparse(denseCs);
+            const SparseMatrix<Cplx>   ACh = toSparse(denseCh);
+
+            Permutation pAmd;
+            if (!ord.compute(AR, pAmd)) { ++dynFail; continue; }
+
+            for (Traversal tr : {Traversal::LeftLooking, Traversal::RightLooking}) {
+                const double dChR  = staticVsDynamic(AR,  pAmd, Factorization::Cholesky,   tr);
+                const double dChC  = staticVsDynamic(ACh, pAmd, Factorization::Cholesky,   tr);
+                const double dLdR  = staticVsDynamic(AR,  pAmd, Factorization::StaticLDLT, tr);
+                const double dLdCs = staticVsDynamic(ACs, pAmd, Factorization::StaticLDLT, tr);
+                const double dLdCh = staticVsDynamic(ACh, pAmd, Factorization::StaticLDLH, tr);
+                for (double d : {dChR, dChC, dLdR, dLdCs, dLdCh}) {
+                    if (d < 0) ++dynFail;
+                    else worst = std::max(worst, d);
+                }
+            }
+        }
+
+        ck(dynFail == 0 && worst == 0.0,
+           "static into dynamic : identical factor, flat vs per-supernode, all symmetries, both traversals");
     }
 
     std::cout << "\nNumFactor tests: " << pass << "/" << (pass + fail) << " passed\n";

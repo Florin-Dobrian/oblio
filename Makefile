@@ -5,6 +5,7 @@
 #   make tests      build the test executables
 #   make test       build and run the tests
 #   make examples   build the example programs (examples/*.cpp)
+#   make objs       compile the library sources to .o only (a fast core compile check)
 #   make <name>_cpp build one test (e.g. make test_order_cpp)
 #   make clean
 #
@@ -70,7 +71,7 @@ TEST_BINS = $(patsubst tests/%.cpp,%_cpp,$(TEST_SRCS))
 EXAMPLE_SRCS = $(filter-out examples/basic.cpp,$(wildcard examples/*.cpp))
 EXAMPLE_BINS = $(patsubst examples/%.cpp,example_%_cpp,$(EXAMPLE_SRCS))
 
-.PHONY: all tests test examples clean
+.PHONY: all tests test examples objs clean
 
 all: tests examples
 
@@ -92,6 +93,9 @@ test: tests
 	@for t in $(TEST_BINS); do echo "== $$t =="; ./$$t || exit 1; echo; done
 
 examples: $(EXAMPLE_BINS)
+
+# The library sources compiled to objects, nothing linked: a fast check that the core still builds.
+objs: $(LIB_OBJS)
 
 clean:
 	rm -f $(TEST_BINS) $(EXAMPLE_BINS) $(LIB_OBJS)

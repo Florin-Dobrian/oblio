@@ -24,6 +24,7 @@
 // Reads the matrix, permutation and symbolic factor through their public accessors; writes the
 // numeric factor through friendship.
 
+#include "oblio/NumFactorDynamic.h"
 #include "oblio/NumFactorStatic.h"
 #include "oblio/Permutation.h"
 #include "oblio/SparseMatrix.h"
@@ -67,6 +68,13 @@ public:
     bool compute(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& sf,
                  NumFactorStatic<Val>& nf) const;
 
+    // The same entry point, producing the dynamic factor. The static factorizations run into
+    // per-supernode storage unchanged; the dynamic-LDL cases are the one thing this overload will
+    // gain that its sibling cannot (a flat buffer cannot grow a front).
+    template<class Val>
+    bool compute(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& sf,
+                 NumFactorDynamic<Val>& nf) const;
+
 private:
     Factorization mFactorization = Factorization::Cholesky;
     Traversal     mTraversal     = Traversal::LeftLooking;
@@ -80,6 +88,11 @@ private:
     // go to a level-3 BLAS call with a leading dimension.
     template<class Val>
     void setSymFactor(const SymFactor& sf, NumFactorStatic<Val>& nf) const;
+
+    // The dynamic twin: same structure copied, but the value blocks are one vector per supernode
+    // rather than offsets into one buffer, so a front can later grow without moving its neighbours.
+    template<class Val>
+    void setSymFactor(const SymFactor& sf, NumFactorDynamic<Val>& nf) const;
 
     // A supernode's rows, in *its own* local coordinates: gblToLcl[globalRow] = local position.
     // Set before working on a supernode, cleared after, so the array is allocated once and reused
@@ -142,12 +155,12 @@ private:
     //                  supernode tracking how far it has got through its ancestors.
     //   Right-looking: for each supernode, factor, then PUSH its update to every ancestor.
     //                  Needs no lists at all.
-    template<class Val>
+    template<class Val, class Factor>
     bool factorLeftLooking(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& sf,
-                           NumFactorStatic<Val>& nf) const;
-    template<class Val>
+                           Factor& nf) const;
+    template<class Val, class Factor>
     bool factorRightLooking(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& sf,
-                            NumFactorStatic<Val>& nf) const;
+                            Factor& nf) const;
 };
 
 } // namespace Oblio

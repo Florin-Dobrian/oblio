@@ -44,7 +44,8 @@ OBLIO_SRCS = \
   src/NumFactorEngine.cpp \
   src/Vector.cpp \
   src/MultiplyEngine.cpp \
-  src/SolveEngine.cpp
+  src/SolveEngine.cpp \
+  src/DirectSolver.cpp
 
 # Vendored ordering codes (SuiteSparse AMD, Sparspak MMD), copied verbatim, not
 # maintained here, so warnings are silenced (-w) for these two files only.
@@ -66,9 +67,8 @@ TEST_SRCS = $(wildcard tests/*.cpp)
 TEST_BINS = $(patsubst tests/%.cpp,%_cpp,$(TEST_SRCS))
 
 # One executable per examples/*.cpp file, named example_<stem>_cpp (the _cpp suffix folds them into
-# the same gitignore rule as the tests). basic.cpp sketches the not-yet-ported OblioEngine facade
-# and does not compile, so it is filtered out until that driver exists.
-EXAMPLE_SRCS = $(filter-out examples/basic.cpp,$(wildcard examples/*.cpp))
+# the same gitignore rule as the tests).
+EXAMPLE_SRCS = $(wildcard examples/*.cpp)
 EXAMPLE_BINS = $(patsubst examples/%.cpp,example_%_cpp,$(EXAMPLE_SRCS))
 
 .PHONY: all tests test examples objs clean

@@ -26,7 +26,7 @@ read this first, it turns "refresh my context" into a two-minute scan.
 ## Pipeline
 
 `OrderEngine -> ElmForestEngine -> SymFactorEngine -> NumFactorEngine -> SolveEngine`,
-orchestrated by `OblioEngine`.
+orchestrated by `DirectSolver`.
 
 Naming note: the modern tree renames as it ports. 0.9's `Matrix` is `SparseMatrix`
 (a `DenseMatrix` will follow), and 0.9's `Symbolic` / `SymbolicEngine` pair is
@@ -55,7 +55,7 @@ differ.
 | MultiplyEngine | yes | checked | `y = A x` and `r = A x - b`. Exists for the residual: it is what turns per-phase oracles into an end-to-end check |
 | DenseMatrix | yes | not needed so far | a supernode's block is a raw pointer plus (rows, cols, ld), handed straight to BLAS. See Owed |
 | SolveEngine | yes | checked | forward, diagonal (LDL only), backward, for Cholesky and both static LDLs, real and complex. Scalar, one right-hand side, as 0.9's `SingleVector` path is. **The backward pass conjugates when the factorization does**, which 10.12 omits: its backward solve applies `L^-T` where a Hermitian factor needs `L^-H`, correct for its complex-symmetric LDL and wrong for its Cholesky. Verified by residual, `\|Ax - b\| / \|b\|` at 3e-16 through the whole pipeline |
-| OblioEngine | yes | not started | top-level driver |
+| OblioEngine | yes | ported as `DirectSolver` | top-level driver: owns the permutation, forest, symbolic and numeric factors, and exposes analyze / factor / solve. Renamed because it is not an engine in this tree's sense (engines are stateless and produce one object) and because `Oblio` names the package, not the method: `DirectSolver` pairs with an `IterativeSolver` if one ever arrives |
 
 Units from 0.9 deliberately not carried over: `Utility` (`ResizeVector` and
 friends, obviated by `std::vector`) and `Functional` (pre-C++11 comparators,

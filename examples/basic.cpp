@@ -1,72 +1,69 @@
 // examples/basic.cpp
-// Minimal usage example: build a 4x4 tridiagonal matrix, factor it, solve.
+// Minimal usage example: build a 4x4 tridiagonal matrix, factor it, solve, check the residual.
 //
-// Compile (from repo root, after cmake build):
-//   g++ -std=c++17 -I include examples/basic.cpp -L build -loblio -lblas -llapack -o basic
+// This is the whole pipeline behind one object. For the same thing wired by hand, one engine at a
+// time, see examples/pipeline.cpp.
+//
+// Compile (macOS, from repo root):
+//   g++ -std=c++17 -O3 -DOBLIO_BLAS_UNDERSCORE -Iinclude examples/basic.cpp src/*.cpp -framework Accelerate -o basic
+// Linux: replace `-framework Accelerate` with `-llapack -lblas`.
 
-#include "oblio/OblioEngine.h"
+#include "oblio/DirectSolver.h"
+
 #include <cstdio>
 #include <vector>
 
-int main() {
-    using namespace Oblio;
+using namespace Oblio;
 
-    // Build 4x4 tridiagonal: diag=4, off=-1 (lower triangle only, COO format).
+int main() {
+    // The 4x4 tridiagonal, diagonal 4, off-diagonal -1, stored full (both triangles) in CSC:
     //
     //   [ 4 -1  0  0 ]
     //   [-1  4 -1  0 ]
     //   [ 0 -1  4 -1 ]
     //   [ 0  0 -1  4 ]
-
-    const Size n = 4;
-    std::vector<Size> rows = {0, 1, 1, 2, 2, 3, 3};
-    std::vector<Size> cols = {0, 0, 1, 1, 2, 2, 3};
-    std::vector<double> vals = {4, -1, 4, -1, 4, -1, 4};
-
-    auto A = Matrix<double>::fromCOO(n, rows, cols, vals);
+    //
+    const std::size_t n = 4;
+    const std::vector<std::size_t>  colPtr = {0, 2, 5, 8, 10};
+    const std::vector<std::int32_t> rowIdx = {0, 1,  0, 1, 2,  1, 2, 3,  2, 3};
+    const std::vector<double>       val    = {4, -1, -1, 4, -1, -1, 4, -1, -1, 4};
+    const SparseMatrix<double> A(n, colPtr, rowIdx, val);
 
     // Right-hand side: all ones.
-    std::vector<double> b(n, 1.0);
+    Vector<double> b(n);
+    for (std::size_t i = 0; i < n; ++i)
+        b[i] = 1.0;
 
-    // Set up solver: MMD ordering, multifrontal, Cholesky.
-    OblioEngine<double> eng;
-    eng.setOrderAlg(OrderAlg::eMMD);
-    eng.setFactorAlg(FactorAlg::eMultifrontal);
-    eng.setFactorType(FactorType::eCholesky);
+    DirectSolver<double> solver(Factorization::Cholesky, Traversal::LeftLooking);
+    solver.setOrderMethod(OrderMethod::AMD);
 
-    // Analyze + factor.
-    Err e = eng.analyzeAndFactor(A);
-    if (e != Err::eNone) {
-        printf("Factor failed: %d\n", (int)e);
-        return 1;
-    }
+    // The three phases. Split like this because they have different lifetimes: analyze depends only
+    // on the pattern, factor on the values, solve on the right-hand side.
+    if (!solver.analyze(A)) { printf("analysis failed\n"); return 1; }
+    if (!solver.factor(A))  { printf("factorization failed\n"); return 1; }
 
-    // Solve A*x = b.
-    std::vector<double> x;
-    e = eng.solve(b, x);
-    if (e != Err::eNone) {
-        printf("Solve failed: %d\n", (int)e);
-        return 1;
-    }
+    Vector<double> x(n);
+    if (!solver.solve(b, x)) { printf("solve failed\n"); return 1; }
 
-    // Print solution.
     printf("Solution x:\n");
-    for (Size i = 0; i < n; ++i)
+    for (std::size_t i = 0; i < n; ++i)
         printf("  x[%zu] = %.10f\n", i, x[i]);
 
-    // Compute residual ||Ax - b||.
-    double res = 0.0;
-    for (Size j = 0; j < n; ++j) {
-        double ax = 0.0;
-        for (Size p = A.mColPtr[j]; p < A.mColPtr[j+1]; ++p) {
-            Size i = A.mRowIdx[p];
-            ax += A.mVal[p] * x[i];
-            if (i != j) ax += A.mVal[p] * x[j]; // symmetric off-diagonal
-        }
-        double r = ax - b[j];
-        res += r * r;
-    }
-    printf("Residual ||Ax-b|| = %.3e\n", std::sqrt(res));
+    printf("\nRelative residual ||Ax - b|| / ||b|| = %.3e\n", solver.relativeResidual(A, b, x));
+
+    // A second right-hand side reuses the factorization: no analysis, no factorization, just the
+    // triangular solves. This is the reason the phases are separate.
+    Vector<double> b2(n);
+    for (std::size_t i = 0; i < n; ++i)
+        b2[i] = static_cast<double>(i + 1);
+
+    Vector<double> x2(n);
+    if (!solver.solve(b2, x2)) { printf("second solve failed\n"); return 1; }
+
+    printf("\nSecond right-hand side, same factorization:\n");
+    for (std::size_t i = 0; i < n; ++i)
+        printf("  x[%zu] = %.10f\n", i, x2[i]);
+    printf("\nRelative residual ||Ax - b|| / ||b|| = %.3e\n", solver.relativeResidual(A, b2, x2));
 
     return 0;
 }

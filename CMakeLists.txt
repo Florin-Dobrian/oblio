@@ -36,6 +36,7 @@ unset(CMAKE_REQUIRED_LIBRARIES)
 add_library(oblio STATIC
     src/Amd.cpp
     src/BlasLapack.cpp
+    src/DirectSolver.cpp
     src/ElmForestEngine.cpp
     src/Mmd.cpp
     src/MultiplyEngine.cpp
@@ -75,7 +76,7 @@ endforeach()
 # Each builds a standalone driver linking oblio. basic.cpp sketches the intended OblioEngine facade,
 # which is not ported and does not compile against the current library, so it is not listed here;
 # add it once that driver exists.
-foreach(e pipeline)
+foreach(e basic pipeline)
     add_executable(${e} examples/${e}.cpp)
     target_link_libraries(${e} PRIVATE oblio)
 endforeach()

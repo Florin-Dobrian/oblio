@@ -20,29 +20,31 @@ traversal strategies.
 ## Quick Start
 
 ```cpp
-#include "oblio/OblioEngine.h"
-#include "oblio/Vector.h"
-#include "oblio/DenseMatrix.h"
+#include "oblio/DirectSolver.h"
 using namespace Oblio;
 
-// Build matrix from COO (lower triangle, 0-based).
-auto A = Matrix<double>::fromCOO(n, rows, cols, vals);
+// A symmetric matrix in CSC, both triangles stored.
+const SparseMatrix<double> A(n, colPtr, rowIdx, val);
 
-// Configure solver.
-OblioEngine<double> eng;
-eng.setOrderAlg(OrderAlg::eMMD);
-eng.setFactorAlg(FactorAlg::eMultifrontal);
-eng.setFactorType(FactorType::eCholesky);
-eng.analyzeAndFactor(A);
+Vector<double> b(n), x(n);
+for (std::size_t i = 0; i < n; ++i) b[i] = 1.0;
 
-// Single RHS.
-Vector<double> b(n, 1.0), x;
-eng.solve(b, x);
+DirectSolver<double> solver(Factorization::Cholesky, Traversal::LeftLooking);
+solver.setOrderMethod(OrderMethod::AMD);
 
-// Multiple RHS, B is n×nRHS column-major, X is filled on output.
-DenseMatrix<double> B(n, nRHS), X;
-eng.solve(B, X);
+// The three phases have different lifetimes: analyze depends only on the pattern,
+// factor on the values, solve on the right-hand side.
+solver.analyze(A);
+solver.factor(A);
+solver.solve(b, x);
+
+// A second right-hand side reuses the factorization.
+solver.solve(b2, x2);
+
+printf("residual %.3e\n", solver.relativeResidual(A, b, x));
 ```
+
+Multiple right-hand sides (a dense `B`) are not wired yet; see Status.
 
 ## Build
 
@@ -85,26 +87,27 @@ include/oblio/      , public headers (declarations only)
   SymFactor.h       , symbolic factor: supernodal index structure (data)
   SymFactorEngine.h , computes the symbolic factorization
   NumFactorStatic.h , numeric factor, flat per-supernode storage (data)
-  NumFactorDynamic.h, numeric factor, vector-of-vectors storage (data; stub)
+  NumFactorDynamic.h, numeric factor, vector-of-vectors storage (data)
   NumFactorEngine.h , computes the numeric factorization (Cholesky, static LDL)
   UpdateBlock.h     , temporary update block used during numeric factorization
   BlasLapack.h      , operation-named BLAS/LAPACK wrappers and custom kernels
   MultiplyEngine.h  , sparse matrix-vector product and residual
   SolveEngine.h     , triangular solves and right-hand-side permutation
+  DirectSolver.h    , the whole pipeline behind one object (analyze / factor / solve)
 src/                , method bodies + explicit instantiations (flat layout)
   Amd.cpp           , AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
   Mmd.cpp           , MMD ordering (Sparspak/Liu, via Oblio 0.9)
-tests/              , test suites (111 tests)
+tests/              , test suites (119 tests)
   smoke.cpp                    5,  quick end-to-end sanity
   test_order.cpp              21,  ordering (Natural, MMD, AMD)
   test_permutation.cpp        11,  permutation maps
   test_forest.cpp             23,  elimination forest and supernodes
   test_symfactor.cpp          29,  symbolic factorization
-  test_numfactor.cpp          14,  numeric factorization
-  test_solve.cpp               8,  end-to-end solve, residual at machine precision
+  test_numfactor.cpp          16,  numeric factorization
+  test_solve.cpp              14,  end-to-end solve, residual at machine precision
 examples/           , usage examples
   pipeline.cpp      , the pipeline by hand, every factorization / traversal / ordering
-  basic.cpp         , sketch of the planned OblioEngine facade (not yet compiling)
+  basic.cpp         , the same solve through the DirectSolver facade
 ```
 
 ## History
@@ -140,8 +143,8 @@ OrderEngine -> ElmForestEngine -> SymFactorEngine -> NumFactorEngine -> SolveEng
 ```
 
 `MultiplyEngine` supplies the sparse matvec and residual. Today the phases are wired by hand
-(see `examples/pipeline.cpp`); `OblioEngine<Val>` will orchestrate them behind a single header,
-as sketched in Quick Start.
+(see `examples/pipeline.cpp`), or driven together by `DirectSolver<Val>`, which owns the
+intermediates and exposes the analyze / factor / solve phases (see `examples/basic.cpp`).
 
 ## Status
 
@@ -154,11 +157,12 @@ Done:
 - [x] Complex arithmetic: Hermitian Cholesky, complex-symmetric LDL^T, complex-Hermitian LDL^H
 - [x] Namespaced headers (`include/oblio/`), explicit instantiation throughout
 - [x] Validated against Oblio 0.9 as oracle; end-to-end residual at machine precision
-- [x] 111 tests across 7 phase suites
+- [x] `DirectSolver<Val>`, the top-level analyze / factor / solve driver
+- [x] 119 tests across 7 phase suites
 
 Not yet:
 
-- [ ] Dynamic LDL, Bunch-Kaufman 1x1 / 2x2 pivots (`NumFactorDynamic` is a stub)
+- [ ] Dynamic LDL, Bunch-Kaufman 1x1 / 2x2 pivots (dense-front pivot kernel done; delayed
+      columns across a forest still to come)
 - [ ] Multifrontal traversal
 - [ ] Multi-RHS solve (dense right-hand sides)
-- [ ] `OblioEngine<Val>` top-level driver (the Quick Start API)

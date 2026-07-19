@@ -1,6 +1,6 @@
 // examples/pipeline.cpp
-// The solve pipeline by hand, without the OblioEngine facade (which does not exist yet). This is
-// what that facade will one day encapsulate: order the matrix, build the elimination forest,
+// The solve pipeline by hand, without the DirectSolver facade. This is what that facade
+// encapsulates (see examples/basic.cpp): order the matrix, build the elimination forest,
 // factor it symbolically, factor it numerically, and solve. Here each phase is a separate object,
 // wired in the order the data flows, so the seams are visible.
 //
@@ -10,8 +10,7 @@
 // returns false and the row says so: the sweep doubles as a map of what is wired today.
 //
 // Compile (macOS, from repo root):
-//   g++ -std=c++17 -O3 -DOBLIO_BLAS_UNDERSCORE -Iinclude examples/pipeline.cpp src/*.cpp \
-//       -framework Accelerate -o pipeline
+//   g++ -std=c++17 -O3 -DOBLIO_BLAS_UNDERSCORE -Iinclude examples/pipeline.cpp src/*.cpp -framework Accelerate -o pipeline
 // Linux: replace `-framework Accelerate` with `-llapack -lblas`.
 
 #include "oblio/ElmForestEngine.h"

@@ -74,7 +74,7 @@ void ElmForestEngine::computeParent(
 
     // Naming: an l prefix is the factor (permuted) ordering, an a prefix the original
     // ordering of A, and j and k carry the column roles, j the lower and k the higher. So lk
-    // is the factor column being processed, lj an earlier neighbour of it (lj < lk, enforced
+    // is the factor column being processed, lj an earlier neighbor of it (lj < lk, enforced
     // by the guard below), and ak is lk's column in A. The same prefix marks a position in
     // the storage: cp is an offset into A's flat arrays, which is 0.9's p (the name p being
     // taken here by the Permutation). Positions measure rather than name, so cp is a
@@ -82,7 +82,7 @@ void ElmForestEngine::computeParent(
     // climb has reached and t the temporary that saves the next hop before compression
     // overwrites it.
     //
-    // For each factor column lk (increasing), look at its neighbours mapping to earlier
+    // For each factor column lk (increasing), look at its neighbors mapping to earlier
     // columns lj < lk; path-compress to attach lj's subtree under lk.
     for (std::int32_t lk = 0; lk < static_cast<std::int32_t>(size); ++lk) {
         const std::int32_t ak = newToOld[lk];
@@ -186,12 +186,12 @@ void ElmForestEngine::computeColumnSizes(
 
     // Update size: the subdiagonal nonzero count of each column of L, by the pruned-row-
     // subtree walk. Fix a factor column lk. The columns holding a nonzero in row lk are
-    // exactly those on the forest paths climbing from each earlier neighbour lj of lk up
+    // exactly those on the forest paths climbing from each earlier neighbor lj of lk up
     // to lk, so climb from each such lj and credit every column passed.
     //
-    // The marker does two jobs. It prevents double counting, since two neighbours of lk may
+    // The marker does two jobs. It prevents double counting, since two neighbors of lk may
     // climb into a shared upper path and the second must not credit it twice. And it halts
-    // the climb: mark[lk] is set to lk before the neighbour loop, so a climb reaching lk
+    // the climb: mark[lk] is set to lk before the neighbor loop, so a climb reaching lk
     // stops there without a separate r == lk test. That is the same trick symbolic
     // factorization uses to make a union idempotent, with the action reduced from storing
     // an index to counting it.

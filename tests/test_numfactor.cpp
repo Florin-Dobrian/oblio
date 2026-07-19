@@ -366,6 +366,78 @@ std::vector<std::vector<Cplx>> randomComplexSymmetric(std::size_t n, std::mt1993
     return A;
 }
 
+// Slice 1 check for dynamic LDL: factor a dense symmetric matrix with DynamicLDLT (left-looking),
+// then reconstruct L D L^T from the block and pivotType and compare to the pivoted, permuted
+// matrix. Returns the worst entry difference, -1 if the factorization was refused (not one front,
+// or a column delayed with no ancestor to take it). twoByTwo counts the 2x2 pivots chosen.
+double dynamicLdlWorst(const std::vector<std::vector<double>>& dense, int& twoByTwo) {
+    const std::int32_t n = static_cast<std::int32_t>(dense.size());
+    const SparseMatrix<double> A = toSparse(dense);
+
+    OrderEngine ord(OrderMethod::AMD);
+    Permutation p;
+    if (!ord.compute(A, p)) return -1;
+
+    ElmForest f; ElmForestEngine fe;
+    if (!fe.compute(A, p, f)) return -1;
+    SymFactor s; SymFactorEngine se;
+    if (!se.compute(A, p, f, s)) return -1;
+
+    NumFactorDynamic<double> nf;
+    NumFactorEngine ne(Factorization::DynamicLDLT, Traversal::LeftLooking);
+    if (!ne.compute(A, p, s, nf)) return -1;
+    if (nf.snodeSize() != 1) return -1;
+
+    const std::vector<std::int32_t>& newToOld = p.newToOld();
+    std::vector<std::vector<double>> permuted(n, std::vector<double>(n));
+    for (std::int32_t li = 0; li < n; ++li)
+        for (std::int32_t lj = 0; lj < n; ++lj)
+            permuted[li][lj] = dense[newToOld[li]][newToOld[lj]];
+
+    const NumFactorDynamic<double>& cnf = nf;
+    const double*       blk = cnf.valPtr(0);
+    const std::int32_t* idx = cnf.nodeIdxPtr(0);
+    const std::vector<std::int32_t>& pt = cnf.pivotType();
+    const auto at = [n](std::int32_t r, std::int32_t c) {
+        return static_cast<std::size_t>(c) * static_cast<std::size_t>(n) + static_cast<std::size_t>(r);
+    };
+
+    std::vector<std::vector<double>> L(n, std::vector<double>(n, 0));
+    std::vector<std::vector<double>> D(n, std::vector<double>(n, 0));
+    for (std::int32_t j = 0; j < n; ) {
+        if (pt[idx[j]] == 1) {
+            L[j][j] = 1;
+            D[j][j] = blk[at(j, j)];
+            for (std::int32_t i = j + 1; i < n; ++i) L[i][j] = blk[at(i, j)];
+            ++j;
+        } else {                                    // 2x2 pivot: columns j, j+1
+            ++twoByTwo;
+            L[j][j] = 1; L[j + 1][j + 1] = 1;       // L[j+1][j] stays 0
+            D[j][j]         = blk[at(j, j)];
+            D[j + 1][j + 1] = blk[at(j + 1, j + 1)];
+            D[j][j + 1] = D[j + 1][j] = blk[at(j, j + 1)];
+            for (std::int32_t i = j + 2; i < n; ++i) { L[i][j] = blk[at(i, j)]; L[i][j + 1] = blk[at(i, j + 1)]; }
+            j += 2;
+        }
+    }
+
+    std::vector<std::vector<double>> LD(n, std::vector<double>(n, 0));
+    for (std::int32_t i = 0; i < n; ++i)
+        for (std::int32_t k = 0; k < n; ++k) {
+            double acc = 0;
+            for (std::int32_t m = 0; m < n; ++m) acc += L[i][m] * D[m][k];
+            LD[i][k] = acc;
+        }
+    double worst = 0;
+    for (std::int32_t i = 0; i < n; ++i)
+        for (std::int32_t jc = 0; jc < n; ++jc) {
+            double acc = 0;
+            for (std::int32_t k = 0; k < n; ++k) acc += LD[i][k] * L[jc][k];
+            worst = std::max(worst, std::abs(acc - permuted[idx[i]][idx[jc]]));
+        }
+    return worst;
+}
+
 } // namespace
 
 int main() {
@@ -547,6 +619,40 @@ int main() {
 
         ck(dynFail == 0 && worst == 0.0,
            "static into dynamic : identical factor, flat vs per-supernode, all symmetries, both traversals");
+    }
+
+    // Dynamic LDL, slice 1: a dense front, real, left-looking. Reconstruct L D L^T and check it
+    // matches the pivoted matrix. Dense PD inputs exercise 1x1 pivots; dense indefinite inputs
+    // exercise the 2x2 pivots and the swap machinery.
+    {
+        int checked = 0, twoByTwo = 0;
+        double worst = 0;
+        std::uniform_real_distribution<double> u(-1.0, 1.0);
+
+        for (int trial = 0; trial < 80; ++trial) {
+            const std::size_t n = 3 + rng() % 8;
+            std::vector<std::vector<double>> dense;
+
+            if (trial % 2 == 0) {
+                dense = randomHpd<double>(n, rng, 100);              // dense PD: 1x1 pivots
+            } else {
+                dense.assign(n, std::vector<double>(n, 0.0));         // dense symmetric indefinite
+                for (std::size_t i = 0; i < n; ++i)
+                    for (std::size_t jc = i; jc < n; ++jc) {
+                        const double v = u(rng);
+                        dense[i][jc] = v;
+                        dense[jc][i] = v;
+                    }
+            }
+
+            const double w = dynamicLdlWorst(dense, twoByTwo);
+            if (w < 0) continue;                                      // refused (multi-front or delayed): skip
+            worst = std::max(worst, w);
+            ++checked;
+        }
+
+        ck(checked > 20 && twoByTwo > 0 && worst < 1e-9,
+           "dynamic LDL slice 1 : L D L^T reconstructs the dense front (1x1 and 2x2 pivots)");
     }
 
     std::cout << "\nNumFactor tests: " << pass << "/" << (pass + fail) << " passed\n";

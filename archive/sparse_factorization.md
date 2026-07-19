@@ -1204,7 +1204,7 @@ Read that way, the four cells are:
 
 - **Plain, single loop, `r != k`** *(classic; pedagogical).* Climb `parent[]` to the very
   top, then ask whether the top is `k`. It is the mental model written out: a subtree has
-  one root, find it, and either it is already yours or you adopt it. The redundancy is a
+  one root, find it, and either it is already ours or we adopt it. The redundancy is a
   single extra read, which costs essentially nothing. This is the form to reason about and
   to prove things with, and it is why we introduced it first. It is not the form to run.
 - **Plain, double loop, `parent[r] == NIL`** *(the plain optimum, rarely written).* Stops
@@ -2593,29 +2593,300 @@ it is worth separating what is hard because the *algorithm* is intricate from wh
 because the *encoding* is fifty years old. They are not the same, and only one of them is worth
 preserving.
 
+**A note on where the pseudocode comes from, because it is not all the same kind.** Sections 5.1
+through 5.10 build up minimum degree in layers, and their pseudocode is written *from* the
+prototypes in `experiments/ordering`, which are the specification: what the pseudocode says, the
+code does, and the worked examples are that code's own output. Sections 5.11 to 5.13 go the other
+way. Their pseudocode is a reading of the vendored `Mmd.cpp` and `Amd.cpp`, which are the
+specification there, and it describes those routines in full. Our prototypes for the two named
+algorithms are deliberately incomplete, and 5.11 records exactly which parts are missing.
+
+The arrow therefore points one way in the first ten subsections and the other way in the last two,
+which is the arrangement we want rather than an oversight: it lets the layered sections be exact
+about code we control, and lets the MMD and AMD sections be complete about code we do not, with
+the gap between the vendored routine and our prototype written down instead of hidden.
+
+One consequence is visible in the notation. The layered sections say *clique* and write `C_i`,
+following 5.3, while 5.11 to 5.13 say *element* and write `E_i`, following their sources. The
+translation is one word and one letter, given in 5.3, and it is kept deliberately so that a reader
+who opens `Mmd.cpp` after 5.11 meets the vocabulary the section just used.
+
 ### 5.1 Minimum degree, and why the obvious version does not work
 
 The greedy idea (Tinney and Walker, 1967) is one line: **eliminate the vertex of least degree
-next.** A vertex of degree `d` creates a clique on its `d` neighbours, so `d` bounds the fill it
-causes. Pick the smallest and you cause the least immediate fill.
+next.** A vertex of degree `d` creates a clique on its `d` neighbors, so `d` bounds the fill it
+causes. Picking the smallest causes the least immediate fill.
 
 It is a heuristic, not an optimum. Minimizing fill exactly is NP-hard, and minimum degree is
 greedy on a local quantity. It is nevertheless very good in practice, and it is what AMD and MMD
 both are.
 
+Written out literally, on a graph that stores its edges, the whole algorithm is this:
+
+```
+minimum_degree(G) -> elimination order:
+
+    while G has a live vertex:
+        p = a live vertex of least degree             # the greedy pick
+        for each pair (u, w) of distinct neighbors of p:
+            if u and w are not adjacent:
+                add the edge (u, w)                   # FILL
+        remove p and its incident edges from G
+        append p to the order
+```
+
+That is the vertex elimination game, and it is the definition the rest of Section 5 optimizes
+without changing what it computes.
+
+It is worth counting what a single elimination costs the graph, because the count is the reason
+the heuristic is *minimum* degree rather than anything else. Eliminating `p` of degree `d` deletes
+exactly `d` edges, the ones joining `p` to its neighbors, and adds at most `d(d-1)/2`. The two
+cross at `d = 3`. A degree-2 pivot deletes two edges and adds at most one, so eliminating it
+strictly shrinks the graph; a degree-3 pivot is break-even at worst; only from `d = 4` up does
+elimination generally grow the edge count. Choosing the least-degree vertex is therefore choosing
+a pivot likely to shrink the graph rather than grow it, which is a stronger statement than the
+usual one about `d` merely bounding the fill.
+
+The `at most` in that count carries the rest of the story. The pivot only pays for the pairs of
+neighbors that were *not already adjacent*, so an elimination whose neighborhood is already a
+clique creates no fill at all and is pure deletion, free. Minimum degree cannot see this coming:
+it ranks vertices by `d` alone, never by how much of the clique already exists, so it will
+sometimes pass over a high-degree vertex that would have cost nothing. That blindness is a large
+part of why the heuristic is a heuristic.
+
 The trouble is entirely in the implementation, and there are two problems.
 
-**The graph grows.** Eliminating a vertex of degree `d` adds up to `d(d-1)/2` edges. Sum that over
-the elimination and you are storing the fill you were trying to avoid predicting. The graph must
-therefore be represented in a way that does *not* materialize the cliques.
+**The graph grows, on balance.** Not monotonically: by the count above a degree-2 pivot shrinks it
+and a degree-3 pivot is break-even at worst. But the pivots that matter are the ones with room to
+fill, and summed over an elimination the additions win, so the ordering code ends up storing
+inside itself the very fill the ordering exists to reduce.
 
-**And the degrees must be recomputed.** After eliminating `p`, every neighbour's degree changes,
-and computing a degree means taking a set union over the vertex's neighbourhood. Done naively this
-is the dominant cost, by a wide margin.
+Note what the ordering does and does not get for that price. It gets the total fill nearly free, and
+by a route worth knowing: the degree of a pivot at the moment it is eliminated is exactly the
+column count of `L` for that column, since the pivot's reachable set is precisely the set of rows
+below the diagonal that fill in. So
+
+```
+nnz(L) = sum over pivots of (degree at elimination)  +  n
+fill   = nnz(L) - nnz(tril A)
+```
+
+and any minimum-degree code can report `nnz(L)` by accumulating a number it already computes at
+every step. This is the same quantity 2.5 obtains from the elimination forest; the forest is not
+needed for the counts when one is performing the elimination anyway, it is needed to get them from
+`A` and a permutation *without* performing it.
+
+What the ordering cannot do is consult that total while choosing. The number only exists once the
+whole sequence is fixed, and each greedy step has no view of the future, so the choice is made on
+a local proxy and the total arrives too late to inform it.
+
+It is worth being precise about what the ordering *does* hold, because it is more than the count.
+The reachable set of a pivot at the moment it is eliminated is not merely the size of a column of
+`L`, it is that column's nonzero pattern. So an ordering code is already performing a symbolic
+factorization, one column at a time, and discarding each column as it goes. Symbolic factorization
+(Section 3) exists as a separate phase not because the ordering lacks the information but because
+producing it there would be the most expensive possible way to get it:
+
+- **Allocation.** A symbolic factorization wants to size its output exactly, once, and fill a flat
+  array. An ordering discovers each column's size only on reaching it, so emitting `L` from inside
+  it means growable per-column storage. The forest breaks the deadlock by computing every column
+  count *before* any pattern is formed, in nearly `O(nnz(A))` rather than `O(nnz(L))` (2.5), so the
+  array can be sized up front and never grown.
+- **Waste.** To find each pivot the ordering computes a reachable set for every live vertex and
+  keeps one. The other `n - 1` per step are built and thrown away, so the great majority of its set
+  work is not the answer.
+- **Granularity.** Once supervariables are in play (5.5) the patterns are over principal variables,
+  not individual ones, and would need expanding before they were `L`'s pattern.
+
+The ordering, in short, can do symbolic factorization and does do it, in the wrong order and with
+structures built for a different question. Separating the phases is about allocating once and
+computing each thing where it is cheap, not about who knows what.
+
+The way out is not to fight the arithmetic but to notice what is being stored. The edges an
+elimination adds are not arbitrary: they complete a *clique* on the pivot's neighborhood, and a
+clique is fully described by its vertex list. Every edge inside it is implicit. So the `d(d-1)/2`
+edges need never be written down; keeping the list of `d` vertices says the same thing.
+
+That observation cuts twice, and the second cut is the one that makes the technique bounded rather
+than merely cheaper. If membership in the clique implies adjacency, then the edges *already
+present* between two of its members are redundant too, and can be deleted from the explicit
+adjacency. An elimination therefore adds nothing and removes something. This is why the
+representation of 5.3 never needs more room than the original graph did.
+
+**And the degrees must be recomputed.** After eliminating `p`, every neighbor's degree changes,
+and computing a degree means taking a set union over the vertex's neighborhood. Done naively this
+is the dominant cost, by a wide margin. Note that the pseudocode above hides two separate costs
+under one line: finding the least-degree vertex, and knowing the degrees in the first place. A
+linear scan for the minimum is `O(n)` per step and is the easier of the two to fix, by filing
+vertices in buckets by degree so the pick is a walk up from the last known minimum (this is what
+`mmdint` builds, and the buckets must be doubly linked, since a vertex whose degree changes has to
+be pulled from the middle of one). But bucketing only helps if the degrees are *maintained*. As
+long as each degree is recomputed on demand, the pick is doing a set union per live vertex and
+dominates the elimination itself. Maintaining degrees incrementally is the real problem, and the
+two codes answer it in opposite ways: AMD makes each update cheap (5.13), MMD makes updates rare
+(5.11).
 
 Everything intricate in a real minimum-degree code is one of those two problems being solved.
 
-### 5.2 The quotient graph
+### 5.2 A worked example: the naive algorithm
+
+Three graphs, used again in 5.4 so the two representations can be compared step for step.
+
+```
+   graph1                graph2                graph3
+   a 4-cycle             uneven degrees        twelve vertices
+
+   0---1                     0                 a path 0-1-2-...-11 plus eight
+   |   |                    / \                extra edges: 0-3 0-8 1-6 1-8
+   3---2                   1   2                2-5 5-9 6-10 7-8
+                           |   |
+   edges:                  3---4               degrees run 1 to 4, and the
+   0-1 1-2 2-3 3-0          \ /                elimination order is not the
+                             5                 identity
+```
+
+**graph1.** All four degrees are 2, so the tie goes to the lowest index.
+
+```
+start                                          storage 8
+  graph: {0: [1,3], 1: [0,2], 2: [1,3], 3: [0,2]}
+step 0: eliminate 0 (degree 2)    fill: 1-3              storage 6
+  graph: {1: [2,3], 2: [1,3], 3: [1,2]}
+step 1: eliminate 1 (degree 2)    fill: none             storage 2
+  graph: {2: [3], 3: [2]}
+step 2: eliminate 2 (degree 1)    fill: none             storage 0
+  graph: {3: []}
+step 3: eliminate 3 (degree 0)    fill: none             storage 0
+  graph: {}
+order = [0, 1, 2, 3]
+fill = 1,  nnz(L) = 9 against nnz(tril A) = 8
+```
+
+One fill edge, `1-3`, the diagonal of the square. Watch vertex 1: it enters with neighbors
+`[0, 2]` and leaves step 0 with `[2, 3]`. It lost the eliminated pivot and gained a vertex it was
+never adjacent to. That gain is the fill, written into the graph. After it, `{1,2,3}` is a
+triangle, so nothing further can fill and every later step reports `none`.
+
+**graph2.** Six vertices, two fill edges.
+
+```
+start                                          storage 14
+  graph: {0: [1,2], 1: [0,3], 2: [0,4], 3: [1,4,5], 4: [2,3,5], 5: [3,4]}
+step 0: eliminate 0 (degree 2)    fill: 1-2              storage 12
+  graph: {1: [2,3], 2: [1,4], 3: [1,4,5], 4: [2,3,5], 5: [3,4]}
+step 1: eliminate 1 (degree 2)    fill: 2-3              storage 10
+  graph: {2: [3,4], 3: [2,4,5], 4: [2,3,5], 5: [3,4]}
+step 2: eliminate 2 (degree 2)    fill: none             storage 6
+  graph: {3: [4,5], 4: [3,5], 5: [3,4]}
+step 3: eliminate 3 (degree 2)    fill: none             storage 2
+  graph: {4: [5], 5: [4]}
+step 4: eliminate 4 (degree 1)    fill: none             storage 0
+  graph: {5: []}
+step 5: eliminate 5 (degree 0)    fill: none             storage 0
+  graph: {}
+order = [0, 1, 2, 3, 4, 5]
+fill = 2,  nnz(L) = 15 against nnz(tril A) = 13
+```
+
+Note the degrees: 2, 2, 2, 2, 1, 0. Vertex 3 began at degree 3 and is eliminated at degree 2,
+because two of its neighbors went first and the fill it received did not make up the difference.
+The degree a vertex is eliminated at is not the degree it started with, which is the whole reason
+degrees have to be recomputed as the algorithm runs.
+
+**graph3.** Twelve vertices, eighteen edges, and the first example whose order is not the
+identity.
+
+```
+start                                          storage 36
+  graph: {0: [1,3,8], 1: [0,2,6,8], 2: [1,3,5], 3: [0,2,4], 4: [3,5],
+          5: [2,4,6,9], 6: [1,5,7,10], 7: [6,8], 8: [0,1,7,9],
+          9: [5,8,10], 10: [6,9,11], 11: [10]}
+step 0: eliminate 11 (degree 1)   fill: none             storage 34
+  graph: {0: [1,3,8], 1: [0,2,6,8], 2: [1,3,5], 3: [0,2,4], 4: [3,5],
+          5: [2,4,6,9], 6: [1,5,7,10], 7: [6,8], 8: [0,1,7,9],
+          9: [5,8,10], 10: [6,9]}
+step 1: eliminate 4 (degree 2)    fill: 3-5              storage 32
+  graph: {0: [1,3,8], 1: [0,2,6,8], 2: [1,3,5], 3: [0,2,5], 5: [2,3,6,9],
+          6: [1,5,7,10], 7: [6,8], 8: [0,1,7,9], 9: [5,8,10], 10: [6,9]}
+step 2: eliminate 7 (degree 2)    fill: 6-8              storage 30
+  graph: {0: [1,3,8], 1: [0,2,6,8], 2: [1,3,5], 3: [0,2,5], 5: [2,3,6,9],
+          6: [1,5,8,10], 8: [0,1,6,9], 9: [5,8,10], 10: [6,9]}
+step 3: eliminate 10 (degree 2)   fill: 6-9              storage 28
+  graph: {0: [1,3,8], 1: [0,2,6,8], 2: [1,3,5], 3: [0,2,5], 5: [2,3,6,9],
+          6: [1,5,8,9], 8: [0,1,6,9], 9: [5,6,8]}
+step 4: eliminate 0 (degree 3)    fill: 1-3, 3-8         storage 26
+  graph: {1: [2,3,6,8], 2: [1,3,5], 3: [1,2,5,8], 5: [2,3,6,9],
+          6: [1,5,8,9], 8: [1,3,6,9], 9: [5,6,8]}
+step 5: eliminate 2 (degree 3)    fill: 1-5              storage 22
+  graph: {1: [3,5,6,8], 3: [1,5,8], 5: [1,3,6,9], 6: [1,5,8,9],
+          8: [1,3,6,9], 9: [5,6,8]}
+step 6: eliminate 3 (degree 3)    fill: 5-8              storage 18
+  graph: {1: [5,6,8], 5: [1,6,8,9], 6: [1,5,8,9], 8: [1,5,6,9],
+          9: [5,6,8]}
+step 7: eliminate 1 (degree 3)    fill: none             storage 12
+  graph: {5: [6,8,9], 6: [5,8,9], 8: [5,6,9], 9: [5,6,8]}
+step 8: eliminate 5 (degree 3)    fill: none             storage 6
+  graph: {6: [8,9], 8: [6,9], 9: [6,8]}
+step 9: eliminate 6 (degree 2)    fill: none             storage 2
+  graph: {8: [9], 9: [8]}
+step 10: eliminate 8 (degree 1)   fill: none             storage 0
+  graph: {9: []}
+step 11: eliminate 9 (degree 0)   fill: none             storage 0
+  graph: {}
+order = [11, 4, 7, 10, 0, 2, 3, 1, 5, 6, 8, 9]
+fill = 7,  nnz(L) = 37 against nnz(tril A) = 30
+```
+
+Minimum degree begins at vertex 11, the only degree-1 vertex, and works inward; the four
+degree-4 vertices (1, 5, 6, 8) are all deferred to the end, which is exactly the behavior the
+heuristic is for. The degrees at elimination run 1, 2, 2, 2, 3, 3, 3, 3, 3, 2, 1, 0, never
+exceeding 3 even though four vertices started at 4.
+
+Two things are visible here that the smaller graphs cannot show. Fill arrives in bursts rather
+than singly: step 4 creates two edges at once, `1-3` and `3-8`, because vertex 0 had three
+neighbors and two of the three pairs were not yet adjacent. And the graph becomes dense at the
+end without any further fill being created, since by step 7 the surviving `{5,6,8,9}` is already
+a complete graph, so the last five eliminations report `none`.
+
+The storage line is the clearest statement of the problem 5.3 solves. It falls by 2 per step at
+first, each elimination removing a low-degree vertex and adding little, then the decrease slows
+through the middle as fill offsets the removals, and only collapses once the graph is nearly
+gone. On a graph this small the additions never overtake the deletions, so the peak is the
+starting value of 36. On a larger and denser problem they do overtake and the peak sits well
+above the start: that is the growth 5.1 warned about, and the reason a real code cannot store the
+graph this way.
+
+
+**graph4.** Eight vertices, fourteen edges, and denser than the others: four fill edges
+appear in the first two steps and none after.
+
+```
+start                                                storage 28
+  graph: {0: [2,3,4,7], 1: [3,4,6,7], 2: [0,3,5], 3: [0,1,2,6,7],
+          4: [0,1,5], 5: [2,4,6], 6: [1,3,5], 7: [0,1,3]}
+step 0: eliminate 2 (degree 3)    fill: 0-5, 3-5     storage 26
+  graph: {0: [3,4,5,7], 1: [3,4,6,7], 3: [0,1,5,6,7], 4: [0,1,5],
+          5: [0,3,4,6], 6: [1,3,5], 7: [0,1,3]}
+step 1: eliminate 4 (degree 3)    fill: 0-1, 1-5     storage 24
+  graph: {0: [1,3,5,7], 1: [0,3,5,6,7], 3: [0,1,5,6,7], 5: [0,1,3,6],
+          6: [1,3,5], 7: [0,1,3]}
+step 2: eliminate 6 (degree 3)    fill: none         storage 18
+  graph: {0: [1,3,5,7], 1: [0,3,5,7], 3: [0,1,5,7], 5: [0,1,3],
+          7: [0,1,3]}
+step 3: eliminate 5 (degree 3)    fill: none         storage 12
+  graph: {0: [1,3,7], 1: [0,3,7], 3: [0,1,7], 7: [0,1,3]}
+step 4: eliminate 0 (degree 3)    fill: none         storage 6
+  graph: {1: [3,7], 3: [1,7], 7: [1,3]}
+step 5: eliminate 1 (degree 2)    fill: none         storage 2
+  graph: {3: [7], 7: [3]}
+step 6: eliminate 3 (degree 1)    fill: none         storage 0
+  graph: {7: []}
+step 7: eliminate 7 (degree 0)    fill: none         storage 0
+order = [2, 4, 6, 5, 0, 1, 3, 7]
+fill = 4
+```
+
+### 5.3 The quotient graph
 
 Do not add the clique's edges. **Store the clique as one object.**
 
@@ -2623,11 +2894,11 @@ An eliminated vertex becomes an **element**, and its pattern `L_p` is the set of
 mutually adjacent. A live vertex `i` is then adjacent to a mixture:
 
 ```
-A_i     the original neighbours of i that have not been eliminated  (variables)
+A_i     the original neighbors of i that have not been eliminated  (variables)
 E_i     the elements i belongs to                                   (cliques)
 ```
 
-and its true neighbourhood is
+and its true neighborhood is
 
 ```
 adj(i) = A_i  union  ( union of L_e over e in E_i )   minus  i itself
@@ -2641,9 +2912,468 @@ that its members all list `p` in their `E`.
 stays bounded, and the representation does not grow without limit. This is the whole reason the
 quotient graph is affordable.
 
-### 5.3 Supervariables
+**A note on the name.** The literature calls these objects *elements*, and writes `E_i` for the
+list above. The word is inherited from finite-element assembly, where the cliques really were
+mesh elements, and it has stuck ever since. They are cliques, and the rest of this section says
+so where it helps: `A_i` for the explicit neighbors, `C_i` for the cliques containing `i`, and
+`L_c` for the members of clique `c`. When reading AMD or MMD, read `element` for `clique` and
+`E_i` for `C_i`; nothing else changes.
 
-Two vertices with **identical neighbourhoods** will have equal degree at every step, will be
+Setting the naive version of 5.1 and 5.2 beside this one, the loop is untouched and only the two
+operations underneath it differ:
+
+```
+minimum_degree_quotient(G) -> elimination order:
+
+    for each vertex i:
+        A_i = the neighbors of i in G          # explicit, as given
+        C_i = {}                                # no cliques yet
+
+    while a live vertex remains:
+
+        # DEGREE, on demand: unite the explicit neighbors with the members of
+        # every clique i belongs to. Never stored, formed only when asked.
+        neighbors(i) = A_i  union  ( union of L_c over c in C_i )   minus i
+
+        p = a live vertex minimizing |neighbors(p)|
+        L = neighbors(p)
+
+        # ELIMINATE. The clique on L is recorded once, not written out as edges.
+        for each c in C_p:
+            delete clique c                     # ABSORPTION: subsumed by the new one
+        L_p = L;  p is now a clique
+
+        for each i in L:
+            A_i = A_i \ L                        # PRUNING: the new clique implies these
+            A_i = A_i \ {p}
+            C_i = ( C_i \ absorbed ) union {p}
+
+        append p to the order
+```
+
+Three things distinguish it from 5.1. The clique on `L` is never expanded into edges, so no fill
+is stored. The absorbed cliques are deleted, which bounds how many can accumulate. And `A_i` is
+pruned of everything the new clique now implies, which is what makes each explicit list shrink
+monotonically. The result is identical to 5.1's, pivot for pivot.
+
+### 5.4 A worked example: the quotient graph
+
+Take the smallest graph that fills, a 4-cycle:
+
+```
+   0---1        edges: 0-1 1-2 2-3 3-0
+   |   |
+   3---2
+```
+
+At the start there are no cliques and every neighbor is explicit, so the quotient graph is
+just the graph:
+
+```
+A       = {0: [1,3], 1: [0,2], 2: [1,3], 3: [0,2]}
+C       = {0: [],    1: [],    2: [],    3: []}
+cliques = {}
+```
+
+All four degrees are 2, so the tie goes to the lowest index and `p = 0`. Its neighborhood needs
+no clique expansion, since `C_0` is empty:
+
+```
+neighbors(0) = A_0                     = {1, 3}
+```
+
+That set is stored once as clique `c0` and vertices 1 and 3 record their membership:
+
+```
+A       = {0: [], 1: [2],    2: [1,3], 3: [2]}
+C       = {0: [], 1: [c0],   2: [],    3: [c0]}
+cliques = {c0: [1,3]}
+neighbors = [1,3], absorbed = none, pruned = none
+```
+
+Compare with 5.1, which at this point would have added the edge `1-3` to the graph. Here that
+edge exists only as the fact that 1 and 3 both list `c0`. Note also that vertex 2, which was not
+reached, is untouched.
+
+Next, `p = 1`. Now the clique does work: `A_1` alone would say the degree is 1, but expanding
+`c0` supplies the implicit neighbor 3.
+
+```
+neighbors(1) = A_1 union L_c0 minus 1  = {2} union {1,3} minus 1  =  {2, 3}
+```
+
+Eliminating 1 does three things at once. The new clique `c1 = {2,3}` is created; `c0` is absorbed,
+because 1 was one of its members; and the *real* edge `2-3` is pruned, because `c1` now implies
+it. That last step is why both explicit lists go empty:
+
+```
+A       = {0: [], 1: [], 2: [],     3: []}
+C       = {0: [], 1: [], 2: [c1],   3: [c1]}
+cliques = {c1: [2,3]}
+neighbors = [2,3], absorbed = c0, pruned = 2-3
+```
+
+From here the graph is carried entirely by cliques. For `p = 2` the explicit side contributes
+nothing at all:
+
+```
+neighbors(2) = {} union L_c1 minus 2   = {2,3} minus 2  =  {3}
+
+A       = {0: [], 1: [], 2: [], 3: []}
+C       = {0: [], 1: [], 2: [], 3: [c2]}
+cliques = {c2: [3]}
+neighbors = [3], absorbed = c1, pruned = none
+```
+
+And the last vertex has nothing left to join:
+
+```
+neighbors(3) = {} union L_c2 minus 3   = {3} minus 3  =  {}
+
+A       = {0: [], 1: [], 2: [], 3: []}
+C       = {0: [], 1: [], 2: [], 3: []}
+cliques = {c3: []}
+neighbors = [], absorbed = c2, pruned = none
+```
+
+Three things are worth reading off the trace. The `neighbors` line gives 2, 2, 1, 0, which by
+5.1's identity are the column counts of `L`; they sum with the diagonal to `nnz(L) = 9` against
+`nnz(tril A) = 8`, so the fill is the single edge `1-3`, exactly what the naive version stored.
+The explicit lists hold 8 entries at the start, 4 after the first elimination and 0 after the
+second, never rising. And `cliques` never holds more than one entry, because each elimination
+absorbs its predecessor.
+
+**A is the same object as the naive graph.** This is worth stating plainly, because the two
+sections can look like different data structures and they are not. `A` starts as the adjacency
+of 5.2, entry for entry, and both versions end with it empty. The difference is entirely in
+what happens in between. The naive version both adds and deletes, so its graph can swell before
+it drains. The quotient version only ever deletes, by three separate routes: no fill is written,
+the pivot's own edges go with it, and existing edges are pruned once a clique implies them.
+
+The third route is the one with no counterpart in 5.2, and step 1 above isolates it. In the
+naive trace, eliminating 1 leaves vertex 2 holding `[3]`. In the quotient trace the same step
+leaves `A_2` empty, because `c1 = {2,3}` now carries that edge. Nothing was lost; the information
+moved from `A` to `C`. That migration, not merely the absence of fill, is why the explicit side
+drains faster here than there.
+
+**A clique owns its pivot implicitly.** `c1` is named 1, stores `{2,3}`, and stands for the
+clique on `{1,2,3}`. The name carries the pivot and the list carries the rest, so the pivot is
+never stored twice. This is not a bookkeeping trick but the `+ n` of 5.1's identity: the stored
+list `L_c` is the below-diagonal part of column `c` of `L`, and the implicit pivot is that
+column's diagonal entry. It is also what lets cliques and vertices share one name space, since a
+clique is always named for the vertex whose elimination created it.
+
+**The last clique of a component is empty.** A clique is created empty exactly when its pivot had
+no live neighbors left, and an empty clique appears in nobody's `C`, so nothing can ever absorb
+it. Each connected component therefore terminates in one empty clique, named for the last pivot
+eliminated in that component. In the trace above that is `c3`.
+
+Two notes on reading that, one about labels and one about structure. Cliques are named by *old*
+index, because the new ordering does not exist yet: it is the thing being computed, and the only
+names available while running are A's. So the terminal clique of a connected graph is `c` of
+`order[n-1]` in old labels, which is the same object as position `n-1` in the new ordering. On
+`graph3` the survivor is `c9`, and 9 is the twelfth vertex eliminated, so in the permuted
+numbering it is exactly `n-1`. The two statements agree; they are one fact in two coordinate
+systems, and the code can only use the first.
+
+The structural note is the disconnected case, which is not a labeling artifact. Two triangles
+plus an isolated vertex end with three empty cliques, sitting at new positions 0, 3 and 6: the
+last vertex of each component. Only the final one is at `n-1`. One terminal clique per component
+is the general rule, and the single clique of a connected graph is its special case.
+
+**Reducible matrices, and what the empty cliques are counting.** A symmetric `A` whose graph is
+disconnected is structurally *reducible*: some permutation makes it block diagonal, one block per
+component. That is exactly the case 2.1 raises when it explains why this document says
+elimination **forest** and not tree, since each component contributes its own tree and only an
+irreducible `A` gives a single one.
+
+The two observations are the same observation. A clique ends up empty precisely when its pivot
+has no below-diagonal nonzero, and `Struct(j)` empty is 2.1's definition of a **root**. So the
+terminal empty cliques and the roots of the elimination forest are the same objects, counted by
+the same rule: one per connected component. On `graph3` there is a single root, vertex 9, and the
+forest is a tree. On two triangles plus an isolated vertex there are three roots, 2, 5 and 6, one
+per block.
+
+Nothing in the algorithm needs to detect this. Components never interact, because no fill can
+cross between them and no clique can span them, so a reducible `A` is factorized as independent
+subproblems without the code being told they are independent. The forest simply comes out with
+more than one root.
+
+The independence is stronger than it may look, and 5.11 turns it into a concrete result. Since no
+fill crosses between components, the total fill is the sum of the components' fills, and each
+component's fill depends only on the relative order *within* it. The order in which we interleave
+between components is therefore free: any interleaving gives the same fill. That is what makes one
+particular batching strategy provably lossless where the general one is not.
+
+Two more graphs, in the same order as 5.2 so the traces can be set side by side.
+
+**graph2.** Same order, same degrees and same fill as the naive run, which is the point.
+
+```
+start                                          storage 14
+  A       = {0: [1,2], 1: [0,3], 2: [0,4], 3: [1,4,5], 4: [2,3,5],
+             5: [3,4]}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: []}
+  cliques = {}
+  neighbors = none, absorbed = none, pruned = none
+step 0: eliminate 0 (degree 2)                 storage 12
+  A       = {0: [], 1: [3], 2: [4], 3: [1,4,5], 4: [2,3,5], 5: [3,4]}
+  C       = {0: [], 1: [c0], 2: [c0], 3: [], 4: [], 5: []}
+  cliques = {c0: [1,2]}
+  neighbors = [1,2], absorbed = none, pruned = none
+step 1: eliminate 1 (degree 2)                 storage 10
+  A       = {0: [], 1: [], 2: [4], 3: [4,5], 4: [2,3,5], 5: [3,4]}
+  C       = {0: [], 1: [], 2: [c1], 3: [c1], 4: [], 5: []}
+  cliques = {c1: [2,3]}
+  neighbors = [2,3], absorbed = c0, pruned = none
+step 2: eliminate 2 (degree 2)                 storage 6
+  A       = {0: [], 1: [], 2: [], 3: [5], 4: [5], 5: [3,4]}
+  C       = {0: [], 1: [], 2: [], 3: [c2], 4: [c2], 5: []}
+  cliques = {c2: [3,4]}
+  neighbors = [3,4], absorbed = c1, pruned = 3-4
+step 3: eliminate 3 (degree 2)                 storage 2
+  A       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: []}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [c3], 5: [c3]}
+  cliques = {c3: [4,5]}
+  neighbors = [4,5], absorbed = c2, pruned = 4-5
+step 4: eliminate 4 (degree 1)                 storage 1
+  A       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: []}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [c4]}
+  cliques = {c4: [5]}
+  neighbors = [5], absorbed = c3, pruned = none
+step 5: eliminate 5 (degree 0)                 storage 0
+  A       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: []}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: []}
+  cliques = {c5: []}
+  neighbors = [], absorbed = c4, pruned = none
+order = [0, 1, 2, 3, 4, 5]
+fill = 2,  nnz(L) = 15 against nnz(tril A) = 13
+```
+
+Pruning fires twice, at steps 2 and 3, each time deleting a genuine original edge that a new
+clique had made redundant: `3-4` and then `4-5`. Storage runs 14, 12, 10, 6, 2, 1, 0 against the
+naive 14, 12, 10, 6, 2, 0, 0, which is nearly identical, because every clique here has exactly
+two members and a two-member clique costs precisely what the edge it replaces cost. The quotient
+graph's advantage is quadratic in clique size, so a graph this sparse cannot show it.
+
+Follow one vertex to see the migration. Vertex 4 starts with `A_4 = [2,3,5]`, three explicit
+neighbors and no cliques. By step 2 it holds `A_4 = [5]` and `C_4 = [c2]`: two of its neighbors
+have moved into a clique and only one is still spelled out. By step 3 its explicit list is empty
+and everything it knows is carried by `c3`. No adjacency was lost at any point.
+
+**graph3.** Twelve vertices, and the first graph whose cliques exceed two members.
+
+```
+start                                          storage 36
+  A       = {0: [1,3,8], 1: [0,2,6,8], 2: [1,3,5], 3: [0,2,4], 4: [3,5],
+             5: [2,4,6,9], 6: [1,5,7,10], 7: [6,8], 8: [0,1,7,9],
+             9: [5,8,10], 10: [6,9,11], 11: [10]}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [],
+             8: [], 9: [], 10: [], 11: []}
+  cliques = {}
+  neighbors = none, absorbed = none, pruned = none
+step 0: eliminate 11 (degree 1)                storage 35
+  A       = {0: [1,3,8], 1: [0,2,6,8], 2: [1,3,5], 3: [0,2,4], 4: [3,5],
+             5: [2,4,6,9], 6: [1,5,7,10], 7: [6,8], 8: [0,1,7,9],
+             9: [5,8,10], 10: [6,9], 11: []}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [],
+             8: [], 9: [], 10: [c11], 11: []}
+  cliques = {c11: [10]}
+  neighbors = [10], absorbed = none, pruned = none
+step 1: eliminate 4 (degree 2)                 storage 33
+  A       = {0: [1,3,8], 1: [0,2,6,8], 2: [1,3,5], 3: [0,2], 4: [],
+             5: [2,6,9], 6: [1,5,7,10], 7: [6,8], 8: [0,1,7,9],
+             9: [5,8,10], 10: [6,9], 11: []}
+  C       = {0: [], 1: [], 2: [], 3: [c4], 4: [], 5: [c4], 6: [], 7: [],
+             8: [], 9: [], 10: [c11], 11: []}
+  cliques = {c4: [3,5], c11: [10]}
+  neighbors = [3,5], absorbed = none, pruned = none
+step 2: eliminate 7 (degree 2)                 storage 31
+  A       = {0: [1,3,8], 1: [0,2,6,8], 2: [1,3,5], 3: [0,2], 4: [],
+             5: [2,6,9], 6: [1,5,10], 7: [], 8: [0,1,9], 9: [5,8,10],
+             10: [6,9], 11: []}
+  C       = {0: [], 1: [], 2: [], 3: [c4], 4: [], 5: [c4], 6: [c7], 7: [],
+             8: [c7], 9: [], 10: [c11], 11: []}
+  cliques = {c4: [3,5], c7: [6,8], c11: [10]}
+  neighbors = [6,8], absorbed = none, pruned = none
+step 3: eliminate 10 (degree 2)                storage 28
+  A       = {0: [1,3,8], 1: [0,2,6,8], 2: [1,3,5], 3: [0,2], 4: [],
+             5: [2,6,9], 6: [1,5], 7: [], 8: [0,1,9], 9: [5,8], 10: [],
+             11: []}
+  C       = {0: [], 1: [], 2: [], 3: [c4], 4: [], 5: [c4], 6: [c7,c10],
+             7: [], 8: [c7], 9: [c10], 10: [], 11: []}
+  cliques = {c4: [3,5], c7: [6,8], c10: [6,9]}
+  neighbors = [6,9], absorbed = c11, pruned = none
+step 4: eliminate 0 (degree 3)                 storage 23
+  A       = {0: [], 1: [2,6], 2: [1,3,5], 3: [2], 4: [], 5: [2,6,9],
+             6: [1,5], 7: [], 8: [9], 9: [5,8], 10: [], 11: []}
+  C       = {0: [], 1: [c0], 2: [], 3: [c0,c4], 4: [], 5: [c4],
+             6: [c7,c10], 7: [], 8: [c0,c7], 9: [c10], 10: [], 11: []}
+  cliques = {c0: [1,3,8], c4: [3,5], c7: [6,8], c10: [6,9]}
+  neighbors = [1,3,8], absorbed = none, pruned = 1-8
+step 5: eliminate 2 (degree 3)                 storage 20
+  A       = {0: [], 1: [6], 2: [], 3: [], 4: [], 5: [6,9], 6: [1,5],
+             7: [], 8: [9], 9: [5,8], 10: [], 11: []}
+  C       = {0: [], 1: [c0,c2], 2: [], 3: [c0,c2,c4], 4: [], 5: [c2,c4],
+             6: [c7,c10], 7: [], 8: [c0,c7], 9: [c10], 10: [], 11: []}
+  cliques = {c0: [1,3,8], c2: [1,3,5], c4: [3,5], c7: [6,8], c10: [6,9]}
+  neighbors = [1,3,5], absorbed = none, pruned = none
+step 6: eliminate 3 (degree 3)                 storage 15
+  A       = {0: [], 1: [6], 2: [], 3: [], 4: [], 5: [6,9], 6: [1,5],
+             7: [], 8: [9], 9: [5,8], 10: [], 11: []}
+  C       = {0: [], 1: [c3], 2: [], 3: [], 4: [], 5: [c3], 6: [c7,c10],
+             7: [], 8: [c3,c7], 9: [c10], 10: [], 11: []}
+  cliques = {c3: [1,5,8], c7: [6,8], c10: [6,9]}
+  neighbors = [1,5,8], absorbed = c0, c2, c4, pruned = none
+step 7: eliminate 1 (degree 3)                 storage 11
+  A       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [9], 6: [], 7: [],
+             8: [9], 9: [5,8], 10: [], 11: []}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [c1], 6: [c1,c7,c10],
+             7: [], 8: [c1,c7], 9: [c10], 10: [], 11: []}
+  cliques = {c1: [5,6,8], c7: [6,8], c10: [6,9]}
+  neighbors = [5,6,8], absorbed = c3, pruned = 5-6
+step 8: eliminate 5 (degree 3)                 storage 7
+  A       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [],
+             8: [], 9: [], 10: [], 11: []}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [c5,c7,c10],
+             7: [], 8: [c5,c7], 9: [c5,c10], 10: [], 11: []}
+  cliques = {c5: [6,8,9], c7: [6,8], c10: [6,9]}
+  neighbors = [6,8,9], absorbed = c1, pruned = 8-9
+step 9: eliminate 6 (degree 2)                 storage 2
+  A       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [],
+             8: [], 9: [], 10: [], 11: []}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [],
+             8: [c6], 9: [c6], 10: [], 11: []}
+  cliques = {c6: [8,9]}
+  neighbors = [8,9], absorbed = c5, c7, c10, pruned = none
+step 10: eliminate 8 (degree 1)                storage 1
+  A       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [],
+             8: [], 9: [], 10: [], 11: []}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [],
+             8: [], 9: [c8], 10: [], 11: []}
+  cliques = {c8: [9]}
+  neighbors = [9], absorbed = c6, pruned = none
+step 11: eliminate 9 (degree 0)                storage 0
+  A       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [],
+             8: [], 9: [], 10: [], 11: []}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [],
+             8: [], 9: [], 10: [], 11: []}
+  cliques = {c9: []}
+  neighbors = [], absorbed = c8, pruned = none
+order = [11, 4, 7, 10, 0, 2, 3, 1, 5, 6, 8, 9]
+fill = 7,  nnz(L) = 37 against nnz(tril A) = 30
+```
+
+The same order and the same fill as 5.2, as they must be. What differs is the shape of the
+storage curve, and it is worth setting the two side by side:
+
+```
+naive     36, 34, 32, 30, 28, 26, 22, 18, 12, 6, 2, 0, 0      peak 36
+quotient  36, 35, 33, 31, 28, 23, 20, 15, 11, 7, 2, 1, 0
+```
+
+They cross twice. The quotient graph is *behind* over the first four steps, since each
+elimination costs it a clique entry where the naive version simply drops edges and stores no
+replacement. From step 5 it pulls ahead as pruning and absorption compound, reaching 15 against
+18 and 11 against 12, then falls behind again at the very end for the trivial reason that it
+still holds one empty clique when the naive graph holds nothing at all.
+
+That crossover is characteristic and worth not overreading in either direction. The quotient
+graph is not uniformly smaller on small problems; on this one it wins by three entries at its
+best. What it is, is *bounded*: `A` never grows, so the total cannot exceed what the original
+graph cost, whatever the fill turns out to be. The naive version has no such guarantee, and on a
+problem where the fill is the dominant term the difference stops being three entries and becomes
+the difference between fitting in memory and not.
+
+**Why these examples cannot show the advantage.** On all three graphs above the naive storage
+falls monotonically; it never once exceeds its starting value, so the bound the quotient graph
+offers is never tested. That is not because the graphs are small. It is because they are the
+wrong *shape*, and the reason is the count from 5.1: a pivot of degree `d` deletes `2d` endpoints
+and adds at most `d(d-1)`, so storage can only grow when `d >= 4`. Minimum degree exists
+precisely to avoid such pivots, and it will keep avoiding them as long as the graph offers
+anything cheaper. A 2D grid always does, since its corners sit at degree 2 and its edges at 3, so
+even an 8x8 grid never exceeds its start. `graph3`, with a degree-1 vertex and several degree-2s,
+is comfortably in the same easy regime. Enlarging it would not help.
+
+Adding a dimension does. A 3D grid has interior degree 6 and no cheap vertices to fall back on,
+which forces minimum degree into the growth regime:
+
+```
+3D grid, 5x5x5:  n = 125, 300 edges, fill = 941
+
+                 start   peak
+naive             600    1132     1.89x, rising to a peak near the middle
+quotient          600     600     1.00x, monotone down: 576, 544, 508, ...
+```
+
+The naive graph nearly doubles before it drains; the quotient graph never rises at all, so its
+starting size is also its ceiling. That gap is the whole point of 5.3, and it is invisible on any
+example small and shapely enough to trace by hand.
+
+
+**graph4.** The densest of the four, and the clearest case for the quotient graph: storage
+falls from 28 to 0 without ever rising, where the naive run of 5.2 had to add fill edges to a
+representation that only grows.
+
+```
+start                                          storage 28
+  A       = {0: [2,3,4,7], 1: [3,4,6,7], 2: [0,3,5], 3: [0,1,2,6,7],
+             4: [0,1,5], 5: [2,4,6], 6: [1,3,5], 7: [0,1,3]}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: []}
+  cliques = {}
+  neighbors = none, absorbed = none, pruned = none
+step 0: eliminate 2 (degree 3)                 storage 23
+  A       = {0: [4,7], 1: [3,4,6,7], 2: [], 3: [1,6,7], 4: [0,1,5],
+             5: [4,6], 6: [1,3,5], 7: [0,1,3]}
+  C       = {0: [c2], 1: [], 2: [], 3: [c2], 4: [], 5: [c2], 6: [], 7: []}
+  cliques = {c2: [0,3,5]}
+  neighbors = {0,3,5}, absorbed = none, pruned = 0-3
+step 1: eliminate 4 (degree 3)                 storage 20
+  A       = {0: [7], 1: [3,6,7], 2: [], 3: [1,6,7], 4: [], 5: [6],
+             6: [1,3,5], 7: [0,1,3]}
+  C       = {0: [c2,c4], 1: [c4], 2: [], 3: [c2], 4: [], 5: [c2,c4],
+             6: [], 7: []}
+  cliques = {c2: [0,3,5], c4: [0,1,5]}
+  neighbors = {0,1,5}, absorbed = none, pruned = none
+step 2: eliminate 6 (degree 3)                 storage 15
+  A       = {0: [7], 1: [7], 2: [], 3: [7], 4: [], 5: [], 6: [],
+             7: [0,1,3]}
+  C       = {0: [c2,c4], 1: [c4,c6], 2: [], 3: [c2,c6], 4: [],
+             5: [c2,c4,c6], 6: [], 7: []}
+  cliques = {c2: [0,3,5], c4: [0,1,5], c6: [1,3,5]}
+  neighbors = {1,3,5}, absorbed = none, pruned = 1-3
+step 3: eliminate 5 (degree 3)                 storage 9
+  A       = {0: [7], 1: [7], 2: [], 3: [7], 4: [], 5: [], 6: [],
+             7: [0,1,3]}
+  C       = {0: [c5], 1: [c5], 2: [], 3: [c5], 4: [], 5: [], 6: [], 7: []}
+  cliques = {c5: [0,1,3]}
+  neighbors = {0,1,3}, absorbed = c2, c4, c6, pruned = none
+step 4: eliminate 0 (degree 3)                 storage 3
+  A       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: []}
+  C       = {0: [], 1: [c0], 2: [], 3: [c0], 4: [], 5: [], 6: [], 7: [c0]}
+  cliques = {c0: [1,3,7]}
+  neighbors = {1,3,7}, absorbed = c5, pruned = 1-7, 3-7
+step 5: eliminate 1 (degree 2)                 storage 2
+  A       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: []}
+  C       = {0: [], 1: [], 2: [], 3: [c1], 4: [], 5: [], 6: [], 7: [c1]}
+  cliques = {c1: [3,7]}
+  neighbors = {3,7}, absorbed = c0, pruned = none
+step 6: eliminate 3 (degree 1)                 storage 1
+  A       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: []}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [c3]}
+  cliques = {c3: [7]}
+  neighbors = {7}, absorbed = c1, pruned = none
+step 7: eliminate 7 (degree 0)                 storage 0
+  A       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: []}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: []}
+  cliques = {c7: []}
+  neighbors = none, absorbed = c3, pruned = none
+order = [2, 4, 6, 5, 0, 1, 3, 7]
+```
+
+### 5.5 Supervariables
+
+Two vertices with **identical neighborhoods** will have equal degree at every step, will be
 chosen at the same moment, and will fill in identically. They can be merged and eliminated
 together.
 
@@ -2652,19 +3382,1477 @@ candidates within a bucket, since a hash collision is not a match. A merged vert
 **supervariable**, and it carries a weight: how many original vertices it stands for.
 
 This is not a marginal optimization. Real matrices are full of indistinguishable vertices,
-especially after a few eliminations have merged their neighbourhoods, and supervariables are
+especially after a few eliminations have merged their neighborhoods, and supervariables are
 often the difference between a usable code and an unusable one.
 
-**Mass elimination** is the same idea one step further. After forming the element `L`, if some
+**Mass elimination** is the same idea one step further. After forming the clique `L`, if some
 vertex `i` in `L` has nothing left outside `L`, it is adjacent only to the new clique, and can be
 eliminated immediately at no cost. Its degree, computed below, comes out zero and says so.
 
-### 5.4 Approximate degree, which is the idea in AMD
+Both mechanisms need the same two additions to 5.3, and nothing else. Each supervariable carries
+a weight, and the degree becomes a weighted count:
+
+```
+minimum_degree_supervariables(G) -> elimination order:
+
+    for each vertex i:
+        A_i = the neighbors of i in G
+        C_i = {}
+        w_i = 1                                 # original vertices represented
+
+    while a live supervariable remains:
+
+        # DEGREE, now WEIGHTED: a neighbor of weight 3 contributes 3, because it
+        # stands for three original vertices and each will fill in.
+        degree(i) = sum of w_j over j in ( A_i union ( union of L_c over c in C_i ) ), j != i
+
+        p = a live supervariable minimizing degree(p)
+        L = the reachable set of p
+
+        for each c in C_p:  delete clique c      # absorption, as in 5.3
+        L_p = L
+        for each i in L:
+            A_i = A_i \ L  \ {p}                  # pruning, as in 5.3
+            C_i = ( C_i \ absorbed ) union {p}
+
+        # MASS ELIMINATION. Everything i can still see lies inside the new
+        # clique, so eliminating it next would create no fill. Merge it now.
+        for each i in L:
+            if A_i is empty and C_i = {p}:
+                w_p = w_p + w_i
+                delete i from the graph and from every clique
+                record i as a member of p
+
+        append p to the pivot sequence
+
+    expand: each pivot p contributes its w_p members, consecutively
+```
+
+The merge test is worth reading twice, because its cheapness is the whole point. `A_i` empty and
+`C_i = {p}` says that after the pruning just performed, `i` has no explicit neighbor left and no
+other clique to reach through, so its entire neighborhood is inside `L`. In the vendored MMD this
+is a single integer comparison, `if (nq <= 0)`, on the count left after compacting `i`'s list.
+Pruning (5.3) is what makes it that cheap: without it the test would be a containment check
+against `L` rather than a test for emptiness.
+
+**Where this changes the permutation, but not the fill.** Every layer up to here was a change of
+representation, and 5.4 verified that the orderings came out identical. This one is different.
+Merged vertices are numbered consecutively whether or not the degree would have chosen them in
+that order, so the permutation genuinely can differ from what 5.3 produces, and the final
+expansion pass exists for exactly that reason.
+
+The constraint turns out to cost nothing. Across fourteen test graphs (grids in two and three
+dimensions, and random graphs from thirty to seventy vertices) the permutation differed from 5.3's
+on nine of them and `nnz(L)` was identical on all fourteen. The merge is not merely sound, it
+appears to be free: a merged vertex creates no fill when eliminated next, so promoting it ahead of
+whatever the degree would have picked cannot cost anything. Measured rather than proved, and on
+prototypes rather than production code, but the result is clean enough to state.
+
+### 5.6 A worked example: supervariables
+
+The same three graphs again, so all four representations can be compared on identical input.
+
+**graph1.** Four vertices, but only two pivots.
+
+```
+start                                          storage 8
+  A       = {0: [1,3], 1: [0,2], 2: [1,3], 3: [0,2]}
+  C       = {0: [], 1: [], 2: [], 3: []}
+  cliques = {}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1}
+  neighbors = none, absorbed = none, pruned = none, merged = none
+step 0: eliminate 0 (degree 2, weight 1 -> 1)  storage 6
+  A       = {0: [], 1: [2], 2: [1,3], 3: [2]}
+  C       = {0: [], 1: [c0], 2: [], 3: [c0]}
+  cliques = {c0: [1,3]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1}
+  neighbors = [1,3], absorbed = none, pruned = none,
+  merged = none
+step 1: eliminate 1 (degree 2, weight 1 -> 3)  storage 0
+  A       = {0: [], 1: [], 2: [], 3: []}
+  C       = {0: [], 1: [], 2: [], 3: []}
+  cliques = {c1: []}
+  weights = {0: 1, 1: 3, 2: 0, 3: 0}
+  neighbors = [2,3], absorbed = c0, pruned = 2-3,
+  merged = 2, 3
+supervariable pivots = [0, 1]   (2 of 4)
+order = [0, 1, 2, 3]
+fill = 1,  nnz(L) = 9 against nnz(tril A) = 8
+```
+
+Step 1 is the whole idea in one step. Eliminating 1 forms the clique `{2,3}`, and the pruning
+that follows empties both `A_2` and `A_3` while leaving each with `C = {c1}` and nothing else.
+Both therefore satisfy the merge test, both are absorbed, and vertex 1 becomes a supervariable of
+weight 3 standing for `{1,2,3}`. The clique `c1` is left empty, since all of its members have
+joined the supervariable that owns it.
+
+Two pivots instead of four, and the same ordering and the same `nnz(L) = 9` as 5.4. The saving is
+not in the answer but in the number of times the degree scan has to run.
+
+**graph2.** Four pivots instead of six.
+
+```
+start                                          storage 14
+  A       = {0: [1,2], 1: [0,3], 2: [0,4], 3: [1,4,5], 4: [2,3,5],
+             5: [3,4]}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: []}
+  cliques = {}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1}
+  neighbors = none, absorbed = none, pruned = none, merged = none
+step 0: eliminate 0 (degree 2, weight 1 -> 1)  storage 12
+  A       = {0: [], 1: [3], 2: [4], 3: [1,4,5], 4: [2,3,5], 5: [3,4]}
+  C       = {0: [], 1: [c0], 2: [c0], 3: [], 4: [], 5: []}
+  cliques = {c0: [1,2]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1}
+  neighbors = [1,2], absorbed = none, pruned = none,
+  merged = none
+step 1: eliminate 1 (degree 2, weight 1 -> 1)  storage 10
+  A       = {0: [], 1: [], 2: [4], 3: [4,5], 4: [2,3,5], 5: [3,4]}
+  C       = {0: [], 1: [], 2: [c1], 3: [c1], 4: [], 5: []}
+  cliques = {c1: [2,3]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1}
+  neighbors = [2,3], absorbed = c0, pruned = none,
+  merged = none
+step 2: eliminate 2 (degree 2, weight 1 -> 1)  storage 6
+  A       = {0: [], 1: [], 2: [], 3: [5], 4: [5], 5: [3,4]}
+  C       = {0: [], 1: [], 2: [], 3: [c2], 4: [c2], 5: []}
+  cliques = {c2: [3,4]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1}
+  neighbors = [3,4], absorbed = c1, pruned = 3-4,
+  merged = none
+step 3: eliminate 3 (degree 2, weight 1 -> 3)  storage 0
+  A       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: []}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: []}
+  cliques = {c3: []}
+  weights = {0: 1, 1: 1, 2: 1, 3: 3, 4: 0, 5: 0}
+  neighbors = [4,5], absorbed = c2, pruned = 4-5,
+  merged = 4, 5
+supervariable pivots = [0, 1, 2, 3]   (4 of 6)
+order = [0, 1, 2, 3, 4, 5]
+fill = 2,  nnz(L) = 15 against nnz(tril A) = 13
+```
+
+**graph3.** Ten pivots instead of twelve.
+
+```
+start                                          storage 36
+  A       = {0: [1,3,8], 1: [0,2,6,8], 2: [1,3,5], 3: [0,2,4], 4: [3,5],
+             5: [2,4,6,9], 6: [1,5,7,10], 7: [6,8], 8: [0,1,7,9],
+             9: [5,8,10], 10: [6,9,11], 11: [10]}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [],
+             8: [], 9: [], 10: [], 11: []}
+  cliques = {}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1, 8: 1, 9: 1,
+             10: 1, 11: 1}
+  neighbors = none, absorbed = none, pruned = none, merged = none
+step 0: eliminate 11 (degree 1, weight 1 -> 1) storage 35
+  A       = {0: [1,3,8], 1: [0,2,6,8], 2: [1,3,5], 3: [0,2,4], 4: [3,5],
+             5: [2,4,6,9], 6: [1,5,7,10], 7: [6,8], 8: [0,1,7,9],
+             9: [5,8,10], 10: [6,9], 11: []}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [],
+             8: [], 9: [], 10: [c11], 11: []}
+  cliques = {c11: [10]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1, 8: 1, 9: 1,
+             10: 1, 11: 1}
+  neighbors = [10], absorbed = none, pruned = none,
+  merged = none
+step 1: eliminate 4 (degree 2, weight 1 -> 1)  storage 33
+  A       = {0: [1,3,8], 1: [0,2,6,8], 2: [1,3,5], 3: [0,2], 4: [],
+             5: [2,6,9], 6: [1,5,7,10], 7: [6,8], 8: [0,1,7,9],
+             9: [5,8,10], 10: [6,9], 11: []}
+  C       = {0: [], 1: [], 2: [], 3: [c4], 4: [], 5: [c4], 6: [], 7: [],
+             8: [], 9: [], 10: [c11], 11: []}
+  cliques = {c4: [3,5], c11: [10]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1, 8: 1, 9: 1,
+             10: 1, 11: 1}
+  neighbors = [3,5], absorbed = none, pruned = none,
+  merged = none
+step 2: eliminate 7 (degree 2, weight 1 -> 1)  storage 31
+  A       = {0: [1,3,8], 1: [0,2,6,8], 2: [1,3,5], 3: [0,2], 4: [],
+             5: [2,6,9], 6: [1,5,10], 7: [], 8: [0,1,9], 9: [5,8,10],
+             10: [6,9], 11: []}
+  C       = {0: [], 1: [], 2: [], 3: [c4], 4: [], 5: [c4], 6: [c7], 7: [],
+             8: [c7], 9: [], 10: [c11], 11: []}
+  cliques = {c4: [3,5], c7: [6,8], c11: [10]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1, 8: 1, 9: 1,
+             10: 1, 11: 1}
+  neighbors = [6,8], absorbed = none, pruned = none,
+  merged = none
+step 3: eliminate 10 (degree 2, weight 1 -> 1) storage 28
+  A       = {0: [1,3,8], 1: [0,2,6,8], 2: [1,3,5], 3: [0,2], 4: [],
+             5: [2,6,9], 6: [1,5], 7: [], 8: [0,1,9], 9: [5,8], 10: [],
+             11: []}
+  C       = {0: [], 1: [], 2: [], 3: [c4], 4: [], 5: [c4], 6: [c7,c10],
+             7: [], 8: [c7], 9: [c10], 10: [], 11: []}
+  cliques = {c4: [3,5], c7: [6,8], c10: [6,9]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1, 8: 1, 9: 1,
+             10: 1, 11: 1}
+  neighbors = [6,9], absorbed = c11, pruned = none,
+  merged = none
+step 4: eliminate 0 (degree 3, weight 1 -> 1)  storage 23
+  A       = {0: [], 1: [2,6], 2: [1,3,5], 3: [2], 4: [], 5: [2,6,9],
+             6: [1,5], 7: [], 8: [9], 9: [5,8], 10: [], 11: []}
+  C       = {0: [], 1: [c0], 2: [], 3: [c0,c4], 4: [], 5: [c4],
+             6: [c7,c10], 7: [], 8: [c0,c7], 9: [c10], 10: [], 11: []}
+  cliques = {c0: [1,3,8], c4: [3,5], c7: [6,8], c10: [6,9]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1, 8: 1, 9: 1,
+             10: 1, 11: 1}
+  neighbors = [1,3,8], absorbed = none, pruned = 1-8,
+  merged = none
+step 5: eliminate 2 (degree 3, weight 1 -> 1)  storage 20
+  A       = {0: [], 1: [6], 2: [], 3: [], 4: [], 5: [6,9], 6: [1,5],
+             7: [], 8: [9], 9: [5,8], 10: [], 11: []}
+  C       = {0: [], 1: [c0,c2], 2: [], 3: [c0,c2,c4], 4: [], 5: [c2,c4],
+             6: [c7,c10], 7: [], 8: [c0,c7], 9: [c10], 10: [], 11: []}
+  cliques = {c0: [1,3,8], c2: [1,3,5], c4: [3,5], c7: [6,8], c10: [6,9]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1, 8: 1, 9: 1,
+             10: 1, 11: 1}
+  neighbors = [1,3,5], absorbed = none, pruned = none,
+  merged = none
+step 6: eliminate 3 (degree 3, weight 1 -> 1)  storage 15
+  A       = {0: [], 1: [6], 2: [], 3: [], 4: [], 5: [6,9], 6: [1,5],
+             7: [], 8: [9], 9: [5,8], 10: [], 11: []}
+  C       = {0: [], 1: [c3], 2: [], 3: [], 4: [], 5: [c3], 6: [c7,c10],
+             7: [], 8: [c3,c7], 9: [c10], 10: [], 11: []}
+  cliques = {c3: [1,5,8], c7: [6,8], c10: [6,9]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1, 8: 1, 9: 1,
+             10: 1, 11: 1}
+  neighbors = [1,5,8], absorbed = c0, c2, c4, pruned = none,
+  merged = none
+step 7: eliminate 1 (degree 3, weight 1 -> 1)  storage 11
+  A       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [9], 6: [], 7: [],
+             8: [9], 9: [5,8], 10: [], 11: []}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [c1], 6: [c1,c7,c10],
+             7: [], 8: [c1,c7], 9: [c10], 10: [], 11: []}
+  cliques = {c1: [5,6,8], c7: [6,8], c10: [6,9]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1, 8: 1, 9: 1,
+             10: 1, 11: 1}
+  neighbors = [5,6,8], absorbed = c3, pruned = 5-6,
+  merged = none
+step 8: eliminate 5 (degree 3, weight 1 -> 1)  storage 7
+  A       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [],
+             8: [], 9: [], 10: [], 11: []}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [c5,c7,c10],
+             7: [], 8: [c5,c7], 9: [c5,c10], 10: [], 11: []}
+  cliques = {c5: [6,8,9], c7: [6,8], c10: [6,9]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1, 8: 1, 9: 1,
+             10: 1, 11: 1}
+  neighbors = [6,8,9], absorbed = c1, pruned = 8-9,
+  merged = none
+step 9: eliminate 6 (degree 2, weight 1 -> 3)  storage 0
+  A       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [],
+             8: [], 9: [], 10: [], 11: []}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [],
+             8: [], 9: [], 10: [], 11: []}
+  cliques = {c6: []}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 3, 7: 1, 8: 0, 9: 0,
+             10: 1, 11: 1}
+  neighbors = [8,9], absorbed = c5, c7, c10, pruned = none,
+  merged = 8, 9
+supervariable pivots = [11, 4, 7, 10, 0, 2, 3, 1, 5, 6]   (10 of 12)
+order = [11, 4, 7, 10, 0, 2, 3, 1, 5, 6, 8, 9]
+fill = 7,  nnz(L) = 37 against nnz(tril A) = 30
+```
+
+All three produce the orderings and the fill counts of 5.2 and 5.4 exactly. What differs is the
+pivot count, and on these graphs the saving is modest: 2 of 4, 4 of 6, 10 of 12. The mechanism
+rewards density, so it is worth measuring where the fill actually is:
+
+```
+                     n     pivots without    pivots with     saving
+2D grid 8x8         64            64              54          15%
+2D grid 12x12      144           144             118          18%
+3D grid 4x4x4       64            64              46          28%
+3D grid 5x5x5      125           125              93          25%
+```
+
+Each avoided pivot is an avoided pass over every live vertex, so a quarter fewer pivots is close
+to a quarter off the dominant cost, for a test that is one integer comparison per clique member.
+This is the sense in which 5.5's opening claim is meant: not a marginal optimization.
+
+**Where the three layers stand.** It is worth naming the progression, because it mirrors one the
+document has already made elsewhere. 5.1 is minimum degree written out literally, storing the fill
+it creates. 5.3 keeps the graph from growing but still eliminates one vertex at a time, which
+makes it *nodal*: one pivot, one column, one pass of the picker. 5.5 eliminates a group at a time
+and is *supernodal* in the same sense Section 4 uses the word, and the analogy is more than
+verbal, since the group in both cases is the same object, a set of columns whose patterns nest.
+
+The two do not cash out in the same currency, though, and the difference is worth keeping
+straight. Supernodes in the numeric phase buy arithmetic: dense blocks, BLAS-3 instead of BLAS-2,
+cache and vectorization. Supervariables in the ordering phase buy *pivots*, and a saved pivot is a
+saved pass over every live vertex. Same idea, handling a group where we handled one, applied to
+different bottlenecks.
+
+**And why this is not the whole symbolic factorization.** An ordering code simulates the
+elimination and therefore already computes what symbolic factorization computes: 5.1 established
+that the reachable set of a pivot is the pattern of its column of `L`, and 5.5 has now grouped
+those columns into what are, at least on the examples of 5.6, the fundamental supernodes. The
+whole analysis could in principle be read off a single tangled pass.
+
+It is not, and the reason is a dependency chain rather than a preference for tidiness. Allocating
+`L` exactly needs `nnz(L)`; the column counts that give `nnz(L)` cheaply need the elimination
+forest (2.5); the forest needs a permutation (2.4); and the permutation is what the ordering is
+computing. Nothing in that chain can be reordered. So the ordering has the patterns but has them
+in the wrong sequence and before any of the sizes are known, and keeping them would mean growable
+per-column storage, which forfeits the single exact allocation the staged version exists to
+provide. Order, then forest, then symbolic factorization, is the order the dependencies impose.
+
+**What each layer actually bought.** It is worth totalling this honestly, because the natural
+assumption, that each layer helps a bit with everything, is wrong. Measuring 5.4's version against
+5.6's on grids:
+
+```
+                  n |  pivots       degree scans   |  peak storage  |  scans   waste
+                    | 5.4    5.6    5.4      5.6   |  5.4    5.6    |  needed
+2D grid 12x12   144 | 144    118    10584    10125 |  528    528    |    652   15.5x
+3D grid 5x5x5   125 | 125     93     8000     7419 |  600    600    |    748    9.9x
+```
+
+Three readings, none of them the obvious one.
+
+Supervariables cut the pivot count by 15 to 28 percent, which is what 5.6 already claimed.
+
+They do **not** reduce peak storage at all: the peaks are identical. That follows from two facts
+already established rather than being a surprise. Quotient-graph storage never rises (5.3), so the
+peak is always the starting value; and merges fire only once the surviving graph has become dense,
+which is late. A mechanism that acts at the end cannot lower a peak that occurred at the
+beginning.
+
+And they barely help the degree cost either: 3 to 9 percent, far short of the pivot saving. The
+reason is the same lateness. The pivots supervariables remove are the last ones, when the live set
+has already collapsed to a handful, so each removed pivot removes a cheap scan. Thirty-two fewer
+pivots out of 125 sounds substantial until one notices which thirty-two.
+
+So the ledger reads: 5.3 solved the growth problem properly, since `A` cannot grow and the bound
+holds. 5.5 is about pivot count, and its deeper value is structural rather than arithmetic, since
+the supervariables it finds are the supernodes the later phases would have had to find anyway.
+Neither touches the degree recomputation. The last column above is what remains: the picker
+recomputes a reachable set for every live vertex at every step, while only the vertices the pivot
+actually reached can have changed, so it does roughly ten to fifteen times the necessary work and
+the ratio grows with `n`. That is the whole of the second problem of 5.1, still untouched after
+four layers, and it is what 5.11 and 5.13 exist to solve from opposite directions.
+
+One qualification on the 3 to 9 percent. Our version detects only mass elimination, vertices
+indistinguishable from the pivot. Real AMD also hashes patterns (5.5) and so catches merges that
+happen earlier in the run, not only at the collapse. The figure is therefore a lower bound on what
+supervariables are worth in a complete implementation, though the shape of the conclusion, that
+this is a pivot-count mechanism and not a degree-cost one, does not change.
+
+**Nothing here improves the ordering.** It is worth saying outright, because the sequence of
+increasingly sophisticated versions invites the opposite assumption. Every layer from 5.1 to 5.6
+computes the *same heuristic*, and the measurements bear that out: 5.3 reproduces 5.1's
+permutation exactly, and 5.5 produces a different permutation with identical fill on every graph
+tried. What the layers buy is time and space, never quality.
+
+The two vendored codes then go a step further and spend a little quality to buy a lot of speed.
+Measuring 5.11's batching against one pivot at a time on the same base, the fill moves by about
+half a percent on average and by a few percent on individual graphs, in *either* direction: it
+came out better on two grids and worse on a third. The full table and the mechanism are in 5.11.
+AMD's approximate degree is the same kind of trade; its authors report fill within a few percent
+of exact (5.13).
+
+The point to carry forward is the sign of the thing rather than its size. Every layer up to 5.10
+left the ordering untouched and could be verified by demanding an identical permutation. From 5.11
+onward that test no longer applies, and the only way to judge a change is to measure the fill and
+accept a distribution rather than an answer.
+
+So the whole of Section 5 is one heuristic implemented five ways. The differences are in cost, and
+the fastest versions give back a fraction of a percent of quality for what the previous table
+measures in factors of ten. All of the figures in this section come from the prototypes in
+`experiments/ordering`, on small graphs, and are meant to show the shape of each effect rather
+than to stand as benchmarks; the production implementations are where quality and speed get
+measured properly.
+
+
+
+**graph4.** Five pivots instead of eight, the largest saving of the four graphs, which fits:
+it is the densest, so its cliques swallow the most vertices.
+
+```
+start                                          storage 28
+  A       = {0: [2,3,4,7], 1: [3,4,6,7], 2: [0,3,5], 3: [0,1,2,6,7],
+             4: [0,1,5], 5: [2,4,6], 6: [1,3,5], 7: [0,1,3]}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: []}
+  cliques = {}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1}
+  neighbors = none, absorbed = none, pruned = none, merged = none
+step 0: eliminate 2 (degree 3, weight 1 -> 1)  storage 23
+  A       = {0: [4,7], 1: [3,4,6,7], 2: [], 3: [1,6,7], 4: [0,1,5],
+             5: [4,6], 6: [1,3,5], 7: [0,1,3]}
+  C       = {0: [c2], 1: [], 2: [], 3: [c2], 4: [], 5: [c2], 6: [], 7: []}
+  cliques = {c2: [0,3,5]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1}
+  neighbors = {0,3,5}, absorbed = none, pruned = 0-3, merged = none
+step 1: eliminate 4 (degree 3, weight 1 -> 1)  storage 20
+  A       = {0: [7], 1: [3,6,7], 2: [], 3: [1,6,7], 4: [], 5: [6],
+             6: [1,3,5], 7: [0,1,3]}
+  C       = {0: [c2,c4], 1: [c4], 2: [], 3: [c2], 4: [], 5: [c2,c4],
+             6: [], 7: []}
+  cliques = {c2: [0,3,5], c4: [0,1,5]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1}
+  neighbors = {0,1,5}, absorbed = none, pruned = none, merged = none
+step 2: eliminate 6 (degree 3, weight 1 -> 1)  storage 15
+  A       = {0: [7], 1: [7], 2: [], 3: [7], 4: [], 5: [], 6: [],
+             7: [0,1,3]}
+  C       = {0: [c2,c4], 1: [c4,c6], 2: [], 3: [c2,c6], 4: [],
+             5: [c2,c4,c6], 6: [], 7: []}
+  cliques = {c2: [0,3,5], c4: [0,1,5], c6: [1,3,5]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1}
+  neighbors = {1,3,5}, absorbed = none, pruned = 1-3, merged = none
+step 3: eliminate 5 (degree 3, weight 1 -> 1)  storage 9
+  A       = {0: [7], 1: [7], 2: [], 3: [7], 4: [], 5: [], 6: [],
+             7: [0,1,3]}
+  C       = {0: [c5], 1: [c5], 2: [], 3: [c5], 4: [], 5: [], 6: [], 7: []}
+  cliques = {c5: [0,1,3]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1}
+  neighbors = {0,1,3}, absorbed = c2, c4, c6, pruned = none, merged = none
+step 4: eliminate 0 (degree 3, weight 1 -> 4)  storage 0
+  A       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: []}
+  C       = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: []}
+  cliques = {c0: []}
+  weights = {0: 4, 1: 0, 2: 1, 3: 0, 4: 1, 5: 1, 6: 1, 7: 0}
+  neighbors = {1,3,7}, absorbed = c5, pruned = 1-7, 3-7, merged = 1, 3, 7
+order = [2, 4, 6, 5, 0, 1, 3, 7]
+fill = 4,  5 pivots instead of 8
+```
+
+### 5.7 Maintained degrees
+
+Everything from 5.3 to 5.6 attacked the first problem of 5.1, the graph that grows. This section
+begins on the second, and it begins with the observation that costs nothing to make.
+
+The measurement closing 5.6 is that the picker recomputes a reachable set for every live vertex at
+every step, and keeps one. The waste is not subtle once stated: **eliminating a pivot can only
+change the degrees of the vertices it reached.** Everything else has the same `A`, the same
+cliques and the same weights it had a moment ago, so its degree is still whatever it was. There is
+nothing to recompute.
+
+So keep a `degree` array and refresh only the reached set. The picker then scans cached integers
+instead of building set unions:
+
+```
+minimum_degree_maintained(G) -> elimination order:
+
+    initialize A, C, w as in 5.5
+    for each vertex i:
+        degree[i] = |A_i|                       # once, at the start
+
+    while a live supervariable remains:
+
+        p = a live supervariable minimizing degree[p]      # reads the cache
+        L = the reachable set of p
+
+        eliminate p exactly as in 5.5: absorb, prune, merge
+
+        # REFRESH, and only here.
+        for each i in L that survived the merges:
+            degree[i] = sum of w_j over the reachable set of i
+
+    expand supervariables as in 5.5
+```
+
+**Why refreshing `L` is enough**, which is the only thing in this layer that needs an argument.
+There are three ways an elimination can alter what a vertex sees, and all three stay inside `L`:
+
+- **Pruning and clique membership.** `A_i` and `C_i` are modified only for `i` in `L`. No other
+  vertex's lists are touched.
+- **Absorption.** A clique `c` is deleted when the pivot belonged to it, which changes `C_i` for
+  every member of `c`. But if the pivot was a member of `c`, every other member of `c` is
+  reachable from the pivot, so all of them are in `L` already.
+- **Merging.** A merged vertex disappears entirely, which would corrupt the cached degree of any
+  neighbor still expecting to see it. But a vertex merges precisely when everything it can see
+  lies inside `L`, so it has no neighbors outside `L` to corrupt.
+
+Nothing outside `L` can tell that an elimination happened. That is a stronger statement than it
+looks, and it is worth checking rather than assuming when implementing, because the failure mode
+is quiet: a stale degree does not crash and does not produce an invalid permutation, it produces a
+valid one that is slightly worse, and nothing announces it.
+
+This is the first half of what both vendored codes do before their ideas diverge. The second half
+is degree buckets, which remove the remaining scan; that is 5.9.
+
+### 5.8 A worked example: maintained degrees
+
+The state is the same as 5.6's with one array added, so `graph1` is shown in full and the other
+two are reduced to the two lines that are new. Nothing else about them has changed.
+
+**graph1.**
+
+```
+start                                          degree computations 4
+  A       = {0: [1,3], 1: [0,2], 2: [1,3], 3: [0,2]}
+  C       = {0: [], 1: [], 2: [], 3: []}
+  cliques = {}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1}
+  degrees = {0: 2, 1: 2, 2: 2, 3: 2}
+  refreshed = all (initial)
+step 0: eliminate 0 (degree 2, weight 1 -> 1)  total 6
+  A       = {0: [], 1: [2], 2: [1,3], 3: [2]}
+  C       = {0: [], 1: [c0], 2: [], 3: [c0]}
+  cliques = {c0: [1,3]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1}
+  degrees = {0: -, 1: 2, 2: 2, 3: 2}
+  refreshed = 1, 3
+step 1: eliminate 1 (degree 2, weight 1 -> 3)  total 6
+  A       = {0: [], 1: [], 2: [], 3: []}
+  C       = {0: [], 1: [], 2: [], 3: []}
+  cliques = {c1: []}
+  weights = {0: 1, 1: 3, 2: 0, 3: 0}
+  degrees = {0: -, 1: -, 2: -, 3: -}
+  refreshed = none
+order = [0, 1, 2, 3]
+fill = 1,  nnz(L) = 9 against nnz(tril A) = 8
+degree computations: 6
+```
+
+Read the `degrees` line across step 0. Vertices 1 and 3 are refreshed because the pivot reached
+them; vertex 2 is not, and keeps the degree it was assigned before any elimination happened. Its
+cached 2 is still correct, which is the claim of 5.7 in its smallest instance.
+
+**graph2.**
+
+```
+start                                          degree computations 6
+  degrees = {0: 2, 1: 2, 2: 2, 3: 3, 4: 3, 5: 2}
+  refreshed = all (initial)
+step 0: eliminate 0 (degree 2, weight 1 -> 1)  total 8
+  degrees = {0: -, 1: 2, 2: 2, 3: 3, 4: 3, 5: 2}
+  refreshed = 1, 2
+step 1: eliminate 1 (degree 2, weight 1 -> 1)  total 10
+  degrees = {0: -, 1: -, 2: 2, 3: 3, 4: 3, 5: 2}
+  refreshed = 2, 3
+step 2: eliminate 2 (degree 2, weight 1 -> 1)  total 12
+  degrees = {0: -, 1: -, 2: -, 3: 2, 4: 2, 5: 2}
+  refreshed = 3, 4
+step 3: eliminate 3 (degree 2, weight 1 -> 3)  total 12
+  degrees = {0: -, 1: -, 2: -, 3: -, 4: -, 5: -}
+  refreshed = none
+order = [0, 1, 2, 3, 4, 5]
+fill = 2,  nnz(L) = 15 against nnz(tril A) = 13
+degree computations: 12
+```
+
+**graph3.**
+
+```
+start                                          degree computations 12
+  degrees = {0: 3, 1: 4, 2: 3, 3: 3, 4: 2, 5: 4, 6: 4, 7: 2, 8: 4, 9: 3,
+             10: 3, 11: 1}
+  refreshed = all (initial)
+step 0: eliminate 11 (degree 1, weight 1 -> 1) total 13
+  degrees = {0: 3, 1: 4, 2: 3, 3: 3, 4: 2, 5: 4, 6: 4, 7: 2, 8: 4, 9: 3,
+             10: 2, 11: -}
+  refreshed = 10
+step 1: eliminate 4 (degree 2, weight 1 -> 1)  total 15
+  degrees = {0: 3, 1: 4, 2: 3, 3: 3, 4: -, 5: 4, 6: 4, 7: 2, 8: 4, 9: 3,
+             10: 2, 11: -}
+  refreshed = 3, 5
+step 2: eliminate 7 (degree 2, weight 1 -> 1)  total 17
+  degrees = {0: 3, 1: 4, 2: 3, 3: 3, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: 2, 11: -}
+  refreshed = 6, 8
+step 3: eliminate 10 (degree 2, weight 1 -> 1) total 19
+  degrees = {0: 3, 1: 4, 2: 3, 3: 3, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: -, 11: -}
+  refreshed = 6, 9
+step 4: eliminate 0 (degree 3, weight 1 -> 1)  total 22
+  degrees = {0: -, 1: 4, 2: 3, 3: 4, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: -, 11: -}
+  refreshed = 1, 3, 8
+step 5: eliminate 2 (degree 3, weight 1 -> 1)  total 25
+  degrees = {0: -, 1: 4, 2: -, 3: 3, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: -, 11: -}
+  refreshed = 1, 3, 5
+step 6: eliminate 3 (degree 3, weight 1 -> 1)  total 28
+  degrees = {0: -, 1: 3, 2: -, 3: -, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: -, 11: -}
+  refreshed = 1, 5, 8
+step 7: eliminate 1 (degree 3, weight 1 -> 1)  total 31
+  degrees = {0: -, 1: -, 2: -, 3: -, 4: -, 5: 3, 6: 3, 7: -, 8: 3, 9: 3,
+             10: -, 11: -}
+  refreshed = 5, 6, 8
+step 8: eliminate 5 (degree 3, weight 1 -> 1)  total 34
+  degrees = {0: -, 1: -, 2: -, 3: -, 4: -, 5: -, 6: 2, 7: -, 8: 2, 9: 2,
+             10: -, 11: -}
+  refreshed = 6, 8, 9
+step 9: eliminate 6 (degree 2, weight 1 -> 3)  total 34
+  degrees = {0: -, 1: -, 2: -, 3: -, 4: -, 5: -, 6: -, 7: -, 8: -, 9: -,
+             10: -, 11: -}
+  refreshed = none
+order = [11, 4, 7, 10, 0, 2, 3, 1, 5, 6, 8, 9]
+fill = 7,  nnz(L) = 37 against nnz(tril A) = 30
+degree computations: 34
+```
+
+Ten steps, thirty-four degree computations, where 5.6's version would perform one per live vertex
+per step. The gap widens quickly with size:
+
+```
+                     n   degree computations       ratio
+                          5.6          5.7
+2D grid 8x8         64      2019         302        6.7x
+2D grid 12x12      144     10007         770       13.0x
+2D grid 16x16      256     31095        1418       21.9x
+3D grid 4x4x4       64      1901         362        5.3x
+3D grid 5x5x5      125      7326         841        8.7x
+3D grid 6x6x6      216     21481        1721       12.5x
+```
+
+The orderings are identical on every one, as they must be: this layer changes when a degree is
+computed, never what it is. The ratio grows with `n` because the two are in different complexity
+classes, `O(n^2)` set unions against `O(nnz(L))`, so the factor of twenty on a 256-vertex grid is
+the beginning of the trend rather than the end of it.
+
+What remains is the scan itself. The picker still walks every live vertex to find the smallest
+cached degree, which is `O(n)` per step, though now over integers rather than set unions. That is
+cheap enough to be invisible on these examples and expensive enough to matter at scale. Filing
+vertices in buckets indexed by degree removes it, and that is 5.9.
+
+
+**graph4.**
+
+```
+start                                          degree computations 8
+  degrees = {0: 4, 1: 4, 2: 3, 3: 5, 4: 3, 5: 3, 6: 3, 7: 3}
+  refreshed = all (initial)
+step 0: eliminate 2 (degree 3, weight 1 -> 1)  total 11
+  degrees = {0: 4, 1: 4, 2: -, 3: 5, 4: 3, 5: 4, 6: 3, 7: 3}
+  refreshed = 0, 3, 5
+step 1: eliminate 4 (degree 3, weight 1 -> 1)  total 14
+  degrees = {0: 4, 1: 5, 2: -, 3: 5, 4: -, 5: 4, 6: 3, 7: 3}
+  refreshed = 0, 1, 5
+step 2: eliminate 6 (degree 3, weight 1 -> 1)  total 17
+  degrees = {0: 4, 1: 4, 2: -, 3: 4, 4: -, 5: 3, 6: -, 7: 3}
+  refreshed = 1, 3, 5
+step 3: eliminate 5 (degree 3, weight 1 -> 1)  total 20
+  degrees = {0: 3, 1: 3, 2: -, 3: 3, 4: -, 5: -, 6: -, 7: 3}
+  refreshed = 0, 1, 3
+step 4: eliminate 0 (degree 3, weight 1 -> 4)  total 20
+  degrees = {0: -, 1: -, 2: -, 3: -, 4: -, 5: -, 6: -, 7: -}
+  refreshed = none
+order = [2, 4, 6, 5, 0, 1, 3, 7]
+degree computations: 20
+```
+
+### 5.9 Degree buckets
+
+5.7 removed the recomputation. What it left is the scan: the picker still walks every live vertex
+to read its cached degree and keep the smallest, `O(n)` per pivot over integers rather than set
+unions. Cheap per step and the only remaining `O(n)` per pivot.
+
+File each supervariable in a bucket indexed by its degree, and the minimum can be found by walking
+**up** from the last known minimum instead of looking at everything:
+
+```
+minimum_degree_bucketed(G) -> elimination order:
+
+    initialize A, C, w, degree as in 5.7
+    for each vertex i:
+        bucket[degree[i]] = bucket[degree[i]] union {i}
+    mdeg = min over i of degree[i]              # a LOWER BOUND, not the true minimum
+
+    while a live supervariable remains:
+
+        while bucket[mdeg] is empty:  mdeg = mdeg + 1     # the walk
+        p = a member of bucket[mdeg]
+        remove p from bucket[mdeg]
+
+        eliminate p as in 5.5; merged vertices leave their buckets too
+
+        for each i in L that survived:
+            d = the refreshed degree of i
+            move i from bucket[degree[i]] to bucket[d]     # REFILE
+            degree[i] = d
+            if d < mdeg:  mdeg = d                         # the bound may only fall
+```
+
+Two things carry the weight. `mdeg` is a **lower bound** on the current minimum, not the minimum
+itself: it is allowed to lag, and the walk corrects it. What it must never do is overshoot, since
+buckets below `mdeg` are never examined and a vertex sitting in one would never be chosen. That is
+why the refile lowers `mdeg` and nothing ever raises it except the walk.
+
+And a vertex whose degree changes must be pulled out of the **middle** of its old bucket, which is
+why MMD's degree lists carry both `fwd` and `bwd` links and AMD's carry `Next` and `Last`. The
+doubly linked list is not decoration; singly linked would make the refile `O(bucket size)` and
+give the whole structure back.
+
+**This is a priority queue question.** Naming it that way makes the sequence legible. The picker
+needs repeated find-min over keys that change constantly, which is exactly what a priority queue
+is for, and the last three sections have been walking up the standard implementations:
+
+```
+5.5   recompute every key on every query          no queue at all
+5.7   maintained keys, linear search              unsorted array:  O(1) update, O(n) find-min
+5.9   keys bucketed by value                      bucket queue:    O(1) update, O(1) amortized
+```
+
+The conspicuous absence is the **binary heap**, `O(log n)` for both operations, which would be the
+obvious middle step and is deliberately skipped. Degrees move in *both* directions here: pruning
+and merging lower them, fill raises them, and a single refresh can do either. Heaps handle
+decrease-key tolerably and increase-key badly. A bucket queue does not care about direction, since
+a refile is a removal and an insertion whichever way the key moved. The heap would be a worse
+middle, not a smaller one.
+
+**When bucket queues are actually fast**, which is the part worth being careful about. The `O(1)`
+amortized claim needs the keys to be small bounded integers, which degrees are, and it needs the
+minimum to be roughly monotone, so that the total distance walked over a whole run is bounded
+rather than paid afresh at every step. That second condition is the fragile one, and this
+algorithm does not strictly satisfy it: a vertex's degree genuinely falls when its neighbors are
+eliminated, so `mdeg` can drop below where it had reached. Measured on our prototype it drops only
+three to seven times in an entire run, and the total walk comes to roughly 0.1 to 0.3 buckets per
+pivot, so the structure behaves as though it were monotone. It is not, and no clean bound follows;
+the evidence is empirical.
+
+**An aside, on three ways to bucket a changing key.** The same structure appears in matching
+algorithms under the same pressure, and comparing them isolates the design choice. Gabow's
+cardinality matching buckets edges by the dual value at which they are *projected* to become
+tight, `L[Delta + p]`, computed from duals that then change; the entries can go stale, so the
+extraction loop carries a guard that discards any edge whose duals no longer make it tight. That
+is **lazy invalidation**: insert eagerly, verify on extraction, never remove. Micali and
+Vazirani's algorithm buckets bridges by tenacity, and when a bridge's tenacity is not yet
+computable it refuses to guess, parking the edge in a per-vertex `hanging` list until its level is
+known and only then filing it at the correct key. That is **deferred insertion**. Our version does
+neither: it moves the entry the moment the key changes, so a stale entry never exists. That is
+**eager refiling**.
+
+The choice is forced by monotonicity rather than taste. Both matching codes advance their key in
+one direction only, a `Delta` that is only ever incremented and a phase index that only counts up,
+so a stale entry is encountered at most once, at a level that was going to be visited anyway.
+Minimum degree has a falling key, and lazy entries would accumulate in buckets already passed,
+below `mdeg`, where nothing will ever look at them again. Eager refiling is what a non-monotone
+key requires, and the doubly linked lists are what make it affordable.
+
+### 5.10 A worked example: degree buckets
+
+The state is 5.8's with the buckets added, so `graph1` is shown in full and the other two are
+reduced to the lines that are new.
+
+**graph1.**
+
+```
+start
+  A       = {0: [1,3], 1: [0,2], 2: [1,3], 3: [0,2]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1}
+  degrees = {0: 2, 1: 2, 2: 2, 3: 2}
+  buckets = {2: [0,1,2,3]}   mdeg = 2
+step 0: eliminate 0 (degree 2, weight 1 -> 1)  walked 0
+  A       = {0: [], 1: [2], 2: [1,3], 3: [2]}
+  weights = {0: 1, 1: 1, 2: 1, 3: 1}
+  degrees = {0: -, 1: 2, 2: 2, 3: 2}
+  buckets = {2: [1,2,3]}   mdeg = 2
+  refreshed = 1, 3
+step 1: eliminate 1 (degree 2, weight 1 -> 3)  walked 0
+  A       = {0: [], 1: [], 2: [], 3: []}
+  weights = {0: 1, 1: 3, 2: 0, 3: 0}
+  degrees = {0: -, 1: -, 2: -, 3: -}
+  buckets = {}   mdeg = 2
+  refreshed = none
+order = [0, 1, 2, 3]
+fill = 1,  nnz(L) = 9 against nnz(tril A) = 8
+bucket probes: 2 for 2 pivots
+```
+
+Every step walks zero buckets: the pivot is found in the first slot examined. That is the common
+case and the reason the structure works, since eliminating a vertex tends to lower its neighbors'
+degrees and pull `mdeg` straight back down to where the search will start next time.
+
+**graph2.**
+
+```
+start
+  degrees = {0: 2, 1: 2, 2: 2, 3: 3, 4: 3, 5: 2}
+  buckets = {2: [0,1,2,5], 3: [3,4]}   mdeg = 2
+step 0: eliminate 0 (degree 2, weight 1 -> 1)  walked 0
+  degrees = {0: -, 1: 2, 2: 2, 3: 3, 4: 3, 5: 2}
+  buckets = {2: [1,2,5], 3: [3,4]}   mdeg = 2
+  refreshed = 1, 2
+step 1: eliminate 1 (degree 2, weight 1 -> 1)  walked 0
+  degrees = {0: -, 1: -, 2: 2, 3: 3, 4: 3, 5: 2}
+  buckets = {2: [2,5], 3: [3,4]}   mdeg = 2
+  refreshed = 2, 3
+step 2: eliminate 2 (degree 2, weight 1 -> 1)  walked 0
+  degrees = {0: -, 1: -, 2: -, 3: 2, 4: 2, 5: 2}
+  buckets = {2: [3,4,5]}   mdeg = 2
+  refreshed = 3, 4
+step 3: eliminate 3 (degree 2, weight 1 -> 3)  walked 0
+  degrees = {0: -, 1: -, 2: -, 3: -, 4: -, 5: -}
+  buckets = {}   mdeg = 2
+  refreshed = none
+order = [0, 1, 2, 3, 4, 5]
+fill = 2,  nnz(L) = 15 against nnz(tril A) = 13
+bucket probes: 4 for 4 pivots
+```
+
+**graph3.**
+
+```
+start
+  degrees = {0: 3, 1: 4, 2: 3, 3: 3, 4: 2, 5: 4, 6: 4, 7: 2, 8: 4, 9: 3,
+             10: 3, 11: 1}
+  buckets = {1: [11], 2: [4,7], 3: [0,2,3,9,10], 4: [1,5,6,8]}   mdeg = 1
+step 0: eliminate 11 (degree 1, weight 1 -> 1) walked 0
+  degrees = {0: 3, 1: 4, 2: 3, 3: 3, 4: 2, 5: 4, 6: 4, 7: 2, 8: 4, 9: 3,
+             10: 2, 11: -}
+  buckets = {2: [4,7,10], 3: [0,2,3,9], 4: [1,5,6,8]}   mdeg = 1
+  refreshed = 10
+step 1: eliminate 4 (degree 2, weight 1 -> 1)  walked 1
+  degrees = {0: 3, 1: 4, 2: 3, 3: 3, 4: -, 5: 4, 6: 4, 7: 2, 8: 4, 9: 3,
+             10: 2, 11: -}
+  buckets = {2: [7,10], 3: [0,2,3,9], 4: [1,5,6,8]}   mdeg = 2
+  refreshed = 3, 5
+step 2: eliminate 7 (degree 2, weight 1 -> 1)  walked 0
+  degrees = {0: 3, 1: 4, 2: 3, 3: 3, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: 2, 11: -}
+  buckets = {2: [10], 3: [0,2,3,9], 4: [1,5,6,8]}   mdeg = 2
+  refreshed = 6, 8
+step 3: eliminate 10 (degree 2, weight 1 -> 1) walked 0
+  degrees = {0: 3, 1: 4, 2: 3, 3: 3, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: -, 11: -}
+  buckets = {3: [0,2,3,9], 4: [1,5,6,8]}   mdeg = 2
+  refreshed = 6, 9
+step 4: eliminate 0 (degree 3, weight 1 -> 1)  walked 1
+  degrees = {0: -, 1: 4, 2: 3, 3: 4, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: -, 11: -}
+  buckets = {3: [2,9], 4: [1,3,5,6,8]}   mdeg = 3
+  refreshed = 1, 3, 8
+step 5: eliminate 2 (degree 3, weight 1 -> 1)  walked 0
+  degrees = {0: -, 1: 4, 2: -, 3: 3, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: -, 11: -}
+  buckets = {3: [3,9], 4: [1,5,6,8]}   mdeg = 3
+  refreshed = 1, 3, 5
+step 6: eliminate 3 (degree 3, weight 1 -> 1)  walked 0
+  degrees = {0: -, 1: 3, 2: -, 3: -, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: -, 11: -}
+  buckets = {3: [1,9], 4: [5,6,8]}   mdeg = 3
+  refreshed = 1, 5, 8
+step 7: eliminate 1 (degree 3, weight 1 -> 1)  walked 0
+  degrees = {0: -, 1: -, 2: -, 3: -, 4: -, 5: 3, 6: 3, 7: -, 8: 3, 9: 3,
+             10: -, 11: -}
+  buckets = {3: [5,6,8,9]}   mdeg = 3
+  refreshed = 5, 6, 8
+step 8: eliminate 5 (degree 3, weight 1 -> 1)  walked 0
+  degrees = {0: -, 1: -, 2: -, 3: -, 4: -, 5: -, 6: 2, 7: -, 8: 2, 9: 2,
+             10: -, 11: -}
+  buckets = {2: [6,8,9]}   mdeg = 2
+  refreshed = 6, 8, 9
+step 9: eliminate 6 (degree 2, weight 1 -> 3)  walked 0
+  degrees = {0: -, 1: -, 2: -, 3: -, 4: -, 5: -, 6: -, 7: -, 8: -, 9: -,
+             10: -, 11: -}
+  buckets = {}   mdeg = 2
+  refreshed = none
+order = [11, 4, 7, 10, 0, 2, 3, 1, 5, 6, 8, 9]
+fill = 7,  nnz(L) = 37 against nnz(tril A) = 30
+bucket probes: 12 for 10 pivots
+```
+
+Twelve probes for ten pivots, so the walk contributed two steps in the whole run. At scale:
+
+```
+                     n   scanned (5.7)   probes (5.9)     ratio
+2D grid 8x8         64          2019             63       32x
+2D grid 12x12      144         10007            136       74x
+2D grid 16x16      256         31095            227      137x
+3D grid 4x4x4       64          1901             61       31x
+3D grid 5x5x5      125          7326            123       60x
+3D grid 6x6x6      216         21481            198      108x
+```
+
+The probe count is essentially the pivot count, 227 against 202 pivots on the largest grid, which
+says the walk is close to free in aggregate. The orderings are identical to 5.8's on every graph
+tried, including random ones, which is the thing to check when replacing a linear scan with a
+structure: the tie-break has to survive. Taking the lowest-numbered member of `bucket[mdeg]`
+reproduces what `min` over the live set was already doing.
+
+**And still nothing has improved the ordering.** 5.7 changed when a degree is computed, 5.9 changed
+how the smallest is found, and neither changed what any degree *is*. The sequence has now spent
+four sections on speed and none on quality, which is the whole point: the heuristic was fixed in
+5.1 and everything since has been implementation.
+
+That statement needs one refinement, though, because "unchanged ordering" is not quite what holds
+across all of it, and the exception is instructive. Three things can happen when a layer is added,
+and all three occur in this section:
+
+```
+                              order        fill        what the change is
+5.1 -> 5.3                    same         same        a change of representation
+5.3 -> 5.5  (mass elim.)      DIFFERENT    same        a provably free reordering
+5.5 -> 5.7 -> 5.9             same         same        a change of implementation
+5.9 -> 5.11 (multiple elim.)  different    DIFFERENT   a wager
+```
+
+So 5.11 is not the first layer to change the permutation. Mass elimination already does, and
+substantially: on twelve test graphs it produced a different ordering from 5.3's on nine of them,
+with identical `nnz(L)` on all twelve. What 5.11 is the first to change is the *fill*.
+
+The middle row deserves its adjective. The reordering is not merely harmless in practice, it is
+free by construction: a merged vertex creates no fill when eliminated next, so promoting it ahead
+of whatever the degree would otherwise have chosen cannot cost anything. Nor is the promotion
+forced. Measured at the moment of each merge, the merged vertex would have been the global
+minimum-degree choice only about seventy percent of the time; in the other thirty the ordering is
+genuinely different from what plain minimum degree would produce, and the fill is identical
+anyway.
+
+It follows that making 5.5 agree with 5.3 is easy and pointless. One would recognize
+indistinguishability, use it to skip the degree recomputation, and still leave the vertex in its
+bucket as a separate pivot. The orderings would match, and the entire pivot saving of 5.6 would be
+gone, because that saving *is* the promotion. The differing order is the design working, not a
+defect in it.
+
+**Two kinds of free reordering, and one that is not.** Collecting them, since the distinction is
+what the rest of the section turns on:
+
+- **Consecutive numbering of indistinguishable vertices** (5.5). Free: the promoted vertex adds no
+  fill.
+- **Interleaving between connected components** (5.4, and 5.11). Free: total fill is the sum of the
+  components' fills and each depends only on the order within it.
+- **Reordering ties inside one component** (5.11's batch). *Not* free, because a tie-break is
+  precisely where this heuristic's quality lives.
+
+Which sets up what remains. 5.11 and 5.13 both start from exactly this base, quotient graph,
+supervariables, maintained degrees, buckets, and both go further by giving something up. MMD gives
+up its freedom to reconsider a vertex the current batch has touched; AMD gives up the exactness of
+the degree. Each buys speed with a small, two-sided change in the fill, and the fact that they must
+give something up is the clearest sign that the free wins have all been taken.
+
+
+**graph4.**
+
+```
+start
+  degrees = {0: 4, 1: 4, 2: 3, 3: 5, 4: 3, 5: 3, 6: 3, 7: 3}
+  buckets = {3: [2,4,5,6,7], 4: [0,1], 5: [3]}   mdeg = 3
+step 0: eliminate 2 (degree 3, weight 1 -> 1)  walked 0
+  degrees = {0: 4, 1: 4, 2: -, 3: 5, 4: 3, 5: 4, 6: 3, 7: 3}
+  buckets = {3: [4,6,7], 4: [0,1,5], 5: [3]}   mdeg = 3
+  refreshed = 0, 3, 5
+step 1: eliminate 4 (degree 3, weight 1 -> 1)  walked 0
+  degrees = {0: 4, 1: 5, 2: -, 3: 5, 4: -, 5: 4, 6: 3, 7: 3}
+  buckets = {3: [6,7], 4: [0,5], 5: [1,3]}   mdeg = 3
+  refreshed = 0, 1, 5
+step 2: eliminate 6 (degree 3, weight 1 -> 1)  walked 0
+  degrees = {0: 4, 1: 4, 2: -, 3: 4, 4: -, 5: 3, 6: -, 7: 3}
+  buckets = {3: [5,7], 4: [0,1,3]}   mdeg = 3
+  refreshed = 1, 3, 5
+step 3: eliminate 5 (degree 3, weight 1 -> 1)  walked 0
+  degrees = {0: 3, 1: 3, 2: -, 3: 3, 4: -, 5: -, 6: -, 7: 3}
+  buckets = {3: [0,1,3,7]}   mdeg = 3
+  refreshed = 0, 1, 3
+step 4: eliminate 0 (degree 3, weight 1 -> 4)  walked 0
+  degrees = {0: -, 1: -, 2: -, 3: -, 4: -, 5: -, 6: -, 7: -}
+  buckets = {}   mdeg = 3
+  refreshed = none
+order = [2, 4, 6, 5, 0, 1, 3, 7]
+bucket probes: 5 for 5 pivots
+```
+
+### 5.11 Multiple elimination, which is the idea in MMD
+
+Sections 5.3 to 5.6 disposed of the first of the two problems of 5.1, the graph that grows: the
+quotient graph never forms a clique, and supervariables shrink what remains. The second problem,
+the expense of the degree, is still open, and it is exactly here that the two codes we vendor part
+company.
+
+**What both codes do first, and neither section is about.** Before either of the two mechanisms,
+AMD and MMD do the same two things, and both are already in place by the end of 5.10: the
+maintained degree of 5.7, refreshing only the vertices the pivot reached, and the degree buckets
+of 5.9, turning the search for the minimum into a short walk. Both are common ground rather than
+either paper's contribution, which is worth saying plainly, because it means the fork below is
+narrower than it first appears. What the two codes disagree about is the refreshes that remain.
+
+There are two ways to make an expensive step affordable: do it less often, or make each one
+cheaper. MMD does it less often. It keeps the degree *exact*, the honest set union of 5.1, and pays
+for that by recomputing it rarely. AMD makes each one cheaper (5.13). Multiple elimination is the
+mechanism behind "less often", and it is the idea the M in MMD names.
+
+Ordinary minimum degree eliminates one vertex, refreshes every degree that elimination disturbed,
+then picks again. The refresh is the costly step, and running it after every single pivot is the
+waste. Liu's observation (1985) is that several least-degree vertices can usually be eliminated
+*before any refresh*, so long as they do not interfere: if two minimum-degree vertices are
+non-adjacent and share no vertex about to be eliminated with them, then eliminating one leaves the
+other's degree untouched, so both are still current and both can go. A maximal independent set of
+minimum-degree vertices is eliminated as a batch, and only then are degrees recomputed, once, for
+everything the whole batch reached.
+
+We never search for that independent set. It falls out of the bookkeeping. Eliminating a vertex
+evicts every vertex it reaches from the degree buckets, to be re-filed only after the batch, so
+whatever is still sitting in the minimum-degree bucket is by construction non-adjacent to everyone
+already eliminated in this batch. Draining the bucket drains an independent set. A tolerance
+`delta` may widen the batch to vertices within `delta` of the minimum, trading a little ordering
+quality for still fewer refreshes; we pass `delta = 0`, which keeps the batch to true minima.
+
+**Multiple elimination is not mass elimination**, and the names invite the confusion, so it is
+worth separating them before going further. Both group several eliminations together; they group
+opposite things for opposite reasons.
+
+```
+                    what is grouped        relation to the pivot   why it is safe
+mass (5.5)          vertices of L_p        adjacent, inside it     they are one object
+multiple (here)     other pivots           non-adjacent, disjoint  they cannot interact
+```
+
+Mass elimination merges vertices indistinguishable *from the pivot*. They lie inside its clique,
+so they are as adjacent to it as vertices can be, and merging them is not a wager but the
+recognition that there was only ever one object there. It happens *within* one elimination step
+and yields one supervariable, one column block of the factor.
+
+Multiple elimination eliminates several *pivots* that cannot see each other. They are non-adjacent
+by construction, so eliminating one leaves the others' degrees untouched and all of them may go
+before anything is recomputed. It happens *across* several elimination steps and yields several
+separate supervariables.
+
+Two consequences follow. Mass elimination changes *what* is eliminated: the graph shrinks, one
+supervariable stands in for many vertices. Multiple elimination changes nothing about what is
+eliminated, only *when the degrees are refreshed*; strip the batching out of MMD and it would
+choose the same pivots, refreshing more often. And mass elimination is exact, which 5.6 verified
+by measurement, whereas multiple elimination is a genuine wager: the second pivot in a batch is
+chosen on a degree computed before the first was eliminated.
+
+**Batching, and two ways to justify it.** The technique here is general enough to name. When a
+loop alternates cheap local work with an expensive global refresh, the refresh can be amortized by
+performing many local steps before paying for one refresh, provided something guarantees the
+steps do not invalidate each other. Hopcroft-Karp is the familiar instance: rather than one
+augmenting path per iteration it augments along a maximal set of *vertex-disjoint* shortest paths
+per phase, and the disjointness is precisely what makes the batch safe to apply without
+recomputing in between. Multiple elimination is the same shape, with non-adjacency in the role of
+vertex-disjointness.
+
+Section 5.5 batches too, and it is worth seeing that the justification is the opposite one. Mass
+elimination merges vertices that are *indistinguishable from the pivot*: they sit inside its
+clique and are as dependent on it as vertices can be. They may be eliminated together because they
+are effectively one object. Multiple elimination batches vertices that cannot see each other at
+all. Independence and identity are the two ways a group of eliminations can be safe, and this
+section and 5.5 take one each.
+
+Two limits on the analogy. Hopcroft-Karp's batching buys an asymptotic improvement, from `O(V E)`
+to `O(sqrt(V) E)`, because the number of phases is provably bounded; multiple elimination is a
+practical constant-factor win with no comparable bound. And Hopcroft-Karp must *search* for its
+disjoint set, with a layering pass and then a set of disjoint augmentations, where MMD gets its
+independent set for free from the bucket eviction described above. The mechanism transfers; the
+guarantee does not.
+
+```
+mmd(A) -> elimination order:
+
+    for each vertex i:                            # mmdint
+        A_i = the neighbors of i in A
+        E_i = {}                                  # no elements yet
+        w_i = 1                                   # supervariable weight
+        degree[i] = |A_i|                         # exact degree
+        file i in the bucket for degree[i]
+
+    # PREPASS: degree 0 and degree 1 create no fill, so number them now and     # genmmd
+    # leave their neighbors' degrees stale. A stale degree costs ordering
+    # quality, never correctness: an eliminated vertex is skipped on sight.
+    for each i with degree[i] <= 1:
+        number i next;  eliminate i
+    if no vertex remains:  goto FINISH
+
+    while vertices remain:                          # genmmd, outer loop
+
+        mdeg = the least non-empty bucket
+
+        # ELIMINATE A MAXIMAL INDEPENDENT SET at mdeg as one batch, refreshing
+        # no degree until the batch is complete. This is multiple elimination.
+        batch = {}
+        while the mdeg bucket still holds a vertex p:
+            remove p from its bucket
+
+            # FORM p's ELEMENT: its reachable set in the quotient graph.        # mmdelm
+            L = A_p
+            for e in E_p:
+                L = L union L_e                     # ELEMENT ABSORPTION: e dies into p
+            L = L \ {p}
+            L_p = L;  p is now an element
+
+            for i in L:
+                A_i = A_i \ (eliminated and absorbed vertices)
+                E_i = (E_i with dead elements dropped) union {p}
+                evict i from its degree bucket      # <- this is what keeps the batch independent
+                if A_i \ L is empty:                # i sees nothing outside the new clique
+                    w_p = w_p + w_i                 # MASS ELIMINATION: merge i into p
+                    absorb i
+
+            reserve the next w_p numbers for p;  add p to batch
+
+        # REFRESH once, for the whole batch: the exact external degree of        # mmdupd
+        # every vertex the batch reached, then re-file it.
+        for i reached by batch:
+            degree[i] = | A_i union ( union of L_e over e in E_i ) | \ {i}
+            re-file i in the bucket for degree[i]
+            # the code splits this by whether i sees exactly two elements or many
+            # (q2h vs qxh); the two-element pass also catches indistinguishable
+            # vertices the A_i \ L test above missed. Collapsed here.
+
+FINISH:                                              # mmdnum
+    resolve each supervariable: every merged vertex takes one number inside its
+    representative's reserved block, giving a consecutive ordering
+    return the numbering
+```
+
+**Where the independence comes from, in the code.** The pseudocode says "evict `i` from its degree
+bucket", and it is worth seeing that this single line is the whole of the batching discipline.
+In `mmdelm`, every reached vertex is spliced out of its degree list:
+
+```c
+int pv = bwd[rn];
+if (pv != 0 && pv != (-maxint)) {
+    int nx = fwd[rn];
+    if (nx > 0) bwd[nx] = pv;
+    if (pv > 0) fwd[pv] = nx;
+    if (pv < 0) head[-pv] = nx;      /* rn leaves its bucket */
+}
+```
+
+That is the doubly linked removal of 5.9, and here is what it is for. Because every vertex the
+pivot reached has just left the buckets, anything *still* sitting in the `mdeg` bucket when the
+loop comes back for another pivot was not reached, hence is non-adjacent to every pivot already
+taken this round. Draining the bucket drains an independent set, and no code anywhere computes
+one. The batch is a side effect of the eviction.
+
+The driver makes the two-level structure plain, with the inner loop taking pivots and the outer
+one refreshing:
+
+```c
+while (1) {
+    while (head[mdeg] <= 0) mdeg++;
+    int mdlmt = mdeg + delta, ehead = 0;
+n500:
+    ...
+    mmdelm(mn, ...);                 /* eliminate; refresh nothing */
+    list[mn] = ehead; ehead = mn;    /* remember it for the batch refresh */
+    if (delta >= 0) goto n500;       /* another pivot, degrees still stale */
+n900:
+    mmdupd(ehead, ...);              /* ONE refresh for the whole batch */
+}
+```
+
+**What the batch buys and what it costs.** Measured against the same code with the batch limited
+to a single pivot, so that only the batching differs:
+
+```
+                 pivots | refreshes  batched  saved | batch size |  fill change
+2D grid 24x24       447 |      3417     2427    28% |       10.0 |    -0.70%
+2D grid 16x16       202 |      1418     1094    22% |        5.8 |    -0.96%
+2D grid 12x12       118 |       770      597    22% |        4.5 |    +0.68%
+3D grid 5x5x5        93 |       841      558    33% |        6.6 |     0.00%
+3D grid 6x6x6       156 |      1721     1458    15% |        4.4 |    +3.70%
+random graphs                              15 to 23% |   3.1-4.3 |  0.00 to +0.37%
+overall                                                          |    +0.40%
+```
+
+Batches run three to ten pivots and remove 15 to 33 percent of the refreshes. The saving is
+precisely the overlap between reached sets: a vertex reached by two pivots of one batch is
+refreshed once rather than twice, and non-adjacent pivots may still share neighbors.
+
+**That column counts refreshes, not work, and the two are not the same claim.** A refresh is one
+vertex having its degree recomputed; the work inside it is the walk over the members of that
+vertex's elements. Batching reduces how *often* a vertex is refreshed while increasing what each
+refresh *costs*, because more new elements exist by the time the batch ends. Counted in element
+members walked rather than in refreshes, the same runs give a saving of roughly six percent, not
+fifteen to thirty-three. Both numbers are honest and they answer different questions; the second
+is closer to time on a machine. We report the first because it isolates the mechanism, and record
+the second here so the first is not read as more than it is.
+
+**What the batch actually gives up**, which is worth pinning down because the obvious answer is
+wrong. It is tempting to say that the later pivots of a batch are chosen on stale degrees, and
+that is precisely what does *not* happen: the pivots are non-adjacent, so none of them disturbs
+another's degree, and every one of them is a genuine minimum-degree vertex when it is taken. The
+heuristic is obeyed throughout.
+
+What changes is *which* minimum-degree vertex. Every vertex the batch has already reached was
+evicted from the buckets and will not be re-filed until the round ends, so the choice is made
+among the untouched remainder rather than among all the candidates. Tracing the two versions
+against each other makes this visible: on a 16x16 grid the pivot sequences diverge at step 11
+while the sequence of pivot *degrees* stays identical until step 114. For a hundred steps the two
+runs take different vertices of the same degree.
+
+So the batch does not make a worse choice, it makes a different one, and minimum degree is
+famously sensitive to exactly that. A tie-break is arbitrary by construction, so perturbing it
+moves the fill in either direction: two of the grids above came out better than one-at-a-time and
+the 6x6x6 came out worse. The mean is slightly bad and the spread exceeds the mean. The honest
+description is not "a small penalty" but "the ordering becomes arbitrary in a different way", and
+that framing predicts the sign pattern where "penalty" does not.
+
+**Where batching is genuinely free.** The distinction is not between adjacent and non-adjacent
+pivots but between pivots in the same connected component and pivots in different ones. The fill
+of a reducible matrix is the sum of its components' fills (5.4), and each component's fill depends
+only on the relative order *within* that component. Interleaving between components therefore
+reorders nothing that matters. Restricting a batch to at most one pivot per component gives an
+ordering identical to one-at-a-time, which we checked on six disconnected graphs; draining the
+whole bucket, which can take several pivots from one component, differed on four of the six.
+
+That is the clean boundary between the two kinds of batching. Across components it is free, in the
+same way mass elimination is free: no wager, just a reordering that provably cannot matter. Within
+a component it is a wager, small and two-sided. MMD does not distinguish the cases, because
+tracking components would cost more than it saves on a matrix that is usually irreducible, but
+knowing which side of the line a given batch sits on explains the whole of its behavior.
+
+It also separates two questions that sound like one. Identical *fill* is reachable: restrict the
+batch to one pivot per component and 5.10's guarantee is restored, at the price of maintaining
+component labels. Identical *ordering* is not, because within a component the batch would have to
+be a single pivot, which is multiple elimination deleted rather than constrained. So the mechanism
+can be made lossless but not order-preserving, and since the fill is what matters, that is the
+useful half to be able to recover.
+
+These are prototype measurements on small graphs; the production numbers are the ones to trust.
+
+The same four mechanisms as AMD, minus one and plus one. MMD keeps the quotient graph with element
+absorption (form `L`, absorb `E_p`), keeps supervariables (the `w` merges), and keeps mass
+elimination (the empty `A_i \ L` test). What it drops is AMD's approximate degree: the refresh
+computes the exact set union, the very quantity 5.13 will bound rather than compute. What it adds is
+multiple elimination, the batching that makes an exact refresh affordable by making it rare. Its
+supervariable detection is structural, done during the refresh, where AMD's is a hash (5.13).
+
+So the two codes are one algorithm forking on the second problem of 5.1. Both refuse to form a
+clique and both shrink the graph; they differ only on the cost of the degree. AMD makes each update
+cheap and runs one per pivot; MMD keeps each update exact and runs one per batch. Approximate
+degree and multiple elimination are the same answer, do the expensive thing less, reached from
+opposite ends.
+
+The vendored code is five routines, and this table doubles as a reading key, since the pseudocode
+above is annotated with the same names:
+
+| routine | role |
+|---|---|
+| `mmdint` | bucket every vertex by degree; the buckets are doubly linked so a vertex can be pulled from the middle |
+| `genmmd` | the driver: the prepass, then the outer loop that finds `mdeg`, drains its bucket as a batch, and calls the refresh |
+| `mmdelm` | eliminate one vertex: form its reachable set `L`, splice the quotient graph, absorb dead elements, merge indistinguishable vertices |
+| `mmdupd` | the batch refresh: exact external degree of every reached vertex, then re-file (the `q2h`/`qxh` split is the two-element versus many-element case) |
+| `mmdnum` | recover the permutation, expanding each `w`-merged group into consecutive numbers |
+
+Two coarse-grainings in the pseudocode above are deliberate: the `q2h`/`qxh` split inside `mmdupd`
+(the two-element versus many-element reachable cases, collapsed into one refresh loop) and the
+exact number-reservation bookkeeping between the batch and `mmdnum`. Neither changes the shape.
+
+**What the prototype implements, and what it does not.** The pseudocode above describes the
+vendored routine. Our `experiments/ordering/mmd` is a subset of it, and the gap is recorded here
+rather than only in the file headers, so that it can be closed deliberately.
+
+Present: the quotient graph with element absorption and pruning, supervariables by mass
+elimination, maintained degrees refreshed only where they can have changed, degree buckets with a
+lagging `mdeg`, and multiple elimination with a `delta` parameter defaulting to zero. That is
+enough to reproduce the behavior this section describes, which is why the measurements above come
+from it.
+
+Absent, in two categories. Two are **algorithmic**, and closing them would change the ordering:
+
+- **The prepass.** `genmmd` numbers every degree-0 and degree-1 vertex before entering the main
+  loop, leaving their neighbors' degrees stale. Such a vertex creates no fill, so eliminating it
+  early is safe; the staleness it leaves behind is a small ordering concession for a real saving.
+  We enter the main loop immediately.
+- **Pair merging in `mmdupd`.** `mmdelm` stashes each reached vertex's pruned adjacency count as
+  `fwd[rn] = nq + 1`, and the refresh routes the `nq == 1` cases into the `q2h` list, where it
+  merges vertices indistinguishable *from each other*. Our merge test fires only for vertices
+  indistinguishable *from the pivot*, so MMD's supervariables are at least as coarse as ours and
+  sometimes strictly coarser. This is the larger of the two gaps: it costs both supervariables we
+  never find and the pivots we would have saved by finding them.
+
+Two are **conventions**, and they matter only when comparing against the vendored code, though
+they are not quite cosmetic:
+
+- **MMD never uses bucket 0.** `mmdint` maps degree 0 to 1, and `mmdupd` floors with
+  `if (dg < 1) dg = 1`. Its least bucket is 1 where ours is 0.
+- **MMD files at `dg - qsize[en] + 1`**, not at the plain external degree. The offset is a
+  monotone shift, so it cannot change which vertex is minimal; but the flooring above collapses
+  degrees 0 and 1 into one bucket, and since this section has established that MMD's whole quality
+  difference is a tie-break effect, a convention that merges two buckets can break a tie
+  differently. Small, and not zero.
+
+The `tag` and `marker` machinery with its overflow reset, and the `ncsub` statistic, have no
+counterpart in the prototype and need none: the first is a way to do set membership without sets,
+and the second is a diagnostic.
+
+### 5.12 A worked example: multiple elimination
+
+The state is 5.10's, reduced to the degrees and buckets, with the round structure made visible.
+Two fields are new and carry the whole idea: `evicted` lists the vertices a pivot pulled out of
+the buckets, and `batch` lists what the round managed to take before the buckets at `mdeg` ran
+dry.
+
+**graph1.** The 4-cycle is the smallest graph that shows batching at all, and it shows it
+immediately.
+
+```
+start
+  degrees = {0: 2, 1: 2, 2: 2, 3: 2}
+  buckets = {2: [0,1,2,3]}   mdeg = 2
+round 0: mdeg = 2
+  eliminate 0 (degree 2, weight 1 -> 1)   merged = none   evicted = 1, 3
+  eliminate 2 (degree 2, weight 1 -> 1)   merged = none   evicted = 1, 3
+  batch of 2: [0, 2]    refreshed = 1, 3
+  degrees = {0: -, 1: 1, 2: -, 3: 1}
+  buckets = {1: [1,3]}   mdeg = 1
+round 1: mdeg = 1
+  eliminate 1 (degree 1, weight 1 -> 2)   merged = 3   evicted = none
+  batch of 1: [1]    refreshed = none
+  degrees = {0: -, 1: -, 2: -, 3: -}
+  buckets = {}   mdeg = 1
+order = [0, 2, 1, 3]
+rounds = 2, pivots = 3, average batch = 1.5
+fill = 1,  nnz(L) = 9 against nnz(tril A) = 8
+degree computations: 6
+```
+
+Round 0 takes two pivots. Vertices 0 and 2 are the diagonal of the 4-cycle, so they are
+non-adjacent, and that is exactly why both survive to be taken: eliminating 0 evicts its neighbors
+1 and 3, and 2 is not among them. Nothing tested whether 0 and 2 were adjacent. The bucket simply
+still held 2 after 0 was done with it.
+
+The `evicted` lines also show where the saving comes from. Both pivots evict the same pair, 1 and
+3, and the refresh runs once over that pair rather than twice. One round, two pivots, one refresh.
+
+**graph2.**
+
+```
+start
+  degrees = {0: 2, 1: 2, 2: 2, 3: 3, 4: 3, 5: 2}
+  buckets = {2: [0,1,2,5], 3: [3,4]}   mdeg = 2
+round 0: mdeg = 2
+  eliminate 0 (degree 2, weight 1 -> 1)   merged = none   evicted = 1, 2
+  eliminate 5 (degree 2, weight 1 -> 1)   merged = none   evicted = 3, 4
+  batch of 2: [0, 5]    refreshed = 1, 2, 3, 4
+  degrees = {0: -, 1: 2, 2: 2, 3: 2, 4: 2, 5: -}
+  buckets = {2: [1,2,3,4]}   mdeg = 2
+round 1: mdeg = 2
+  eliminate 1 (degree 2, weight 1 -> 1)   merged = none   evicted = 2, 3
+  eliminate 4 (degree 2, weight 1 -> 1)   merged = none   evicted = 2, 3
+  batch of 2: [1, 4]    refreshed = 2, 3
+  degrees = {0: -, 1: -, 2: 1, 3: 1, 4: -, 5: -}
+  buckets = {1: [2,3]}   mdeg = 1
+round 2: mdeg = 1
+  eliminate 2 (degree 1, weight 1 -> 2)   merged = 3   evicted = none
+  batch of 1: [2]    refreshed = none
+  degrees = {0: -, 1: -, 2: -, 3: -, 4: -, 5: -}
+  buckets = {}   mdeg = 1
+order = [0, 5, 1, 4, 2, 3]
+rounds = 3, pivots = 5, average batch = 1.7
+fill = 2,  nnz(L) = 15 against nnz(tril A) = 13
+degree computations: 12
+```
+
+**graph3.**
+
+```
+start
+  degrees = {0: 3, 1: 4, 2: 3, 3: 3, 4: 2, 5: 4, 6: 4, 7: 2, 8: 4, 9: 3,
+             10: 3, 11: 1}
+  buckets = {1: [11], 2: [4,7], 3: [0,2,3,9,10], 4: [1,5,6,8]}   mdeg = 1
+round 0: mdeg = 1
+  eliminate 11 (degree 1, weight 1 -> 1)   merged = none   evicted = 10
+  batch of 1: [11]    refreshed = 10
+  degrees = {0: 3, 1: 4, 2: 3, 3: 3, 4: 2, 5: 4, 6: 4, 7: 2, 8: 4, 9: 3,
+             10: 2, 11: -}
+  buckets = {2: [4,7,10], 3: [0,2,3,9], 4: [1,5,6,8]}   mdeg = 1
+round 1: mdeg = 2
+  eliminate 4 (degree 2, weight 1 -> 1)   merged = none   evicted = 3, 5
+  eliminate 7 (degree 2, weight 1 -> 1)   merged = none   evicted = 6, 8
+  eliminate 10 (degree 2, weight 1 -> 1)   merged = none   evicted = 6, 9
+  batch of 3: [4, 7, 10]    refreshed = 3, 5, 6, 8, 9
+  degrees = {0: 3, 1: 4, 2: 3, 3: 3, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: -, 11: -}
+  buckets = {3: [0,2,3,9], 4: [1,5,6,8]}   mdeg = 2
+round 2: mdeg = 3
+  eliminate 0 (degree 3, weight 1 -> 1)   merged = none   evicted = 1, 3, 8
+  eliminate 2 (degree 3, weight 1 -> 1)   merged = none   evicted = 1, 3, 5
+  eliminate 9 (degree 3, weight 1 -> 1)   merged = none   evicted = 5, 6, 8
+  batch of 3: [0, 2, 9]    refreshed = 1, 3, 5, 6, 8
+  degrees = {0: -, 1: 4, 2: -, 3: 3, 4: -, 5: 4, 6: 3, 7: -, 8: 4, 9: -,
+             10: -, 11: -}
+  buckets = {3: [3,6], 4: [1,5,8]}   mdeg = 3
+round 3: mdeg = 3
+  eliminate 3 (degree 3, weight 1 -> 1)   merged = none   evicted = 1, 5, 8
+  eliminate 6 (degree 3, weight 1 -> 1)   merged = none   evicted = 1, 5, 8
+  batch of 2: [3, 6]    refreshed = 1, 5, 8
+  degrees = {0: -, 1: 2, 2: -, 3: -, 4: -, 5: 2, 6: -, 7: -, 8: 2, 9: -,
+             10: -, 11: -}
+  buckets = {2: [1,5,8]}   mdeg = 2
+round 4: mdeg = 2
+  eliminate 1 (degree 2, weight 1 -> 3)   merged = 5, 8   evicted = none
+  batch of 1: [1]    refreshed = none
+  degrees = {0: -, 1: -, 2: -, 3: -, 4: -, 5: -, 6: -, 7: -, 8: -, 9: -,
+             10: -, 11: -}
+  buckets = {}   mdeg = 2
+order = [11, 4, 7, 10, 0, 2, 9, 3, 6, 1, 5, 8]
+rounds = 5, pivots = 10, average batch = 2.0
+fill = 7,  nnz(L) = 37 against nnz(tril A) = 30
+degree computations: 26
+```
+
+Ten pivots in five rounds, and 26 degree computations against the 34 that 5.8 needed for the same
+graph. Round 1 is the clearest instance: pivots 4, 7 and 10 are mutually non-adjacent, and vertex
+6 is evicted twice, once by 7 and once by 10, then refreshed once.
+
+**And here the ordering finally moves.** Every version from 5.1 through 5.10 returns
+
+```
+[11, 4, 7, 10, 0, 2, 3, 1, 5, 6, 8, 9]
+```
+
+on `graph3`, and this one returns
+
+```
+[11, 4, 7, 10, 0, 2, 9, 3, 6, 1, 5, 8]
+```
+
+They agree for six positions and then diverge, where the earlier versions take 3 and this one
+takes 9. Both are vertices of degree 3, which is the point: the batch did not choose a worse
+vertex, it chose a different vertex of the same degree, because 3 had been evicted by an earlier
+pivot of the round and was not available to be chosen. The fill is 7 either way.
+
+That single line is the taxonomy at the end of 5.10 made concrete. Mass elimination changed the
+ordering without changing the fill; this changes the ordering and puts the fill in play. On
+`graph3` the wager happens to cost nothing, and on the graphs of 5.11's table it costs a fraction
+of a percent, in either direction.
+
+
+**graph4.** Three rounds for six pivots, and the ordering diverges from every earlier layer at
+position three.
+
+```
+start
+  degrees = {0: 4, 1: 4, 2: 3, 3: 5, 4: 3, 5: 3, 6: 3, 7: 3}
+  buckets = {3: [2,4,5,6,7], 4: [0,1], 5: [3]}   mdeg = 3
+round 0: mdeg = 3
+  eliminate 2 (degree 3, weight 1 -> 1)   merged = none   evicted = 0, 3, 5
+  eliminate 4 (degree 3, weight 1 -> 1)   merged = none   evicted = 0, 1, 5
+  eliminate 6 (degree 3, weight 1 -> 1)   merged = none   evicted = 1, 3, 5
+  eliminate 7 (degree 3, weight 1 -> 1)   merged = none   evicted = 0, 1, 3
+  batch of 4: [2, 4, 6, 7]    refreshed = 0, 1, 3, 5
+  degrees = {0: 3, 1: 3, 2: -, 3: 3, 4: -, 5: 3, 6: -, 7: -}
+  buckets = {3: [0,1,3,5]}   mdeg = 3
+round 1: mdeg = 3
+  eliminate 0 (degree 3, weight 1 -> 1)   merged = none   evicted = 1, 3, 5
+  batch of 1: [0]    refreshed = 1, 3, 5
+  degrees = {0: -, 1: 2, 2: -, 3: 2, 4: -, 5: 2, 6: -, 7: -}
+  buckets = {2: [1,3,5]}   mdeg = 2
+round 2: mdeg = 2
+  eliminate 1 (degree 2, weight 1 -> 3)   merged = 3, 5   evicted = none
+  batch of 1: [1]    refreshed = none
+  degrees = {0: -, 1: -, 2: -, 3: -, 4: -, 5: -, 6: -, 7: -}
+  buckets = {}   mdeg = 2
+order = [2, 4, 6, 7, 0, 1, 3, 5]
+rounds = 3, pivots = 6
+```
+
+### 5.13 Approximate degree, which is the idea in AMD
+
+MMD made the exact degree affordable by computing it rarely (5.11). AMD takes the other route: it
+computes a degree at every single pivot, and makes that affordable by refusing to compute the
+degree exactly at all.
+
+**AMD does not batch**, which is worth saying outright because the code invites the opposite
+reading. Its main loop is `while (nel < n)` with one pivot chosen per iteration and the degrees
+updated before the next, and multiple elimination appears nowhere. What does appear is
+`nel += nvpiv`, which advances the count by the pivot's *weight*, so a single pivot numbers many
+columns at once. That is mass elimination, not multiple elimination: many columns from one pivot,
+grouped by identity rather than by independence, exactly the pair 5.11 separates. The two codes
+share no trick beyond the common ground; each takes one branch of the fork and neither takes the
+other's.
 
 The exact external degree of `i` is
 
 ```
-d_i = | A_i  union  ( union of L_e over e in E_i ) |    minus i
+degree[i] = | A_i  union  ( union of L_e over e in E_i ) |    minus i
 ```
 
 a set union per vertex per step. That is the bottleneck of true minimum degree, and it is what
@@ -2673,9 +4861,9 @@ AMD refuses to pay.
 **Bound it instead.** Sum the elements' contributions rather than uniting them:
 
 ```
-d_i  <=  min(  n - k,                                       # nothing can exceed what remains
-               d_i_old + |L \ i|,                           # it can only grow by the new element
-               |A_i \ L|  +  |L \ i|  +  sum |L_e \ L|  )   # over e in E_i, e != the new element
+degree[i] <= min( n - k,                                  # nothing can exceed what remains
+                  degree_old[i] + |L \ i|,                # it can only grow by the new element
+                  |A_i \ L| + |L \ i| + sum |L_e \ L| )   # over e in E_i, e != the new element
 ```
 
 The third line is the approximation. It **overcounts**, because two elements may overlap outside
@@ -2683,26 +4871,42 @@ The third line is the approximation. It **overcounts**, because two elements may
 
 **And the payoff is in one word: reuse.** The quantity `|L_e \ L|` depends only on the element
 `e`, not on the vertex `i`. It is computed **once per element** and read by every vertex that
-touches `e`. The exact degree would need a union *per vertex*. That single substitution is what
-separates AMD from minimum degree, and the surprise of the AMD paper is that the ordering barely
-suffers: an upper bound on the degree, chosen greedily, produces fill within a few percent of the
-exact computation while running several times faster.
+touches `e`. The exact degree would need a union *per vertex*.
 
-### 5.5 The algorithm, whole
+The reason the exact degree cannot be shared the same way is worth stating, because it is the
+whole of the matter: **a union is not decomposable and a sum is.** There is no way to split
+`|A_i union L_e union L_f|` into a part that depends on `e` and a part that depends on `f`, since
+the answer turns on how much `L_e` and `L_f` overlap, and the overlap that matters is different
+for every vertex. So the union has to be recomputed for each `i`, and that is the per-vertex cost
+being paid. Adding `|L_e \ L|` and `|L_f \ L|` instead asks a question about each element alone,
+which is why one answer serves every vertex that touches it. The cost per vertex falls from a
+walk over its elements' members to one addition per element. That is the entire speed argument,
+and it says where the gain lands: the ratio between the two grows with element size, which is to
+say with fill, which is to say precisely where the ordering is expensive.
+
+**The other two terms are the brake**, and they are easy to read past as bookkeeping. Both are
+exact and both are cheap: `n - k` counts what is left to eliminate, and `degree_old[i] + |L \ i|`
+says a degree can only have grown by the new element. Neither needs a union. Taking the minimum
+of all three lets the loose term be used where it is good and discarded where it is not, so the
+overcounting cannot accumulate over a run. That clamp is load-bearing rather than defensive: the
+combination result below turns on it, since a bound that is re-tightened at every pivot stays
+useful and one that is not degrades quickly.
+
+The algorithm whole:
 
 ```
 amd(A) -> elimination order:
 
     for each vertex i:
-        A_i    = the neighbours of i in A
+        A_i    = the neighbors of i in A
         E_i    = {}                        # no elements yet
         w_i    = 1                         # supervariable weight
-        d_i    = |A_i|                     # degree
+        degree[i] = |A_i|                  # degree
 
     while vertices remain:
 
         # PICK
-        p = the live vertex of least d
+        p = the live vertex of least degree
 
         # FORM THE ELEMENT: absorb every element p touches
         L = A_p
@@ -2716,16 +4920,27 @@ amd(A) -> elimination order:
         # APPROXIMATE THE NEW DEGREES
         for each element e reachable from L:
             we = |L_e \ L|                 # ONCE per element, not per vertex
+            if we == 0:                    # AGGRESSIVE ABSORPTION
+                kill e                     # e lies wholly inside L, so it is dead
 
-        for i in L:
-            d_i = min( remaining,
-                       d_i + |L| - w_i,
-                       |A_i \ L| + |L| + sum of we over e in E_i )
+        for i in L:                        # ONE pass here, for legibility. The
+            degree[i] = min( remaining,    # vendored code splits this in two;
+                                           # see the note below the algorithm.
+                             degree[i] + |L| - w_i,
+                             |A_i \ L| + |L| + sum of we over e in E_i )
 
-            if d_i == 0:                   # MASS ELIMINATION
-                eliminate i with p         # nothing outside the new clique
-
-            h_i = hash(A_i, E_i)           # for the next step
+            if degree[i] == 0:             # MASS ELIMINATION
+                w_p = w_p + w_i            # i joins the pivot's supervariable
+                |L| = |L| - w_i            # ... and so LEAVES the new element,
+                                           # which every later i in this same
+                                           # pass must see. Easy to omit.
+                eliminate i with p
+                                           # (the degree[i] == 0 test is
+                                           # equivalent to the structural one
+                                           # only BECAUSE of the aggressive
+                                           # absorption above)
+            else:
+                h_i = hash(A_i, E_i)       # for the merge below
 
         # ABSORB INDISTINGUISHABLE SUPERVARIABLES
         for i, j in one hash bucket, with identical patterns:
@@ -2735,20 +4950,340 @@ amd(A) -> elimination order:
     expand the supervariables back into individual vertices
 ```
 
-Four mechanisms, and each is a solution to one of the two problems of 5.1:
+Five mechanisms, and each is a solution to one of the two problems of 5.1:
 
 | mechanism | solves |
 |---|---|
 | quotient graph, element absorption | the graph growing |
 | approximate degree | the degrees being expensive |
-| supervariables | both, by shrinking the graph |
+| supervariables, found by hash | both, by shrinking the graph |
 | mass elimination | both, likewise |
+| aggressive absorption | the graph growing, more of it |
 
-### 5.6 What is intricate, and what is merely old
+Aggressive absorption is the one addition beyond what 5.1 to 5.10 built, and it is nearly free.
+Ordinary absorption kills the elements the *pivot* touched. Aggressive absorption also kills any
+element whose members all lie inside the new one, which is detected by `|L_e \ L| == 0`, a
+quantity the degree bound has just computed anyway. The vendored code makes it optional
+(`Control[AMD_AGGRESSIVE]`), and the pseudocode above assumes it is on: the `degree[i] == 0` test
+for mass elimination is equivalent to the structural test only when it is.
+
+**The two codes give up different kinds of thing**, and the distinction matters more than the
+sizes involved. MMD's pivots are exact. A batch never chooses a vertex that is not of true minimum
+degree, so its ordering moves only because the tie among equally-minimal vertices is broken
+differently (5.11). AMD's pivots are not exact. An overcounted bound can make the true minimum
+look worse than it is, so the wrong vertex can be chosen outright. MMD perturbs; AMD can be wrong.
+
+That the second is not obviously worse in practice is the striking result of the AMD paper, and it
+survives our own measurement. On nine graphs, comparing the prototype against exact minimum degree
+on the same base:
+
+```
+                     exact work   bound work   ratio   bound loose   fill against exact
+2D grid 16x16              3800         1493    2.5x    464 / 1081        -1.84%
+3D grid 6x6x6              7206         2602    2.8x    816 / 1321        +0.47%
+2D grid 12x12              1823          731    2.5x    209 / 571         +1.17%
+random graphs                                2.4-3.0x                  0.00 to +0.26%
+overall                                                                   -0.15%
+```
+
+The middle column is the mechanism: element members walked once per *element* against once per
+*vertex*, and the ratio grows with element size, which is to say with fill, which is to say
+precisely where the cost is. The bound is genuinely loose, on a third to a half of the vertices it
+touches, so this is a real approximation and not a formality. And the fill came out slightly
+*better* than exact on these graphs, which is the same two-sided noise 5.11 found: choosing
+greedily on a bound is a different heuristic, not a degraded one, and its errors are not
+systematically in the bad direction.
+
+**One line in that loop is easy to get wrong**, and it is worth flagging because we got it wrong.
+When `i` is mass-eliminated it joins the pivot's supervariable, so it is no longer *outside* the
+new element and must stop contributing to `|L|`. The vendored code does this at `degme -= nvi`;
+our prototype originally did not, having computed `|L|` once before the loop began. The effect is
+easy to miss: it changes nothing on any of the four graphs of 5.14 and nothing on the grids, and
+it surfaced only on a five-vertex graph where a bound came out one too large. It matters because
+the loop is a single pass, so a mass elimination at one `i` is seen by every later `i` in the same
+pass, and a bound is only worth having if it bounds the right quantity.
+
+**Can the two mechanisms be combined?** They look orthogonal: one decides how often to refresh,
+the other how to compute a refresh, and nothing obviously forbids doing both. The reason they are
+not orthogonal is in the formula above. Every term of the bound subtracts `L`, the element just
+formed, and that subtraction is what makes it tight rather than trivial. It presumes there is
+exactly *one* new element. Batch the pivots and several form at once, a vertex can belong to more
+than one of them, and the bound then needs their union, which is the object the approximation
+exists to avoid computing.
+
+Running one implementation in all four configurations, so that only the two mechanisms vary:
+
+```
+                              work      fill
+exact  + one pivot   (5.9)    1.00x    +0.00%
+exact  + batch       (5.11)   0.94x    +0.38%
+bound  + one pivot   (5.13)   0.14x    -0.98%
+bound  + batch                0.16x   +14.67%
+```
+
+Combining is worse on both axes: fifteen percent more fill than exact minimum degree, and *more*
+work than the bound alone rather than less.
+
+One mechanism explains both failures. The bound stays tight because of its `min` against
+`degree_old[i] + |L \ i|`, where `degree_old[i]` is itself a bound from the last time `i` was
+touched. With one pivot per refresh that chain is re-tightened at every step, since every reached
+vertex is recomputed at once. Batch, and a vertex may be touched by three pivots and refreshed
+once, so bounds accumulate on bounds instead of being reset. Looser bounds then choose worse
+pivots, worse pivots make more fill, more fill makes larger elements, and larger elements are why
+the work rises too. So multiple elimination works by *delaying* refreshes and the approximate
+degree depends on refreshes being *frequent*, which is a genuine conflict and not a coincidence of
+implementation.
+
+**This result is empirical, and worth labeling as such.** It is one implementation of one
+reasonable generalization of the bound, on seven small graphs. The compounding argument explains
+the numbers but does not prove they must come out that way, and a scheme that re-tightened bounds
+inside a batch might do better, though it would have to compute per-vertex unions over the batch's
+elements, which is the expense being avoided. What the measurement does establish is that AMD's
+choice to refresh at every pivot is load-bearing rather than incidental, which is the thing worth
+knowing when reading the code.
+
+**What the prototype implements, and what it does not.** The pseudocode above describes the
+vendored routine. Our `experiments/ordering/amd` is a subset of it, and the gap is recorded here
+rather than only in the file header, so that it can be closed deliberately. The same accounting
+as 5.11's, for the same reason.
+
+Present: the quotient graph with element absorption, the three-way bound above, aggressive
+absorption, mass elimination, hash supervariable detection, and degree buckets. That is enough to
+reproduce the behavior this section describes, which is why the measurements above come from it.
+
+Absent, in two categories. Three are **algorithmic**, and closing them would change the output:
+
+- **The update runs in one pass here and two there.** This is a difference in structure rather
+  than a missing feature, and it is the important one. `Amd.cpp` computes, in a first loop, a
+  bound that deliberately excludes the new element, performing the mass eliminations as it goes
+  and shrinking `|L|` at each one; a *second* loop then adds the **final** `|L|` to every
+  survivor. We fold both into a single pass, so a vertex handled early sees a larger `|L|` than
+  one handled late, where the vendored code gives them all the same value. Since `|L|` only
+  shrinks, our early vertices get looser bounds. Measured on eleven graphs, the two forms give
+  different orderings on four, all of them grids, with fill moving a few tenths of a percent in
+  either direction. One pass is easier to read, which is why the pseudocode above shows it; two
+  is faithful.
+- **Dense-row handling** (`amd_preprocess`, with the `AMD_DENSE` control) removes rows above a
+  density threshold from the ordering entirely and places them last. It changes the result on any
+  matrix that has such rows, and it is the first thing to add if the prototype is ever run on real
+  problems.
+- **The postorder** (`amd_postorder`, `amd_post_tree`) reorders the output within the assembly
+  tree. It leaves the fill alone but changes the permutation, and so changes everything downstream
+  that reads one, our elimination forest included.
+
+The rest are **packaging**, and closing them would change nothing:
+
+- **`amd_aat`** forms `A + A'`, so that unsymmetric input can be ordered on its symmetric pattern.
+  Our prototypes take a symmetric graph directly.
+- **`amd_valid`** checks the input, and **`Control` and `Info`** carry parameters in and
+  statistics out, `aggressive` among them, where we hardcode the choice.
+- **Workspace compression** reclaims the index array when it fills, a memory strategy for a
+  flat-array representation with no counterpart in a prototype built on sets.
+
+### 5.14 A worked example: approximate degree
+
+Two lines carry this section. `bounds` is what the algorithm believes and acts on; `exact` is what
+the degree really is, computed alongside purely so the two can be compared. In a production
+implementation the second line would not exist, which is the whole point of the first.
+
+**graph1.**
+
+```
+start: no elements yet, so nothing to approximate over
+  bounds  = {0: 2, 1: 2, 2: 2, 3: 2}   (exact)
+  exact   = {0: 2, 1: 2, 2: 2, 3: 2}
+  buckets = {2: [0,1,2,3]}   mdeg = 2
+eliminate 0 (bound 2, weight -> 1)   merged = none   absorbed = none
+  bounds  = {0: -, 1: 2, 2: 2, 3: 2}
+  exact   = {0: -, 1: 2, 2: 2, 3: 2}
+  buckets = {2: [1,2,3]}   mdeg = 2
+eliminate 1 (bound 2, weight -> 3)   merged = 2, 3   absorbed = none
+  bounds  = {0: -, 1: -, 2: -, 3: -}
+  exact   = {0: -, 1: -, 2: -, 3: -}
+  buckets = {}   mdeg = 2
+order = [0, 1, 2, 3]
+fill = 1,  bound was loose 0 of 2
+element members an exact degree walks: 0;  element reads used: 0
+```
+
+**graph2.**
+
+```
+start: no elements yet, so nothing to approximate over
+  bounds  = {0: 2, 1: 2, 2: 2, 3: 3, 4: 3, 5: 2}   (exact)
+  exact   = {0: 2, 1: 2, 2: 2, 3: 3, 4: 3, 5: 2}
+  buckets = {2: [0,1,2,5], 3: [3,4]}   mdeg = 2
+eliminate 0 (bound 2, weight -> 1)   merged = none   absorbed = none
+  bounds  = {0: -, 1: 2, 2: 2, 3: 3, 4: 3, 5: 2}
+  exact   = {0: -, 1: 2, 2: 2, 3: 3, 4: 3, 5: 2}
+  buckets = {2: [1,2,5], 3: [3,4]}   mdeg = 2
+eliminate 1 (bound 2, weight -> 1)   merged = none   absorbed = none
+  bounds  = {0: -, 1: -, 2: 2, 3: 3, 4: 3, 5: 2}
+  exact   = {0: -, 1: -, 2: 2, 3: 3, 4: 3, 5: 2}
+  buckets = {2: [2,5], 3: [3,4]}   mdeg = 2
+eliminate 2 (bound 2, weight -> 1)   merged = none   absorbed = none
+  bounds  = {0: -, 1: -, 2: -, 3: 2, 4: 2, 5: 2}
+  exact   = {0: -, 1: -, 2: -, 3: 2, 4: 2, 5: 2}
+  buckets = {2: [3,4,5]}   mdeg = 2
+eliminate 3 (bound 2, weight -> 3)   merged = 4, 5   absorbed = none
+  bounds  = {0: -, 1: -, 2: -, 3: -, 4: -, 5: -}
+  exact   = {0: -, 1: -, 2: -, 3: -, 4: -, 5: -}
+  buckets = {}   mdeg = 2
+order = [0, 1, 2, 3, 4, 5]
+fill = 2,  bound was loose 0 of 6
+element members an exact degree walks: 0;  element reads used: 0
+```
+
+**graph3.**
+
+```
+start: no elements yet, so nothing to approximate over
+  bounds  = {0: 3, 1: 4, 2: 3, 3: 3, 4: 2, 5: 4, 6: 4, 7: 2, 8: 4, 9: 3,
+             10: 3, 11: 1}   (exact)
+  exact   = {0: 3, 1: 4, 2: 3, 3: 3, 4: 2, 5: 4, 6: 4, 7: 2, 8: 4, 9: 3,
+             10: 3, 11: 1}
+  buckets = {1: [11], 2: [4,7], 3: [0,2,3,9,10], 4: [1,5,6,8]}   mdeg = 1
+eliminate 11 (bound 1, weight -> 1)   merged = none   absorbed = none
+  bounds  = {0: 3, 1: 4, 2: 3, 3: 3, 4: 2, 5: 4, 6: 4, 7: 2, 8: 4, 9: 3,
+             10: 2, 11: -}
+  exact   = {0: 3, 1: 4, 2: 3, 3: 3, 4: 2, 5: 4, 6: 4, 7: 2, 8: 4, 9: 3,
+             10: 2, 11: -}
+  buckets = {2: [4,7,10], 3: [0,2,3,9], 4: [1,5,6,8]}   mdeg = 1
+eliminate 4 (bound 2, weight -> 1)   merged = none   absorbed = none
+  bounds  = {0: 3, 1: 4, 2: 3, 3: 3, 4: -, 5: 4, 6: 4, 7: 2, 8: 4, 9: 3,
+             10: 2, 11: -}
+  exact   = {0: 3, 1: 4, 2: 3, 3: 3, 4: -, 5: 4, 6: 4, 7: 2, 8: 4, 9: 3,
+             10: 2, 11: -}
+  buckets = {2: [7,10], 3: [0,2,3,9], 4: [1,5,6,8]}   mdeg = 2
+eliminate 7 (bound 2, weight -> 1)   merged = none   absorbed = none
+  bounds  = {0: 3, 1: 4, 2: 3, 3: 3, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: 2, 11: -}
+  exact   = {0: 3, 1: 4, 2: 3, 3: 3, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: 2, 11: -}
+  buckets = {2: [10], 3: [0,2,3,9], 4: [1,5,6,8]}   mdeg = 2
+eliminate 10 (bound 2, weight -> 1)   merged = none   absorbed = none
+  bounds  = {0: 3, 1: 4, 2: 3, 3: 3, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: -, 11: -}
+  exact   = {0: 3, 1: 4, 2: 3, 3: 3, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: -, 11: -}
+  buckets = {3: [0,2,3,9], 4: [1,5,6,8]}   mdeg = 2
+eliminate 0 (bound 3, weight -> 1)   merged = none   absorbed = none
+  bounds  = {0: -, 1: 4, 2: 3, 3: 4, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: -, 11: -}
+  exact   = {0: -, 1: 4, 2: 3, 3: 4, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: -, 11: -}
+  buckets = {3: [2,9], 4: [1,3,5,6,8]}   mdeg = 3
+eliminate 2 (bound 3, weight -> 1)   merged = none   absorbed = c4
+  bounds  = {0: -, 1: 4, 2: -, 3: 3, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: -, 11: -}
+  exact   = {0: -, 1: 4, 2: -, 3: 3, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: -, 11: -}
+  buckets = {3: [3,9], 4: [1,5,6,8]}   mdeg = 3
+eliminate 3 (bound 3, weight -> 1)   merged = none   absorbed = none
+  bounds  = {0: -, 1: 3, 2: -, 3: -, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: -, 11: -}
+  exact   = {0: -, 1: 3, 2: -, 3: -, 4: -, 5: 4, 6: 4, 7: -, 8: 4, 9: 3,
+             10: -, 11: -}
+  buckets = {3: [1,9], 4: [5,6,8]}   mdeg = 3
+eliminate 1 (bound 3, weight -> 1)   merged = none   absorbed = c7
+  bounds  = {0: -, 1: -, 2: -, 3: -, 4: -, 5: 3, 6: 3, 7: -, 8: 3, 9: 3,
+             10: -, 11: -}
+  exact   = {0: -, 1: -, 2: -, 3: -, 4: -, 5: 3, 6: 3, 7: -, 8: 3, 9: 3,
+             10: -, 11: -}
+  buckets = {3: [5,6,8,9]}   mdeg = 3
+eliminate 5 (bound 3, weight -> 4)   merged = 6, 8, 9   absorbed = c10
+  bounds  = {0: -, 1: -, 2: -, 3: -, 4: -, 5: -, 6: -, 7: -, 8: -, 9: -,
+             10: -, 11: -}
+  exact   = {0: -, 1: -, 2: -, 3: -, 4: -, 5: -, 6: -, 7: -, 8: -, 9: -,
+             10: -, 11: -}
+  buckets = {}   mdeg = 3
+order = [11, 4, 7, 10, 0, 2, 3, 1, 5, 6, 8, 9]
+fill = 7,  bound was loose 0 of 19
+element members an exact degree walks: 19;  element reads used: 7
+```
+
+**And on all three, the two lines never differ.** The bound is not merely close, it is exact at
+every step, and the last line of each trace says so: loose 0 of 2, 0 of 6, 0 of 19. A reader who
+stopped here would have watched the whole of AMD's machinery, the elements, the absorptions, the
+mass eliminations, and never once seen it approximate anything.
+
+That is not an accident of these particular graphs, and the reason is the useful part. The sum
+overcounts only when a vertex belongs to **two elements that overlap outside the new one**. That
+needs enough eliminations to have created several live elements, and enough fill for them to
+intersect. Small sparse graphs do not get there: a vertex usually has at most one element, and a
+sum with one term is a union with one term. Checking exhaustively, **no connected graph on five or
+six vertices has a loose bound anywhere in its run**, and a sample of thirty thousand on seven
+vertices found none either.
+
+So the fourth graph exists for this section. Eight vertices, fourteen edges, the smallest we
+found on which the bound is ever wrong.
+
+**graph4.**
+
+```
+start: no elements yet, so nothing to approximate over
+  bounds  = {0: 4, 1: 4, 2: 3, 3: 5, 4: 3, 5: 3, 6: 3, 7: 3}   (exact)
+  exact   = {0: 4, 1: 4, 2: 3, 3: 5, 4: 3, 5: 3, 6: 3, 7: 3}
+  buckets = {3: [2,4,5,6,7], 4: [0,1], 5: [3]}   mdeg = 3
+eliminate 2 (bound 3, weight -> 1)   merged = none   absorbed = none
+  bounds  = {0: 4, 1: 4, 2: -, 3: 5, 4: 3, 5: 4, 6: 3, 7: 3}
+  exact   = {0: 4, 1: 4, 2: -, 3: 5, 4: 3, 5: 4, 6: 3, 7: 3}
+  buckets = {3: [4,6,7], 4: [0,1,5], 5: [3]}   mdeg = 3
+eliminate 4 (bound 3, weight -> 1)   merged = none   absorbed = none
+  bounds  = {0: 4, 1: 5, 2: -, 3: 5, 4: -, 5: 4, 6: 3, 7: 3}
+  exact   = {0: 4, 1: 5, 2: -, 3: 5, 4: -, 5: 4, 6: 3, 7: 3}
+  buckets = {3: [6,7], 4: [0,5], 5: [1,3]}   mdeg = 3
+eliminate 6 (bound 3, weight -> 1)   merged = none   absorbed = none
+  bounds  = {0: 4, 1: 4, 2: -, 3: 4, 4: -, 5: 4, 6: -, 7: 3}
+  exact   = {0: 4, 1: 4, 2: -, 3: 4, 4: -, 5: 3, 6: -, 7: 3}
+  buckets = {3: [7], 4: [0,1,3,5]}   mdeg = 3
+eliminate 7 (bound 3, weight -> 1)   merged = none   absorbed = none
+  bounds  = {0: 3, 1: 3, 2: -, 3: 3, 4: -, 5: 4, 6: -, 7: -}
+  exact   = {0: 3, 1: 3, 2: -, 3: 3, 4: -, 5: 3, 6: -, 7: -}
+  buckets = {3: [0,1,3], 4: [5]}   mdeg = 3
+eliminate 0 (bound 3, weight -> 4)   merged = 1, 3, 5   absorbed = c6
+  bounds  = {0: -, 1: -, 2: -, 3: -, 4: -, 5: -, 6: -, 7: -}
+  exact   = {0: -, 1: -, 2: -, 3: -, 4: -, 5: -, 6: -, 7: -}
+  buckets = {}   mdeg = 3
+order = [2, 4, 6, 7, 0, 1, 3, 5]
+fill = 4,  bound was loose 1 of 12
+element members an exact degree walks: 21;  element reads used: 12
+```
+
+The divergence is at the third elimination. After `6` goes, vertex `5` is credited with a bound of
+4 while its true degree is 3:
+
+```
+  bounds  = {0: 4, 1: 4, 2: -, 3: 4, 4: -, 5: 4, 6: -, 7: 3}
+  exact   = {0: 4, 1: 4, 2: -, 3: 4, 4: -, 5: 3, 6: -, 7: 3}
+                                          ^
+```
+
+Vertex `5` sits in two elements by then, and they share a vertex outside the element just formed.
+The union counts it once and the sum counts it twice, which is exactly the overcount the third
+line of the bound admits to. One vertex, one step, one too many.
+
+Note what does *not* go wrong. The bound is never too small, which is what makes it safe to use:
+an upper bound can make a vertex look worse than it is and cost us a good pivot, but it can never
+make one look better than it is and tempt us into a bad one. And on this graph the error changes
+nothing that matters, since `amd` returns the same fill as every earlier layer.
+
+**Which is the section in miniature.** The approximation is invisible on small graphs, appears
+only once fill has accumulated, and even then usually costs nothing. Its looseness rate tracks
+density directly: 0 percent here on `graph1` to `graph3`, about 8 percent on `graph4`, 37 percent
+on a 2D grid, 62 percent on a 3D one. And the *saving* tracks the same quantity, since both grow
+with element size. The approximation bites hardest exactly where it saves the most, which is why
+it is worth making.
+
+### 5.15 What is intricate, and what is merely old
+
+We vendor two codes, and both are long for the same two reasons, an intricate algorithm and a
+fifty-year-old encoding, in different proportions. The split matters because the two causes have
+opposite implications for a rewrite: one is worth preserving and the other only worth deleting.
+Take AMD first, the larger.
 
 The vendored SuiteSparse AMD is about 1200 lines of code (plus 990 of comment) in essentially one
-function. It is worth being exact about where that goes, because the two causes have very
-different implications for a rewrite.
+function. It is worth being exact about where that goes.
 
 **Inherent, and no style will remove it:**
 
@@ -2777,6 +5312,20 @@ So the code is long *both* because the mechanisms are intricate *and* because th
 fifty years old. Only the first is worth preserving. A legible version keeps every mechanism above
 and loses every item in the second list, and the honest expectation is that it lands at a few
 hundred lines and can be read.
+
+MMD sits at a different point on both axes, and the contrast is instructive. Its inherent core is
+if anything lighter: it keeps the quotient graph and mass elimination but drops the two subtlest
+mechanisms above, the approximate degree bound and supervariable hashing, because it computes the
+exact degree and detects indistinguishable vertices structurally during the batch update rather
+than by hash. What it adds in their place, multiple elimination, is a batching loop, not a data
+structure. The encoding, though, is more concentrated, not less: some 160 lines of algorithm with
+none of AMD's near-thousand lines of comment, the Sparspak transliteration entire, numeric goto
+labels, the pointer decrement that fakes one-based indexing, sentinel-tagged state, and variables
+hoisted to a function's top only to dodge a goto crossing their initialization. The one
+archaeological burden it escapes is the garbage collector: MMD compacts each adjacency list in
+place as it eliminates, so it needs no separate compaction pass, and that absence is most of why it
+is a couple hundred lines rather than two thousand. Between a simpler algorithm to keep and a
+shorter, if denser, text to replace, MMD is the more approachable of the two to rewrite first.
 
 The risk, which is real: a rewrite must produce **the same permutation**, or the fill changes and
 every downstream measurement drifts. That equivalence is the thing that makes it a piece of work
@@ -2836,8 +5385,8 @@ knowledge and are worth a spot-check against the originals.
   used by Oblio (2.4); single-triangle storage in the other orientation is transposed
   first.
 
-**Ordering (not covered above, but it is what feeds the forest).** The doc takes a permutation
-as given; producing a good one is a subject of its own, and the two we vendor come from here.
+**Ordering (Section 5).** The two orderings we vendor, MMD and AMD, come from this lineage; the
+primary sources for each, in the order Section 5 builds them.
 
 - W. F. Tinney and J. W. Walker, "Direct solutions of sparse network equations by optimally
   ordered triangular factorization", *Proc. IEEE* 55(11):1801-1809, 1967. The origin of minimum
@@ -2855,6 +5404,10 @@ as given; producing a good one is a subject of its own, and the two we vendor co
   *SIAM J. Matrix Anal. Appl.* 17(4):886-905, 1996. AMD. The idea is to bound the degree instead
   of computing it, which turns the expensive step into a cheap one and, surprisingly, does not
   hurt the ordering.
+- P. R. Amestoy, T. A. Davis, and I. S. Duff, "Algorithm 837: AMD, an approximate minimum degree
+  ordering algorithm", *ACM Trans. Math. Software* 30(3):381-388, 2004. The software paper for the
+  SuiteSparse code we vendor (`src/Amd.cpp`); the 1996 entry above is the algorithm, this is the
+  implementation.
 - T. A. Davis, *Direct Methods for Sparse Linear Systems*, SIAM, 2006, chapter 7. Davis's own
   compact AMD (`cs_amd`), several times shorter than the SuiteSparse implementation. **The
   shortness is in the surrounding machinery, not the algorithm**: statistics, control parameters,

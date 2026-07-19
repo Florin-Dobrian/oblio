@@ -51,6 +51,13 @@ public:
     void      setTraversal(Traversal traversal) { mTraversal = traversal; }
     Traversal traversal() const                 { return mTraversal; }
 
+    // The threshold for accepting a 1x1 (or 2x2) pivot in dynamic LDL: a candidate pivots in place
+    // only if its magnitude is at least this fraction of the largest off-diagonal in its column,
+    // otherwise it is delayed to an ancestor. 0.9's default, in (0, 1]; smaller delays fewer
+    // columns (less fill) at the cost of stability.
+    void   setPivotThreshold(double t) { mPivotThreshold = t; }
+    double pivotThreshold() const      { return mPivotThreshold; }
+
     // The perturbation threshold, for LDL only.
     //
     // A static factorization does not pivot, so a pivot smaller than this has no remedy: it is
@@ -78,6 +85,7 @@ public:
 private:
     Factorization mFactorization = Factorization::Cholesky;
     Traversal     mTraversal     = Traversal::LeftLooking;
+    double        mPivotThreshold = 0.1;
     double        mPerturbation  = 1e-14;
 
     // Copy the structure from SymFactor and allocate the value blocks, zeroed. Every traversal
@@ -90,7 +98,7 @@ private:
     void setSymFactor(const SymFactor& sf, NumFactorStatic<Val>& nf) const;
 
     // The dynamic twin: same structure copied, but the value blocks are one vector per supernode
-    // rather than offsets into one buffer, so a front can later grow without moving its neighbours.
+    // rather than offsets into one buffer, so a front can later grow without moving its neighbors.
     template<class Val>
     void setSymFactor(const SymFactor& sf, NumFactorDynamic<Val>& nf) const;
 
@@ -161,6 +169,21 @@ private:
     template<class Val, class Factor>
     bool factorRightLooking(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& sf,
                             Factor& nf) const;
+
+    // Dynamic LDL, left-looking. Slice 1: the pivot kernel and a single-supernode driver, so a
+    // dense front exercises the Bunch-Kaufman 1x1/2x2 selection and delaying in isolation. The
+    // delayed-column machinery across a real forest (pass 2, updateDynamicLDL, the delayed
+    // assembles) follows.
+    template<class Val>
+    bool factorDynamicLeftLooking(const SparseMatrix<Val>& A, const Permutation& p,
+                                  const SymFactor& sf, NumFactorDynamic<Val>& nf) const;
+
+    // Factor one supernode's dense front in place with threshold pivoting, delaying the columns it
+    // cannot pivot to an ancestor. Records pivotType (1 / 2,3), numberOfDelayedColumns, and reduces
+    // frontSize by the number delayed. Ported from 0.9 factorDynamicLDL_ (updateSize == 0 pass).
+    template<class Val>
+    bool factorDynamicLDL(NumFactorDynamic<Val>& nf, std::int32_t jj,
+                          std::vector<std::int32_t>& gblToLcl) const;
 };
 
 } // namespace Oblio

@@ -8,9 +8,9 @@
 //   rowIdx — size nnz(); row indices, sorted ascending within each column
 //   val    — size nnz(); the corresponding values
 // A symmetric matrix is stored FULLY (both triangles), matching Oblio 0.9/10.12:
-// each column holds its complete neighbour list plus the diagonal. Full storage
+// each column holds its complete neighbor list plus the diagonal. Full storage
 // lets the structural phases (ordering, elimination forest, symbolic) read each
-// column's neighbours directly, with no lower->full expansion, and is the natural
+// column's neighbors directly, with no lower->full expansion, and is the natural
 // substrate for a future unsymmetric extension (factor the symmetrized structure).
 // Values are carried but unused by the structural phases.
 //

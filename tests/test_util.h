@@ -87,7 +87,7 @@ denseFactorPattern(const Oblio::SparseMatrix<Val>& A, const Oblio::Permutation& 
 // exactly when k has one child and the two columns share a sparsity pattern, which for
 // the nodal case means |pattern(j)| == |pattern(k)| + 1.
 //
-// Returns the column -> supernode map, labelled by the same rule the engine uses: scan
+// Returns the column -> supernode map, labeled by the same rule the engine uses: scan
 // columns in increasing order, a column joining its child keeps that child's label, a
 // column starting a supernode takes the next free label. Sharing no code path with the
 // engine, this checks the merge decisions and the labelling independently.

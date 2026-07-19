@@ -531,7 +531,7 @@ out at each call site.
 
 ### The choice matrix is sparse. Enumerate its nonzeros, not the product.
 
-The obvious modelling of "what do we factor" is a product:
+The obvious modeling of "what do we factor" is a product:
 
 ```
 (Cholesky, LDL)  x  (transpose, conjugate-transpose)   ->  four combinations
@@ -1357,7 +1357,7 @@ Two kinds of integer, two types:
 
 **Why signed int32 for IDs.** The forcing function was the sentinel. The forest needs a
 "no parent"/"no child" marker; on an unsigned `std::size_t` that can only be the max
-value, spelled `static_cast<std::size_t>(-1)`, defined behaviour but an ugly wraparound
+value, spelled `static_cast<std::size_t>(-1)`, defined behavior but an ugly wraparound
 smell, and easy to misuse in arithmetic. A signed `std::int32_t` gives a clean, obvious
 `-1`. This also matches (a) the graph code, which already uses `int32_t` vertex IDs with
 `static const int NIL = -1;` so companion arrays like `mate` hold `-1` naturally, and (b)
@@ -1371,7 +1371,7 @@ matrices past 2^31 structural indices for now. If that changes, widen the ID typ
 2^31 even when the index *count* does not: a row-pointer is a position into an `nnz`-length
 array, and `nnz` outgrows `n`. So positions keep the full unsigned range and never carry a
 sentinel. This mirrors the graph's `GeneralGraph` exactly: `idx` (the row-pointer) is `size_t`,
-`adj` (the neighbour indices) is `int32_t`.
+`adj` (the neighbor indices) is `int32_t`.
 
 (CODING_RULES now calls these **indices** and **positions** rather than IDs and offsets, and
 bans the phrase "index into a vector": `index` names a matrix or graph entity, and reusing it
@@ -1443,7 +1443,7 @@ The engine↔data access rule:
 `Matrix` (input A) stores its structure and values as flat **compressed sparse column
 (CSC)**: three contiguous `std::vector`s, `colPtr` (size+1), `rowIdx` (nnz), `val`
 (nnz), row indices sorted ascending per column. A symmetric matrix is stored **fully
-(both triangles)**, each column holding its complete neighbour list plus the diagonal.
+(both triangles)**, each column holding its complete neighbor list plus the diagonal.
 
 Storage layout (flat CSC vs vector-of-vectors) and triangle (full vs lower) are two
 separate decisions:
@@ -1459,13 +1459,13 @@ separate decisions:
 **Triangle, full, not lower.** Both 0.9 and 10.12 store A **fully**: 0.9's
 `getNumberOfNonzeroEntries() = size + 2*numOffDiagonals` (each off-diagonal in both
 triangles) and its "storing A within the structure of A+Aᵀ"; 10.12 has `SymmetrizeStrc`
-and its etree reads full per-column neighbour lists. The **PoC diverged**, storing the
+and its etree reads full per-column neighbor lists. The **PoC diverged**, storing the
 lower triangle only ("stored as lower triangle in CSC"). That divergence is what forced
 every structural consumer to expand lower→full first (the MMD path in `OrderEngine`, the
 etree in `ElmForestEngine`), and the etree bug where lower-triangle input silently
 produced an empty tree until expansion was added. **The port matches the oracle: A is
 stored fully.** Consequences: structural phases (ordering, elimination forest, symbolic)
-read each column's neighbours directly with no expansion (the etree's diagonal
+read each column's neighbors directly with no expansion (the etree's diagonal
 self-skips via `lc1 < lc2`; MMD just strips the diagonal; AMD ignores it); it's the
 faithful port (lower-triangle was a rewrite of the data structure); and it's the natural
 substrate for a future **unsymmetric extension**, factor the symmetrized structure
@@ -1734,7 +1734,7 @@ Conceptual framing (two axes):
 
 All three are built and tested together via the example's `Makefile` (`make test`)
 against one shared source, `test_multiply.cpp`, they must produce identical
-results, and the plain explicit and guarded explicit variants share the same link-failure behaviour when
+results, and the plain explicit and guarded explicit variants share the same link-failure behavior when
 their `.cpp` files are omitted (empirical confirmation that with declaration-only
 headers `extern template` suppresses nothing, it is documentation, not mechanism).
 Selector macros: `OBLIO_TI_IMPLICIT` / `OBLIO_TI_PLAIN_EXPLICIT` /

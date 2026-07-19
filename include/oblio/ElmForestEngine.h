@@ -7,7 +7,7 @@
 // Reads the matrix/permutation via their public accessors and fills the forest
 // via friend access.
 //
-// A is stored full-symmetric, so the etree reads each column's neighbours
+// A is stored full-symmetric, so the etree reads each column's neighbors
 // directly (the diagonal self-skips) — no expansion step.
 
 #include "oblio/SparseMatrix.h"

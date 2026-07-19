@@ -4,7 +4,9 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <list>
+#include <type_traits>
 #include <utility>
 
 namespace Oblio {
@@ -72,18 +74,28 @@ void NumFactorEngine::setSymFactor(const SymFactor& sf, NumFactorDynamic<Val>& n
     nf.mFactorization = mFactorization;
 
     // The structure, copied, exactly as for the static factor.
-    nf.mNodeToSnode     = sf.nodeToSnode();
-    nf.mFrontSize       = sf.frontSize();
-    nf.mUpdateSize      = sf.updateSize();
-    nf.mNumNodeIdx      = sf.numNodeIdx();
-    nf.mSnodeNodeIdxPtr = sf.snodePtr();
-    nf.mNodeIdx         = sf.nodeIdx();
+    nf.mNodeToSnode = sf.nodeToSnode();
+    nf.mFrontSize   = sf.frontSize();
+    nf.mUpdateSize  = sf.updateSize();
 
-    // The value blocks. Same shape as the static factor, indexSize rows by frontSize columns, but
-    // one vector per supernode rather than offsets into one flat buffer, so a front can later grow
-    // without moving its neighbours. Each zeroed, because assembly adds into it.
+    // No columns delayed and no pivots chosen yet: dynamic LDL fills these as it runs, and a static
+    // factorization into this storage leaves them untouched. pivotType is per column, the rest per
+    // supernode.
+    nf.mNumberOfDelayedColumns.assign(nf.mSnodeSize, 0);
+    nf.mPivotType.assign(nf.mSize, 0);
+
+    // The index sets and value blocks, one vector per supernode so a front can later grow without
+    // moving its neighbors. The index set is copied from SymFactor's flat buffer, sliced per
+    // supernode; each block is indexSize rows by frontSize columns, zeroed because assembly adds
+    // into it.
+    const std::vector<std::int32_t>& sfNodeIdx  = sf.nodeIdx();
+    const std::vector<std::size_t>&  sfSnodePtr = sf.snodePtr();
+    nf.mNodeIdx.resize(nf.mSnodeSize);
     nf.mVal.resize(nf.mSnodeSize);
     for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(nf.mSnodeSize); ++kk) {
+        nf.mNodeIdx[kk].assign(sfNodeIdx.begin() + static_cast<std::ptrdiff_t>(sfSnodePtr[kk]),
+                               sfNodeIdx.begin() + static_cast<std::ptrdiff_t>(sfSnodePtr[kk + 1]));
+
         const std::size_t numNodeIdx = nf.mFrontSize[kk] + nf.mUpdateSize[kk];
         nf.mVal[kk].assign(numNodeIdx * nf.mFrontSize[kk], Val(0));
     }
@@ -409,6 +421,196 @@ bool NumFactorEngine::factorRightLooking(const SparseMatrix<Val>& A, const Permu
 }
 
 template<class Val>
+bool NumFactorEngine::factorDynamicLDL(NumFactorDynamic<Val>& nf, std::int32_t jj,
+                                       std::vector<std::int32_t>& gblToLcl) const {
+    Val*          block = nf.valPtr(jj);
+    std::int32_t* idx   = nf.mNodeIdx[jj].data();
+
+    const std::int32_t   jjFrontSize = static_cast<std::int32_t>(nf.mFrontSize[jj]);
+    const std::int32_t   rows        = jjFrontSize + static_cast<std::int32_t>(nf.mUpdateSize[jj]);
+    const std::ptrdiff_t ld          = rows;
+    const double         threshold   = mPivotThreshold;
+
+    // Column-major position of (row r, column c), in ptrdiff_t to avoid overflow.
+    const auto at = [ld](std::int32_t r, std::int32_t c) {
+        return static_cast<std::ptrdiff_t>(c) * ld + static_cast<std::ptrdiff_t>(r);
+    };
+
+    // The candidate pivot columns, by global index, in front order.
+    std::list<std::int32_t> pivotList;
+    for (std::int32_t j_ = 0; j_ < jjFrontSize; ++j_)
+        pivotList.push_back(idx[j_]);
+
+    std::int32_t j_ = 0;
+
+    while (!pivotList.empty()) {
+        bool         pivotFound = false;
+        std::int32_t trials     = static_cast<std::int32_t>(pivotList.size());
+
+        while (trials > 0) {
+            const std::int32_t k1  = pivotList.front(); pivotList.pop_front();
+            const std::int32_t k1_ = gblToLcl[k1];
+
+            if (pivotList.empty()) {                    // only candidate left: a forced 1x1
+                pivotFound = true;
+                nf.mPivotType[k1] = 1;
+                ++j_;
+                break;
+            }
+
+            // max1 = k1's largest off-diagonal magnitude (its row on the left, its column below);
+            // k2_ the local row where it occurs.
+            std::int32_t k2_  = -1;
+            double       max1 = -1;
+            for (std::int32_t i_ = j_; i_ < k1_; ++i_)
+                if (max1 < std::abs(block[at(k1_, i_)])) { k2_ = i_; max1 = std::abs(block[at(k1_, i_)]); }
+            for (std::int32_t i_ = k1_ + 1; i_ < rows; ++i_)
+                if (max1 < std::abs(block[at(i_, k1_)])) { k2_ = i_; max1 = std::abs(block[at(i_, k1_)]); }
+
+            const Val diagonal1 = block[at(k1_, k1_)];
+
+            if (max1 == 0) {                            // isolated column: 1x1, nothing to eliminate
+                pivotFound = true;
+                if (j_ != k1_) nf.swap(jj, j_, k1_, gblToLcl);
+                nf.mPivotType[k1] = 1;
+                ++j_;
+                break;
+            }
+
+            if (std::abs(diagonal1) > 0 && std::abs(diagonal1) >= threshold * max1) {   // accept 1x1
+                pivotFound = true;
+                if (j_ != k1_) nf.swap(jj, j_, k1_, gblToLcl);
+
+                for (std::int32_t i_ = j_ + 1; i_ < rows; ++i_)               // L column: divide by pivot
+                    block[at(i_, j_)] /= diagonal1;
+
+                for (std::int32_t k_ = j_ + 1; k_ < jjFrontSize; ++k_)        // D L^T row, in the upper part
+                    block[at(j_, k_)] = block[at(j_, j_)] * block[at(k_, j_)];
+
+                for (std::int32_t k_ = j_ + 1; k_ < jjFrontSize; ++k_)        // rank-1 trailing update
+                    for (std::int32_t i_ = k_; i_ < rows; ++i_)
+                        block[at(i_, k_)] -= block[at(i_, j_)] * block[at(j_, k_)];
+
+                nf.mPivotType[k1] = 1;
+                ++j_;
+                break;
+            }
+            else {                                      // try a 2x2 with k1 and its max partner k2
+                const std::int32_t k2 = idx[k2_];
+
+                double max2 = -1;
+                for (std::int32_t i_ = j_; i_ < k2_; ++i_)
+                    if (max2 < std::abs(block[at(k2_, i_)])) max2 = std::abs(block[at(k2_, i_)]);
+                for (std::int32_t i_ = k2_ + 1; i_ < rows; ++i_)
+                    if (max2 < std::abs(block[at(i_, k2_)])) max2 = std::abs(block[at(i_, k2_)]);
+
+                const Val diagonal11 = block[at(k1_, k1_)];
+                const Val diagonal22 = block[at(k2_, k2_)];
+                const Val diagonal21 = (k2_ > k1_) ? block[at(k2_, k1_)] : block[at(k1_, k2_)];
+                const Val diagonal12 = diagonal21;
+                const Val diagonal2  = diagonal11 * diagonal22 - diagonal12 * diagonal21;
+
+                if (max1 == max2) {                     // accept 2x2
+                    pivotFound = true;
+                    pivotList.remove(k2);
+
+                    const std::int32_t j1_ = j_;
+                    const std::int32_t j2_ = j_ + 1;
+
+                    if (k1_ < k2_) {
+                        if (!(j1_ == k1_ && j2_ == k2_)) {
+                            if (j1_ != k1_) nf.swap(jj, j1_, k1_, gblToLcl);
+                            nf.swap(jj, j2_, k2_, gblToLcl);
+                        }
+                    } else {
+                        if (j1_ == k2_ && j2_ == k1_) {
+                            nf.swap(jj, j1_, j2_, gblToLcl);
+                        } else {
+                            if (j2_ != k2_) nf.swap(jj, j2_, k2_, gblToLcl);
+                            nf.swap(jj, j1_, k1_, gblToLcl);
+                        }
+                    }
+
+                    block[at(j1_, j2_)] = diagonal12;   // the 2x2 off-diagonal, kept in the upper part
+
+                    for (std::int32_t i_ = j1_ + 2; i_ < rows; ++i_) {        // L columns: solve against D
+                        const Val t1 = block[at(i_, j1_)];
+                        const Val t2 = block[at(i_, j2_)];
+                        block[at(i_, j1_)] = (t1 * diagonal22 - t2 * diagonal21) / diagonal2;
+                        block[at(i_, j2_)] = (t2 * diagonal11 - t1 * diagonal12) / diagonal2;
+                    }
+
+                    for (std::int32_t k_ = j1_ + 2; k_ < jjFrontSize; ++k_) { // D L^T rows, in the upper part
+                        block[at(j1_, k_)] = diagonal11 * block[at(k_, j1_)] + diagonal12 * block[at(k_, j2_)];
+                        block[at(j2_, k_)] = diagonal21 * block[at(k_, j1_)] + diagonal22 * block[at(k_, j2_)];
+                    }
+
+                    for (std::int32_t k_ = j1_ + 2; k_ < jjFrontSize; ++k_)   // rank-2 trailing update
+                        for (std::int32_t i_ = k_; i_ < rows; ++i_)
+                            block[at(i_, k_)] -= block[at(i_, j1_)] * block[at(j1_, k_)];
+                    for (std::int32_t k_ = j2_ + 1; k_ < jjFrontSize; ++k_)
+                        for (std::int32_t i_ = k_; i_ < rows; ++i_)
+                            block[at(i_, k_)] -= block[at(i_, j2_)] * block[at(j2_, k_)];
+
+                    nf.mPivotType[k1] = 2;
+                    nf.mPivotType[k2] = 3;
+                    j_ += 2;
+                    break;
+                }
+                else {                                  // neither k1 nor the 2x2 acceptable: delay k1
+                    pivotList.push_back(k1);
+                }
+            }
+
+            --trials;
+        }
+
+        if (!pivotFound)
+            break;
+    }
+
+    // Whatever is left could not be pivoted here; delay it to an ancestor. frontSize shrinks by that
+    // count, and the block height (frontSize + numberOfDelayedColumns + updateSize) is preserved.
+    const std::int32_t delayed = static_cast<std::int32_t>(pivotList.size());
+    nf.mNumberOfDelayedColumns[jj] = delayed;
+    nf.mFrontSize[jj] -= static_cast<std::size_t>(delayed);
+
+    return true;
+}
+
+template<class Val>
+bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const Permutation& p,
+                                               const SymFactor& sf, NumFactorDynamic<Val>& nf) const {
+    setSymFactor(sf, nf);
+
+    const std::int32_t snodeSize = static_cast<std::int32_t>(nf.snodeSize());
+
+    // Slice 1: dense fronts only. A supernode with update rows needs the forest driver (pass 2,
+    // updateDynamicLDL, the delayed assembles), which is the next slice.
+    for (std::int32_t kk = 0; kk < snodeSize; ++kk)
+        if (nf.updateSize(kk) != 0)
+            return false;
+
+    std::vector<std::int32_t> gblToLcl(nf.size(), NIL);
+
+    for (std::int32_t kk = 0; kk < snodeSize; ++kk) {
+        const std::size_t   numNodeIdx = nf.frontSize(kk) + nf.updateSize(kk);
+        const std::int32_t* nodeIdx    = nf.nodeIdxPtr(kk);
+        Val*                block      = nf.valPtr(kk);
+
+        setGlobalToLocal(numNodeIdx, nodeIdx, gblToLcl);
+        const bool ok = assembleFromA(A, p, gblToLcl, nf.frontSize(kk), numNodeIdx, nodeIdx, block)
+                        && factorDynamicLDL(nf, kk, gblToLcl)
+                        && nf.numberOfDelayedColumns(kk) == 0;   // no ancestor to take a delay in slice 1
+        clearGlobalToLocal(numNodeIdx, nodeIdx, gblToLcl);
+        if (!ok)
+            return false;
+    }
+
+    return true;
+}
+
+template<class Val>
 bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& sf,
                               NumFactorStatic<Val>& nf) const {
     if (A.size() != p.size() || A.size() != sf.size())
@@ -445,18 +647,23 @@ bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, 
     if (A.size() != p.size() || A.size() != sf.size())
         return false;
 
-    // The static factorizations run unchanged into per-supernode storage: same traversals, same
-    // kernels, only the block addresses differ. Dynamic LDL, which needs this storage to grow a
-    // front under a delayed pivot, is next; until then its cases are refused here as *not yet*,
-    // unlike the static overload, where they are refused permanently (a flat buffer cannot grow).
+    // Dynamic LDL is the reason this storage exists. Slice 1 handles it for real, left-looking,
+    // dense-front inputs; everything else (complex, LDLH, right-looking, multifrontal, and forests
+    // with real delaying) is still not yet. The static factorizations run unchanged, below.
+    if (mFactorization == Factorization::DynamicLDLT || mFactorization == Factorization::DynamicLDLH) {
+        if constexpr (std::is_same_v<Val, double>)
+            if (mFactorization == Factorization::DynamicLDLT && mTraversal == Traversal::LeftLooking)
+                return factorDynamicLeftLooking(A, p, sf, nf);
+        return false;
+    }
+
     switch (mFactorization) {
         case Factorization::Cholesky:
         case Factorization::StaticLDLT:
         case Factorization::StaticLDLH:
             break;
-        case Factorization::DynamicLDLT:
-        case Factorization::DynamicLDLH:
-            return false;   // not implemented yet
+        default:
+            return false;
     }
 
     switch (mTraversal) {

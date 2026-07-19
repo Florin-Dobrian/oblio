@@ -84,7 +84,7 @@ public:
     // Where supernode kk's node indices start. One vector per supernode (not a flat buffer as in
     // the static factor), so a delayed column can grow the set; the signature is the same either
     // way, and the engines cannot tell which storage they are reading.
-    const std::int32_t* nodeIdxPtr(std::int32_t kk) const { return mNodeIdx[kk].data(); }
+    const std::int32_t* nodeIdx(std::int32_t kk) const { return mNodeIdx[kk].data(); }
 
     // Where supernode kk's dense block lives. The static factor's counterpart computes an offset
     // into one flat buffer; this one hands over the column's own vector. Same question, same
@@ -96,12 +96,12 @@ public:
     // **Call it at the moment of use, never hoist it.** Here the warning is not theoretical: a
     // delayed pivot grows an ancestor's front, which resizes its vector, which dangles every
     // pointer previously taken into it.
-    const Val*          valPtr(std::int32_t kk)     const { return mVal[kk].data(); }
+    const Val*          val(std::int32_t kk)     const { return mVal[kk].data(); }
 
 private:
     // The write path, reached only through friendship: NumFactorEngine fills each block.
-    std::int32_t*       nodeIdxPtr(std::int32_t kk) { return mNodeIdx[kk].data(); }
-    Val*                valPtr(std::int32_t kk)     { return mVal[kk].data(); }
+    std::int32_t*       nodeIdx(std::int32_t kk) { return mNodeIdx[kk].data(); }
+    Val*                val(std::int32_t kk)     { return mVal[kk].data(); }
 
     // Also the write path: the engine accumulates the perturbation count through this reference
     // (factorSupernode increments it). The const read overload above is public.

@@ -55,7 +55,8 @@ hand-written baseline reads those whole-vector forms, which is precisely why it 
 
 These are *lookups*: O(1) addresses into storage the matrix already holds, nothing allocated,
 nothing owned. A lookup is a fact about the layout, so it lives on the storage, exactly as
-`blockPtr` lives on the numeric factor.
+`nodeIdx(kk)` and `val(kk)` live on the numeric factor, where they answer the same question about a
+supernode's block that `rowIdx(j)` and `val(j)` answer about a column.
 
 The multiply then reads a column directly, at the moment of use:
 

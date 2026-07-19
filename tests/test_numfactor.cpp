@@ -332,8 +332,8 @@ double staticVsDynamic(const SparseMatrix<Val>& A, const Permutation& p,
     double worst = 0;
     for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(cs.snodeSize()); ++kk) {
         const std::size_t len = (cs.frontSize(kk) + cs.updateSize(kk)) * cs.frontSize(kk);
-        const Val* a = cs.valPtr(kk);
-        const Val* b = cd.valPtr(kk);
+        const Val* a = cs.val(kk);
+        const Val* b = cd.val(kk);
         for (std::size_t t = 0; t < len; ++t)
             worst = std::max(worst, std::abs(a[t] - b[t]));
     }
@@ -395,8 +395,8 @@ double dynamicLdlWorst(const std::vector<std::vector<double>>& dense, int& twoBy
             permuted[li][lj] = dense[newToOld[li]][newToOld[lj]];
 
     const NumFactorDynamic<double>& cnf = nf;
-    const double*       blk = cnf.valPtr(0);
-    const std::int32_t* idx = cnf.nodeIdxPtr(0);
+    const double*       blk = cnf.val(0);
+    const std::int32_t* idx = cnf.nodeIdx(0);
     const std::vector<std::int32_t>& pt = cnf.pivotType();
     const auto at = [n](std::int32_t r, std::int32_t c) {
         return static_cast<std::size_t>(c) * static_cast<std::size_t>(n) + static_cast<std::size_t>(r);

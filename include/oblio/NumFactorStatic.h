@@ -93,7 +93,7 @@ public:
     //
     // The matrix's per-column lookups (rowIdx / val / colSize in experiments/storage-options)
     // are the same idea over a different storage: a fact about the layout, answered by the class
-    // that owns it. NumFactorDynamic supplies its own nodeIdxPtr and valPtr, over its own layout,
+    // that owns it. NumFactorDynamic supplies its own nodeIdx and val, over its own layout,
     // and the engines cannot tell them apart.
     //
     // Reading is public: a consumer that only reads the factor (SolveEngine) reaches these through
@@ -105,14 +105,14 @@ public:
     // previously taken into it, silently. experiments/storage-options demonstrates the rule
     // (structural mutation invalidates, value mutation does not) and measures the cost of obeying
     // it: one indirection, which is nothing.
-    const std::int32_t* nodeIdxPtr(std::int32_t kk) const { return mNodeIdx.data() + mSnodeNodeIdxPtr[kk]; }
-    const Val*          valPtr(std::int32_t kk)     const { return mVal.data()     + mSnodeValPtr[kk]; }
+    const std::int32_t* nodeIdx(std::int32_t kk) const { return mNodeIdx.data() + mSnodeNodeIdxPtr[kk]; }
+    const Val*          val(std::int32_t kk)     const { return mVal.data()     + mSnodeValPtr[kk]; }
 
 private:
     // The write path: NumFactorEngine fills each supernode's block through these, reached only
     // through friendship.
-    std::int32_t*       nodeIdxPtr(std::int32_t kk) { return mNodeIdx.data() + mSnodeNodeIdxPtr[kk]; }
-    Val*                valPtr(std::int32_t kk)     { return mVal.data()     + mSnodeValPtr[kk]; }
+    std::int32_t*       nodeIdx(std::int32_t kk) { return mNodeIdx.data() + mSnodeNodeIdxPtr[kk]; }
+    Val*                val(std::int32_t kk)     { return mVal.data()     + mSnodeValPtr[kk]; }
 
     // Also the write path: the engine accumulates the perturbation count through this reference
     // (factorSupernode increments it). The const read overload above is public: the caller is

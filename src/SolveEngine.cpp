@@ -41,8 +41,8 @@ void SolveEngine::forward(const Factor& nf, Vector<Val>& y) const {
         const std::size_t   frontSize  = nf.frontSize(jj);
         const std::size_t   updateSize = nf.updateSize(jj);
         const std::size_t   numNodeIdx = frontSize + updateSize;
-        const std::int32_t* nodeIdx    = nf.nodeIdxPtr(jj);
-        const Val*          val        = nf.valPtr(jj);
+        const std::int32_t* nodeIdx    = nf.nodeIdx(jj);
+        const Val*          val        = nf.val(jj);
 
         for (std::int32_t j = 0; j < static_cast<std::int32_t>(frontSize); ++j) {
             const std::int32_t lj = nodeIdx[j];   // the global column
@@ -71,8 +71,8 @@ void SolveEngine::diagonal(const Factor& nf, Vector<Val>& y) const {
         const std::size_t   frontSize  = nf.frontSize(jj);
         const std::size_t   updateSize = nf.updateSize(jj);
         const std::size_t   numNodeIdx = frontSize + updateSize;
-        const std::int32_t* nodeIdx    = nf.nodeIdxPtr(jj);
-        const Val*          val        = nf.valPtr(jj);
+        const std::int32_t* nodeIdx    = nf.nodeIdx(jj);
+        const Val*          val        = nf.val(jj);
 
         for (std::int32_t j = 0; j < static_cast<std::int32_t>(frontSize); ++j)
             y.mVal[nodeIdx[j]] /= val[j * numNodeIdx + j];
@@ -90,8 +90,8 @@ void SolveEngine::backward(const Factor& nf, Vector<Val>& y) const {
         const std::size_t   frontSize  = nf.frontSize(jj);
         const std::size_t   updateSize = nf.updateSize(jj);
         const std::size_t   numNodeIdx = frontSize + updateSize;
-        const std::int32_t* nodeIdx    = nf.nodeIdxPtr(jj);
-        const Val*          val        = nf.valPtr(jj);
+        const std::int32_t* nodeIdx    = nf.nodeIdx(jj);
+        const Val*          val        = nf.val(jj);
 
         for (std::int32_t j = static_cast<std::int32_t>(frontSize) - 1; j >= 0; --j) {
             const std::int32_t lj = nodeIdx[j];

@@ -67,6 +67,54 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-07-19, The per-supernode lookups drop `Ptr`: `nodeIdx(jj)` and `val(jj)`
+
+The naming entry below (07-17) settled the arrays and, in passing, gave `Ptr` a job: an offset is
+named for its entity and takes a payload qualifier only when a sibling offset exists, which is why
+the numeric factor carries `snodeNodeIdxPtr` and `snodeValPtr` while A collapses to `colPtr`. **The
+accessors never followed that rule.** They were `nodeIdxPtr(jj)` and `valPtr(jj)`, and a reader
+applying the rule would expect an offset array. They return neither an offset nor an array.
+
+**What they are is lookups**, the same thing the matrix's per-column accessors are: an O(1) address
+into storage the object already holds, computed at the moment of use, nothing allocated and nothing
+owned. `experiments/storage-options` is where that shape was worked out, and its accessors are
+named `rowIdx(j)` / `val(j)` / `colSize(j)`, with no suffix, over exactly the same reasoning. The
+factor was the odd one out.
+
+So the lookups are now `nodeIdx(jj)` and `val(jj)`, and the two spellings line up:
+
+| | the lookup | the offset array behind it |
+|---|---|---|
+| **A** | `rowIdx(j)`, `val(j)` | `colPtr` |
+| **L, numeric, static** | `nodeIdx(jj)`, `val(jj)` | `snodeNodeIdxPtr`, `snodeValPtr` |
+| **L, numeric, dynamic** | `nodeIdx(jj)`, `val(jj)` | none: each supernode owns its vector |
+
+**The rule, in one line: an offset array keeps `Ptr`; a lookup does not.**
+
+Two things fell out of the rename rather than being designed into it. The static factor already
+exposed whole-vector `nodeIdx()` and `val()`, so the renamed forms became overloads of them, which
+is precisely `SparseMatrixStatic`'s `rowIdx()` / `rowIdx(j)` pairing: the whole array for a caller
+who wants it, one entity's slice for a caller who wants that. And the read-public / write-private
+split is untouched, because name lookup gathers every overload before access is checked, so the
+`std::as_const` idiom behaves exactly as it did.
+
+The shared read surface is now seven functions, and it is what makes one solve serve both storages:
+`size`, `snodeSize`, `factorization`, `frontSize(jj)`, `updateSize(jj)`, `nodeIdx(jj)`, `val(jj)`.
+Five are the same field read on both classes and only the last two differ, an offset into a flat
+buffer against a per-supernode vector that already holds the pointer. The correspondence with the
+matvec is close but not exact: `colSize(j)` has no single counterpart, because a supernode's value
+block is a rectangle rather than a run and takes two numbers (`frontSize` for columns,
+`frontSize + updateSize` for rows, which is also the leading dimension), and `factorization()` has
+no counterpart at all, because a matrix carries no method identity while a factor must say whether
+to conjugate.
+
+**Earlier entries in this file keep the old spelling**, since they record what was decided when they
+were written: the bulk-versus-direct entry (07-14) argues about `valPtr` as it then stood, and the
+rejected extractor it describes materializes arrays it calls `rowIdxPtr[j]` / `valPtr[j]` / `len[j]`.
+Those array names are a different thing from the accessor and are correct as written.
+
+---
+
 ## 2026-07-17, Naming A and L: `val` stays `val`, and `nodeIdx` unifies row and column
 
 A and L are both column oriented, and the names should show them to be the same idea, with L adding

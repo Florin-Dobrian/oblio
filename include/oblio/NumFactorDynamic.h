@@ -2,10 +2,11 @@
 
 // NumFactorDynamic.h - the numeric factorization of a sparse matrix, dynamically stored.
 //
-// **A placeholder. No engine writes it yet.** It is here because the storage split is a settled
-// decision and the class that embodies it should exist next to its sibling, not be summoned into
-// being when dynamic LDL is written. It also fixes what the two classes do and do not share, at
-// the moment that is cheap to get right.
+// **Engines write it now.** The static factorizations (Cholesky, static LDL) run into it unchanged
+// through the templated traversals, and dynamic LDL, the reason it exists, writes it through the
+// growth verbs below. It began as a placeholder, built next to its sibling before anything filled
+// it, because the storage split was a settled decision and because that was the cheap moment to fix
+// what the two classes do and do not share.
 //
 // Dynamic means the structure changes while the arithmetic runs. Dynamic LDL delays an unstable
 // pivot by passing its column up to an ancestor, which makes that ancestor's front grow by an

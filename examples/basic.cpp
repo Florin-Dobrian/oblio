@@ -34,8 +34,8 @@ int main() {
     for (std::size_t i = 0; i < n; ++i)
         b[i] = 1.0;
 
-    DirectSolver<double> solver(Factorization::Cholesky, Traversal::LeftLooking);
-    solver.setOrderMethod(OrderMethod::AMD);
+    // Ordering, factorization, traversal: the pipeline order. Each also has a setter.
+    DirectSolver<double> solver(OrderMethod::AMD, Factorization::Cholesky, Traversal::LeftLooking);
 
     // The three phases. Split like this because they have different lifetimes: analyze depends only
     // on the pattern, factor on the values, solve on the right-hand side.

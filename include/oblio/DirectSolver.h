@@ -45,9 +45,13 @@ namespace Oblio {
 template<class Val>
 class DirectSolver {
 public:
-    DirectSolver() = default;
-    DirectSolver(Factorization factorization, Traversal traversal)
-        : mFactorization(factorization), mTraversal(traversal) {}
+    // Every setting is available two ways: in the constructor, in pipeline order, and through a
+    // setter afterwards. The defaults are each engine's own default, so a DirectSolver built with
+    // no arguments behaves as the engines it drives would.
+    explicit DirectSolver(OrderMethod   method        = OrderMethod::MMD,
+                          Factorization factorization = Factorization::Cholesky,
+                          Traversal     traversal     = Traversal::LeftLooking)
+        : mOrderMethod(method), mFactorization(factorization), mTraversal(traversal) {}
 
     // Configuration. Changing any of these invalidates what has been computed so far: the ordering
     // choice changes the analysis, the factorization and traversal change the numeric factor.
@@ -93,10 +97,12 @@ public:
                             const Vector<Val>& x) const;
 
 private:
-    OrderMethod   mOrderMethod    = OrderMethod::AMD;
-    Factorization mFactorization  = Factorization::Cholesky;
-    Traversal     mTraversal      = Traversal::LeftLooking;
-    double        mPivotThreshold = 0.1;
+    // Set by the constructor, which is where their defaults live, so they are not repeated here.
+    OrderMethod   mOrderMethod;
+    Factorization mFactorization;
+    Traversal     mTraversal;
+
+    double mPivotThreshold = 0.1;   // not a constructor argument: dynamic LDL tuning, as on the engine
 
     Permutation mPermutation;
     ElmForest   mForest;

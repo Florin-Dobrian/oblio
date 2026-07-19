@@ -11,6 +11,53 @@
 
 namespace Oblio {
 
+namespace {
+
+// The 2x2 pivot block D, read out of a front at local columns k1_ and k2_.
+//
+// **This is the one place the symmetry of D is decided, and that is the point of it existing.**
+// `d12 = d21` is the symmetric statement, and it is what `LDL^T` means over the reals and over the
+// complex field alike. A Hermitian factorization wants the conjugate here instead, and wants `d11`
+// and `d22` known real. Everything downstream, the acceptance test and the elimination, works from
+// what this returns, so that change is made once rather than in four places that must not drift.
+template<class Val>
+struct PivotBlock2x2 {
+    Val d11, d22, d21, d12;
+    Val det;
+};
+
+template<class Val>
+PivotBlock2x2<Val> readPivotBlock2x2(const Val* block, std::ptrdiff_t ld,
+                                     std::int32_t k1_, std::int32_t k2_, bool withHermitian) {
+    const auto at = [ld](std::int32_t r, std::int32_t c) {
+        return static_cast<std::ptrdiff_t>(c) * ld + static_cast<std::ptrdiff_t>(r);
+    };
+
+    PivotBlock2x2<Val> d;
+    d.d11 = forceReal(block[at(k1_, k1_)], withHermitian);
+    d.d22 = forceReal(block[at(k2_, k2_)], withHermitian);
+
+    // Only the lower triangle is occupied before the front is factored, so exactly one of the two
+    // off-diagonal positions is stored, and **which one it is depends on the order of k1 and k2**.
+    // That distinction is invisible in the symmetric case, where the two are equal, and matters
+    // here: the stored entry is d21 when k2 sits below k1 and d12 when it sits above, and the other
+    // is its conjugate.
+    if (k2_ > k1_) {
+        d.d21 = block[at(k2_, k1_)];
+        d.d12 = maybeConjugate(d.d21, withHermitian);
+    } else {
+        d.d12 = block[at(k1_, k2_)];
+        d.d21 = maybeConjugate(d.d12, withHermitian);
+    }
+
+    // Hermitian: d11 * d22 is real and d12 * d21 is |d21|^2, so the determinant is real, as the
+    // Bunch-Kaufman test downstream assumes when it compares magnitudes against it.
+    d.det = d.d11 * d.d22 - d.d12 * d.d21;
+    return d;
+}
+
+} // namespace
+
 // =================================================================================================
 // Naming, as elsewhere. Supernodes are doubled letters: jj the supernode being factored, kk an
 // ancestor it updates, and jj < kk since a descendant's label is below its ancestor's. Single
@@ -24,6 +71,21 @@ namespace Oblio {
 // `lcl` is local.
 // =================================================================================================
 
+// The global-to-local map is a scratchpad the size of the matrix, allocated once per factorization
+// with every entry NIL, and touched only at the positions a supernode names. Both directions cost
+// O(|Idx(jj)|), never O(n), so the map is proportional to the supernode rather than to the matrix
+// however sparse it is.
+//
+// **The clear is required, not hygiene.** assembleFromA reads NIL as an input check: every
+// lower-triangle row of A's column must appear in the supernode's index set, because symbolic made
+// the same cut, and a row that maps to NIL means A carries a nonzero the symbolic structure did not
+// predict. Leave a stale local index behind and that check passes on a value from a previous
+// supernode, putting the entry at a plausible offset in the wrong place, silently, on exactly the
+// malformed input the check exists to catch.
+//
+// The escape, should the map ever show up in a profile, is a generation counter: store a stamp
+// beside each local index and treat a stale stamp as NIL, trading the clear pass for a wider array
+// and a comparison per lookup. Not worth it at this cost level.
 void NumFactorEngine::setGlobalToLocal(std::size_t numNodeIdx, const std::int32_t* nodeIdx,
                                        std::vector<std::int32_t>& gblToLcl) const {
     for (std::size_t sp = 0; sp < numNodeIdx; ++sp)
@@ -104,6 +166,7 @@ void NumFactorEngine::setSymFactor(const SymFactor& sf, NumFactorDynamic<Val>& n
 template<class Val>
 bool NumFactorEngine::assembleFromA(const SparseMatrix<Val>& A, const Permutation& p,
                                     const std::vector<std::int32_t>& gblToLcl,
+                                    std::size_t numberOfDelayedColumns,
                                     std::size_t frontSize, std::size_t numNodeIdx,
                                     const std::int32_t* nodeIdx, Val* block) const {
     const std::vector<std::size_t>&  colPtr   = A.colPtr();
@@ -112,9 +175,11 @@ bool NumFactorEngine::assembleFromA(const SparseMatrix<Val>& A, const Permutatio
     const std::vector<std::int32_t>& oldToNew = p.oldToNew();
     const std::vector<std::int32_t>& newToOld = p.newToOld();
 
-    // For each front column of the supernode. Its local column position is lcl, and its block
-    // column starts at lcl * numNodeIdx (column-major).
-    for (std::size_t lcl = 0; lcl < frontSize; ++lcl) {
+    // For each front column of the supernode that holds an entry of A. Its local column position
+    // is lcl, and its block column starts at lcl * numNodeIdx (column-major). The run starts at
+    // numberOfDelayedColumns: zero for a static factorization, and under dynamic pivoting the
+    // columns delayed into this front from its children, which A knows nothing about.
+    for (std::size_t lcl = numberOfDelayedColumns; lcl < frontSize; ++lcl) {
         const std::int32_t lk = nodeIdx[lcl];        // the global column, in L's ordering
         const std::int32_t ak = newToOld[lk];       // the same column, in A's
 
@@ -286,7 +351,7 @@ bool NumFactorEngine::factorStaticLeftLooking(const SparseMatrix<Val>& A, const 
         Val*                block  = nf.val(kk);
 
         setGlobalToLocal(numNodeIdx, nodeIdx, gblToLcl);
-        const bool ok = assembleFromA(A, p, gblToLcl, nf.frontSize(kk), numNodeIdx, nodeIdx, block);
+        const bool ok = assembleFromA(A, p, gblToLcl, 0, nf.frontSize(kk), numNodeIdx, nodeIdx, block);
         clearGlobalToLocal(numNodeIdx, nodeIdx, gblToLcl);
         if (!ok)
             return false;
@@ -377,7 +442,7 @@ bool NumFactorEngine::factorStaticRightLooking(const SparseMatrix<Val>& A, const
         Val*                block  = nf.val(kk);
 
         setGlobalToLocal(numNodeIdx, nodeIdx, gblToLcl);
-        const bool ok = assembleFromA(A, p, gblToLcl, nf.frontSize(kk), numNodeIdx, nodeIdx, block);
+        const bool ok = assembleFromA(A, p, gblToLcl, 0, nf.frontSize(kk), numNodeIdx, nodeIdx, block);
         clearGlobalToLocal(numNodeIdx, nodeIdx, gblToLcl);
         if (!ok)
             return false;
@@ -423,6 +488,128 @@ bool NumFactorEngine::factorStaticRightLooking(const SparseMatrix<Val>& A, const
     return true;
 }
 
+// =================================================================================================
+// The two pivot eliminations, each applied once a selection loop has accepted it.
+//
+// These were duplicated across the kernel's two passes until now, character for character: 0.9
+// splits factorDynamicLDL_ on whether the supernode has update rows and writes both bodies out, and
+// the port followed it. What the transcription showed is that the split is entirely in the
+// *selection*: which candidates are eligible, which partner may be paired, and which acceptance
+// test applies. Once a pivot is accepted the arithmetic is the same, so it lives here once and the
+// two selection loops call it.
+//
+// The selection loops stay separate, deliberately. They are genuinely two algorithms rather than
+// one with flags, and merging them behind parameters would save lines and cost the reader the
+// ability to see what each pass actually does.
+// =================================================================================================
+
+template<class Val>
+void NumFactorEngine::applyPivot1x1(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j_,
+                                    std::int32_t k1_, std::int32_t k1, std::int32_t jjFrontSize,
+                                    std::int32_t rows,
+                                    std::vector<std::int32_t>& gblToLcl) const {
+    Val*                 block = nf.val(jj);
+    const std::ptrdiff_t ld    = rows;
+
+    const auto at = [ld](std::int32_t r, std::int32_t c) {
+        return static_cast<std::ptrdiff_t>(c) * ld + static_cast<std::ptrdiff_t>(r);
+    };
+
+    const bool withHermitian = hermitian(nf.factorization());
+
+    // Read before the swap, which is why it is not simply block[at(j_, j_)]: the swap is what puts
+    // the pivot there. Forced real for a Hermitian factorization, and written back so the solve
+    // divides by the same value the elimination used.
+    const Val diagonal1 = forceReal(block[at(k1_, k1_)], withHermitian);
+
+    if (j_ != k1_) nf.swap(jj, j_, k1_, gblToLcl);
+
+    block[at(j_, j_)] = diagonal1;
+
+    for (std::int32_t i_ = j_ + 1; i_ < rows; ++i_)               // L column: divide by the pivot
+        block[at(i_, j_)] /= diagonal1;
+
+    for (std::int32_t k_ = j_ + 1; k_ < jjFrontSize; ++k_)        // D L^H row, in the upper part
+        block[at(j_, k_)] = diagonal1 * maybeConjugate(block[at(k_, j_)], withHermitian);
+
+    for (std::int32_t k_ = j_ + 1; k_ < jjFrontSize; ++k_)        // rank-1 trailing update
+        for (std::int32_t i_ = k_; i_ < rows; ++i_)
+            block[at(i_, k_)] -= block[at(i_, j_)] * block[at(j_, k_)];
+
+    nf.mPivotType[k1] = 1;
+}
+
+template<class Val>
+void NumFactorEngine::applyPivot2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j_,
+                                    std::int32_t k1_, std::int32_t k2_, std::int32_t k1,
+                                    std::int32_t k2, std::int32_t jjFrontSize, std::int32_t rows,
+                                    std::vector<std::int32_t>& gblToLcl) const {
+    Val*                 block = nf.val(jj);
+    const std::ptrdiff_t ld    = rows;
+
+    const auto at = [ld](std::int32_t r, std::int32_t c) {
+        return static_cast<std::ptrdiff_t>(c) * ld + static_cast<std::ptrdiff_t>(r);
+    };
+
+    const bool withHermitian = hermitian(nf.factorization());
+
+    // Read before the swaps, as above. The caller read the same block to decide on it; nothing
+    // touches the front in between.
+    const PivotBlock2x2<Val> d = readPivotBlock2x2(block, ld, k1_, k2_, withHermitian);
+
+    const std::int32_t j1_ = j_;
+    const std::int32_t j2_ = j_ + 1;
+
+    // Bring k1 and k2 to the front's next two columns. Which swaps are needed depends on where they
+    // already are relative to each other, and doing them in the wrong order would undo one.
+    if (k1_ < k2_) {
+        if (!(j1_ == k1_ && j2_ == k2_)) {
+            if (j1_ != k1_) nf.swap(jj, j1_, k1_, gblToLcl);
+            nf.swap(jj, j2_, k2_, gblToLcl);
+        }
+    } else {
+        if (j1_ == k2_ && j2_ == k1_) {
+            nf.swap(jj, j1_, j2_, gblToLcl);
+        } else {
+            if (j2_ != k2_) nf.swap(jj, j2_, k2_, gblToLcl);
+            nf.swap(jj, j1_, k1_, gblToLcl);
+        }
+    }
+
+    // D's own four entries, written back where the solve expects them. The lower pair are already
+    // in place, the swaps having carried them (conjugating on the way, for Hermitian); the diagonal
+    // pair is rewritten because forceReal may have changed them, and the upper off-diagonal has no
+    // other home.
+    block[at(j1_, j1_)] = d.d11;
+    block[at(j2_, j2_)] = d.d22;
+    block[at(j1_, j2_)] = d.d12;
+
+    for (std::int32_t i_ = j1_ + 2; i_ < rows; ++i_) {        // L columns: solve against D
+        const Val t1 = block[at(i_, j1_)];
+        const Val t2 = block[at(i_, j2_)];
+        block[at(i_, j1_)] = (t1 * d.d22 - t2 * d.d21) / d.det;
+        block[at(i_, j2_)] = (t2 * d.d11 - t1 * d.d12) / d.det;
+    }
+
+    for (std::int32_t k_ = j1_ + 2; k_ < jjFrontSize; ++k_) { // D L^H rows, in the upper part
+        const Val l1 = maybeConjugate(block[at(k_, j1_)], withHermitian);
+        const Val l2 = maybeConjugate(block[at(k_, j2_)], withHermitian);
+        block[at(j1_, k_)] = d.d11 * l1 + d.d12 * l2;
+        block[at(j2_, k_)] = d.d21 * l1 + d.d22 * l2;
+    }
+
+    for (std::int32_t k_ = j1_ + 2; k_ < jjFrontSize; ++k_)   // rank-2 trailing update
+        for (std::int32_t i_ = k_; i_ < rows; ++i_)
+            block[at(i_, k_)] -= block[at(i_, j1_)] * block[at(j1_, k_)];
+    for (std::int32_t k_ = j2_ + 1; k_ < jjFrontSize; ++k_)
+        for (std::int32_t i_ = k_; i_ < rows; ++i_)
+            block[at(i_, k_)] -= block[at(i_, j2_)] * block[at(j2_, k_)];
+
+    nf.mPivotType[k1] = 2;
+    nf.mPivotType[k2] = 3;
+}
+
+
 template<class Val>
 bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int32_t jj,
                                        std::vector<std::int32_t>& gblToLcl) const {
@@ -446,130 +633,196 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
 
     std::int32_t j_ = 0;
 
-    while (!pivotList.empty()) {
-        bool         pivotFound = false;
-        std::int32_t trials     = static_cast<std::int32_t>(pivotList.size());
+    // Two passes, and 0.9 splits them on whether the supernode has update rows. Pass 1 is the
+    // dense-front case, where a column that cannot pivot has nowhere to go; pass 2 is the general
+    // one, where an ancestor is waiting. The bodies below say how they differ.
+    //
+    // **What remains below is selection only.** The eliminations themselves are applyPivot1x1 and
+    // applyPivot2x2, shared by both passes, because once a pivot is accepted the arithmetic is
+    // identical and 0.9's two copies of it were an artifact of writing the passes out separately.
+    // The three real differences are the ones this loop and the next make visible:
+    //
+    //   No forced 1x1.  Pass 1 accepts the last remaining candidate whatever it looks like, since
+    //                   a dense front has nowhere to delay it to. Pass 2 never does.
+    //   Front partners. Pass 2's 2x2 partner scan stops at jjFrontSize, so a partner is always a
+    //                   front column and never an update row.
+    //   A real test.    Pass 1 accepts a 2x2 on max1 == max2, on the magnitudes alone, without ever
+    //                   reading the 2x2 block. Pass 2 applies the Bunch-Kaufman test to its
+    //                   determinant against the growth bound.
+    if (nf.mUpdateSize[jj] == 0) {
+        while (!pivotList.empty()) {
+            bool         pivotFound = false;
+            std::int32_t trials     = static_cast<std::int32_t>(pivotList.size());
 
-        while (trials > 0) {
-            const std::int32_t k1  = pivotList.front(); pivotList.pop_front();
-            const std::int32_t k1_ = gblToLcl[k1];
+            while (trials > 0) {
+                const std::int32_t k1  = pivotList.front(); pivotList.pop_front();
+                const std::int32_t k1_ = gblToLcl[k1];
 
-            if (pivotList.empty()) {                    // only candidate left: a forced 1x1
-                pivotFound = true;
-                nf.mPivotType[k1] = 1;
-                ++j_;
-                break;
-            }
-
-            // max1 = k1's largest off-diagonal magnitude (its row on the left, its column below);
-            // k2_ the local row where it occurs.
-            std::int32_t k2_  = -1;
-            double       max1 = -1;
-            for (std::int32_t i_ = j_; i_ < k1_; ++i_)
-                if (max1 < std::abs(block[at(k1_, i_)])) { k2_ = i_; max1 = std::abs(block[at(k1_, i_)]); }
-            for (std::int32_t i_ = k1_ + 1; i_ < rows; ++i_)
-                if (max1 < std::abs(block[at(i_, k1_)])) { k2_ = i_; max1 = std::abs(block[at(i_, k1_)]); }
-
-            const Val diagonal1 = block[at(k1_, k1_)];
-
-            if (max1 == 0) {                            // isolated column: 1x1, nothing to eliminate
-                pivotFound = true;
-                if (j_ != k1_) nf.swap(jj, j_, k1_, gblToLcl);
-                nf.mPivotType[k1] = 1;
-                ++j_;
-                break;
-            }
-
-            if (std::abs(diagonal1) > 0 && std::abs(diagonal1) >= threshold * max1) {   // accept 1x1
-                pivotFound = true;
-                if (j_ != k1_) nf.swap(jj, j_, k1_, gblToLcl);
-
-                for (std::int32_t i_ = j_ + 1; i_ < rows; ++i_)               // L column: divide by pivot
-                    block[at(i_, j_)] /= diagonal1;
-
-                for (std::int32_t k_ = j_ + 1; k_ < jjFrontSize; ++k_)        // D L^T row, in the upper part
-                    block[at(j_, k_)] = block[at(j_, j_)] * block[at(k_, j_)];
-
-                for (std::int32_t k_ = j_ + 1; k_ < jjFrontSize; ++k_)        // rank-1 trailing update
-                    for (std::int32_t i_ = k_; i_ < rows; ++i_)
-                        block[at(i_, k_)] -= block[at(i_, j_)] * block[at(j_, k_)];
-
-                nf.mPivotType[k1] = 1;
-                ++j_;
-                break;
-            }
-            else {                                      // try a 2x2 with k1 and its max partner k2
-                const std::int32_t k2 = idx[k2_];
-
-                double max2 = -1;
-                for (std::int32_t i_ = j_; i_ < k2_; ++i_)
-                    if (max2 < std::abs(block[at(k2_, i_)])) max2 = std::abs(block[at(k2_, i_)]);
-                for (std::int32_t i_ = k2_ + 1; i_ < rows; ++i_)
-                    if (max2 < std::abs(block[at(i_, k2_)])) max2 = std::abs(block[at(i_, k2_)]);
-
-                const Val diagonal11 = block[at(k1_, k1_)];
-                const Val diagonal22 = block[at(k2_, k2_)];
-                const Val diagonal21 = (k2_ > k1_) ? block[at(k2_, k1_)] : block[at(k1_, k2_)];
-                const Val diagonal12 = diagonal21;
-                const Val diagonal2  = diagonal11 * diagonal22 - diagonal12 * diagonal21;
-
-                if (max1 == max2) {                     // accept 2x2
+                if (pivotList.empty()) {                    // only candidate left: a forced 1x1
                     pivotFound = true;
-                    pivotList.remove(k2);
-
-                    const std::int32_t j1_ = j_;
-                    const std::int32_t j2_ = j_ + 1;
-
-                    if (k1_ < k2_) {
-                        if (!(j1_ == k1_ && j2_ == k2_)) {
-                            if (j1_ != k1_) nf.swap(jj, j1_, k1_, gblToLcl);
-                            nf.swap(jj, j2_, k2_, gblToLcl);
-                        }
-                    } else {
-                        if (j1_ == k2_ && j2_ == k1_) {
-                            nf.swap(jj, j1_, j2_, gblToLcl);
-                        } else {
-                            if (j2_ != k2_) nf.swap(jj, j2_, k2_, gblToLcl);
-                            nf.swap(jj, j1_, k1_, gblToLcl);
-                        }
-                    }
-
-                    block[at(j1_, j2_)] = diagonal12;   // the 2x2 off-diagonal, kept in the upper part
-
-                    for (std::int32_t i_ = j1_ + 2; i_ < rows; ++i_) {        // L columns: solve against D
-                        const Val t1 = block[at(i_, j1_)];
-                        const Val t2 = block[at(i_, j2_)];
-                        block[at(i_, j1_)] = (t1 * diagonal22 - t2 * diagonal21) / diagonal2;
-                        block[at(i_, j2_)] = (t2 * diagonal11 - t1 * diagonal12) / diagonal2;
-                    }
-
-                    for (std::int32_t k_ = j1_ + 2; k_ < jjFrontSize; ++k_) { // D L^T rows, in the upper part
-                        block[at(j1_, k_)] = diagonal11 * block[at(k_, j1_)] + diagonal12 * block[at(k_, j2_)];
-                        block[at(j2_, k_)] = diagonal21 * block[at(k_, j1_)] + diagonal22 * block[at(k_, j2_)];
-                    }
-
-                    for (std::int32_t k_ = j1_ + 2; k_ < jjFrontSize; ++k_)   // rank-2 trailing update
-                        for (std::int32_t i_ = k_; i_ < rows; ++i_)
-                            block[at(i_, k_)] -= block[at(i_, j1_)] * block[at(j1_, k_)];
-                    for (std::int32_t k_ = j2_ + 1; k_ < jjFrontSize; ++k_)
-                        for (std::int32_t i_ = k_; i_ < rows; ++i_)
-                            block[at(i_, k_)] -= block[at(i_, j2_)] * block[at(j2_, k_)];
-
-                    nf.mPivotType[k1] = 2;
-                    nf.mPivotType[k2] = 3;
-                    j_ += 2;
+                    nf.mPivotType[k1] = 1;
+                    ++j_;
                     break;
                 }
-                else {                                  // neither k1 nor the 2x2 acceptable: delay k1
-                    pivotList.push_back(k1);
+
+                // max1 = k1's largest off-diagonal magnitude (its row on the left, its column below);
+                // k2_ the local row where it occurs.
+                std::int32_t k2_  = -1;
+                double       max1 = -1;
+                for (std::int32_t i_ = j_; i_ < k1_; ++i_)
+                    if (max1 < std::abs(block[at(k1_, i_)])) { k2_ = i_; max1 = std::abs(block[at(k1_, i_)]); }
+                for (std::int32_t i_ = k1_ + 1; i_ < rows; ++i_)
+                    if (max1 < std::abs(block[at(i_, k1_)])) { k2_ = i_; max1 = std::abs(block[at(i_, k1_)]); }
+
+                const Val diagonal1 = block[at(k1_, k1_)];
+
+                if (max1 == 0) {                            // isolated column: 1x1, nothing to eliminate
+                    pivotFound = true;
+                    if (j_ != k1_) nf.swap(jj, j_, k1_, gblToLcl);
+                    nf.mPivotType[k1] = 1;
+                    ++j_;
+                    break;
                 }
+
+                if (std::abs(diagonal1) > 0 && std::abs(diagonal1) >= threshold * max1) {   // accept 1x1
+                    pivotFound = true;
+                    applyPivot1x1(nf, jj, j_, k1_, k1, jjFrontSize, rows, gblToLcl);
+                    ++j_;
+                    break;
+                }
+                else {                                      // try a 2x2 with k1 and its max partner k2
+                    const std::int32_t k2 = idx[k2_];
+
+                    double max2 = -1;
+                    for (std::int32_t i_ = j_; i_ < k2_; ++i_)
+                        if (max2 < std::abs(block[at(k2_, i_)])) max2 = std::abs(block[at(k2_, i_)]);
+                    for (std::int32_t i_ = k2_ + 1; i_ < rows; ++i_)
+                        if (max2 < std::abs(block[at(i_, k2_)])) max2 = std::abs(block[at(i_, k2_)]);
+
+                    // Note what is *not* read here. Pass 1 decides on the magnitudes alone and
+                    // never examines the 2x2 block itself; pass 2 tests its determinant. That
+                    // difference was invisible while the two passes each carried their own copy of
+                    // the elimination.
+                    if (max1 == max2) {                     // accept 2x2
+                        pivotFound = true;
+                        pivotList.remove(k2);
+
+                        applyPivot2x2(nf, jj, j_, k1_, k2_, k1, k2, jjFrontSize, rows, gblToLcl);
+                        j_ += 2;
+                        break;
+                    }
+                    else {                                  // neither k1 nor the 2x2 acceptable: delay k1
+                        pivotList.push_back(k1);
+                    }
+                }
+
+                --trials;
             }
 
-            --trials;
+            if (!pivotFound)
+                break;
         }
+    } else {
+        // Pass 2: the supernode has update rows, so an ancestor exists to take a column this front
+        // cannot pivot. Ported from 0.9 factorDynamicLDL_, the jjUpdateSize != 0 branch.
+        //
+        // **Not pass 1 with different bounds**, which is the guess worth naming so nobody makes it
+        // twice. The two arithmetic bodies below, 1x1 and 2x2, are identical to pass 1's, character
+        // for character. Everything that differs is in the *selection*:
+        //
+        //   No forced 1x1.  Pass 1 accepts the last remaining candidate whatever it looks like,
+        //                   because there is nowhere to delay it to. Here there is, so the last
+        //                   candidate falls through and is delayed like any other.
+        //   Two scans.      max1 measures k1's largest off-diagonal over the whole column height,
+        //                   update rows included. The partner scan `max` repeats it stopping at
+        //                   jjFrontSize, so a 2x2 partner is always a front column and never an
+        //                   update row. Hence max <= max1, and max == max1 says the largest entry
+        //                   in k1's line is a front column after all.
+        //   A real test.    Pass 1 accepts a 2x2 on max1 == max2. Here the test is the
+        //                   Bunch-Kaufman one on the 2x2 determinant against the growth bound
+        //                   maxmax, with the symmetric-maximum case kept as a separate disjunct.
+        while (!pivotList.empty()) {
+            bool         pivotFound = false;
+            std::int32_t trials     = static_cast<std::int32_t>(pivotList.size());
 
-        if (!pivotFound)
-            break;
+            while (trials > 0) {
+                const std::int32_t k1  = pivotList.front(); pivotList.pop_front();
+                const std::int32_t k1_ = gblToLcl[k1];
+
+                // k1's largest off-diagonal magnitude: its row on the left, its column below, all
+                // the way down through the update rows. No argmax here, unlike pass 1; the partner
+                // is chosen by the narrower scan further down.
+                double max1 = -1;
+                for (std::int32_t i_ = j_; i_ < k1_; ++i_)
+                    if (max1 < std::abs(block[at(k1_, i_)])) max1 = std::abs(block[at(k1_, i_)]);
+                for (std::int32_t i_ = k1_ + 1; i_ < rows; ++i_)
+                    if (max1 < std::abs(block[at(i_, k1_)])) max1 = std::abs(block[at(i_, k1_)]);
+
+                const Val diagonal1 = block[at(k1_, k1_)];
+
+                if (max1 == 0) {                            // isolated column: 1x1, nothing to eliminate
+                    pivotFound = true;
+                    if (j_ != k1_) nf.swap(jj, j_, k1_, gblToLcl);
+                    nf.mPivotType[k1] = 1;
+                    ++j_;
+                    break;
+                }
+
+                if (std::abs(diagonal1) > 0 && std::abs(diagonal1) >= threshold * max1) {   // accept 1x1
+                    pivotFound = true;
+                    applyPivot1x1(nf, jj, j_, k1_, k1, jjFrontSize, rows, gblToLcl);
+                    ++j_;
+                    break;
+                }
+                else if (!pivotList.empty()) {              // try a 2x2 with k1 and a front partner
+                    // The same scan as max1's, stopped at the end of the front. k2_ is where the
+                    // largest such entry sits, and it is a front column by construction.
+                    std::int32_t k2_ = -1;
+                    double       max = -1;
+                    for (std::int32_t i_ = j_; i_ < k1_; ++i_)
+                        if (max < std::abs(block[at(k1_, i_)])) { k2_ = i_; max = std::abs(block[at(k1_, i_)]); }
+                    for (std::int32_t i_ = k1_ + 1; i_ < jjFrontSize; ++i_)
+                        if (max < std::abs(block[at(i_, k1_)])) { k2_ = i_; max = std::abs(block[at(i_, k1_)]); }
+
+                    const std::int32_t k2 = idx[k2_];
+
+                    double max2 = -1;
+                    for (std::int32_t i_ = j_; i_ < k2_; ++i_)
+                        if (max2 < std::abs(block[at(k2_, i_)])) max2 = std::abs(block[at(k2_, i_)]);
+                    for (std::int32_t i_ = k2_ + 1; i_ < rows; ++i_)
+                        if (max2 < std::abs(block[at(i_, k2_)])) max2 = std::abs(block[at(i_, k2_)]);
+
+                    const PivotBlock2x2<Val> d =
+                        readPivotBlock2x2(block, ld, k1_, k2_, hermitian(nf.factorization()));
+
+                    // The growth bound the 2x2 determinant is tested against: the larger of the two
+                    // ways of pairing each diagonal with the other column's maximum.
+                    const double maxmax = std::max(std::abs(d.d22) * max1 + max * max2,
+                                                   std::abs(d.d11) * max2 + max * max1);
+
+                    if ((max == max1 && max == max2 && max != 0)
+                        || (std::abs(d.det) > 0 && std::abs(d.det) >= threshold * maxmax)) {   // accept 2x2
+                        pivotFound = true;
+                        pivotList.remove(k2);
+
+                        applyPivot2x2(nf, jj, j_, k1_, k2_, k1, k2, jjFrontSize, rows, gblToLcl);
+                        j_ += 2;
+                        break;
+                    }
+                    else {                                  // neither k1 nor the 2x2 acceptable: delay k1
+                        pivotList.push_back(k1);
+                    }
+                }
+                else {                                      // no partner available: delay k1
+                    pivotList.push_back(k1);
+                }
+
+                --trials;
+            }
+
+            if (!pivotFound)
+                break;
+        }
     }
 
     // Whatever is left could not be pivoted here; delay it to an ancestor. frontSize shrinks by that
@@ -582,32 +835,436 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
 }
 
 template<class Val>
+void NumFactorEngine::updateDynamicSupernode(const NumFactorDynamic<Val>& nf, std::int32_t jj,
+                                             std::size_t offset, UpdateBlock<Val>& t) const {
+    const int f = static_cast<int>(nf.mFrontSize[jj]);
+    if (f == 0)
+        return;   // every column of jj was delayed: there is no pivot here to update anyone with
+
+    // The height, and the one number that differs from the static twin, where it is just
+    // frontSize + updateSize. A delayed column keeps its row, so the stride still counts it.
+    const int ld     = f + nf.mNumberOfDelayedColumns[jj] + static_cast<int>(nf.mUpdateSize[jj]);
+    const int height = static_cast<int>(t.mHeight);
+    const int width  = static_cast<int>(t.mWidth);
+    const int tld    = height;
+
+    const bool          withHermitian = hermitian(nf.factorization());
+    const Val*          block = nf.val(jj);
+    const std::int32_t* idx   = nf.mNodeIdx[jj].data();
+    const Val*          L21   = block + offset;   // jj's rows from `offset` down, this ancestor's
+    Val*                tVal  = t.mVal.data();
+
+    // Column-major positions: `at` into jj's block (and equally into L21, which shares its leading
+    // dimension), `atU` into the scratch.
+    const auto at = [ld](std::int32_t r, std::int32_t c) {
+        return static_cast<std::ptrdiff_t>(c) * ld + static_cast<std::ptrdiff_t>(r);
+    };
+    const auto atU = [f](std::int32_t r, std::int32_t c) {
+        return static_cast<std::ptrdiff_t>(c) * f + static_cast<std::ptrdiff_t>(r);
+    };
+
+    // U := D L21^H, f by width, the conjugate being the identity for a symmetric factorization. The
+    // static twin gets this from formUpper in one call; here D is block-diagonal, so the front is
+    // walked a pivot at a time.
+    //
+    // For a 2x2 the four entries of D sit where the factorization left them: the 2x2 elimination
+    // starts at row j1 + 2 and never touches its own corner, so the lower pair are the original
+    // matrix entries and the upper one was written back explicitly.
+    std::vector<Val> upper(static_cast<std::size_t>(f) * static_cast<std::size_t>(width), Val(0));
+
+    for (std::int32_t j_ = 0; j_ < f; ) {
+        if (nf.mPivotType[idx[j_]] == 1) {
+            const Val d = block[at(j_, j_)];
+            for (std::int32_t tc = 0; tc < width; ++tc)
+                upper[atU(j_, tc)] = d * maybeConjugate(L21[at(tc, j_)], withHermitian);
+            ++j_;
+        } else {                                   // a 2x2 pivot: two columns solved together
+            const std::int32_t j1_ = j_;
+            const std::int32_t j2_ = j_ + 1;
+
+            const Val d11 = block[at(j1_, j1_)];
+            const Val d12 = block[at(j1_, j2_)];   // the upper part, written back by the pivot
+            const Val d21 = block[at(j2_, j1_)];   // the lower part, never overwritten
+            const Val d22 = block[at(j2_, j2_)];
+
+            for (std::int32_t tc = 0; tc < width; ++tc) {
+                const Val l1 = maybeConjugate(L21[at(tc, j1_)], withHermitian);
+                const Val l2 = maybeConjugate(L21[at(tc, j2_)], withHermitian);
+                upper[atU(j1_, tc)] = d11 * l1 + d12 * l2;
+                upper[atU(j2_, tc)] = d21 * l1 + d22 * l2;
+            }
+            j_ += 2;
+        }
+    }
+
+    // From here it is the static twin exactly: the square part is symmetric and gets gemmLower,
+    // the rectangle below it is not and gets a plain GEMM, with the transpose already baked into U.
+    gemmLower(width, f, L21, ld, upper.data(), f, tVal, tld);
+
+    if (height > width)
+        gemm('N', 'N', height - width, width, f,
+             Val(-1), L21 + width, ld,
+             upper.data(), f,
+             Val(1), tVal + width, tld);
+}
+
+template<class Val>
+void NumFactorEngine::assembleDelayed(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t kk,
+                                      const std::vector<std::int32_t>& gblToLcl) const {
+    const std::int32_t jjFrontSize = static_cast<std::int32_t>(nf.mFrontSize[jj]);
+    const std::int32_t jjDelayed   = nf.mNumberOfDelayedColumns[jj];
+    const std::int32_t jjRows      = jjFrontSize + jjDelayed
+                                   + static_cast<std::int32_t>(nf.mUpdateSize[jj]);
+    const std::int32_t kkRows      = static_cast<std::int32_t>(nf.mFrontSize[kk] + nf.mUpdateSize[kk]);
+
+    const std::int32_t* jjNodeIdx = nf.mNodeIdx[jj].data();
+    const Val*          jjBlock   = std::as_const(nf).val(jj);
+    Val*                kkBlock   = nf.val(kk);
+
+    const auto atJj = [jjRows](std::int32_t r, std::int32_t c) {
+        return static_cast<std::ptrdiff_t>(c) * jjRows + static_cast<std::ptrdiff_t>(r);
+    };
+    const auto atKk = [kkRows](std::int32_t r, std::int32_t c) {
+        return static_cast<std::ptrdiff_t>(c) * kkRows + static_cast<std::ptrdiff_t>(r);
+    };
+
+    // The delayed columns are the run just past jj's new front, and each carries its rows from the
+    // diagonal down. Every one of those rows is in kk's index set: the delayed columns because kk
+    // was grown to hold exactly them, and the update rows below by the property that makes the
+    // elimination forest work, a supernode's update indices lying inside its parent's index set.
+    // So gblToLcl finds all of them, and none is NIL.
+    for (std::int32_t sj_ = jjFrontSize; sj_ < jjFrontSize + jjDelayed; ++sj_) {
+        const std::int32_t dj_ = gblToLcl[jjNodeIdx[sj_]];
+
+        for (std::int32_t si_ = sj_; si_ < jjRows; ++si_) {
+            const std::int32_t di_ = gblToLcl[jjNodeIdx[si_]];
+
+            kkBlock[atKk(di_, dj_)] = jjBlock[atJj(si_, sj_)];
+        }
+    }
+}
+
+// =================================================================================================
+// Dynamic LDL, left-looking. The same shape as the static traversal above, pull every update owed
+// then factor, with three additions that all follow from one fact: a column that cannot be pivoted
+// where it stands is passed up to the parent, so a front's width is no longer what symbolic
+// predicted.
+//
+// Per supernode kk, in order, and the order is load bearing twice:
+//
+//   Grow.       Sum what kk's children delayed. If nonzero, extend kk's index set, shift its own
+//               indices right to make room, prepend the children's delayed globals, widen the
+//               front, and discard-and-rezero the block.
+//   Assemble A. Starting past the prepended columns, which hold no entry of A.
+//   Update.     For each jj owing kk: if kk is jj's parent, fold jj's delayed columns in and only
+//               then shrink them away. Then the ordinary update.
+//   Factor.     Which may itself delay, reducing frontSize[kk] and setting
+//               numberOfDelayedColumns[kk].
+//
+// The two orderings that matter: the delayed columns must be assembled into the parent *before*
+// shrinkEntry drops them, and kk must be grown *before* A is assembled into it, since the offset
+// assumes the wider front.
+//
+// **The height is conserved throughout.** frontSize + numberOfDelayedColumns + updateSize is the
+// block's row count and never changes: growing moves rows from nowhere into the front, factoring
+// moves them from the front into delayed, and updateSize is never rewritten. When a residual comes
+// out wrong, that identity is the first thing to check.
+// =================================================================================================
+
+template<class Val>
 bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const Permutation& p,
                                                const SymFactor& sf, NumFactorDynamic<Val>& nf) const {
     setSymFactor(sf, nf);
 
     const std::int32_t snodeSize = static_cast<std::int32_t>(nf.snodeSize());
 
-    // Slice 1: dense fronts only. A supernode with update rows needs the forest driver (pass 2,
-    // updateDynamicLDL, the delayed assembles), which is the next slice.
-    for (std::int32_t kk = 0; kk < snodeSize; ++kk)
-        if (nf.updateSize(kk) != 0)
-            return false;
+    const std::vector<std::int32_t>& parent      = sf.parent();
+    const std::vector<std::int32_t>& firstChild  = sf.firstChild();
+    const std::vector<std::int32_t>& nextSibling = sf.nextSibling();
 
     std::vector<std::int32_t> gblToLcl(nf.size(), NIL);
 
+    // Who still owes whom, and how far each has got, exactly as in the static traversal. A is not
+    // assembled up front here as it is there: kk's block does not reach its final width until its
+    // children have been factored, so the assemble has to happen inside the loop.
+    std::vector<std::list<std::int32_t>> owed(nf.snodeSize());
+    std::vector<std::size_t>             pos(nf.snodeSize(), 0);
+
+    for (std::int32_t kk = 0; kk < snodeSize; ++kk) {
+        std::int32_t delayedIntoKk = 0;
+        for (std::int32_t jj = firstChild[kk]; jj != NIL; jj = nextSibling[jj])
+            delayedIntoKk += nf.mNumberOfDelayedColumns[jj];
+
+        if (delayedIntoKk > 0) {
+            // The height after growing, which is also the height before it: the new columns come
+            // from rows the block already had. Only the front/update split moves.
+            const std::int32_t grownRows =
+                static_cast<std::int32_t>(nf.mFrontSize[kk] + nf.mUpdateSize[kk]) + delayedIntoKk;
+
+            // The index set. Extend first, then shift kk's own indices right by the delayed count,
+            // descending so the copy does not overwrite its own source.
+            nf.extendIndex(kk, delayedIntoKk);
+            std::vector<std::int32_t>& kkNodeIdx = nf.mNodeIdx[kk];
+
+            for (std::int32_t sij_ = grownRows - delayedIntoKk - 1, dij_ = grownRows - 1;
+                 sij_ >= 0; --sij_, --dij_)
+                kkNodeIdx[dij_] = kkNodeIdx[sij_];
+
+            // Then the vacated slots at the left, filled from the children in sibling order. Each
+            // child's delayed columns are the run just past its (already reduced) front.
+            std::int32_t dij_ = 0;
+            for (std::int32_t jj = firstChild[kk]; jj != NIL; jj = nextSibling[jj]) {
+                const std::int32_t  jjFrontSize = static_cast<std::int32_t>(nf.mFrontSize[jj]);
+                const std::int32_t* jjNodeIdx   = nf.nodeIdx(jj);
+
+                for (std::int32_t sij_ = jjFrontSize;
+                     sij_ < jjFrontSize + nf.mNumberOfDelayedColumns[jj]; ++sij_, ++dij_)
+                    kkNodeIdx[dij_] = jjNodeIdx[sij_];
+            }
+
+            // And the block. The front is wider, so the old contents are discarded rather than
+            // moved: nothing has been written into kk yet, which is why left-looking never needs
+            // 0.9's extendEntry_.
+            nf.mFrontSize[kk] += static_cast<std::size_t>(delayedIntoKk);
+            nf.resetEntry(kk);
+        }
+
+        // The full height, captured before the factorization reclassifies part of the front as
+        // delayed. Every use below wants this number and not the shrunken front.
+        const std::size_t   kkNumNodeIdx = nf.frontSize(kk) + nf.updateSize(kk);
+        const std::int32_t* kkNodeIdx    = nf.nodeIdx(kk);
+
+        setGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
+
+        if (!assembleFromA(A, p, gblToLcl, static_cast<std::size_t>(delayedIntoKk),
+                           nf.frontSize(kk), kkNumNodeIdx, kkNodeIdx, nf.val(kk))) {
+            clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
+            return false;
+        }
+
+        // Every supernode jj that owes kk an update.
+        while (!owed[kk].empty()) {
+            const std::int32_t jj = owed[kk].front();
+            owed[kk].pop_front();
+
+            const std::int32_t  jjDelayed    = nf.mNumberOfDelayedColumns[jj];
+            const std::size_t   jjNumNodeIdx = nf.frontSize(jj)
+                                             + static_cast<std::size_t>(jjDelayed)
+                                             + nf.updateSize(jj);
+            const std::int32_t* jjNodeIdx    = nf.nodeIdx(jj);
+
+            // How many of jj's remaining rows belong to kk. Contiguous, as in the static case.
+            const std::size_t from   = pos[jj];
+            const std::size_t height = jjNumNodeIdx - from;
+            std::size_t       width  = 0;
+            while (from + width < jjNumNodeIdx
+                   && nf.nodeToSnode()[jjNodeIdx[from + width]] == kk)
+                ++width;
+
+            // jj's delayed columns go to its parent and nowhere else, so this fires at most once
+            // per jj across the whole traversal, and only if jj delayed something.
+            //
+            // 0.9 tests only the parent, letting both calls run as no-ops when jj delayed nothing:
+            // assembleDelayed loops zero times and shrinkEntry resizes a block to the size it
+            // already has. Correct, but it makes the verb fire on every non-root supernode, which
+            // is misleading under measurement and asymmetric with the right-looking driver, where
+            // the same calls sit under a delay test already.
+            if (jjDelayed > 0 && parent[jj] == kk) {
+                assembleDelayed(nf, jj, kk, gblToLcl);
+                nf.shrinkEntry(jj, jjDelayed);
+            }
+
+            UpdateBlock<Val> t(height, width);
+            std::copy(jjNodeIdx + from, jjNodeIdx + jjNumNodeIdx, t.mRowIdx.begin());
+
+            updateDynamicSupernode(nf, jj, from, t);
+            assembleUpdate(gblToLcl, t, kkNumNodeIdx, nf.val(kk));
+
+            pos[jj] = from + width;
+            if (pos[jj] < jjNumNodeIdx)
+                owed[nf.nodeToSnode()[jjNodeIdx[pos[jj]]]].push_back(jj);
+        }
+
+        if (!factorDynamicSupernode(nf, kk, gblToLcl)) {
+            clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
+            return false;
+        }
+
+        // kk now owes updates of its own. **The advance is over the front and the delayed columns
+        // together**, not the front alone: both are kk's own rows, neither updates an ancestor, and
+        // the delayed ones are handed over by assembleDelayed rather than as an update. Getting
+        // this wrong sends the delayed rows into a temporary and corrupts the parent quietly.
+        pos[kk] = nf.frontSize(kk) + static_cast<std::size_t>(nf.numberOfDelayedColumns(kk));
+        if (pos[kk] < kkNumNodeIdx)
+            owed[nf.nodeToSnode()[kkNodeIdx[pos[kk]]]].push_back(kk);
+
+        // A root has no parent to take a delayed column, so a delay there is unrecoverable. 0.9
+        // treats it as an error rather than a numeric failure, and so do we: it means the pivoting
+        // strategy did not do its job, not that the matrix is singular.
+        const bool delayedAtRoot = nf.numberOfDelayedColumns(kk) > 0 && parent[kk] == NIL;
+
+        // Clear the whole height, delayed columns included. 0.9 clears only frontSize + updateSize
+        // here, and since frontSize has just shrunk it leaves the delayed entries stale. Harmless
+        // there, because the map is only ever read at indices known to be in the current
+        // supernode's set, but it costs the array its stated invariant (NIL everywhere outside the
+        // supernode in hand), and assembleFromA's NIL test is exactly a check that relies on it.
+        clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
+
+        if (delayedAtRoot)
+            return false;
+    }
+
+    return true;
+}
+
+
+// =================================================================================================
+// Dynamic LDL, right-looking. Factor a supernode, then push its update to every ancestor: the
+// mirror of the traversal above, and it uses the same two kernels unchanged, because 0.9's are
+// byte-identical between its two engines.
+//
+// One thing genuinely differs, and it is the reason extendEntry exists. A is assembled into every
+// front here *before* the traversal starts, and ancestors accumulate updates as their descendants
+// are factored, so a front that grows is never empty. It must keep what it holds while the delayed
+// columns are inserted at its left, which is extendEntry; left-looking, whose fronts are still
+// empty when they grow, calls resetEntry instead.
+//
+// The second difference is smaller and follows from the direction. Left-looking folds a child's
+// delayed columns into the parent when it reaches the parent's update list; here the parent takes
+// them from all its children at once, at the moment it grows, since by then every child is
+// finished. The order that matters is unchanged: assemble the delayed columns, then shrink them
+// away.
+//
+// **The cost trade is the same one the static pair makes**, and neither side is free. This
+// traversal sets and clears the global-to-local map once per (descendant, ancestor) pair rather
+// than once per supernode, because it is standing at the descendant and must reach each ancestor in
+// turn. Left-looking sets it once per supernode, and pays for that with the owed lists: a list node
+// allocated and freed per pair, plus the position array, neither of which this driver needs, since
+// a supernode's ancestors are found by walking its own index set.
+//
+// Which is cheaper is empirical and unmeasured. The map costs O(|Idx(kk)|) per pair against numeric
+// work of about frontSize * width * height, so it vanishes where supernodes are fat and is the same
+// order where they are thin, which is the nodal regime a supernodal method is not built for anyway.
+// =================================================================================================
+
+template<class Val>
+bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, const Permutation& p,
+                                                const SymFactor& sf, NumFactorDynamic<Val>& nf) const {
+    setSymFactor(sf, nf);
+
+    const std::int32_t snodeSize = static_cast<std::int32_t>(nf.snodeSize());
+
+    const std::vector<std::int32_t>& parent      = sf.parent();
+    const std::vector<std::int32_t>& firstChild  = sf.firstChild();
+    const std::vector<std::int32_t>& nextSibling = sf.nextSibling();
+
+    std::vector<std::int32_t> gblToLcl(nf.size(), NIL);
+
+    // A first, into every front, while every front is still the width symbolic predicted. Nothing
+    // has grown yet, so the delayed-column offset is zero everywhere.
     for (std::int32_t kk = 0; kk < snodeSize; ++kk) {
         const std::size_t   numNodeIdx = nf.frontSize(kk) + nf.updateSize(kk);
         const std::int32_t* nodeIdx    = nf.nodeIdx(kk);
-        Val*                block      = nf.val(kk);
 
         setGlobalToLocal(numNodeIdx, nodeIdx, gblToLcl);
-        const bool ok = assembleFromA(A, p, gblToLcl, nf.frontSize(kk), numNodeIdx, nodeIdx, block)
-                        && factorDynamicSupernode(nf, kk, gblToLcl)
-                        && nf.numberOfDelayedColumns(kk) == 0;   // no ancestor to take a delay in slice 1
+        const bool ok = assembleFromA(A, p, gblToLcl, 0, nf.frontSize(kk), numNodeIdx, nodeIdx,
+                                      nf.val(kk));
         clearGlobalToLocal(numNodeIdx, nodeIdx, gblToLcl);
         if (!ok)
             return false;
+    }
+
+    for (std::int32_t jj = 0; jj < snodeSize; ++jj) {
+        std::int32_t delayedIntoJj = 0;
+        for (std::int32_t ii = firstChild[jj]; ii != NIL; ii = nextSibling[ii])
+            delayedIntoJj += nf.mNumberOfDelayedColumns[ii];
+
+        if (delayedIntoJj > 0) {
+            const std::int32_t grownRows =
+                static_cast<std::int32_t>(nf.mFrontSize[jj] + nf.mUpdateSize[jj]) + delayedIntoJj;
+
+            // The index set, exactly as in the left-looking driver: extend, shift right, prepend
+            // the children's delayed globals in sibling order.
+            nf.extendIndex(jj, delayedIntoJj);
+            std::vector<std::int32_t>& jjNodeIdxVec = nf.mNodeIdx[jj];
+
+            for (std::int32_t sij_ = grownRows - delayedIntoJj - 1, dij_ = grownRows - 1;
+                 sij_ >= 0; --sij_, --dij_)
+                jjNodeIdxVec[dij_] = jjNodeIdxVec[sij_];
+
+            std::int32_t dij_ = 0;
+            for (std::int32_t ii = firstChild[jj]; ii != NIL; ii = nextSibling[ii]) {
+                const std::int32_t  iiFrontSize = static_cast<std::int32_t>(nf.mFrontSize[ii]);
+                const std::int32_t* iiNodeIdx   = nf.nodeIdx(ii);
+
+                for (std::int32_t sij_ = iiFrontSize;
+                     sij_ < iiFrontSize + nf.mNumberOfDelayedColumns[ii]; ++sij_, ++dij_)
+                    jjNodeIdxVec[dij_] = iiNodeIdx[sij_];
+            }
+
+            // And the block, keeping what A and the descendants already put there.
+            nf.mFrontSize[jj] += static_cast<std::size_t>(delayedIntoJj);
+            nf.extendEntry(jj, delayedIntoJj);
+        }
+
+        // The full height, captured before the factorization reclassifies part of the front as
+        // delayed. The map is computed once and serves both the delayed assembly and the factor,
+        // since jj's index set does not change between them.
+        const std::size_t   jjNumNodeIdx = nf.frontSize(jj) + nf.updateSize(jj);
+        const std::int32_t* jjNodeIdx    = nf.nodeIdx(jj);
+
+        setGlobalToLocal(jjNumNodeIdx, jjNodeIdx, gblToLcl);
+
+        // Take every child's delayed columns, then let the child reclaim their storage. Tested per
+        // child, not just on the total: one child delaying does not mean its siblings did, and the
+        // calls are no-ops for those that did not.
+        if (delayedIntoJj > 0)
+            for (std::int32_t ii = firstChild[jj]; ii != NIL; ii = nextSibling[ii])
+                if (nf.mNumberOfDelayedColumns[ii] > 0) {
+                    assembleDelayed(nf, ii, jj, gblToLcl);
+                    nf.shrinkEntry(ii, nf.mNumberOfDelayedColumns[ii]);
+                }
+
+        if (!factorDynamicSupernode(nf, jj, gblToLcl)) {
+            clearGlobalToLocal(jjNumNodeIdx, jjNodeIdx, gblToLcl);
+            return false;
+        }
+
+        clearGlobalToLocal(jjNumNodeIdx, jjNodeIdx, gblToLcl);
+
+        // Push. The walk starts past the front *and* the delayed columns, for the same reason the
+        // left-looking pp advance does: both are jj's own rows and neither updates an ancestor,
+        // the delayed ones going up by assembleDelayed instead.
+        std::size_t from = nf.frontSize(jj) + static_cast<std::size_t>(nf.numberOfDelayedColumns(jj));
+        while (from < jjNumNodeIdx) {
+            const std::int32_t kk = nf.nodeToSnode()[jjNodeIdx[from]];
+
+            const std::size_t height = jjNumNodeIdx - from;
+            std::size_t       width  = 0;
+            while (from + width < jjNumNodeIdx
+                   && nf.nodeToSnode()[jjNodeIdx[from + width]] == kk)
+                ++width;
+
+            UpdateBlock<Val> t(height, width);
+            std::copy(jjNodeIdx + from, jjNodeIdx + jjNumNodeIdx, t.mRowIdx.begin());
+
+            updateDynamicSupernode(nf, jj, from, t);
+
+            // kk has not grown yet, and need not have: jj's update rows are kk's own nodes, which
+            // its index set already holds. When kk later grows, extendEntry carries these values
+            // along with the rest.
+            const std::size_t   kkNumNodeIdx = nf.frontSize(kk) + nf.updateSize(kk);
+            const std::int32_t* kkNodeIdx    = nf.nodeIdx(kk);
+
+            setGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
+            assembleUpdate(gblToLcl, t, kkNumNodeIdx, nf.val(kk));
+            clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
+
+            from += width;
+        }
+
+        if (nf.numberOfDelayedColumns(jj) > 0 && parent[jj] == NIL)
+            return false;   // delayed at a root: nowhere left to put it
     }
 
     return true;
@@ -619,7 +1276,12 @@ bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, 
     if (A.size() != p.size() || A.size() != sf.size())
         return false;
 
-    // Cholesky and static LDL, in both transposes. Dynamic LDL and multifrontal follow.
+    // **Dynamic pivoting cannot go into this storage, and never will.** A delayed column grows its
+    // parent's front, and this factor's value buffer is one flat array sized once from the symbolic
+    // factorization; growing a front in the middle of it would mean moving everything after it. So
+    // this is a design refusal rather than a missing feature, and the combination is asserted to be
+    // refused in test_pipeline. Callers wanting a dynamic factorization pass NumFactorDynamic, which
+    // the overload below takes.
     switch (mFactorization) {
         case Factorization::Cholesky:
         case Factorization::StaticLDLT:
@@ -627,7 +1289,7 @@ bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, 
             break;
         case Factorization::DynamicLDLT:
         case Factorization::DynamicLDLH:
-            return false;   // not implemented
+            return false;   // by design, see above; not a gap to be filled
     }
 
     switch (mTraversal) {
@@ -650,29 +1312,52 @@ bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, 
     if (A.size() != p.size() || A.size() != sf.size())
         return false;
 
-    // Dynamic LDL is the reason this storage exists. Slice 1 handles it for real, left-looking,
-    // dense-front inputs; everything else (complex, LDLH, right-looking, multifrontal, and forests
-    // with real delaying) is still not yet. The static factorizations run unchanged, below.
+    // Dynamic LDL is the reason this storage exists. Everything runs except complex `LDL^H`;
+    // multifrontal is unported for all of them. The static factorizations run unchanged, below.
+    //
+    // **The kernels needed nothing to become complex.** 0.9's complex `factorDynamicLDL_` differs
+    // from its real one in six lines, all the same edit: the pivot *magnitudes* (`max1`, `max2`,
+    // `maxmax`) are declared real rather than scalar. This port declared them `double` from the
+    // start, so it was already the complex form; `updateDynamicLDL_` is byte-identical between
+    // 0.9's two engines to begin with. Everything else is `Val` arithmetic and `std::abs`, which
+    // means modulus for complex and is the right comparison either way.
+    //
+    // **Complex `LDL^H` is the one cell still missing, and it is an extension, not a port.** 0.9's
+    // complex LDL is symmetric only, so there is nothing to transcribe. `factorDynamicSupernode`
+    // writes `diagonal12 = diagonal21`, which is exactly the complex-symmetric assumption; the
+    // Hermitian form needs the conjugate there and a Bunch-Kaufman test that knows the 2x2's
+    // diagonal is real. Refused here rather than silently computing the symmetric factorization
+    // under a Hermitian name. See docs/TODO.md.
+    //
+    // Over the reals the question does not arise: the two transposes are the same computation, and
+    // `test_pipeline` asserts they agree bit for bit.
     if (dynamicPivoting(mFactorization)) {
-        if constexpr (std::is_same_v<Val, double>)
-            if (mFactorization == Factorization::DynamicLDLT && mTraversal == Traversal::LeftLooking)
-                return factorDynamicLeftLooking(A, p, sf, nf);
+        switch (mTraversal) {
+            case Traversal::LeftLooking:  return factorDynamicLeftLooking(A, p, sf, nf);
+            case Traversal::RightLooking: return factorDynamicRightLooking(A, p, sf, nf);
+            case Traversal::Multifrontal: return false;   // not ported yet
+        }
         return false;
     }
 
+    // The static factorizations, which this storage holds too. Every enumerator is named rather
+    // than collected under a default: the two dynamic ones are unreachable here, the guard above
+    // having returned for them, but the compiler cannot know that, and naming them is what keeps
+    // -Wswitch pointing at this switch if a sixth factorization is ever added.
     switch (mFactorization) {
         case Factorization::Cholesky:
         case Factorization::StaticLDLT:
         case Factorization::StaticLDLH:
             break;
-        default:
-            return false;
+        case Factorization::DynamicLDLT:
+        case Factorization::DynamicLDLH:
+            return false;   // unreachable: handled by the guard above
     }
 
     switch (mTraversal) {
         case Traversal::LeftLooking:  return factorStaticLeftLooking(A, p, sf, nf);
         case Traversal::RightLooking: return factorStaticRightLooking(A, p, sf, nf);
-        case Traversal::Multifrontal: return false;   // not implemented
+        case Traversal::Multifrontal: return false;   // not ported yet
     }
     return false;
 }

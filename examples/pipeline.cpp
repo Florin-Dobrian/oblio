@@ -6,8 +6,14 @@
 //
 // It runs the same 4x4 tridiagonal matrix through every factorization and every traversal, under
 // both ordering algorithms, and prints the residual ||Ax - b|| / ||b|| for each. Where a
-// configuration is not implemented yet (dynamic LDL, multifrontal), the numeric factorization
-// returns false and the row says so: the sweep doubles as a map of what is wired today.
+// configuration is not implemented yet, the numeric factorization returns false and the row says
+// so: the sweep doubles as a map of what is wired today.
+//
+// **The storage is chosen from the factorization, not fixed.** Dynamic pivoting delays a column up
+// to an ancestor, which grows that ancestor's front, and only NumFactorDynamic can grow; asking for
+// dynamic LDL in the flat storage is refused by design rather than by omission. The predicate that
+// says so is dynamicPivoting() in Types.h, and the sweep consults it, so a "not implemented" row
+// here means the algorithm is missing rather than that the example asked for the wrong container.
 //
 // Compile (macOS, from repo root):
 //   g++ -std=c++17 -O3 -DOBLIO_BLAS_UNDERSCORE -Iinclude examples/pipeline.cpp src/*.cpp -framework Accelerate -o pipeline
@@ -103,31 +109,37 @@ int main() {
                                    Factorization::DynamicLDLH}) {
             for (Traversal trav : {Traversal::LeftLooking, Traversal::RightLooking,
                                    Traversal::Multifrontal}) {
-                NumFactorStatic<double> nf;
-                NumFactorEngine ne(fact, trav);
-                if (!ne.compute(A, p, s, nf)) {
-                    printf("  %-8s  %-13s  %-13s  %s\n",
-                           name(method), name(fact), name(trav), "not implemented");
-                    continue;
+                // Factor, solve and take the residual, in whichever storage this factorization
+                // needs. The two branches differ only in the type of nf, so the body is a lambda
+                // templated on it rather than written twice.
+                const auto attempt = [&](auto& nf) -> const char* {
+                    NumFactorEngine ne(fact, trav);
+                    if (!ne.compute(A, p, s, nf))       return "not implemented";
+
+                    Vector<double> x(n);
+                    if (!sol.compute(p, nf, b, x))      return "solve failed";
+
+                    Vector<double> r(n);
+                    if (!mul.residual(A, x, b, r))      return "residual failed";
+
+                    const double rel = normB > 0 ? r.norm() / normB : r.norm();
+                    printf("  %-8s  %-13s  %-13s  %.3e\n",
+                           name(method), name(fact), name(trav), rel);
+                    return nullptr;
+                };
+
+                const char* why = nullptr;
+                if (dynamicPivoting(fact)) {
+                    NumFactorDynamic<double> nf;
+                    why = attempt(nf);
+                } else {
+                    NumFactorStatic<double> nf;
+                    why = attempt(nf);
                 }
 
-                Vector<double> x(n);
-                if (!sol.compute(p, nf, b, x)) {
+                if (why)
                     printf("  %-8s  %-13s  %-13s  %s\n",
-                           name(method), name(fact), name(trav), "solve failed");
-                    continue;
-                }
-
-                Vector<double> r(n);
-                if (!mul.residual(A, x, b, r)) {
-                    printf("  %-8s  %-13s  %-13s  %s\n",
-                           name(method), name(fact), name(trav), "residual failed");
-                    continue;
-                }
-
-                const double rel = normB > 0 ? r.norm() / normB : r.norm();
-                printf("  %-8s  %-13s  %-13s  %.3e\n",
-                       name(method), name(fact), name(trav), rel);
+                           name(method), name(fact), name(trav), why);
             }
         }
     }

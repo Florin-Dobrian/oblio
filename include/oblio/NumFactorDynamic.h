@@ -119,13 +119,74 @@ private:
         mNodeIdx[jj].resize(mNodeIdx[jj].size() + static_cast<std::size_t>(n));
     }
 
+    // Size supernode jj's block to its *current* shape and zero it: frontSize columns by
+    // frontSize + updateSize rows. The other half of growing a front, called once frontSize has
+    // absorbed the columns delayed into it, and only there, since the old contents are discarded.
+    //
+    // 0.9 spells this as three calls, discardEntry_ then allocateEntry_ then zeroEntry_, because it
+    // manages the block by hand. One vector per supernode collapses all three into an assign, which
+    // is the whole of what the storage choice buys here. Left-looking never grows a block in place,
+    // so 0.9's extendEntry_ has no counterpart yet; right-looking is what will want it.
+    void resetEntry(std::int32_t jj) {
+        mVal[jj].assign(mFrontSize[jj] * (mFrontSize[jj] + mUpdateSize[jj]), Val(0));
+    }
+
+    // The other way to grow a block, and the one right-looking needs: size jj's block to its
+    // current shape while **keeping what is already in it**, the n new columns arriving empty at
+    // the left. Ported from 0.9 extendEntry_.
+    //
+    // The two traversals differ in exactly this. Left-looking assembles A into a front immediately
+    // before factoring it, so when the front grows there is nothing in it worth keeping and
+    // resetEntry discards. Right-looking assembles A into every front at the start and then pushes
+    // each supernode's update into its ancestors, so by the time a front grows it already holds A's
+    // values and every update from every descendant already factored. Discarding there would throw
+    // the factorization away.
+    //
+    // The delayed columns are prepended, so the old contents move down and right by n: old (i, j)
+    // becomes new (i + n, j + n). Only the lower triangle is carried, which is all that is occupied
+    // before a front is factored.
+    //
+    // **Called after mFrontSize has been widened**, like resetEntry, so both verbs mean the same
+    // thing: make the block match the shape the fields already describe. 0.9 calls its version
+    // before widening and passes the old width implicitly; the arithmetic is identical either way,
+    // and one convention across the two verbs is worth more than matching that call order.
+    void extendEntry(std::int32_t jj, std::int32_t n) {
+        const std::int32_t newFront = static_cast<std::int32_t>(mFrontSize[jj]);
+        const std::int32_t update   = static_cast<std::int32_t>(mUpdateSize[jj]);
+        const std::int32_t oldFront = newFront - n;
+        const std::int32_t oldRows  = oldFront + update;
+        const std::int32_t newRows  = newFront + update;
+
+        std::vector<Val> grown(static_cast<std::size_t>(newFront) * static_cast<std::size_t>(newRows),
+                               Val(0));
+        const std::vector<Val>& old = mVal[jj];
+
+        for (std::int32_t j_ = 0; j_ < oldFront; ++j_)
+            for (std::int32_t i_ = j_; i_ < oldRows; ++i_)
+                grown[static_cast<std::size_t>(j_ + n) * static_cast<std::size_t>(newRows)
+                      + static_cast<std::size_t>(i_ + n)]
+                    = old[static_cast<std::size_t>(j_) * static_cast<std::size_t>(oldRows)
+                          + static_cast<std::size_t>(i_)];
+
+        mVal[jj] = std::move(grown);
+    }
+
     // Swap columns j_ and k_ of supernode jj, symmetrically. The block is a symmetric matrix stored
     // column-major with leading dimension the index size, so exchanging two pivot columns exchanges
     // the matching rows too. Also swaps the two node indices and repairs the global-to-local map.
     // Ported from 0.9 swap_.
+    // **The middle loop conjugates for a Hermitian factorization, and that is not decoration.** It
+    // exchanges a column entry with a row entry, and those two are reflections across the diagonal:
+    // for a symmetric factor A(i,j) == A(j,i) and a raw swap is right, but for a Hermitian one
+    // A(k,i) == conj(A(i,k)), so a value crossing the diagonal has to be conjugated on the way. The
+    // other two loops move entries between columns or between rows without crossing, and the
+    // diagonal entries are real, so this is the only place it arises. For `double` conj is the
+    // identity and all three loops are plain swaps again.
     void swap(std::int32_t jj, std::int32_t j_, std::int32_t k_, std::vector<std::int32_t>& gblToLcl) {
         if (k_ < j_)
             std::swap(j_, k_);
+
+        const bool withHermitian = hermitian(mFactorization);
 
         Val*               block = mVal[jj].data();
         std::int32_t*      idx   = mNodeIdx[jj].data();
@@ -139,13 +200,25 @@ private:
         for (std::int32_t i_ = 0; i_ < j_; ++i_)            // rows j_ and k_, in the columns left of j_
             std::swap(block[at(j_, i_)], block[at(k_, i_)]);
 
-        for (std::int32_t i_ = j_ + 1; i_ < k_; ++i_)       // column j_ against row k_, between j_ and k_
-            std::swap(block[at(i_, j_)], block[at(k_, i_)]);
+        for (std::int32_t i_ = j_ + 1; i_ < k_; ++i_) {     // column j_ against row k_, between j_ and k_
+            const Val a = block[at(i_, j_)];                // A(i, j)
+            const Val b = block[at(k_, i_)];                // A(k, i)
+            block[at(i_, j_)] = maybeConjugate(b, withHermitian);   // becomes A(i, k)
+            block[at(k_, i_)] = maybeConjugate(a, withHermitian);   // becomes A(j, i)
+        }
 
         for (std::int32_t i_ = k_ + 1; i_ < ld; ++i_)       // columns j_ and k_, in the rows below k_
             std::swap(block[at(i_, j_)], block[at(i_, k_)]);
 
         std::swap(block[at(j_, j_)], block[at(k_, k_)]);    // the two diagonal entries
+
+        // **The entry between the two swapped positions is its own reflection**, and so is touched
+        // by none of the loops above: under the permutation A(k, j) becomes A(j, k), which is the
+        // same stored position. For a symmetric factor those are equal and there is nothing to do,
+        // which is why 0.9 leaves it alone. For a Hermitian one they are conjugates, so it has to
+        // be conjugated in place. Leaving it out produces a factor that reconstructs the conjugate
+        // of the matrix in the affected rows, with no other symptom.
+        block[at(k_, j_)] = maybeConjugate(block[at(k_, j_)], withHermitian);
 
         std::swap(idx[j_], idx[k_]);                        // the node indices and the global-to-local map
         gblToLcl[idx[j_]] = j_;

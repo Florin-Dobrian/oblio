@@ -67,14 +67,65 @@ friend. Name lookup gathers every overload before access is checked, so a non-co
 the friend context selects the private overload and fails to compile; `std::as_const(nf).val(jj)`
 is the idiom for reading through such an object.
 
-**The dynamic factor's growth verbs are private and one-sided.** `extendIndex`, `swap` and
-`shrinkEntry` exist only on `NumFactorDynamic`, because only its storage makes them cheap. That
-asymmetry is the same rule `experiments/storage-options` arrived at for the matrix pair, where
-`setColumn` is absent from the flat class by design: an object offers what its storage makes cheap,
-and nothing else.
+**The dynamic factor's growth verbs are private and one-sided.** `extendIndex`, `resetEntry`,
+`extendEntry`, `swap` and `shrinkEntry` exist only on `NumFactorDynamic`, because only its storage
+makes them cheap. That asymmetry is the same rule `experiments/storage-options` arrived at for the
+matrix pair, where `setColumn` is absent from the flat class by design: an object offers what its
+storage makes cheap, and nothing else.
 
-**This set will grow.** When dynamic LDL delays columns across a forest, the solve's diagonal pass
-needs `pivotType` to apply 2x2 block solves, and the table above gains a row.
+### The life of a delayed column
+
+Two flows run over the elimination forest during dynamic LDL, and they have different reach. An
+**update** goes from a supernode to any ancestor holding one of its update rows, which may be far up
+the tree and may skip levels; this is the flow the traversals disagree about, left-looking pulling
+and right-looking pushing. A **delay** goes from a child to its parent, one edge, never further.
+
+Only one flow is contested, so the delay machinery is identical in both drivers, which fell out
+rather than being designed. A delay can still travel further than one edge, but only by being
+delayed again: a column passed up to the parent becomes an ordinary front column there and may fail
+to pivot a second time. At a root there is no next hop, and that is an error rather than a numeric
+failure.
+
+From this the storage behavior follows, and it is worth stating because it bounds the allocation:
+
+| | when | how often |
+|---|---|---|
+| `extendIndex` | the supernode is reached, if its children delayed | at most once, never undone |
+| `resetEntry` / `extendEntry` | the same moment | at most once |
+| `shrinkEntry` | the *parent* is reached, if this supernode delayed | at most once, always after |
+
+Once and not more, because delays arrive only from children and a supernode is reached once. "At
+most" rather than "exactly" for two reasons that are different in kind: structurally, a leaf never
+grows and a root never shrinks; numerically, whether a supernode delays at all depends on the
+*values*, not the pattern. The same matrix under a different ordering delays a different set of
+columns, which is the whole difference between static and dynamic pivoting.
+
+The order cannot interleave, since a parent's index is above its child's, so a block is at its
+largest between its own growth and its parent's collection. That interval is the storage high-water
+mark.
+
+**Growth counts and shrink counts need not match**, and where they diverge says something about the
+forest: several children may delay into one parent, giving one growth and several shrinks. A chain
+forest, which a banded matrix under Natural ordering produces, makes them equal; a branching one
+does not. Measured on a saddle-point matrix under AMD: 15 supernodes grew, 24 shrank, identically in
+both traversals.
+
+**The index set never shrinks.** `shrinkEntry` truncates the value block's columns and keeps every
+row, because a delayed column remains a row of L: its entries under this supernode's pivots are
+genuine. That is the height invariant, `frontSize + numberOfDelayedColumns + updateSize`, constant
+throughout. It also makes the three regions a partition, so every row belongs to exactly one flow,
+which is what the traversals rely on when they advance past `frontSize + numberOfDelayedColumns`
+rather than past the front alone. Advancing by the front alone would push the delayed rows to the
+parent as an update *as well as* handing them over as delays, and the parent would double-count
+them silently.
+
+**This set has grown.** The solve reads `numberOfDelayedColumns(jj)` and `pivotType()` from the
+dynamic factor, the first because a delayed column leaves its row behind so the leading dimension is
+`frontSize + numberOfDelayedColumns + updateSize`, the second because a 2x2 pivot puts D's
+off-diagonal where L's first sub-diagonal entry would be. Both are dynamic-only, which is why
+`SolveEngine`'s three passes are paired: `forwardStatic` and `forwardDynamic`, and so on, the static
+three templated on the factor and the dynamic three naming `NumFactorDynamic` outright. Same split,
+same reason, as the traversals in `NumFactorEngine`.
 
 ### The parallel with the matrix, and where it stops
 

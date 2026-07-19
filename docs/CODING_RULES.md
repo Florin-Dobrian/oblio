@@ -109,6 +109,24 @@ softer layer: conventions for consistency, not correctness.
 
 ## C++
 
+- **A switch over one of our enums names every enumerator, and never uses `default`.** Under
+  `-Wall` the compiler warns on a switch that misses one, and that warning is the point: adding a
+  sixth `Factorization` should make the build list every place that has to make a decision about it.
+  A `default` throws that away. The new enumerator compiles, falls into the catch-all, and returns
+  something plausible from a site nobody revisited.
+
+  This holds even where a case is unreachable. `NumFactorEngine::compute`'s dynamic overload
+  dispatches the dynamic factorizations before its static switch, so those two enumerators cannot
+  reach it, but they are still listed and still return false, because the compiler cannot know they
+  are unreachable and neither can the next reader. An unreachable named case costs one line; a
+  `default` costs the warning.
+
+  Corollary for the comment beside a refusal: **say whether it is a gap or a decision.** "Not
+  implemented" invites someone to implement it. Dynamic pivoting into `NumFactorStatic` returns
+  false permanently, because a delayed column grows a front and a flat buffer cannot grow, and the
+  comment says so; multifrontal returns false because nobody has ported it yet, and the comment says
+  that instead. Same statement, opposite instruction to the reader.
+
 - **Index naming: `j` and `k` are columns, `jj` and `kk` are their supernodes.** 0.9's
   convention, and worth keeping. Two rules, and the second is the useful one:
 

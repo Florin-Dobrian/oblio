@@ -1,5 +1,7 @@
 #include "oblio/BlasLapack.h"
 
+#include "oblio/Types.h"
+
 #include <cmath>
 
 namespace Oblio {
@@ -11,17 +13,10 @@ namespace {
 double absVal(double v)      { return std::abs(v); }
 double absVal(Cplx v)        { return std::abs(v); }
 
-// Conjugate, or not. `hermitian` decides, and for double it is a no-op either way, which is the
-// whole point: real symmetric and real Hermitian are the same case, so the branch costs nothing
-// and says nothing.
-double maybeConj(double v, bool)          { return v; }
-Cplx   maybeConj(Cplx v, bool hermitian)  { return hermitian ? std::conj(v) : v; }
-
-// A Hermitian factorization's D is real. Floating point will not make it exactly so, and the
-// imaginary part it leaves is noise, not information. Discard it, which is what LAPACK's zpotrf
-// does with the diagonal too.
-double forceReal(double v, bool)          { return v; }
-Cplx   forceReal(Cplx v, bool hermitian)  { return hermitian ? Cplx(v.real(), 0.0) : v; }
+// maybeConjugate and forceReal live in Types.h, beside the `hermitian` predicate that drives them.
+// A Hermitian factorization's D is real; floating point will not make it exactly so, and the
+// imaginary part left behind is noise rather than information, which is why forceReal discards it,
+// as LAPACK's zpotrf does with its diagonal.
 
 } // namespace
 
@@ -36,7 +31,7 @@ void formUpper(int n, int k, const Val* l, int ldl, Val* u, int ldu,
     // columns (by ldl), up steps across U's rows (by 1), dp walks D's diagonal (by ldd + 1).
     for (int i = 0, lp = 0, up = 0, dp = 0; i < k; ++i, lp += ldl, ++up, dp += ldd + 1)
         for (int j = 0, lq = lp, uq = up; j < n; ++j, ++lq, uq += ldu)
-            u[uq] = d[dp] * maybeConj(l[lq], hermitian);
+            u[uq] = d[dp] * maybeConjugate(l[lq], hermitian);
 }
 
 template<class Val>

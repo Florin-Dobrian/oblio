@@ -145,8 +145,31 @@ That multifrontal needed three attempts is itself a signal. It is the traversal 
 columns meet the update stack (`UpdateStackDynamic`, which only the multifrontal engines befriend),
 and it is the right one to leave for last.
 
-## Not in scope for slice 2
+## Not in scope for slice 2 — as written at the time
 
 Complex, both symmetric and Hermitian, is slice 3. Right-looking and multifrontal, and
 the `UpdateStackDynamic` that the multifrontal engines befriend, come after. `extendEntry`
 stays unported until right-looking needs it.
+
+*All of that except multifrontal was finished the same day. Right-looking came first, on the rule
+that the two traversals travel together, and `extendEntry` was exactly what it needed. Complex
+followed: `DynamicLDLT` needed only a dispatch guard, since the port was already in 0.9's complex
+form, and `DynamicLDLH` was an extension with no reference. The live record is PORTING_LEDGER and
+TODO; this file is history.*
+
+## Closed, 2026-07-19
+
+Slice 2 is done and verified end to end, and right-looking came with it rather than after it, on
+the rule that the two traversals travel together. So this note is history now; the current record is
+PORTING_LEDGER for what is ported, TESTING_SPECIFICATION for what is checked, and TODO for what is
+owed.
+
+Two of its predictions were wrong and are worth keeping visible, since the same guesses are
+available to make again. Pass 2 is **not** pass 1 with different loop bounds: the arithmetic bodies
+are character-identical and the whole difference is in the selection (no forced 1x1, a 2x2 partner
+restricted to front columns, and a Bunch-Kaufman determinant test in place of `max1 == max2`). And
+the solve needed all three passes rewritten, not just the diagonal, because the leading dimension
+changes as well as the pivot handling.
+
+One prediction was right and paid off immediately: `extendEntry` was exactly what right-looking
+needed and nothing else did.

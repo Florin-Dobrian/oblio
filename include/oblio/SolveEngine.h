@@ -29,6 +29,7 @@
 // calls TRSM and GEMM, and scatters. Many right-hand sides make a supernode a *matrix* operation,
 // and only then does the packing pay. That path is worth adding; it is not needed to be correct.
 
+#include "oblio/NumFactorDynamic.h"
 #include "oblio/Permutation.h"
 #include "oblio/Types.h"
 #include "oblio/Vector.h"
@@ -55,19 +56,40 @@ public:
                  const Vector<Val>& b, Vector<Val>& x) const;
 
 private:
+    // The three passes come in pairs, split on the *pivoting* axis, exactly as NumFactorEngine's
+    // kernels are. The static three serve Cholesky and static LDL and are templated on the factor,
+    // since either storage holds them; the dynamic three name NumFactorDynamic outright, because
+    // dynamic pivoting requires that storage. Same rule, same reason, stated once by
+    // dynamicPivoting() in Types.h.
+    //
+    // Two things separate a dynamic pass from its static twin, and both come from delayed columns:
+    //
+    //   The stride.  A block's leading dimension is frontSize + numberOfDelayedColumns +
+    //                updateSize. The delayed columns kept their rows when shrinkEntry dropped their
+    //                columns, and those rows are genuine rows of L that the solve must walk.
+    //   The 2x2s.    Where pivotType says a column opens a 2x2, the entry just below its diagonal
+    //                holds D's off-diagonal rather than an entry of L, so the triangular passes
+    //                step over it and the diagonal pass solves the pair together.
+
     // L y = b. Descending the supernodes, which is a topological order, so a supernode's own
     // columns are solved before anything below them is updated.
     template<class Val, class Factor>
-    void forward(const Factor& nf, Vector<Val>& y) const;
+    void forwardStatic(const Factor& nf, Vector<Val>& y) const;
+    template<class Val>
+    void forwardDynamic(const NumFactorDynamic<Val>& nf, Vector<Val>& y) const;
 
-    // D z = y. LDL only. Trivial while pivots are 1x1; a 2x2 block solve when dynamic LDL brings
-    // them.
+    // D z = y. LDL only. One division per column while every pivot is 1x1; a 2x2 block solve where
+    // dynamic pivoting chose a pair.
     template<class Val, class Factor>
-    void diagonal(const Factor& nf, Vector<Val>& y) const;
+    void diagonalStatic(const Factor& nf, Vector<Val>& y) const;
+    template<class Val>
+    void diagonalDynamic(const NumFactorDynamic<Val>& nf, Vector<Val>& y) const;
 
     // L^H x = z (or L^T, for LDLT). Ascending, the mirror of the forward pass.
     template<class Val, class Factor>
-    void backward(const Factor& nf, Vector<Val>& y) const;
+    void backwardStatic(const Factor& nf, Vector<Val>& y) const;
+    template<class Val>
+    void backwardDynamic(const NumFactorDynamic<Val>& nf, Vector<Val>& y) const;
 };
 
 } // namespace Oblio

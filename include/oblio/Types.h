@@ -10,6 +10,7 @@
 // it so an over-range value fails loudly rather than wrapping at a narrowing cast.
 
 #include <cstddef>
+#include <complex>
 #include <cstdint>
 #include <limits>
 
@@ -76,6 +77,24 @@ enum class Factorization {
 // conjugate is the identity, so the flag is harmless there. `separateDiagonal` is true when the
 // diagonal is a pass of its own: LDL keeps L unit and holds D apart, while Cholesky folds its own
 // diagonal into C.
+// Conjugate a value, or leave it. `hermitian` decides, and for `double` both overloads are the
+// identity, which is what lets one templated kernel serve the symmetric and Hermitian
+// factorizations alike rather than being written twice.
+//
+// These sit beside the predicate that drives them because three separate parts of the library need
+// them: the dense kernels in BlasLapack, the dynamic pivot and swap code, and the solve.
+inline double               maybeConjugate(double v, bool)                    { return v; }
+inline std::complex<double> maybeConjugate(std::complex<double> v, bool herm) {
+    return herm ? std::conj(v) : v;
+}
+
+// A Hermitian matrix has a real diagonal. Rounding does not know that, so the diagonal is forced
+// rather than assumed, exactly as the static kernel does when it factors one.
+inline double               forceReal(double v, bool)                    { return v; }
+inline std::complex<double> forceReal(std::complex<double> v, bool herm) {
+    return herm ? std::complex<double>(v.real(), 0.0) : v;
+}
+
 inline bool hermitian(Factorization factorization) {
     return factorization == Factorization::Cholesky
         || factorization == Factorization::StaticLDLH

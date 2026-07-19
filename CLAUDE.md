@@ -54,6 +54,12 @@ Conventions (style preferences) are imported below from docs/CODING_RULES.md
   bug came from reimplementing a 0.9 algorithm instead of porting it. Following
   10.12's *design* is not a rewrite: shape and decomposition may track 10.12, but
   *what* is computed still matches 0.9.
+- **The test suite and docs/TESTING_SPECIFICATION.md move together.** Adding, removing or
+  changing what a test asserts is a change to both, in the same step. The specification is the
+  description of the suite, so a test it does not describe is a test nobody can find, and a
+  description with no test behind it is a claim we are not making good on. This is an invariant
+  rather than a convention because nothing detects the drift: both files keep compiling, the suite
+  keeps passing, and the record quietly stops being true.
 - **`std::vector` is the default container.** Exceptions, each deliberate:
   fixed-size small blocks (e.g. 2×2 pivots) → `std::array`; non-owning view over a
   column/block → pointer + length (C++17, no `std::span`), one house convention;
@@ -133,6 +139,12 @@ Linux: replace `-framework Accelerate` with `-lblas -llapack -lm`.
 
 - **CLAUDE.md** (this file), operating contract + doc index.
 - **docs/PORTING_LEDGER.md**, per-unit porting status. Read first after a context gap.
+- **docs/TODO.md**, work we intend to do that is not a porting question. The ledger asks whether a
+  0.9 unit is carried over, which is a question with an end; TODO holds what outlives it, including
+  things neither reference does. Straddling items live in TODO and the ledger points at them.
+- **docs/TESTING_SPECIFICATION.md**, what the suite covers, stated independently of the test
+  sources. Tests are written from it, not recovered from it, so an unsupported combination is a
+  stated expectation rather than a missing test. Currently a catalog of the suite as it stands.
 - **docs/CODING_RULES.md**, conventions a linter can't enforce. Imported above, so
   always loaded. Language-general.
 - **docs/WRITING_RULES.md**, prose and documentation conventions (no em-dashes,

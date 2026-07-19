@@ -97,14 +97,15 @@ include/oblio/      , public headers (declarations only)
 src/                , method bodies + explicit instantiations (flat layout)
   Amd.cpp           , AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
   Mmd.cpp           , MMD ordering (Sparspak/Liu, via Oblio 0.9)
-tests/              , test suites (119 tests)
+tests/              , test suites (148 tests; see docs/TESTING_SPECIFICATION.md)
   smoke.cpp                    5,  quick end-to-end sanity
   test_order.cpp              21,  ordering (Natural, MMD, AMD)
   test_permutation.cpp        11,  permutation maps
   test_forest.cpp             23,  elimination forest and supernodes
   test_symfactor.cpp          29,  symbolic factorization
   test_numfactor.cpp          16,  numeric factorization
-  test_solve.cpp              14,  end-to-end solve, residual at machine precision
+  test_solve.cpp              14,  the solve step, residual at machine precision
+  test_pipeline.cpp           29,  whole-pipeline combinations, by residual
 examples/           , usage examples
   pipeline.cpp      , the pipeline by hand, every factorization / traversal / ordering
   basic.cpp         , the same solve through the DirectSolver facade
@@ -158,11 +159,14 @@ Done:
 - [x] Namespaced headers (`include/oblio/`), explicit instantiation throughout
 - [x] Validated against Oblio 0.9 as oracle; end-to-end residual at machine precision
 - [x] `DirectSolver<Val>`, the top-level analyze / factor / solve driver
-- [x] 119 tests across 7 phase suites
+- [x] 148 tests across 8 suites
 
 Not yet:
 
-- [ ] Dynamic LDL, Bunch-Kaufman 1x1 / 2x2 pivots (dense-front pivot kernel done; delayed
-      columns across a forest still to come)
+- [x] Dynamic LDL, Bunch-Kaufman 1x1 / 2x2 pivots: both traversals, delayed columns and all, at
+      machine precision
+- [x] **All five factorizations, real and complex, in both implemented traversals.** Complex
+      LDL^H with dynamic pivoting is an extension rather than a port: 0.9's complex LDL is
+      symmetric only
 - [ ] Multifrontal traversal
 - [ ] Multi-RHS solve (dense right-hand sides)

@@ -35,17 +35,23 @@ written so that it does not know the layout at all.
 ## The idea
 
 Each class exposes the same three per-column accessors, named for what they return, not for the
-array behind them:
+array behind them. Same signatures, different bodies: **the same type, from a different place.**
 
-```
-rowIdx(j)    where column j's row indices start   (const std::int32_t*)
-val(j)       where column j's values start         (const double*)
-colSize(j)   how many entries column j has         (std::size_t)
-```
+| accessor | returns | static | dynamic |
+|---|---|---|---|
+| `rowIdx(j)` | `const std::int32_t*`, where column j's row indices start | `mRowIdx.data() + mColPtr[j]` | `mRowIdx[j].data()` |
+| `val(j)` | `const double*`, where column j's values start | `mVal.data() + mColPtr[j]` | `mVal[j].data()` |
+| `colSize(j)` | `std::size_t`, how many entries column j has | `mColPtr[j + 1] - mColPtr[j]` | `mRowIdx[j].size()` |
 
-In the static matrix a real pointer is one step from `colPtr`: `mRowIdx.data() + mColPtr[j]`. In the
-dynamic one it is already there: `mRowIdx[j].data()`. **The same type, from a different place.**
-`colPtr` never appears in a signature; it is a static-internal detail.
+Add `size()`, the column count, and that is the **entire** contract the multiply relies on: four
+functions, all const, identical in signature, differing only in body. In the static matrix a real
+pointer is one step from `colPtr`; in the dynamic one it is already there.
+
+**What is missing from that list matters as much as what is on it.** The static class also exposes
+`colPtr()`, `rowIdx()` and `val()` as whole vectors, and the templated multiply calls none of them.
+A flat offset array has no dynamic counterpart, so admitting one would have made the set
+unshareable; `colPtr` never appears in a signature, and stays a static-internal detail. Only the
+hand-written baseline reads those whole-vector forms, which is precisely why it is static-only.
 
 These are *lookups*: O(1) addresses into storage the matrix already holds, nothing allocated,
 nothing owned. A lookup is a fact about the layout, so it lives on the storage, exactly as

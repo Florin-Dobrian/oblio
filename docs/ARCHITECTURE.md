@@ -49,9 +49,11 @@ The contract is not one set. Each consumer uses the part it needs, and the diffe
 informative: the solve needs to know which factorization produced the factor, because that decides
 whether it conjugates, while the traversals never ask, because the engine already knows what it is
 computing. Conversely the traversals need the node-to-supernode map to find an ancestor, and the
-solve never does.
+solve never does. The column is the static traversals (`factorStaticLeftLooking` and its
+right-looking twin), which are the pair templated on the factor; dynamic pivoting reaches further,
+for the growth verbs below.
 
-| | `SolveEngine` | the traversals in `NumFactorEngine` |
+| | `SolveEngine` | the static traversals in `NumFactorEngine` |
 |---|---|---|
 | `size`, `snodeSize`, `frontSize(jj)`, `updateSize(jj)`, `nodeIdx(jj)`, `val(jj)` | read | read |
 | `factorization()` | read | not used |

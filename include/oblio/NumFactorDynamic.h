@@ -105,12 +105,12 @@ private:
     Val*                val(std::int32_t kk)     { return mVal[kk].data(); }
 
     // Also the write path: the engine accumulates the perturbation count through this reference
-    // (factorSupernode increments it). The const read overload above is public.
+    // (factorStaticSupernode increments it). The const read overload above is public.
     std::size_t& numPerturbations() { return mNumPerturbations; }
 
     // The growth verbs, the engine's alone, exercised as dynamic LDL delays and pivots. Like the
-    // other engine-internal steps (factorSupernode, assembleFromA) they are validated through the
-    // factorization's residual rather than in isolation.
+    // other engine-internal steps (factorStaticSupernode, assembleFromA) they are validated
+    // through the factorization's residual rather than in isolation.
 
     // Grow supernode jj's index set by n slots, for n columns delayed into it. The existing indices
     // stay at the front; the new slots (zero for now) are for the caller to fill with the delayed

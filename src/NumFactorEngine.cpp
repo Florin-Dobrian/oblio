@@ -159,7 +159,8 @@ void NumFactorEngine::assembleUpdate(const std::vector<std::int32_t>& gblToLcl,
 }
 
 template<class Val>
-bool NumFactorEngine::factorSupernode(std::size_t frontSize, std::size_t numNodeIdx, Val* block,
+bool NumFactorEngine::factorStaticSupernode(std::size_t frontSize, std::size_t numNodeIdx,
+                                            Val* block,
                                       std::size_t& numPerturbations) const {
     const int f  = static_cast<int>(frontSize);
     const int u  = static_cast<int>(numNodeIdx - frontSize);
@@ -200,7 +201,8 @@ bool NumFactorEngine::factorSupernode(std::size_t frontSize, std::size_t numNode
 }
 
 template<class Val>
-void NumFactorEngine::updateSupernode(std::size_t frontSize, std::size_t numNodeIdx, const Val* block,
+void NumFactorEngine::updateStaticSupernode(std::size_t frontSize, std::size_t numNodeIdx,
+                                            const Val* block,
                                       std::size_t offset, UpdateBlock<Val>& t) const {
     const int f      = static_cast<int>(frontSize);
     const int ld     = static_cast<int>(numNodeIdx);
@@ -266,7 +268,7 @@ void NumFactorEngine::updateSupernode(std::size_t frontSize, std::size_t numNode
 // =================================================================================================
 
 template<class Val, class Factor>
-bool NumFactorEngine::factorLeftLooking(const SparseMatrix<Val>& A, const Permutation& p,
+bool NumFactorEngine::factorStaticLeftLooking(const SparseMatrix<Val>& A, const Permutation& p,
                                         const SymFactor& sf, Factor& nf) const {
     setSymFactor(sf, nf);
 
@@ -323,7 +325,7 @@ bool NumFactorEngine::factorLeftLooking(const SparseMatrix<Val>& A, const Permut
             UpdateBlock<Val> t(height, width);
             std::copy(jjNodeIdx + from, jjNodeIdx + jjNumNodeIdx, t.mRowIdx.begin());
 
-            updateSupernode(jjFrontSize, jjNumNodeIdx, jjBlock, from, t);
+            updateStaticSupernode(jjFrontSize, jjNumNodeIdx, jjBlock, from, t);
             assembleUpdate(gblToLcl, t, kkNumNodeIdx, kkBlock);
 
             // jj has discharged kk. Queue it against the next ancestor it owes.
@@ -332,7 +334,8 @@ bool NumFactorEngine::factorLeftLooking(const SparseMatrix<Val>& A, const Permut
                 owed[nf.nodeToSnode()[jjNodeIdx[pos[jj]]]].push_back(jj);
         }
 
-        if (!factorSupernode(nf.frontSize(kk), kkNumNodeIdx, kkBlock, nf.numPerturbations())) {
+        if (!factorStaticSupernode(nf.frontSize(kk), kkNumNodeIdx, kkBlock,
+                                   nf.numPerturbations())) {
             clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
             return false;   // not positive definite (Cholesky only; LDL perturbs instead)
         }
@@ -359,8 +362,8 @@ bool NumFactorEngine::factorLeftLooking(const SparseMatrix<Val>& A, const Permut
 // =================================================================================================
 
 template<class Val, class Factor>
-bool NumFactorEngine::factorRightLooking(const SparseMatrix<Val>& A, const Permutation& p,
-                                         const SymFactor& sf, Factor& nf) const {
+bool NumFactorEngine::factorStaticRightLooking(const SparseMatrix<Val>& A, const Permutation& p,
+                                               const SymFactor& sf, Factor& nf) const {
     setSymFactor(sf, nf);
 
     const std::size_t size    = nf.size();
@@ -386,7 +389,7 @@ bool NumFactorEngine::factorRightLooking(const SparseMatrix<Val>& A, const Permu
         const std::int32_t* jjNodeIdx    = nf.nodeIdx(jj);
         Val*                jjBlock     = nf.val(jj);
 
-        if (!factorSupernode(jjFrontSize, jjNumNodeIdx, jjBlock, nf.numPerturbations()))
+        if (!factorStaticSupernode(jjFrontSize, jjNumNodeIdx, jjBlock, nf.numPerturbations()))
             return false;   // not positive definite (Cholesky only; LDL perturbs instead)
 
         // Walk jj's update rows. Each run of them belonging to one ancestor is one update.
@@ -407,7 +410,7 @@ bool NumFactorEngine::factorRightLooking(const SparseMatrix<Val>& A, const Permu
             UpdateBlock<Val> t(height, width);
             std::copy(jjNodeIdx + from, jjNodeIdx + jjNumNodeIdx, t.mRowIdx.begin());
 
-            updateSupernode(jjFrontSize, jjNumNodeIdx, jjBlock, from, t);
+            updateStaticSupernode(jjFrontSize, jjNumNodeIdx, jjBlock, from, t);
 
             setGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
             assembleUpdate(gblToLcl, t, kkNumNodeIdx, kkBlock);
@@ -421,7 +424,7 @@ bool NumFactorEngine::factorRightLooking(const SparseMatrix<Val>& A, const Permu
 }
 
 template<class Val>
-bool NumFactorEngine::factorDynamicLDL(NumFactorDynamic<Val>& nf, std::int32_t jj,
+bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int32_t jj,
                                        std::vector<std::int32_t>& gblToLcl) const {
     Val*          block = nf.val(jj);
     std::int32_t* idx   = nf.mNodeIdx[jj].data();
@@ -600,7 +603,7 @@ bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const
 
         setGlobalToLocal(numNodeIdx, nodeIdx, gblToLcl);
         const bool ok = assembleFromA(A, p, gblToLcl, nf.frontSize(kk), numNodeIdx, nodeIdx, block)
-                        && factorDynamicLDL(nf, kk, gblToLcl)
+                        && factorDynamicSupernode(nf, kk, gblToLcl)
                         && nf.numberOfDelayedColumns(kk) == 0;   // no ancestor to take a delay in slice 1
         clearGlobalToLocal(numNodeIdx, nodeIdx, gblToLcl);
         if (!ok)
@@ -628,8 +631,8 @@ bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, 
     }
 
     switch (mTraversal) {
-        case Traversal::LeftLooking:  return factorLeftLooking(A, p, sf, nf);
-        case Traversal::RightLooking: return factorRightLooking(A, p, sf, nf);
+        case Traversal::LeftLooking:  return factorStaticLeftLooking(A, p, sf, nf);
+        case Traversal::RightLooking: return factorStaticRightLooking(A, p, sf, nf);
         case Traversal::Multifrontal: return false;   // not implemented
     }
     return false;
@@ -650,7 +653,7 @@ bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, 
     // Dynamic LDL is the reason this storage exists. Slice 1 handles it for real, left-looking,
     // dense-front inputs; everything else (complex, LDLH, right-looking, multifrontal, and forests
     // with real delaying) is still not yet. The static factorizations run unchanged, below.
-    if (mFactorization == Factorization::DynamicLDLT || mFactorization == Factorization::DynamicLDLH) {
+    if (dynamicPivoting(mFactorization)) {
         if constexpr (std::is_same_v<Val, double>)
             if (mFactorization == Factorization::DynamicLDLT && mTraversal == Traversal::LeftLooking)
                 return factorDynamicLeftLooking(A, p, sf, nf);
@@ -667,8 +670,8 @@ bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, 
     }
 
     switch (mTraversal) {
-        case Traversal::LeftLooking:  return factorLeftLooking(A, p, sf, nf);
-        case Traversal::RightLooking: return factorRightLooking(A, p, sf, nf);
+        case Traversal::LeftLooking:  return factorStaticLeftLooking(A, p, sf, nf);
+        case Traversal::RightLooking: return factorStaticRightLooking(A, p, sf, nf);
         case Traversal::Multifrontal: return false;   // not implemented
     }
     return false;

@@ -146,44 +146,58 @@ private:
     //           a rank-k call. So U := D L21^T into a scratch, then gemmLower on the symmetric
     //           part and GEMM on the rectangle. The scratch is the price of the D.
     //
-    // factorSupernode returns false only for Cholesky, on a non-positive pivot. LDL cannot fail:
+    // factorStaticSupernode returns false only for Cholesky, on a non-positive pivot. LDL cannot
+    // fail:
     // it perturbs instead, and reports how often.
     template<class Val>
-    bool factorSupernode(std::size_t frontSize, std::size_t numIdx, Val* block,
+    bool factorStaticSupernode(std::size_t frontSize, std::size_t numIdx, Val* block,
                          std::size_t& numPerturbations) const;
 
     template<class Val>
-    void updateSupernode(std::size_t frontSize, std::size_t numIdx, const Val* block,
+    void updateStaticSupernode(std::size_t frontSize, std::size_t numIdx, const Val* block,
                          std::size_t offset, UpdateBlock<Val>& t) const;
 
-    // The two traversals. Same arithmetic, opposite direction.
+    // The traversals, named for the *pivoting*, which is the axis the Factorization enum names:
+    // static pivoting is Cholesky and static LDL, dynamic pivoting is dynamic LDL. Left-looking and
+    // right-looking are the same arithmetic in opposite directions:
     //
     //   Left-looking:  for each supernode, PULL every update owed to it, then factor.
     //                  Needs a list per supernode of who still owes it, and a position per
     //                  supernode tracking how far it has got through its ancestors.
     //   Right-looking: for each supernode, factor, then PUSH its update to every ancestor.
     //                  Needs no lists at all.
+    //
+    // **Static pivoting runs in either storage; dynamic pivoting requires the dynamic one**, since
+    // delaying a column grows a front. So these two are templated on the factor, while the dynamic
+    // traversal below names NumFactorDynamic outright. See dynamicPivoting() in Types.h.
+    //
+    // These two do not know which factorization they are running. They call
+    // factorStaticSupernode and updateStaticSupernode, and those branch on mFactorization to
+    // choose Cholesky or LDL.
     template<class Val, class Factor>
-    bool factorLeftLooking(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& sf,
-                           Factor& nf) const;
+    bool factorStaticLeftLooking(const SparseMatrix<Val>& A, const Permutation& p,
+                                 const SymFactor& sf, Factor& nf) const;
     template<class Val, class Factor>
-    bool factorRightLooking(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& sf,
-                            Factor& nf) const;
+    bool factorStaticRightLooking(const SparseMatrix<Val>& A, const Permutation& p,
+                                  const SymFactor& sf, Factor& nf) const;
 
     // Dynamic LDL, left-looking. Slice 1: the pivot kernel and a single-supernode driver, so a
     // dense front exercises the Bunch-Kaufman 1x1/2x2 selection and delaying in isolation. The
-    // delayed-column machinery across a real forest (pass 2, updateDynamicLDL, the delayed
-    // assembles) follows.
+    // delayed-column machinery across a real forest (pass 2, updateDynamicSupernode's counterpart
+    // for update rows, the delayed assembles) follows.
     template<class Val>
     bool factorDynamicLeftLooking(const SparseMatrix<Val>& A, const Permutation& p,
                                   const SymFactor& sf, NumFactorDynamic<Val>& nf) const;
 
     // Factor one supernode's dense front in place with threshold pivoting, delaying the columns it
     // cannot pivot to an ancestor. Records pivotType (1 / 2,3), numberOfDelayedColumns, and reduces
-    // frontSize by the number delayed. Ported from 0.9 factorDynamicLDL_ (updateSize == 0 pass).
+    // frontSize by the number delayed. The dynamic counterpart of factorStaticSupernode, and
+    // unlike it this one takes the factor rather than a raw block: pivoting swaps columns and
+    // records their kind, so it cannot be storage-blind. Ported from 0.9 factorDynamicLDL_
+    // (updateSize == 0 pass).
     template<class Val>
-    bool factorDynamicLDL(NumFactorDynamic<Val>& nf, std::int32_t jj,
-                          std::vector<std::int32_t>& gblToLcl) const;
+    bool factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int32_t jj,
+                                std::vector<std::int32_t>& gblToLcl) const;
 };
 
 } // namespace Oblio

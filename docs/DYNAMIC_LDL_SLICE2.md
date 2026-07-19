@@ -5,7 +5,7 @@ without re-deriving the model. Slice 1 is committed and green (119/119).
 
 ## Where we are
 
-Slice 1 ported the pivot core in isolation: `factorDynamicLDL` (0.9's `updateSize == 0`
+Slice 1 ported the pivot core in isolation: `factorDynamicSupernode` (0.9's `updateSize == 0`
 pass) plus a single-front driver `factorDynamicLeftLooking`, validated by reconstructing
 `L D L^T` from the block and `pivotType` against the pivoted, permuted matrix. Both 1x1
 and 2x2 pivots fire, and the test asserts that they do. The three growth verbs live on
@@ -22,7 +22,7 @@ both restrictions.
 
 A supernode's block height is `frontSize + numberOfDelayedColumns + updateSize`.
 
-`updateSize` is never rewritten. `factorDynamicLDL` ends by setting
+`updateSize` is never rewritten. `factorDynamicSupernode` ends by setting
 `numberOfDelayedColumns[jj]` to the leftover pivot count and doing `frontSize[jj] -= n`,
 so the height is conserved: the delayed columns reclassify from front to delayed rather
 than disappearing. This is why `shrinkEntry` is a column truncation that keeps every row.
@@ -72,7 +72,7 @@ For each updater `jj` of `kk`: if `kk` is `jj`'s parent, assemble `jj`'s delayed
 into `kk` and then call `shrinkEntry(jj, numberOfDelayedColumns[jj])`. Build the
 temporary, call `updateDynamicLDL_`, and assemble the temporary into `kk`.
 
-Factor `kk` with `factorDynamicLDL`. Advance `pp[kk]` by `frontSize + numberOfDelayedColumns`,
+Factor `kk` with `factorDynamicSupernode`. Advance `pp[kk]` by `frontSize + numberOfDelayedColumns`,
 not by `frontSize` alone, and enqueue `kk` against its next ancestor.
 
 The ordering matters twice. The delayed columns must be assembled into the parent before
@@ -105,6 +105,45 @@ and keep the slice 1 reconstruction test passing untouched.
 
 When the residual is wrong, the first checks are the height invariant above, then whether
 the delayed assembly happened before the shrink, then the `pp` advance.
+
+## Names
+
+The port renamed its traversals onto the pivoting axis after this note was first written:
+`factorStaticLeftLooking` and `factorStaticRightLooking` for Cholesky and static LDL,
+`factorDynamicLeftLooking` for the dynamic driver, and `factorDynamicSupernode` for the pivot
+kernel (the dynamic counterpart of `factorStaticSupernode`). By the same rule the update kernel
+ported in this slice should land as `updateDynamicSupernode`, beside the existing
+`updateStaticSupernode`. 0.9's
+own names keep their trailing underscore here (`factorDynamicLDL_`, `updateDynamicLDL_`) so that
+line references stay greppable against the reference sources.
+
+## What the reference covers beyond this slice
+
+0.9 implements dynamic LDL in all three traversals and for both scalar types, so nothing after this
+slice needs inventing. Two things about that are worth knowing before opening those files.
+
+**Right-looking is a near twin of left-looking.** `FactorRightLookingEngineReal-0_9.cc` has
+`factorDynamicLDL_` at 357 and `updateDynamicLDL_` at 1038, against 355 and 1036 in the
+left-looking file, and the two files are the same length to within a few lines. So once this slice
+is green, right-looking should be closer to a transcription with the direction flipped than to new
+work.
+
+**Multifrontal contains three versions of `factorDynamicLDL_`, and two of them are dead.** They
+share one signature, which compiles only because the preprocessor hides all but one:
+
+```
+352   #ifdef UNDEF          355   version 1     599   #endif      (dead)
+600   //#ifdef UNDEF        603   version 2    1189   //#endif    (LIVE: the guard is commented out)
+1190  #ifdef UNDEF         1193   version 3    1508   #endif      (dead)
+```
+
+**The live one is the middle version, at 603.** Its guard is commented out, which is what leaves it
+in the build; the other two are compiled out and were evidently abandoned. Porting version 1 or 3
+would mean porting code the author rejected. `updateDynamicLDL_` at 1591 has no such twin.
+
+That multifrontal needed three attempts is itself a signal. It is the traversal where delayed
+columns meet the update stack (`UpdateStackDynamic`, which only the multifrontal engines befriend),
+and it is the right one to leave for last.
 
 ## Not in scope for slice 2
 

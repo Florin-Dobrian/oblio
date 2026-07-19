@@ -9,17 +9,6 @@
 
 namespace Oblio {
 
-namespace {
-
-// Dynamic LDL delays a pivot it cannot take, which grows a front. A flat buffer cannot grow, so
-// these two need per-supernode storage; the rest are cheaper in the flat factor.
-bool needsDynamicStorage(Factorization factorization) {
-    return factorization == Factorization::DynamicLDLT
-        || factorization == Factorization::DynamicLDLH;
-}
-
-} // namespace
-
 template<class Val>
 void DirectSolver<Val>::setOrderMethod(OrderMethod method) {
     mOrderMethod = method;
@@ -70,7 +59,8 @@ bool DirectSolver<Val>::factor(const SparseMatrix<Val>& A) {
     NumFactorEngine ne(mFactorization, mTraversal);
     ne.setPivotThreshold(mPivotThreshold);
 
-    mUsesDynamicStorage = needsDynamicStorage(mFactorization);
+    // Dynamic pivoting delays a column, which grows a front, which a flat buffer cannot do.
+    mUsesDynamicStorage = dynamicPivoting(mFactorization);
     mFactored = mUsesDynamicStorage ? ne.compute(A, mPermutation, mSymFactor, mDynamicFactor)
                                     : ne.compute(A, mPermutation, mSymFactor, mStaticFactor);
     return mFactored;

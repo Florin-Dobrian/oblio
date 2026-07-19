@@ -93,6 +93,19 @@ notes (`CC^H` throughout); the rule only makes it bind on comments too. The one 
 shared numeric-kernel blocks `L11`, `L21`: a single kernel computes them for both factorizations,
 so they are generic and stay `L`.
 
+**Static and dynamic mean pivoting on an algorithm, storage on a container.** The two words name
+two different axes, and the noun they qualify says which one is meant, so nothing has to be spelled
+out. On an algorithm object, static and dynamic are about *pivoting*:
+`NumFactorEngine::factorStaticLeftLooking` runs the factorizations whose pivots are fixed by the
+symbolic structure (Cholesky, static LDL), and `factorDynamicSupernode` runs the one that chooses
+pivots while the arithmetic runs. On a data object they are about *storage*: `NumFactorStatic` holds
+flat buffers that cannot grow, `NumFactorDynamic` holds one vector per supernode so that a front
+can. A field describing a storage choice says so in its own name (`mUsesDynamicStorage`).
+
+The axes are aligned but not identical, and the asymmetry is worth knowing: static pivoting runs in
+either storage, while dynamic pivoting requires the dynamic one, because delaying a column grows a
+front. `dynamicPivoting()` in `Types.h` is where that rule is stated once.
+
 ## Dated entries (DESIGN_DECISIONS, CHANGELOG, the devlog)
 
 **Read the date before writing it.** An entry is stamped with the date it is *written*, and that

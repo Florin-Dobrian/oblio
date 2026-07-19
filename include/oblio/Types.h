@@ -85,6 +85,21 @@ inline bool separateDiagonal(Factorization factorization) {
     return factorization != Factorization::Cholesky;
 }
 
+// Whether pivots are chosen while the arithmetic runs. This is the other axis the enum names, and
+// it is about *pivoting*, not storage: Cholesky is static by nature (a positive definite matrix
+// needs no pivot search), while LDL can go either way, statically for matrices that tolerate the
+// pivots symbolic assigned, dynamically for the hard ones, where an unstable pivot is delayed to an
+// ancestor.
+//
+// **Dynamic pivoting implies dynamic storage**, because delaying a column grows a front and a flat
+// buffer cannot grow; the reverse does not hold, since static pivoting runs in either storage (and
+// prefers the flat one, for locality). This predicate is where that rule is stated once: the engine
+// asks it to pick a traversal, DirectSolver asks it to pick a storage.
+inline bool dynamicPivoting(Factorization factorization) {
+    return factorization == Factorization::DynamicLDLT
+        || factorization == Factorization::DynamicLDLH;
+}
+
 // How the supernodes are traversed. All three compute the same factor; they differ in when the
 // updates are formed and where they are kept.
 //

@@ -312,6 +312,24 @@ Recorded now because the storage-options experiment's matrix constructors just g
 (mirroring `SparseMatrix`), and it is the model for numfact: the matrix keeps the cap, the factor
 analog drops it.
 
+**The BLAS integer width is a link-time contract, not a compile-time one.** All of the above assumes
+BLAS's `int` is 32-bit, which is what lets `static_cast<int>` of a `size_t` dimension be safe: the
+per-side block dimensions are bounded by `n <= 2^31 - 1`, and a 32-bit signed `int` holds them. That
+assumption is correct on every build we target (LP64: reference BLAS, Accelerate, OpenBLAS default,
+MKL's `lp64` interface all use a 32-bit Fortran `INTEGER`, which the `int` prototypes in
+`BlasLapack.h` express faithfully). It is worth naming because it can be violated without a compiler
+error. An ILP64 BLAS (MKL's `ilp64` interface, OpenBLAS built `INTERFACE64=1`, Accelerate's newer
+ILP64 variant) uses a 64-bit `INTEGER`; linking one against our 32-bit `int` prototypes is an ABI
+mismatch that both sides compile clean and that surfaces only at run time, as wrong results on large
+problems or a crash. The danger runs `size_t -> int`, never `int32_t -> int`: our row ids are
+`int32_t` and equal `int` in width on these targets, so that cast loses nothing; the real narrowing
+is the `size_t` dimension, and it is safe only while the BLAS `int` is at least 32 bits. If Oblio ever
+needs the ILP64 range, the change is localized to `BlasLapack.h` (the raw prototypes and the inline
+wrappers swap `int` for a 64-bit integer) because the rest of the code already speaks `size_t` and
+narrows only at those wrapper calls; nothing else would move. This pairs with the `SuiteSparse_long`
+liftability note above: both the orderer's integer and the BLAS integer are link choices, widened
+independently, neither an algorithm change.
+
 ---
 
 ## 2026-07-14, Bulk versus direct access: direct wins, and bulk was never worth its one advantage

@@ -59,7 +59,7 @@ bool DirectSolver<Val>::factor(const SparseMatrix<Val>& A) {
     NumFactorEngine ne(mFactorization, mTraversal);
     ne.setPivotThreshold(mPivotThreshold);
 
-    // Dynamic pivoting delays a column, which grows a front, which a flat buffer cannot do.
+    // Dynamic pivoting delays a column, which expands a front, which a flat buffer cannot do.
     mUsesDynamicStorage = dynamicPivoting(mFactorization);
     mFactored = mUsesDynamicStorage ? ne.compute(A, mPermutation, mSymFactor, mDynamicFactor)
                                     : ne.compute(A, mPermutation, mSymFactor, mStaticFactor);

@@ -275,7 +275,7 @@ Outcome run(const SparseMatrix<Val>& A, OrderMethod om, Factorization fz, Traver
 
     if constexpr (std::is_same_v<Factor, NumFactorDynamic<Val>>) {
         for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(nf.snodeSize()); ++kk) {
-            const std::int32_t d = nf.numberOfDelayedColumns(kk);
+            const std::int32_t d = static_cast<std::int32_t>(nf.delaySize(kk));
             o.delayed += d;
             if (d > 0) ++o.snodesDelaying;
         }

@@ -113,8 +113,8 @@ void SolveEngine::backwardStatic(const Factor& nf, Vector<Val>& y) const {
 // =================================================================================================
 // The dynamic three. Same three solves, against a factor whose fronts moved while it was computed.
 //
-// A delayed column left its row behind: shrinkEntry reclaimed its column and kept every row, so the
-// leading dimension is frontSize + numberOfDelayedColumns + updateSize while the columns to solve
+// A delayed column left its row behind: contractVal reclaimed its column and kept every row, so the
+// leading dimension is frontSize + delaySize + updateSize while the columns to solve
 // are only the frontSize of them. And a 2x2 pivot puts D's off-diagonal in the slot immediately
 // below a diagonal, where L's first sub-diagonal entry would otherwise be, so the triangular passes
 // step over it and the diagonal pass takes the pair together.
@@ -129,7 +129,7 @@ void SolveEngine::forwardDynamic(const NumFactorDynamic<Val>& nf, Vector<Val>& y
 
     for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(nf.snodeSize()); ++jj) {
         const std::int32_t  frontSize  = static_cast<std::int32_t>(nf.frontSize(jj));
-        const std::int32_t  rows       = frontSize + nf.numberOfDelayedColumns(jj)
+        const std::int32_t  rows       = frontSize + static_cast<std::int32_t>(nf.delaySize(jj))
                                        + static_cast<std::int32_t>(nf.updateSize(jj));
         const std::int32_t* nodeIdx    = nf.nodeIdx(jj);
         const Val*          val        = nf.val(jj);
@@ -153,7 +153,7 @@ void SolveEngine::diagonalDynamic(const NumFactorDynamic<Val>& nf, Vector<Val>& 
 
     for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(nf.snodeSize()); ++jj) {
         const std::int32_t  frontSize = static_cast<std::int32_t>(nf.frontSize(jj));
-        const std::int32_t  rows      = frontSize + nf.numberOfDelayedColumns(jj)
+        const std::int32_t  rows      = frontSize + static_cast<std::int32_t>(nf.delaySize(jj))
                                       + static_cast<std::int32_t>(nf.updateSize(jj));
         const std::int32_t* nodeIdx   = nf.nodeIdx(jj);
         const Val*          val       = nf.val(jj);
@@ -221,7 +221,7 @@ void SolveEngine::backwardDynamic(const NumFactorDynamic<Val>& nf, Vector<Val>& 
 
     for (std::int32_t jj = static_cast<std::int32_t>(nf.snodeSize()) - 1; jj >= 0; --jj) {
         const std::int32_t  frontSize = static_cast<std::int32_t>(nf.frontSize(jj));
-        const std::int32_t  rows      = frontSize + nf.numberOfDelayedColumns(jj)
+        const std::int32_t  rows      = frontSize + static_cast<std::int32_t>(nf.delaySize(jj))
                                       + static_cast<std::int32_t>(nf.updateSize(jj));
         const std::int32_t* nodeIdx   = nf.nodeIdx(jj);
         const Val*          val       = nf.val(jj);

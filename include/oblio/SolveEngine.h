@@ -64,8 +64,8 @@ private:
     //
     // Two things separate a dynamic pass from its static twin, and both come from delayed columns:
     //
-    //   The stride.  A block's leading dimension is frontSize + numberOfDelayedColumns +
-    //                updateSize. The delayed columns kept their rows when shrinkEntry dropped their
+    //   The stride.  A block's leading dimension is frontSize + delaySize +
+    //                updateSize. The delayed columns kept their rows when contractVal dropped their
     //                columns, and those rows are genuine rows of L that the solve must walk.
     //   The 2x2s.    Where pivotType says a column opens a 2x2, the entry just below its diagonal
     //                holds D's off-diagonal rather than an entry of L, so the triangular passes

@@ -3,7 +3,7 @@
 Conventions not enforced by tooling. Mechanical style, formatting and idiom
 modernization, is enforced by `.clang-format` and `.clang-tidy`; this file covers
 only what a linter can't check. Language-general; add per-language sections as the
-project grows (e.g. a Rust section later).
+project expands (e.g. a Rust section later).
 
 **Invariants** (must not break) live in CLAUDE.md, always loaded. This file is the
 softer layer: conventions for consistency, not correctness.
@@ -123,7 +123,7 @@ softer layer: conventions for consistency, not correctness.
 
   Corollary for the comment beside a refusal: **say whether it is a gap or a decision.** "Not
   implemented" invites someone to implement it. Dynamic pivoting into `NumFactorStatic` returns
-  false permanently, because a delayed column grows a front and a flat buffer cannot grow, and the
+  false permanently, because a delayed column expands a front and a flat buffer cannot expand, and the
   comment says so; multifrontal returns false because nobody has ported it yet, and the comment says
   that instead. Same statement, opposite instruction to the reader.
 

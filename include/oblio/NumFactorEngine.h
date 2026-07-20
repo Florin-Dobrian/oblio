@@ -77,7 +77,7 @@ public:
 
     // The same entry point, producing the dynamic factor. The static factorizations run into
     // per-supernode storage unchanged; the dynamic-LDL cases are the one thing this overload will
-    // gain that its sibling cannot (a flat buffer cannot grow a front).
+    // gain that its sibling cannot (a flat buffer cannot expand a front).
     template<class Val>
     bool compute(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& sf,
                  NumFactorDynamic<Val>& nf) const;
@@ -98,7 +98,8 @@ private:
     void setSymFactor(const SymFactor& sf, NumFactorStatic<Val>& nf) const;
 
     // The dynamic twin: same structure copied, but the value blocks are one vector per supernode
-    // rather than offsets into one buffer, so a front can later grow without moving its neighbors.
+    // rather than offsets into one buffer, so a front can later expand without moving its
+    // neighbors.
     template<class Val>
     void setSymFactor(const SymFactor& sf, NumFactorDynamic<Val>& nf) const;
 
@@ -114,8 +115,8 @@ private:
 
     // Scatter A's original values into a supernode's block. The only place A is read.
     //
-    // `numberOfDelayedColumns` is where A's own columns begin. It is zero for every static
-    // factorization; under dynamic pivoting a front is grown at the left by the columns its
+    // `delaySize` is where A's own columns begin. It is zero for every static
+    // factorization; under dynamic pivoting a front is expanded at the left by the columns its
     // children delayed into it, and those columns hold no entry of A, so the scatter starts past
     // them. The count is therefore a property of the *destination*, not of A.
     //
@@ -129,7 +130,7 @@ private:
     template<class Val>
     bool assembleFromA(const SparseMatrix<Val>& A, const Permutation& p,
                        const std::vector<std::int32_t>& gblToLcl,
-                       std::size_t numberOfDelayedColumns,
+                       std::size_t delaySize,
                        std::size_t frontSize, std::size_t numIdx,
                        const std::int32_t* rowIdx, Val* block) const;
 
@@ -179,7 +180,8 @@ private:
     //                  Needs no lists at all.
     //
     // **Static pivoting runs in either storage; dynamic pivoting requires the dynamic one**, since
-    // delaying a column grows a front. So these two are templated on the factor, while the dynamic
+    // delaying a column expands a front. So these two are templated on the factor, while the
+    // dynamic
     // traversal below names NumFactorDynamic outright. See dynamicPivoting() in Types.h.
     //
     // These two do not know which factorization they are running. They call
@@ -194,11 +196,12 @@ private:
 
     // Dynamic LDL, left-looking: the full traversal. Grows a front by whatever its children could
     // not pivot, assembles A past those columns, folds each child's delayed columns into it before
-    // shrinking them away, then factors, which may delay in turn. Real only so far, serving both
+    // contracting them away, then factors, which may delay in turn. Real only so far, serving both
     // `DynamicLDLT` and `DynamicLDLH`, which are the same computation over the reals. Complex is
     // where the two part company; right-looking and multifrontal come after.
     // The two pivot eliminations, applied once a selection loop has accepted one. Shared by the
-    // kernel's two passes, which differ only in *selection*: once a pivot is accepted the arithmetic
+    // kernel's two passes, which differ only in *selection*: once a pivot is accepted the
+    // arithmetic
     // is the same, so it lives in one place. See the note above their definitions.
     template<class Val>
     void applyPivot1x1(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j_,
@@ -219,16 +222,16 @@ private:
     // factorDynamicLDL_ and updateDynamicLDL_ are byte-identical between its left- and
     // right-looking engines, so only the driver differs.
     //
-    // Where it differs is growth. This traversal assembles A into every front at the start and
-    // pushes each supernode's update into its ancestors as it goes, so a front that grows already
-    // holds values and must keep them: it calls extendEntry where left-looking calls resetEntry.
-    // That is the whole of the difference, and it is why extendEntry existed unported until now.
+    // Where it differs is expansion. This traversal assembles A into every front at the start and
+    // pushes each supernode's update into its ancestors as it goes, so a front that expands already
+    // holds values and must keep them: it calls expandVal where left-looking calls resetVal.
+    // That is the whole of the difference, and it is why expandVal existed unported until now.
     template<class Val>
     bool factorDynamicRightLooking(const SparseMatrix<Val>& A, const Permutation& p,
                                    const SymFactor& sf, NumFactorDynamic<Val>& nf) const;
 
     // Factor one supernode's dense front in place with threshold pivoting, delaying the columns it
-    // cannot pivot to an ancestor. Records pivotType (1 / 2,3), numberOfDelayedColumns, and reduces
+    // cannot pivot to an ancestor. Records pivotType (1 / 2,3), delaySize, and reduces
     // frontSize by the number delayed. The dynamic counterpart of factorStaticSupernode, and
     // unlike it this one takes the factor rather than a raw block: pivoting swaps columns and
     // records their kind, so it cannot be storage-blind. Ported from 0.9 factorDynamicLDL_
@@ -241,7 +244,7 @@ private:
     // dynamic counterpart of updateStaticSupernode, and it differs from it in exactly two places.
     //
     // The leading dimension is the block's *height*, which still counts the delayed columns:
-    // shrinkEntry dropped their columns and kept their rows, so a delayed row is a genuine row of
+    // contractVal dropped their columns and kept their rows, so a delayed row is a genuine row of
     // L and the stride steps over it.
     //
     // And D is no longer diagonal. The static twin hands the whole D L21^T scratch to formUpper in
@@ -253,15 +256,15 @@ private:
     void updateDynamicSupernode(const NumFactorDynamic<Val>& nf, std::int32_t jj,
                                 std::size_t offset, UpdateBlock<Val>& t) const;
 
-    // Fold supernode jj's delayed columns into kk, its parent, which has already been grown to
+    // Fold supernode jj's delayed columns into kk, its parent, which has already been expanded to
     // hold them. The third assemble, and the only one dynamic pivoting adds: A's values and a
     // descendant's update both land in a block the symbolic factorization predicted, while these
     // columns are the part it did not.
     //
     // jj's block still carries them at this point. factorDynamicSupernode has decremented
-    // frontSize[jj] and set numberOfDelayedColumns[jj], so the columns are the run just past the
-    // new front, and shrinkEntry has not yet reclaimed them. Which fixes the order: assemble, then
-    // shrink.
+    // frontSize[jj] and set delaySize[jj], so the columns are the run just past the
+    // new front, and contractVal has not yet reclaimed them. Which fixes the order: assemble, then
+    // contract.
     template<class Val>
     void assembleDelayed(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t kk,
                          const std::vector<std::int32_t>& gblToLcl) const;

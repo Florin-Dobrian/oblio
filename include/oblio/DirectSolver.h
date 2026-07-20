@@ -23,7 +23,7 @@
 // they sit beside this class rather than inside it.
 //
 // The storage of the numeric factor is chosen for the caller. Dynamic LDL delays pivots it cannot
-// take, growing a front, so it requires the per-supernode storage of NumFactorDynamic; everything
+// take, expanding a front, so it requires the per-supernode storage of NumFactorDynamic; everything
 // else takes the cheaper flat NumFactorStatic. See NumFactorDynamic.h for why the two exist.
 
 #include "oblio/ElmForest.h"

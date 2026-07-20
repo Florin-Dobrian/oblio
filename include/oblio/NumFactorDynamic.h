@@ -4,23 +4,24 @@
 //
 // **Engines write it now.** The static factorizations (Cholesky, static LDL) run into it unchanged
 // through the templated traversals, and dynamic LDL, the reason it exists, writes it through the
-// growth verbs below. It began as a placeholder, built next to its sibling before anything filled
+// expansion and contraction verbs below. It began as a placeholder, built next to its sibling
+// before anything filled
 // it, because the storage split was a settled decision and because that was the cheap moment to fix
 // what the two classes do and do not share.
 //
 // Dynamic means the structure changes while the arithmetic runs. Dynamic LDL delays an unstable
-// pivot by passing its column up to an ancestor, which makes that ancestor's front grow by an
-// amount symbolic factorization never predicted. The growth is *local*: one front grows, its
+// pivot by passing its column up to an ancestor, which makes that ancestor's front expand by an
+// amount symbolic factorization never predicted. The expansion is *local*: one front expands, its
 // siblings do not.
 //
 // Which is why the storage differs:
 //
-//   NumFactorStatic    flat index and value buffers, an offset per supernode   nothing grows
-//   NumFactorDynamic   one index vector and one value vector per supernode      either may grow
+//   NumFactorStatic    flat index and value buffers, an offset per supernode   nothing expands
+//   NumFactorDynamic   one index vector and one value vector per supernode      either may expand
 //
 // The sizes and the node-to-supernode map are identical and identically copied from SymFactor. The
-// index sets and value blocks are held one vector per supernode, because a delayed column grows
-// both a front's index set and its block, and the growth must stay local. There is deliberately
+// index sets and value blocks are held one vector per supernode, because a delayed column expands
+// both a front's index set and its block, and the expansion must stay local. There is deliberately
 // **no common base class**. A base exists so that one algorithm can serve two
 // storages, and experiments/storage-options measured that a plain array of pointers already does
 // that, for a single compiled function, at about a one percent cost. A base would buy nothing the
@@ -28,10 +29,10 @@
 // use friendship and direct field access. The engine's kernels take (Val* block, rows, cols, ld)
 // and never see either class, so both storages reach them unchanged.
 //
-// Note what a growable front does to the flat layout, and why it cannot simply be kept: a
-// supernode whose block grows must either be reallocated (moving every later supernode in the
+// Note what an expandable front does to the flat layout, and why it cannot simply be kept: a
+// supernode whose block expands must either be reallocated (moving every later supernode in the
 // buffer) or preallocated to a worst case that symbolic cannot bound tightly. One vector per
-// supernode makes the growth local, which is what the algorithm already is.
+// supernode makes the expansion local, which is what the algorithm already is.
 
 #include "oblio/Types.h"
 
@@ -59,19 +60,27 @@ public:
     // when it lands, delays an unstable pivot instead of replacing it, and leaves this zero.
     std::size_t numPerturbations() const { return mNumPerturbations; }
 
-    const std::vector<std::int32_t>& nodeToSnode() const { return mNodeToSnode; }
+    // Node to supernode: the whole map, and the supernode a single node belongs to. Indexed by a
+    // *node*, unlike frontSize and its kin, which are indexed by a supernode.
+    const std::vector<std::int32_t>& nodeToSnode()                  const { return mNodeToSnode; }
+    std::int32_t                     nodeToSnode(std::int32_t node) const { return mNodeToSnode[node]; }
 
-    const std::vector<std::size_t>& frontSize()  const { return mFrontSize; }
-    const std::vector<std::size_t>& updateSize() const { return mUpdateSize; }
-    std::size_t frontSize(std::int32_t kk)  const { return mFrontSize[kk]; }
-    std::size_t updateSize(std::int32_t kk) const { return mUpdateSize[kk]; }
+    // **The three regions of a supernode's block, in the order they occupy it.** The height is
+    // frontSize + delaySize + updateSize and is conserved throughout: expanding moves rows into the
+    // front, factoring moves columns from the front into the delay region, and updateSize is never
+    // rewritten. Every leading dimension in the dynamic path is that sum.
+    //
+    // delaySize is how many of this supernode's columns were delayed up to its *parent*, unpivotable
+    // where they stood, never how many were delayed into it, which is a sum over its children and
+    // is never stored. Zero until dynamic LDL runs, and never cleared afterwards: the delayed
+    // columns leave, but their rows stay, so the count remains part of this block's geometry.
+    const std::vector<std::size_t>&  frontSize()  const { return mFrontSize; }
+    const std::vector<std::size_t>&  delaySize()  const { return mDelaySize; }
+    const std::vector<std::size_t>&  updateSize() const { return mUpdateSize; }
 
-    // Per supernode: how many of its columns were delayed up to its parent, unpivotable where they
-    // stood. Zero until dynamic LDL runs. (No flat nodeIdx()/snodeNodeIdxPtr() here: unlike the
-    // static factor, the index sets are stored one vector per supernode, since a delayed column
-    // grows a front's index set, so there is no single flat buffer to point into.)
-    const std::vector<std::int32_t>& numberOfDelayedColumns() const { return mNumberOfDelayedColumns; }
-    std::int32_t numberOfDelayedColumns(std::int32_t kk) const { return mNumberOfDelayedColumns[kk]; }
+    std::size_t  frontSize(std::int32_t kk)  const { return mFrontSize[kk]; }
+    std::size_t  delaySize(std::int32_t kk)  const { return mDelaySize[kk]; }
+    std::size_t  updateSize(std::int32_t kk) const { return mUpdateSize[kk]; }
 
     // Per column (global): 0 = not yet pivoted, 1 = 1x1 pivot, 2 and 3 = the two halves of a 2x2.
     // The solve reads this to apply 1x1 divisions and 2x2 block solves in the diagonal pass.
@@ -83,8 +92,13 @@ public:
     const std::vector<std::vector<Val>>& val() const { return mVal; }
 
     // Where supernode kk's node indices start. One vector per supernode (not a flat buffer as in
-    // the static factor), so a delayed column can grow the set; the signature is the same either
+    // the static factor), so a delayed column can expand the set; the signature is the same either
     // way, and the engines cannot tell which storage they are reading.
+    //
+    // There is deliberately no `snodeNodeIdxPtr()` counterpart. The static factor offers one
+    // because its index sets live end to end in a single buffer and an offset per supernode is
+    // meaningful; here there is no such buffer to point into, and inventing an accessor that
+    // returned something offset-shaped would promise a layout this class does not have.
     const std::int32_t* nodeIdx(std::int32_t kk) const { return mNodeIdx[kk].data(); }
 
     // Where supernode kk's dense block lives. The static factor's counterpart computes an offset
@@ -95,7 +109,7 @@ public:
     // these const overloads and needs no friendship; the mutable overloads stay private.
     //
     // **Call it at the moment of use, never hoist it.** Here the warning is not theoretical: a
-    // delayed pivot grows an ancestor's front, which resizes its vector, which dangles every
+    // delayed pivot expands an ancestor's front, which resizes its vector, which dangles every
     // pointer previously taken into it.
     const Val*          val(std::int32_t kk)     const { return mVal[kk].data(); }
 
@@ -108,37 +122,40 @@ private:
     // (factorStaticSupernode increments it). The const read overload above is public.
     std::size_t& numPerturbations() { return mNumPerturbations; }
 
-    // The growth verbs, the engine's alone, exercised as dynamic LDL delays and pivots. Like the
-    // other engine-internal steps (factorStaticSupernode, assembleFromA) they are validated
-    // through the factorization's residual rather than in isolation.
+    // The expansion and contraction verbs, the engine's alone, exercised as dynamic LDL delays
+    // and pivots. Like the other engine-internal steps (factorStaticSupernode, assembleFromA)
+    // they are validated through the factorization's residual rather than in isolation.
 
     // Grow supernode jj's index set by n slots, for n columns delayed into it. The existing indices
     // stay at the front; the new slots (zero for now) are for the caller to fill with the delayed
     // columns' global indices. Ported from 0.9 extendIndex_.
-    void extendIndex(std::int32_t jj, std::int32_t n) {
+    void expandNodeIdx(std::int32_t jj, std::int32_t n) {
         mNodeIdx[jj].resize(mNodeIdx[jj].size() + static_cast<std::size_t>(n));
     }
 
     // Size supernode jj's block to its *current* shape and zero it: frontSize columns by
-    // frontSize + updateSize rows. The other half of growing a front, called once frontSize has
+    // frontSize + updateSize rows. The other half of expanding a front, called once frontSize has
     // absorbed the columns delayed into it, and only there, since the old contents are discarded.
     //
     // 0.9 spells this as three calls, discardEntry_ then allocateEntry_ then zeroEntry_, because it
     // manages the block by hand. One vector per supernode collapses all three into an assign, which
-    // is the whole of what the storage choice buys here. Left-looking never grows a block in place,
-    // so 0.9's extendEntry_ has no counterpart yet; right-looking is what will want it.
-    void resetEntry(std::int32_t jj) {
+    // is the whole of what the storage choice buys here. Left-looking never expands a block in
+    // place,
+    // which is why it can discard; expandVal below is right-looking's counterpart, and 0.9's
+    // extendEntry_ is what that ports.
+    void resetVal(std::int32_t jj) {
         mVal[jj].assign(mFrontSize[jj] * (mFrontSize[jj] + mUpdateSize[jj]), Val(0));
     }
 
-    // The other way to grow a block, and the one right-looking needs: size jj's block to its
+    // The other way to expand a block, and the one right-looking needs: size jj's block to its
     // current shape while **keeping what is already in it**, the n new columns arriving empty at
     // the left. Ported from 0.9 extendEntry_.
     //
     // The two traversals differ in exactly this. Left-looking assembles A into a front immediately
-    // before factoring it, so when the front grows there is nothing in it worth keeping and
-    // resetEntry discards. Right-looking assembles A into every front at the start and then pushes
-    // each supernode's update into its ancestors, so by the time a front grows it already holds A's
+    // before factoring it, so when the front expands there is nothing in it worth keeping and
+    // resetVal discards. Right-looking assembles A into every front at the start and then pushes
+    // each supernode's update into its ancestors, so by the time a front expands it already holds
+    // A's
     // values and every update from every descendant already factored. Discarding there would throw
     // the factorization away.
     //
@@ -146,29 +163,29 @@ private:
     // becomes new (i + n, j + n). Only the lower triangle is carried, which is all that is occupied
     // before a front is factored.
     //
-    // **Called after mFrontSize has been widened**, like resetEntry, so both verbs mean the same
+    // **Called after mFrontSize has been widened**, like resetVal, so both verbs mean the same
     // thing: make the block match the shape the fields already describe. 0.9 calls its version
     // before widening and passes the old width implicitly; the arithmetic is identical either way,
     // and one convention across the two verbs is worth more than matching that call order.
-    void extendEntry(std::int32_t jj, std::int32_t n) {
+    void expandVal(std::int32_t jj, std::int32_t n) {
         const std::int32_t newFront = static_cast<std::int32_t>(mFrontSize[jj]);
         const std::int32_t update   = static_cast<std::int32_t>(mUpdateSize[jj]);
         const std::int32_t oldFront = newFront - n;
         const std::int32_t oldRows  = oldFront + update;
         const std::int32_t newRows  = newFront + update;
 
-        std::vector<Val> grown(static_cast<std::size_t>(newFront) * static_cast<std::size_t>(newRows),
+        std::vector<Val> expanded(static_cast<std::size_t>(newFront) * static_cast<std::size_t>(newRows),
                                Val(0));
         const std::vector<Val>& old = mVal[jj];
 
         for (std::int32_t j_ = 0; j_ < oldFront; ++j_)
             for (std::int32_t i_ = j_; i_ < oldRows; ++i_)
-                grown[static_cast<std::size_t>(j_ + n) * static_cast<std::size_t>(newRows)
+                expanded[static_cast<std::size_t>(j_ + n) * static_cast<std::size_t>(newRows)
                       + static_cast<std::size_t>(i_ + n)]
                     = old[static_cast<std::size_t>(j_) * static_cast<std::size_t>(oldRows)
                           + static_cast<std::size_t>(i_)];
 
-        mVal[jj] = std::move(grown);
+        mVal[jj] = std::move(expanded);
     }
 
     // Swap columns j_ and k_ of supernode jj, symmetrically. The block is a symmetric matrix stored
@@ -229,9 +246,9 @@ private:
     // once factorDynamicLDL_ has reduced frontSize[jj] by n and the delayed columns' values have
     // been assembled into the parent: the block loses its n trailing front columns and keeps all
     // its rows (frontSize + n + updateSize), so a column-major truncation does it. The delayed
-    // columns live on only as rows, counted now in numberOfDelayedColumns. Ported from 0.9
+    // columns live on only as rows, counted now in delaySize. Ported from 0.9
     // shrinkEntry_.
-    void shrinkEntry(std::int32_t jj, std::int32_t n) {
+    void contractVal(std::int32_t jj, std::int32_t n) {
         const std::size_t rows = mFrontSize[jj] + static_cast<std::size_t>(n) + mUpdateSize[jj];
         mVal[jj].resize(mFrontSize[jj] * rows);
     }
@@ -241,19 +258,20 @@ private:
     Factorization mFactorization = Factorization::DynamicLDLT;
 
     // Copied from SymFactor, exactly as in NumFactorStatic. Under delayed pivoting the index sets
-    // themselves grow, which is the second reason the factor owns a copy rather than referring
+    // themselves expand, which is the second reason the factor owns a copy rather than referring
     // back: SymFactor's sets are the *predicted* ones and must not be disturbed.
     std::vector<std::int32_t> mNodeToSnode;
     std::vector<std::size_t>  mFrontSize;
     std::vector<std::size_t>  mUpdateSize;
 
     // Per supernode, filled by dynamic LDL: how many columns it delayed up to its parent.
-    std::vector<std::int32_t> mNumberOfDelayedColumns;
+    std::vector<std::size_t>  mDelaySize;
 
     // Per column (global): the pivot kind, 0 / 1x1 / the two halves of a 2x2.
     std::vector<std::int32_t> mPivotType;
 
-    // The index sets and value blocks, one vector per supernode so a front can grow without moving
+    // The index sets and value blocks, one vector per supernode so a front can expand without
+    // moving
     // its neighbors. In the static factor both are flat buffers with offsets; here each supernode
     // owns its own, because a delayed column extends both.
     std::vector<std::vector<std::int32_t>> mNodeIdx;

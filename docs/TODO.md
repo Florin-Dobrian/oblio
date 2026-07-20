@@ -49,16 +49,16 @@ rather than one at a time. Trigger: before anyone outside this effort runs the s
 
 ## Capability
 
-### Complex Hermitian dynamic LDL — DONE, 2026-07-19
+### Complex Hermitian dynamic LDL: DONE, 2026-07-19
 
 Recorded here as done rather than deleted, because it is the one factorization in the library with
 no reference behind it and that is worth being able to find later. 0.9's complex LDL is symmetric
 only, so nothing was transcribed; the oracles are the residual in `test_pipeline` and reconstruction
 of `L D L^H` on dense fronts.
 
-Complex `DynamicLDLT` turned out to need no kernel change at all — 0.9's complex `factorDynamicLDL_`
+Complex `DynamicLDLT` turned out to need no kernel change at all, 0.9's complex `factorDynamicLDL_`
 differs from its real one in six lines, all declaring the pivot magnitudes real rather than scalar,
-which this port had done from the start — so only the dispatch guard widened.
+which this port had done from the start, so only the dispatch guard widened.
 
 `DynamicLDLH` needed four changes, one place each thanks to the pivot-body merge landing first:
 the conjugate in `readPivotBlock2x2`, conjugated `L` where the `D L^H` rows are formed in both
@@ -67,7 +67,7 @@ eliminations, and `forceReal` on the diagonal.
 **And one that was not in the plan, in `swap`.** Two of its loops move values across the diagonal
 and needed conjugating, which was anticipated; the one that was not is the entry *between* the two
 swapped positions, `block[at(k_, j_)]`. It is its own reflection under the permutation, so no loop
-touches it, and for a symmetric factor it is invariant — which is why 0.9 leaves it alone and why
+touches it, and for a symmetric factor it is invariant, which is why 0.9 leaves it alone and why
 the omission is invisible until the factorization is Hermitian. Left out, the factor reconstructs
 the *conjugate* of the matrix in the affected rows, with no crash, no NaN, and no symptom at all
 when the swaps happen to be the identity. Roughly a third of random Hermitian matrices failed.
@@ -97,14 +97,14 @@ Measured 2026-07-19, code lines with comments stripped: `factorDynamicSupernode`
 reference, almost all of it from dropping the error-macro scaffolding and the raw-pointer preamble
 rather than from restructuring. What follows is the restructuring that has not been done.
 
-### Merge the duplicated pivot bodies — DONE, 2026-07-19
+### Merge the duplicated pivot bodies: DONE, 2026-07-19
 
 The eliminations are now `applyPivot1x1` and `applyPivot2x2`, shared by both selection loops, and
 the 2x2 block is read once in `readPivotBlock2x2`. 230 code lines became 204 across three functions,
 under 147 passing assertions throughout.
 
 The non-goal held: **the selection loops stayed separate.** They are two algorithms rather than one
-with flags, differing in three ways — no forced 1x1 in pass 2, a partner scan bounded by the front,
+with flags, differing in three ways, no forced 1x1 in pass 2, a partner scan bounded by the front,
 and a Bunch-Kaufman determinant test in place of `max1 == max2`. Merging those behind parameters
 would save lines and cost the reader the ability to see what each pass does. That remains the
 recommendation if anyone revisits it.
@@ -116,14 +116,14 @@ moment one shared body served both. And `readPivotBlock2x2` is the single place 
 decided, `d12 = d21` being the symmetric statement, which makes complex `LDL^H` a change in one
 function rather than four.
 
-### Extract the front growth shared by both drivers
+### Extract the front expansion shared by both drivers
 
-Not previously recorded. `factorDynamicLeftLooking` and `factorDynamicRightLooking` grow a parent's
+Not previously recorded. `factorDynamicLeftLooking` and `factorDynamicRightLooking` expand a parent's
 index set with about 16 identical lines: extend the index array by the children's total, shift the
 existing indices right by that amount, then prepend each child's delayed globals in sibling order.
 Verified identical apart from local variable names.
 
-They differ only in the verb that closes the block, `resetEntry` for left-looking and `extendEntry`
+They differ only in the verb that closes the block, `resetVal` for left-looking and `expandVal`
 for right-looking, which is the one place the traversals genuinely part company on delayed columns.
 
 So the extraction is clean and the signature is narrow, something like
@@ -134,7 +134,7 @@ std::int32_t growFrontIndexSet(NumFactorDynamic<Val>& nf, std::int32_t parent,
                                const std::vector<std::int32_t>& nextSibling) const;
 ```
 
-returning the number of delayed columns folded in, with each driver calling its own growth verb
+returning the number of delayed columns folded in, with each driver calling its own expansion verb
 afterwards. That also has a documentation benefit beyond the line count: it puts the drivers'
 real difference on one visible line each, instead of at the bottom of a block that otherwise reads
 identically in both.
@@ -146,14 +146,16 @@ Lower risk and smaller than the pivot merge, and independent of it. Either can b
 ### Measure left-looking against right-looking
 
 The two traversals compute the same factor by the same kernels and differ only in bookkeeping, so
-the comparison is clean, and neither side is obviously cheaper. Right-looking sets and clears the
-global-to-local map once per (descendant, ancestor) pair, where left-looking sets it once per
-supernode. Left-looking pays for that with the owed lists, a list node allocated and freed per pair
-plus a position array, neither of which right-looking needs.
+the comparison is clean, and neither side is obviously cheaper. **The reasoning lives in "The life of
+an update" in docs/ARCHITECTURE.md**, what the per-pair costs are, why the unit is pairs rather than
+supernodes, and what could be done about left-looking's queues if it loses. That belongs there
+rather than here: it describes how the thing works, and stays true whether or not this item is ever
+picked up.
 
-The map costs O(|Idx(kk)|) per pair against numeric work of roughly frontSize * width * height, so
-it should vanish where supernodes are fat and matter only where they are thin. That is a prediction,
-not a measurement, and it wants matrices large enough to separate the two rather than reasoning.
+What is owed here is only the measurement. It wants matrices large enough to separate an allocation
+from a linear sweep, and it should report per-pair costs rather than totals, so the two sides are
+comparable. If left-looking measures badly, try the flat-array queues described in ARCHITECTURE
+before concluding anything about the traversal itself.
 
 Worth doing alongside any other timing work rather than on its own, and worth doing before either
 traversal is chosen as a default for anything.
@@ -185,7 +187,7 @@ assertion alone would just record that the answer is worse, which says nothing a
 right thing was done.
 
 Worth pairing with a note in the specification that a poor residual from a static factorization on
-an indefinite matrix is expected behaviour rather than a defect. That confusion has now cost time
+an indefinite matrix is expected behavior rather than a defect. That confusion has now cost time
 twice in one session.
 
 ### A specification the suite can be regenerated from

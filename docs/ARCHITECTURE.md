@@ -19,7 +19,7 @@ would otherwise have to reconstruct by grepping.
 
 The numeric factor comes in two storages. `NumFactorStatic` holds flat index and value buffers with
 an offset per supernode; `NumFactorDynamic` holds one index vector and one value vector per
-supernode, so that a delayed pivot can grow a front without moving its neighbors. Dynamic LDL
+supernode, so that a delayed pivot can expand a front without moving its neighbors. Dynamic LDL
 requires the second; everything else is cheaper in the first.
 
 **There is deliberately no common base class**, so the thing that lets one algorithm serve both is
@@ -51,7 +51,7 @@ whether it conjugates, while the traversals never ask, because the engine alread
 computing. Conversely the traversals need the node-to-supernode map to find an ancestor, and the
 solve never does. The column is the static traversals (`factorStaticLeftLooking` and its
 right-looking twin), which are the pair templated on the factor; dynamic pivoting reaches further,
-for the growth verbs below.
+for the expansion and contraction verbs below.
 
 | | `SolveEngine` | the static traversals in `NumFactorEngine` |
 |---|---|---|
@@ -67,8 +67,15 @@ friend. Name lookup gathers every overload before access is checked, so a non-co
 the friend context selects the private overload and fails to compile; `std::as_const(nf).val(jj)`
 is the idiom for reading through such an object.
 
-**The dynamic factor's growth verbs are private and one-sided.** `extendIndex`, `resetEntry`,
-`extendEntry`, `swap` and `shrinkEntry` exist only on `NumFactorDynamic`, because only its storage
+**Inside the friend context it is unnecessary, and the engine does not use it.** `NumFactorEngine`
+may select either overload, and the writable one converts to a `const` local anyway, so the cast
+would change nothing a reader can observe. What says "this block is only read here" is the type of
+the local, `const Val*` in left-looking, where `jj` is an already-factored descendant, against
+plain `Val*` in right-looking, where both blocks are written. Sprinkling `as_const` over some of
+those sites and not others makes the asymmetry itself the thing a reader has to explain.
+
+**The dynamic factor's expansion and contraction verbs are private and one-sided.** `expandNodeIdx`,
+`resetVal`, `expandVal`, `swap` and `contractVal` exist only on `NumFactorDynamic`, because only its storage
 makes them cheap. That asymmetry is the same rule `experiments/storage-options` arrived at for the
 matrix pair, where `setColumn` is absent from the flat class by design: an object offers what its
 storage makes cheap, and nothing else.
@@ -90,42 +97,220 @@ From this the storage behavior follows, and it is worth stating because it bound
 
 | | when | how often |
 |---|---|---|
-| `extendIndex` | the supernode is reached, if its children delayed | at most once, never undone |
-| `resetEntry` / `extendEntry` | the same moment | at most once |
-| `shrinkEntry` | the *parent* is reached, if this supernode delayed | at most once, always after |
+| `expandNodeIdx` | the supernode is reached, if its children delayed | at most once, never undone |
+| `resetVal` / `expandVal` | the same moment | at most once |
+| `contractVal` | the *parent* is reached, if this supernode delayed | at most once, always after |
 
 Once and not more, because delays arrive only from children and a supernode is reached once. "At
 most" rather than "exactly" for two reasons that are different in kind: structurally, a leaf never
-grows and a root never shrinks; numerically, whether a supernode delays at all depends on the
+expands and a root never contracts; numerically, whether a supernode delays at all depends on the
 *values*, not the pattern. The same matrix under a different ordering delays a different set of
 columns, which is the whole difference between static and dynamic pivoting.
 
 The order cannot interleave, since a parent's index is above its child's, so a block is at its
-largest between its own growth and its parent's collection. That interval is the storage high-water
+largest between its own expansion and its parent's collection. That interval is the storage high-water
 mark.
 
-**Growth counts and shrink counts need not match**, and where they diverge says something about the
-forest: several children may delay into one parent, giving one growth and several shrinks. A chain
+**Growth counts and contract counts need not match**, and where they diverge says something about the
+forest: several children may delay into one parent, giving one expansion and several contracts. A chain
 forest, which a banded matrix under Natural ordering produces, makes them equal; a branching one
 does not. Measured on a saddle-point matrix under AMD: 15 supernodes grew, 24 shrank, identically in
 both traversals.
 
-**The index set never shrinks.** `shrinkEntry` truncates the value block's columns and keeps every
+**The index set never contracts.** `contractVal` truncates the value block's columns and keeps every
 row, because a delayed column remains a row of L: its entries under this supernode's pivots are
-genuine. That is the height invariant, `frontSize + numberOfDelayedColumns + updateSize`, constant
+genuine. That is the height invariant, `frontSize + delaySize + updateSize`, constant
 throughout. It also makes the three regions a partition, so every row belongs to exactly one flow,
-which is what the traversals rely on when they advance past `frontSize + numberOfDelayedColumns`
+which is what the traversals rely on when they advance past `frontSize + delaySize`
 rather than past the front alone. Advancing by the front alone would push the delayed rows to the
 parent as an update *as well as* handing them over as delays, and the parent would double-count
 them silently.
 
-**This set has grown.** The solve reads `numberOfDelayedColumns(jj)` and `pivotType()` from the
+**This set has expanded.** The solve reads `delaySize(jj)` and `pivotType()` from the
 dynamic factor, the first because a delayed column leaves its row behind so the leading dimension is
-`frontSize + numberOfDelayedColumns + updateSize`, the second because a 2x2 pivot puts D's
+`frontSize + delaySize + updateSize`, the second because a 2x2 pivot puts D's
 off-diagonal where L's first sub-diagonal entry would be. Both are dynamic-only, which is why
 `SolveEngine`'s three passes are paired: `forwardStatic` and `forwardDynamic`, and so on, the static
 three templated on the factor and the dynamic three naming `NumFactorDynamic` outright. Same split,
 same reason, as the traversals in `NumFactorEngine`.
+
+### The life of an update
+
+The section above followed a delayed column, which travels one edge. An update travels differently:
+from a supernode to *any* ancestor holding one of its update rows, possibly several of them, and
+possibly skipping levels. How that gets scheduled is the one place the two traversals genuinely
+disagree, and it is worth setting down because the mechanism is not obvious from either driver.
+
+**The structural fact underneath everything here** is the elimination tree's absorption property:
+every update row of `jj` also appears in `parent(jj)`'s index set. Measured across grids and random
+matrices, nodal and fundamental, roughly 6000 update rows with no exception. So if `ii` has a row in
+some distant ancestor `kk`, then `parent(ii)` has that row too, and so does every supernode above it
+on the way to `kk`. The relay therefore always has a next hop and never strands an update.
+
+**Note the direction, because the convenient-looking converse is false.** Absorption says `ii`'s
+update rows are a *subset* of its parent's, and a proper subset is normal. It does not say `ii`
+updates everything its parent updates, so "`ii` updates `jj`, `jj` updates `kk`, therefore `ii`
+updates `kk`" does not hold. A four-node chain is enough to break it, nodal, etree `0->1->2->3`,
+no branching anywhere:
+
+```
+  snode 0  nodeIdx=[0 1 3]   updates: 1 3      <- skips 2
+  snode 1  nodeIdx=[1 2 3]   updates: 2 3
+  snode 2  nodeIdx=[2 3]     updates: 3
+```
+
+`0` updates `1` and `1` updates `2`, yet `0` does not update `2`: it has no entry in row 2, and no
+fill creates one, since that would need a path from 0 to 2 through nodes numbered below 0. Skipping
+comes from sparsity within a column, not from branching in the forest.
+
+**Right-looking delivers data.** Standing at `jj`, it walks `jj`'s own index set, finds each ancestor
+in turn, forms the update and assembles it immediately. Having done the work it stores nothing, so
+the full ancestor walk costs it only the walk.
+
+**Left-looking relays intent.** Standing at `kk`, it needs to know which descendants will update
+`kk` before `kk` is reached, and that is a record it must carry. It keeps one queue per supernode,
+`descendantUpdateQueue[kk]`, and a supernode sits on exactly one queue at a time, the next ancestor
+it must update, hopping to the following one each time it delivers an update. `nextUpdateSp[jj]` is the bookmark saying how far through `jj`'s index set it has got.
+
+**And here is the crux of the relay: where a descendant goes next does not depend on where it is.**
+
+```cpp
+    nextUpdateSp[jj] = from + width;                                    // jj's own bookmark
+    if (nextUpdateSp[jj] < jjNumNodeIdx)
+        descendantUpdateQueue[nf.nodeToSnode(jjNodeIdx[nextUpdateSp[jj]])].push_back(jj);
+        //          ^ jj's index set          ^ jj's bookmark
+```
+
+Nothing in that expression mentions the supernode currently being factored, or `parent(jj)`, or the
+forest at all. It reads `jj`'s own index set at `jj`'s own bookmark and asks which supernode owns
+that row. The ancestor being updated is merely the *occasion*, the reason `jj` is awake and
+being processed, not an input to the decision.
+
+Two things follow immediately, which are otherwise separate facts to be checked.
+
+The tree is never walked, so there are no levels to skip and skipping is not an optimization. The
+relay moves along an index set, and the supernodes it names are whichever ones happen to own those
+rows. On the 8x8 grid the 111 hops jump over 92 etree levels, up to 9 at once, and none of that is
+deliberate, it simply falls out of where the rows are.
+
+And disjointness is forced rather than merely observed: `jj` has exactly one bookmark, therefore at
+most one next destination, therefore at most one queue membership. The single `nextUpdateSp[jj]` is what
+makes the whole family of queues encodable as flat arrays.
+
+It is also the sharpest way to state the difference from right-looking. Both read the same index
+set. Right-looking reads all of it at once and acts immediately; left-looking reads one run at a
+time, and the bookmark is the only thing it carries between visits.
+
+**The relay does not plod up the tree.** Each hop reads the supernode owning `jj`'s next *remaining*
+row, so it jumps straight to the next ancestor `jj` genuinely updates and skips any it has no rows
+in. On the 8x8 grid Laplacian, 111 hops skip 92 etree levels between them, as many as 9 in one hop.
+Each `(descendant, ancestor)` pair is popped exactly once: 164 pairs, 164 pops, no repeats.
+
+Two things about the relay are easy to get wrong.
+
+**It is not avoiding redundant updates.** `ii` still has to update `kk` itself; its contribution is
+not subsumed by `jj`'s, and both arrive at `kk`. The point is not that `ii` need only tell `jj`. It
+is that `ii` will *reach* `kk` eventually, and can be told where to go next when it gets there. The
+absorption property is what guarantees the relay never drops anyone: the ancestor `ii` is re-queued
+onto always has more work upward too, so there is always a next hop until the work is done.
+
+**And the eager alternative is not rejected on computation, it costs no more operations at all.**
+Enumerating all of `ii`'s ancestors when `ii` is factored is one walk of its index set,
+`O(|Idx(ii)|)`, and right-looking does exactly that walk. The enqueue count is identical either way:
+lazily, `ii` is queued on `jj`, then `ii` and `jj` are queued on `kk`; eagerly, `ii` is queued on
+`jj` and `kk`, then `jj` on `kk`. Three enqueues both times. Measured on the 8x8 grid: 164 pairs,
+164 pops, **no pair popped twice**.
+
+What eager enqueueing costs is memory and structure. Every membership would be live at once,
+`O(pairs)` against `O(N)` in the number of supernodes, 164 against at most 54 on that grid, and the
+gap widens with the matrix. It would also destroy the disjointness of the queues, and disjointness
+is what allows them to be flat arrays rather than lists.
+
+So the relay does not save work. **It saves peak storage**, and preserves disjointness as a
+consequence.
+
+**The relay does not plod up the tree, either**, which is the crux above, seen from the outside. A
+natural misreading is that `ii` is re-queued at every supernode between itself and `kk`. It is not.
+
+Those gaps come from the structure of the index sets, not from branching in the forest. A chain
+`0-1-2-3-4-5` with one extra edge `0-5` has a path etree with no branching anywhere, and supernode 0
+still updates only 1 and 5, skipping three levels. The tempting implication, `ii` updates `jj` and
+`jj` updates `kk`, therefore `ii` updates `kk`, is false, and false in that example: 0 updates 1,
+1 updates 2, 0 does not update 2. Absorption runs the other way, and that direction is the one the
+relay depends on: if `ii` updates `kk`, every ancestor of `ii` below `kk` updates `kk` too, so there
+is always a next hop.
+
+So: **left-looking relays intent, right-looking delivers data.** Right-looking can afford the full
+ancestor walk because it acts immediately and stores nothing; left-looking only records that a supernode still
+has someone to update, so it needs the relay to keep that record down to one slot per supernode.
+
+One consequence, recorded because it looks like a bug when first noticed. The order in which
+descendants arrive on a queue is by *previous ancestor*, not by their own index, so a queue can be out of index
+order, commonly, on branching forests. Along a single root-path it is always sorted; every
+inversion observed was between different branches. Order does not affect correctness, since the
+updates are summed, but it does affect the last bits of that sum.
+
+#### What the two traversals actually cost
+
+**Both do work proportional to the same count: the number of (descendant, ancestor) pairs**, which
+is the right unit here rather than supernodes. On an 8x8 grid Laplacian under AMD, 54 supernodes,
+that count is 164, supernodes update about 3 ancestors each, up to 5. Neither traversal avoids any of
+those pairs; they spend the per-pair cost differently.
+
+| | per pair | shape |
+|---|---|---|
+| left-looking | one list node allocated and freed, plus a `nextUpdateSp` write | O(1), but an allocation and a pointer chase |
+| right-looking | global-to-local map set and cleared | O(\|Idx(kk)\|), but a contiguous sweep over an array already warm |
+
+So it is O(1)-with-an-allocation against O(\|Idx\|)-with-good-locality, and which wins depends on how
+large the index sets are. Fat supernodes should favour left-looking, since \|Idx(kk)\| grows while the
+list node does not; thin ones may favour right-looking, since a malloc can cost more than sweeping
+twenty integers. **That is a prediction and nothing has been measured**; the work item lives in
+docs/TODO.md.
+
+**What the relay does not buy is operations.** Enqueueing every ancestor eagerly at `ii`'s factor
+time would perform the same number of enqueues and dequeues, one per pair either way. For `ii`
+updating `jj` and `kk`, with `jj` updating `kk`: lazily, `ii` is enqueued for `jj`, then `ii` and
+`jj` are enqueued for `kk`. Eagerly, `ii` is enqueued for `jj` and `kk`, then `jj` for `kk`. Three
+enqueues both times. Nor is enumerating the ancestry expensive, it is one walk of `ii`'s index set,
+which right-looking performs without difficulty.
+
+**What it buys is peak storage**, and that is the whole of it: `O(N)` live memberships against
+`O(pairs)`, where `N` is the number of supernodes, 54 against 164 on that grid, and the gap widens
+with the matrix. The disjointness below follows from it.
+
+#### The queues do not need to be lists
+
+Disjointness, a supernode is on at most one queue at a time, is not just a description of the
+schedule. It is the licence for a data structure: one successor slot per supernode covers every
+queue simultaneously, so the whole family collapses to flat arrays.
+
+```cpp
+    std::vector<std::int32_t> queueHead(snodeSize, NIL);   // first descendant queued for kk
+    std::vector<std::int32_t> queueTail(snodeSize, NIL);   // last, so pushes stay FIFO
+    std::vector<std::int32_t> queueNext(snodeSize, NIL);   // jj's successor on whatever queue holds it
+```
+
+Push becomes three or four integer writes, pop becomes two, and the loop tests
+`queueHead[kk] != NIL`. It is the same idea as the `firstChild`/`nextSibling` pair already used for
+the forest, applied to a queue instead of a tree. The general pattern: **a family of disjoint lists
+over a fixed universe of n elements encodes as `head[numLists]` plus `next[n]`, with no allocation
+at all.** If an element could sit on two lists at once the encoding breaks.
+
+Keep the tail array if this is ever done. Dropping it gives LIFO with two arrays instead of three,
+but that reverses the order updates are summed into an ancestor, which perturbs the last bits and
+would break `test_pipeline`'s assertion that the two traversals agree bit for bit.
+
+**And be precise about what it would buy.** The complexity does not change: push and pop are O(1)
+either way. What changes is the constant, and the reason the constant is worth caring about is that
+one side of it is a call into the allocator. Related but distinct, the *number of allocations* does
+drop asymptotically, from one per pair to three for the whole factorization. Likely larger than
+either: the traversal then walks contiguous `int32_t` arrays rather than chasing heap nodes, which
+is the part neither an operation count nor an allocation count expresses.
+
+The port uses `std::vector<std::list<std::int32_t>>` today. 0.9 used an `ArraySingleLinkedList`,
+whose source did not come across with the rest of the reference, so whether it pooled its nodes is
+not known here.
 
 ### The parallel with the matrix, and where it stops
 

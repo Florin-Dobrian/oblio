@@ -110,8 +110,10 @@ inline bool separateDiagonal(Factorization factorization) {
 // pivots symbolic assigned, dynamically for the hard ones, where an unstable pivot is delayed to an
 // ancestor.
 //
-// **Dynamic pivoting implies dynamic storage**, because delaying a column grows a front and a flat
-// buffer cannot grow; the reverse does not hold, since static pivoting runs in either storage (and
+// **Dynamic pivoting implies dynamic storage**, because delaying a column expands a front and a
+// flat
+// buffer cannot expand; the reverse does not hold, since static pivoting runs in either storage
+// (and
 // prefers the flat one, for locality). This predicate is where that rule is stated once: the engine
 // asks it to pick a traversal, DirectSolver asks it to pick a storage.
 inline bool dynamicPivoting(Factorization factorization) {

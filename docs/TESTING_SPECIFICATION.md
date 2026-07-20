@@ -184,10 +184,10 @@ the reals is actually tested, on an input that pivots, rather than asserted in a
 
 Right-looking against left-looking. These are two different drivers over the same two kernels
 (0.9's `factorDynamicLDL_` and `updateDynamicLDL_` are byte-identical between its two engines), and
-they grow a front by opposite means: left-looking discards an empty front and rebuilds it, while
+they expand a front by opposite means: left-looking discards an empty front and rebuilds it, while
 right-looking must carry forward the values A and the already-factored descendants left in it.
 Agreement on a matrix that delays is what says the second of those is right, and it is the only
-assertion that exercises `extendEntry` at all.
+assertion that exercises `expandVal` at all.
 
 **The counts are pinned exactly, and the matrices are built to make that meaningful.** `std::mt19937`
 has its output sequence fixed by the standard, but the distribution templates do not: their
@@ -240,7 +240,7 @@ gets a Hermitian one. Handing either the other's matrix would test nothing.
 
 **Three factorizations, three different matrices, and they cannot be shared.** This cost two failing
 assertions to learn. A static factorization cannot pivot, so a zero diagonal is *perturbed* rather
-than delayed and the residual is then honestly poor (4.8e-03 observed) — the perturbation branch
+than delayed and the residual is then honestly poor (4.8e-03 observed), the perturbation branch
 working as designed, not a defect. So `StaticLDLT` gets the dominant matrix and `DynamicLDLT` gets
 the one with zero diagonals. Cholesky is absent on purpose: it needs Hermitian positive definite
 input, a third matrix and a different property, and a complex symmetric matrix is not a valid input
@@ -302,8 +302,8 @@ in the complex section below does *not* agree across platforms:
 | x86-64, libstdc++, reference BLAS | 2 | 2 | 28 | 2 | 1.76e-15 |
 | Apple Silicon, libc++, Accelerate | 3 | 3 | 26 | 3 | 5.40e-15 |
 
-Same matrix — the generator is deterministic and complex `DynamicLDLT` reports identical counts on
-both — and genuinely different pivot decisions.
+Same matrix, the generator is deterministic and complex `DynamicLDLT` reports identical counts on
+both, and genuinely different pivot decisions.
 
 **Why it happens.** The pivot search asks a yes/no question, `|d| >= threshold * max1`, of quantities
 that come out of BLAS updates. Two machines can produce different last bits there for several
@@ -315,13 +315,13 @@ that point the two factorizations differ in structure.
 **Why it does not matter for accuracy, which is the part worth being clear about.** Both are valid
 factorizations of the same matrix. The threshold is not selecting one canonical answer; it is
 refusing pivots small enough to amplify error. Any choice that passes it yields a backward-stable
-factorization, so both platforms land at machine precision — 1.76e-15 and 5.40e-15 are both simply
+factorization, so both platforms land at machine precision, 1.76e-15 and 5.40e-15 are both simply
 zero. The arithmetic is not fragile; the decision boundary is, and by design.
 
 **The diagnostic, when this recurs.** Residual at machine precision but counts differing across
 machines is expected and is not a defect. Residual *degraded* is a defect, wherever the counts land.
 And the traversals disagreeing with each other on one machine is always a defect, since they share
-hardware, library and BLAS — which is why that comparison, rather than the absolute counts, is what
+hardware, library and BLAS, which is why that comparison, rather than the absolute counts, is what
 the complex assertions check.
 
 Pinned counts here would have gone red on a correct build, and the newest, least-referenced change
@@ -353,7 +353,7 @@ still indistinguishable from tests nobody wrote. Those two are unsupported for d
 should not be recorded as one debt: `DynamicLDLT` is unported, `DynamicLDLH` is underived.
 
 **Dynamic pivoting is covered at tiers 0 and 1 only.** Delayed columns crossing a forest, 2x2
-pivots in the solve, and the growth of a parent's front are now exercised, but mildly: five delayed
+pivots in the solve, and the expansion of a parent's front are now exercised, but mildly: five delayed
 columns is the most any assertion sees. Tier 2 is where the machinery would be pushed, and it does
 not exist yet.
 

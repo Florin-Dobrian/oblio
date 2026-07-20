@@ -49,14 +49,14 @@ differ.
 | BlasLapack | yes | checked | wraps potrf/trsm/herk/syrk/gemm, overloaded on the scalar type. Named by *operation*, not routine: `herk` means A times A-conjugate-transpose, so it is `dsyrk_` for real and `zherk_` for complex, and the engine cannot pick the wrong one (0.9 does; see DESIGN_DECISIONS). One trait, `Blas<Val>::conjTrans`. Also carries the three kernels BLAS lacks, ported from 0.9: `ldl` (unpivoted LDL, 0.9's `OBLIO_POTRF2`), `formUpper` (`U = D L^T`, `OBLIO_COMPUTE_U`), `gemmLower` (`A -= L U` with the product known symmetric, `OBLIO_GEMM`). Verified on hand-computed factors and by reconstruction, 1x1 to 23x23 |
 | UpdateBlock | yes | checked | 0.9 `Temporary`; one supernode's update to one ancestor, dense column-major plus its row indices. Not the multifrontal update matrix, which is a different object |
 | NumFactorStatic | yes | checked | 0.9 `FactorsStatic`; SymFactor's structure copied, plus one flat value buffer with per-supernode offsets. Blocks are dense column-major rectangles (the upper front triangle is allocated and zero, so BLAS can take the whole block) |
-| NumFactorDynamic | yes | checked | 0.9 `FactorsDynamic`. One index vector and one value vector per supernode, so a front can grow under delayed pivoting. Written by every factorization: the static ones run into it unchanged and produce a factor identical to the flat one, bit for bit; dynamic LDL writes it through the growth verbs (`extendIndex`, `resetEntry`, `extendEntry`, `swap`,
-`shrinkEntry`). No base class shared with the static one: `experiments/storage-options` showed a pointer array does the job a base would |
+| NumFactorDynamic | yes | checked | 0.9 `FactorsDynamic`. One index vector and one value vector per supernode, so a front can expand under delayed pivoting. Written by every factorization: the static ones run into it unchanged and produce a factor identical to the flat one, bit for bit; dynamic LDL writes it through the expansion and contraction verbs (`expandNodeIdx`, `resetVal`, `expandVal`, `swap`,
+`contractVal`). No base class shared with the static one: `experiments/storage-options` showed a pointer array does the job a base would |
 | NumFactorEngine | yes | checked | **Static factorizations functionally complete**: `Cholesky`, `StaticLDLT`, `StaticLDLH`, each left- and right-looking, real and complex. Cholesky checked against an independent dense Cholesky (4e-16); LDL by reconstruction, `L D L^H == P A P^T` (2e-15), through AMD ordering and supernodes. `StaticLDLH` (complex Hermitian LDL) is an **extension**: 0.9's complex LDL is symmetric only. Gaps, both in Owed: the LDL **perturbation branch has never fired**, and a complex input is **not validated as Hermitian**. **Dynamic LDL works for real input in both traversals**, `DynamicLDLT` and `DynamicLDLH` alike (the
 same computation over the reals), with delayed columns crossing the forest and 2x2 pivots in the
 solve, verified by residual in `test_pipeline` and by right-looking agreeing with left-looking bit
 for bit. 0.9's two dynamic kernels are byte-identical between its left- and right-looking engines,
-so only the driver differs: right-looking grows a front with `extendEntry`, which preserves, where
-left-looking uses `resetEntry`, which discards. Complex dynamic LDL and `Traversal::Multifrontal` not
+so only the driver differs: right-looking expands a front with `expandVal`, which preserves, where
+left-looking uses `resetVal`, which discards. Complex dynamic LDL and `Traversal::Multifrontal` not
 started. **Complex `DynamicLDLT` needed no kernel change at all**: 0.9's complex
 `factorDynamicLDL_` differs from its real one in six lines, all declaring the pivot magnitudes real
 rather than scalar, and this port declared them `double` from the start, so it was already the
@@ -109,7 +109,7 @@ obviated by lambdas).
 
   It was found twice by accident, both times as a "failing" assertion that was the branch working
   correctly on input a static factorization cannot handle. The test it still wants is unchanged in
-  shape — assert the count is nonzero *and* that the reconstruction differs from `A` by about the
+  shape, assert the count is nonzero *and* that the reconstruction differs from `A` by about the
   perturbation, which is the honest statement of what perturbing means: we factored a slightly
   different matrix and said so. What has changed is that the matrix no longer has to be invented.
 
@@ -124,7 +124,7 @@ obviated by lambdas).
   the refactor was covered by 147 assertions throughout.
 
   Two things fell out of it that the duplication had hidden. **Pass 1 never reads the 2x2 block at
-  all** — it accepts on `max1 == max2`, on the magnitudes alone, where pass 2 tests the determinant;
+  all**, it accepts on `max1 == max2`, on the magnitudes alone, where pass 2 tests the determinant;
   the compiler said so with an unused-variable warning the moment the shared body stopped reading it
   for both. And `readPivotBlock2x2` turns out to be the single place the *symmetry* of D is decided,
   which is exactly what complex `LDL^H` needs to change.

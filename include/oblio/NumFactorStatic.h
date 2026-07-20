@@ -3,9 +3,9 @@
 // NumFactorStatic.h - the numeric factorization of a sparse matrix, statically stored.
 //
 // Static means the structure is fixed before any arithmetic runs: symbolic factorization has
-// already sized every supernode's block, and nothing grows. That covers Cholesky and static LDL.
-// Dynamic LDL does grow, by delaying unstable pivots into an ancestor, and gets its own class
-// (NumFactorDynamic), because the storage that suits growth does not suit this.
+// already sized every supernode's block, and nothing expands. That covers Cholesky and static LDL.
+// Dynamic LDL does expand, by delaying unstable pivots into an ancestor, and gets its own class
+// (NumFactorDynamic), because the storage that suits expansion does not suit this.
 //
 // This object is SymFactor plus the values. It copies what it needs from SymFactor rather than
 // referring to it, exactly as SymFactor copies from ElmForest: each object is self-contained, so
@@ -66,8 +66,10 @@ public:
     // entitles it to do.
     std::size_t numPerturbations() const { return mNumPerturbations; }
 
-    // Node to supernode.
-    const std::vector<std::int32_t>& nodeToSnode() const { return mNodeToSnode; }
+    // Node to supernode: the whole map, and the supernode a single node belongs to. Indexed by a
+    // *node*, unlike frontSize and its kin, which are indexed by a supernode.
+    const std::vector<std::int32_t>& nodeToSnode()                  const { return mNodeToSnode; }
+    std::int32_t                     nodeToSnode(std::int32_t node) const { return mNodeToSnode[node]; }
 
     // Per supernode: its own columns, and the rows below them.
     const std::vector<std::size_t>& frontSize()  const { return mFrontSize; }
@@ -101,7 +103,7 @@ public:
     // block, stay private for the engine that fills them.
     //
     // **Call it at the moment of use, never hoist it.** In the dynamic factor a delayed pivot
-    // grows an ancestor's front, which reallocates its buffer, which dangles every pointer
+    // expands an ancestor's front, which reallocates its buffer, which dangles every pointer
     // previously taken into it, silently. experiments/storage-options demonstrates the rule
     // (structural mutation invalidates, value mutation does not) and measures the cost of obeying
     // it: one indirection, which is nothing.

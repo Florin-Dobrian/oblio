@@ -28,7 +28,7 @@ what dynamic LDL exists for. A KKT matrix whose zero block is stored sparsely, d
 hits it immediately. Found on 2026-07-19 while validating dynamic LDL, where it produced both wrong
 answers and spurious refusals before the cause was clear.
 
-**No duplicate entries.** `assembleFromA` and `assembleDelayed` assign rather than accumulate,
+**No duplicate entries.** `assembleFromA` and `assembleDelay` assign rather than accumulate,
 which is correct when each position has one writer and silently keeps only the last value if a
 column stores the same row twice. 0.9 accumulates in the matrix case and so tolerates duplicates.
 The header already documents CSC with sorted, and by implication unique, row indices, so this is an

@@ -135,6 +135,64 @@ Linux: replace `-framework Accelerate` with `-lblas -llapack -lm`.
 - Both are starting points, not yet calibrated to the tree; see the headers in each
   config before mass-applying.
 
+### Editor navigation (CLion, terminal build kept)
+
+The build stays in the terminal; CLion is a read-and-navigate surface only, driven by a
+`compile_commands.json` so its clangd index sees the exact flags the Makefile uses. Written up one
+step at a time as each is confirmed on alpamayo, so every step here is one that actually ran.
+
+1. **Generate the compile database.** `brew install bear`, then from the repo root run the normal
+   build prefixed with `bear --`, from clean so every translation unit is captured. On macOS the
+   Makefile detects Darwin via `uname` and sets `BLAS_LIBS = -framework Accelerate` itself, so the
+   command needs no BLAS argument: `make clean && bear -- make test`. This writes
+   `compile_commands.json` (gitignored, machine-specific: it holds absolute paths) and changes
+   nothing about the Makefile. Re-run only when the compile commands change, a new source file or a
+   changed flag, not on every edit. Confirmed on alpamayo (macOS Tahoe, Apple Silicon): bear
+   intercepted cleanly with no SIP trouble, and the database captured all 24 translation units (17
+   in `src/`, 7 tests) each carrying `-std=c++17 -Iinclude -DOBLIO_BLAS_UNDERSCORE`, which is what
+   clangd needs to index the code the way the build sees it. `Amd.cpp` and `Mmd.cpp` additionally
+   carry `-w`; that silences the compiler but not clangd, so expect analysis noise on those two
+   vendored/ported files regardless.
+
+2. **Ignore the generated artifacts.** `compile_commands.json` holds absolute paths and the local
+   toolchain, so it is per-machine and must not be committed; clangd also writes a `.cache/`
+   index directory. Both are in `.gitignore` (`.idea/`, CLion's project folder, was already there).
+   Confirmed on alpamayo: after the ignore rule was in place, `git status` did not list
+   `compile_commands.json` among untracked files, so the database is present on disk but invisible
+   to git.
+
+3. **Open it in CLion as a compilation-database project.** File -> Open, and select the
+   `compile_commands.json` file itself (not the folder); CLion offers "Open as Project", take it. It
+   imports the database as the source of truth for flags and does not configure or run a build of
+   its own, so the terminal stays the only place anything compiles. Confirmed on alpamayo: it
+   reported "Compilation database project successfully imported", indexed without error, and
+   cmd-click navigation resolves through the templates (jump-to-definition and find-usages both
+   work). `reference/` needed no manual exclusion: it is gitignored, and CLion skips it on that
+   basis, so cmd-click on a symbol with a `-0.9`/`-10.12` twin still jumps straight to the port
+   with no pick-list. If a future setup does surface duplicate symbols, the fix is right-click the
+   directory -> Mark Directory as -> Excluded, but it was not needed here.
+
+**Why the build stays in the terminal.** A compilation-database project is deliberately
+reduced-capability: the database records *what was compiled*, not *how to build*, so CLion can
+compile a single file on demand (replaying one entry) but has no working full-build button. It knows
+nothing of link steps, the `make test` orchestration, or the target structure, because that lives in
+the Makefile, which CLion does not read. This is the wanted state, not a limitation: the terminal is
+the only thing that compiles, and the two never fight over who owns the build. Even where CLion
+builds *could* be wired in (registering `make` as an external tool, or migrating to CMake), the
+terminal is the better choice on the merits here. The Makefile is the single source of truth and does
+real work a second build description would have to duplicate and keep in sync: the `uname` platform
+branch, the `-w` on the vendored orderers, the guarded explicit-instantiation object layout. And the
+one-unit-at-a-time loop is a terminal loop, reading `PASS`/`FAIL` lines and comparing residuals
+against the 0.9 oracle; the hand-rolled test prints are not a framework CLion's runner would parse
+into a green/red tree, so routing the build through the IDE would cost the tidy output and gain
+nothing. The clean model: CLion is a reading instrument pointed at the code, the terminal is the
+workshop, and the compile database is the one-way bridge that lets the instrument understand what the
+workshop produces without needing to run it. Wiring builds into CLion earns its keep only if the work
+moves into CLion (its debugger, refactoring, inline run buttons); for navigation-only it is a moving
+part with no payoff. The lightest middle option, if tab-switching ever grates, is binding `make test`
+to a key as a CLion External Tool, which gives terminal-identical output in a panel without CLion
+owning anything.
+
 ## Docs
 
 - **CLAUDE.md** (this file), operating contract + doc index.

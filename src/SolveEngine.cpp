@@ -119,6 +119,17 @@ void SolveEngine::backwardStatic(const Factor& nf, Vector<Val>& y) const {
 // below a diagonal, where L's first sub-diagonal entry would otherwise be, so the triangular passes
 // step over it and the diagonal pass takes the pair together.
 //
+// Three conservation facts make these solves need no knowledge of what delayed where. The supernode
+// count is fixed: delaying moves columns between fronts, never creates or destroys a supernode, so
+// the loop runs over the same snodeSize it always would. Each front's row count is conserved
+// (frontSize + delaySize + updateSize, the height note in NumFactorEngine). And the total column
+// count is conserved: every original column ends up as a surviving front column of exactly one
+// supernode, the one where it finally pivoted, so summing frontSize over all supernodes is still n.
+// The delay history is therefore invisible here. The solve walks every supernode's *final* front,
+// bounded by its settled frontSize, and those finals partition the same n columns the symbolic
+// fronts did. A supernode that gained columns does more work, one emptied by delay does none (its
+// column loop runs zero times), and the sum is unchanged.
+//
 // pivotType is per *global* node: 1 for a 1x1, 2 for the first column of a 2x2, 3 for its second.
 // Only 2 changes a loop bound, which is why the tests below read `!= 2` rather than enumerating.
 // =================================================================================================

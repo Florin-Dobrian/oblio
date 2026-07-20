@@ -944,8 +944,8 @@ void NumFactorEngine::updateDynamicSupernode(const NumFactorDynamic<Val>& nf, st
 }
 
 template<class Val>
-void NumFactorEngine::assembleDelayed(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t kk,
-                                      const std::vector<std::int32_t>& gblToLcl) const {
+void NumFactorEngine::assembleDelay(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t kk,
+                                    const std::vector<std::int32_t>& gblToLcl) const {
     const std::int32_t jjFrontSize = static_cast<std::int32_t>(nf.mFrontSize[jj]);
     const std::int32_t jjDelayed   = static_cast<std::int32_t>(nf.mDelaySize[jj]);
     const std::int32_t jjRows      = jjFrontSize + jjDelayed
@@ -1004,6 +1004,19 @@ void NumFactorEngine::assembleDelayed(NumFactorDynamic<Val>& nf, std::int32_t jj
 // val's row count and never changes: expanding moves rows from nowhere into the front, factoring
 // moves them from the front into delayed, and updateSize is never rewritten. When a residual comes
 // out wrong, that identity is the first thing to check.
+//
+// **The extreme case: every column of a supernode delays.** frontSize then reaches zero. The
+// supernode still exists, its val still holds every row (they were reclassified front -> delayed,
+// not removed), and the height identity still holds. Once its parent takes those delayed columns,
+// contractVal resizes the val to frontSize * height = 0: the val goes genuinely empty, since a val
+// is dimensioned by column count and there are no columns left. The nodeIdx is not shrunk to match,
+// and it does not need to be. Nothing reads it afterward: assembleDelay already extracted the
+// delayed globals while the columns were still present, and every later reader is gated on
+// frontSize (the solve loops j < frontSize, updateDynamicSupernode returns on f == 0), so a
+// zero-front supernode is uniformly skipped. The surviving rows are vestigial, kept because
+// "nodeIdx never contracts" is a simpler invariant to hold than one with an emptying special case,
+// not because anyone consults them. Clearing them would be equally correct and save a little
+// memory; the code does not bother.
 // =================================================================================================
 
 template<class Val>
@@ -1103,12 +1116,12 @@ bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const
             // per jj across the whole traversal, and only if jj delayed something.
             //
             // 0.9 tests only the parent, letting both calls run as no-ops when jj delayed nothing:
-            // assembleDelayed loops zero times and contractVal resizes a val to the size it
+            // assembleDelay loops zero times and contractVal resizes a val to the size it
             // already has. Correct, but it makes the verb fire on every non-root supernode, which
             // is misleading under measurement and asymmetric with the right-looking driver, where
             // the same calls sit under a delay test already.
             if (jjDelayed > 0 && parent[jj] == kk) {
-                assembleDelayed(nf, jj, kk, gblToLcl);
+                assembleDelay(nf, jj, kk, gblToLcl);
                 nf.contractVal(jj, jjDelayed);
             }
 
@@ -1130,7 +1143,7 @@ bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const
 
         // kk now has updates of its own to deliver. **The advance is over the front and the delayed columns
         // together**, not the front alone: both are kk's own rows, neither updates an ancestor, and
-        // the delayed ones are handed over by assembleDelayed rather than as an update. Getting
+        // the delayed ones are handed over by assembleDelay rather than as an update. Getting
         // this wrong sends the delayed rows into a temporary and corrupts the parent quietly.
         nextUpdateSp[kk] = nf.frontSize(kk) + nf.delaySize(kk);
         if (nextUpdateSp[kk] < kkNumNodeIdx)
@@ -1263,7 +1276,7 @@ bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, cons
         if (delayedIntoJj > 0)
             for (std::int32_t ii = firstChild[jj]; ii != NIL; ii = nextSibling[ii])
                 if (nf.mDelaySize[ii] > 0) {
-                    assembleDelayed(nf, ii, jj, gblToLcl);
+                    assembleDelay(nf, ii, jj, gblToLcl);
                     nf.contractVal(ii, static_cast<std::int32_t>(nf.mDelaySize[ii]));
                 }
 
@@ -1276,7 +1289,7 @@ bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, cons
 
         // Push. The walk starts past the front *and* the delayed columns, for the same reason the
         // left-looking nextUpdateSp seed does: both are jj's own rows and neither updates an
-        // ancestor, the delayed ones going up by assembleDelayed instead.
+        // ancestor, the delayed ones going up by assembleDelay instead.
         std::size_t jjUpdateSp = nf.frontSize(jj) + nf.delaySize(jj);
         while (jjUpdateSp < jjNumNodeIdx) {
             const std::int32_t kk = nf.nodeToSnode(jjNodeIdx[jjUpdateSp]);

@@ -170,7 +170,15 @@ the full ancestor walk costs it only the walk.
 **Left-looking relays intent.** Standing at `kk`, it needs to know which descendants will update
 `kk` before `kk` is reached, and that is a record it must carry. It keeps one queue per supernode,
 `descendantUpdateQueue[kk]`, and a supernode sits on exactly one queue at a time, the next ancestor
-it must update, hopping to the following one each time it delivers an update. `nextUpdateSp[jj]` is the bookmark saying how far through `jj`'s index set it has got.
+it must update, hopping to the following one each time it delivers an update. `nextUpdateSp[jj]` is
+the bookmark saying how far through `jj`'s index set it has got.
+
+This is **bookmarking**, and it is a technique in its own right, not a local trick. Whenever several
+consumers walk the same sorted sequence at different times, each keeps a position that only ever
+advances, so resuming is O(1) instead of a rescan from the start. The same shape appears in a k-way
+merge (one bookmark per input list) and in a two-pointer sweep over two sorted sets; here there is
+one bookmark per supernode, over that supernode's own sorted index set. Sorted order is what makes
+the single saved position sufficient: nothing already passed can become relevant again.
 
 **And here is the crux of the relay: where a descendant goes next does not depend on where it is.**
 

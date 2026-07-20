@@ -22,6 +22,11 @@ cmake-build-*/
 .vscode/
 .idea/
 
+# clangd compile database (machine-specific: absolute paths, local toolchain).
+# Regenerate with `bear -- make test`; see CLAUDE.md, Tooling / Editor navigation.
+compile_commands.json
+.cache/
+
 *.pdf
 
 REPO_MAP.md

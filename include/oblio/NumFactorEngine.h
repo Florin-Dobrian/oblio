@@ -120,7 +120,7 @@ private:
     // children delayed into it, and those columns hold no entry of A, so the scatter starts past
     // them. The count is therefore a property of the *destination*, not of A.
     //
-    // Assigns rather than accumulates, and so does assembleDelayed below: the block was zeroed and
+    // Assigns rather than accumulates, and so does assembleDelay below: the block was zeroed and
     // each of these positions has exactly one writer. Only assembleUpdate accumulates, because only
     // it lands where A's values and other descendants' updates already sit. (0.9 writes `+=` here,
     // which differs only if A stores a duplicate entry, and A is assumed valid.)
@@ -266,8 +266,8 @@ private:
     // new front, and contractVal has not yet reclaimed them. Which fixes the order: assemble, then
     // contract.
     template<class Val>
-    void assembleDelayed(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t kk,
-                         const std::vector<std::int32_t>& gblToLcl) const;
+    void assembleDelay(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t kk,
+                       const std::vector<std::int32_t>& gblToLcl) const;
 };
 
 } // namespace Oblio

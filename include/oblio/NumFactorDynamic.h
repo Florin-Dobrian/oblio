@@ -129,8 +129,8 @@ private:
     // Grow supernode jj's index set by n slots, for n columns delayed into it. The existing indices
     // stay at the front; the new slots (zero for now) are for the caller to fill with the delayed
     // columns' global indices. Ported from 0.9 extendIndex_.
-    void expandNodeIdx(std::int32_t jj, std::int32_t n) {
-        mNodeIdx[jj].resize(mNodeIdx[jj].size() + static_cast<std::size_t>(n));
+    void expandNodeIdx(std::int32_t jj, std::size_t n) {
+        mNodeIdx[jj].resize(mNodeIdx[jj].size() + n);
     }
 
     // Size supernode jj's block to its *current* shape and zero it: frontSize columns by
@@ -167,10 +167,11 @@ private:
     // thing: make the block match the shape the fields already describe. 0.9 calls its version
     // before widening and passes the old width implicitly; the arithmetic is identical either way,
     // and one convention across the two verbs is worth more than matching that call order.
-    void expandVal(std::int32_t jj, std::int32_t n) {
+    void expandVal(std::int32_t jj, std::size_t n) {
+        const std::int32_t nInt     = static_cast<std::int32_t>(n);
         const std::int32_t newFront = static_cast<std::int32_t>(mFrontSize[jj]);
         const std::int32_t update   = static_cast<std::int32_t>(mUpdateSize[jj]);
-        const std::int32_t oldFront = newFront - n;
+        const std::int32_t oldFront = newFront - nInt;
         const std::int32_t oldRows  = oldFront + update;
         const std::int32_t newRows  = newFront + update;
 
@@ -180,8 +181,8 @@ private:
 
         for (std::int32_t j_ = 0; j_ < oldFront; ++j_)
             for (std::int32_t i_ = j_; i_ < oldRows; ++i_)
-                expanded[static_cast<std::size_t>(j_ + n) * static_cast<std::size_t>(newRows)
-                      + static_cast<std::size_t>(i_ + n)]
+                expanded[static_cast<std::size_t>(j_ + nInt) * static_cast<std::size_t>(newRows)
+                      + static_cast<std::size_t>(i_ + nInt)]
                     = old[static_cast<std::size_t>(j_) * static_cast<std::size_t>(oldRows)
                           + static_cast<std::size_t>(i_)];
 
@@ -248,8 +249,8 @@ private:
     // its rows (frontSize + n + updateSize), so a column-major truncation does it. The delayed
     // columns live on only as rows, counted now in delaySize. Ported from 0.9
     // shrinkEntry_.
-    void contractVal(std::int32_t jj, std::int32_t n) {
-        const std::size_t rows = mFrontSize[jj] + static_cast<std::size_t>(n) + mUpdateSize[jj];
+    void contractVal(std::int32_t jj, std::size_t n) {
+        const std::size_t rows = mFrontSize[jj] + n + mUpdateSize[jj];
         mVal[jj].resize(mFrontSize[jj] * rows);
     }
 

@@ -92,13 +92,13 @@ static bool validSupernodes(const SparseMatrix<double>& A, const Permutation& p,
         // Nodal: one supernode per column, identity map.
         if(f.snodeSize()!=f.size()) return false;
         for(std::size_t lc=0; lc<f.size(); ++lc)
-            if(f.nodeToSnode()[lc]!=static_cast<std::int32_t>(lc)) return false;
+            if(f.nodeToSnode(lc)!=static_cast<std::int32_t>(lc)) return false;
     }
 
     // Collect each supernode's columns from the map.
     std::vector<std::vector<std::size_t>> cols(f.snodeSize());
     for(std::size_t lc=0; lc<f.size(); ++lc)
-        cols[static_cast<std::size_t>(f.nodeToSnode()[lc])].push_back(lc);
+        cols[static_cast<std::size_t>(f.nodeToSnode(lc))].push_back(lc);
 
     for(std::size_t s=0; s<f.snodeSize(); ++s){
         if(cols[s].empty()) return false;

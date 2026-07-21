@@ -57,8 +57,10 @@ public:
     std::int32_t firstRoot() const { return mFirstRoot; }   // first root snodeIdx, or NIL
     std::int32_t lastRoot()  const { return mLastRoot; }    // last root snodeIdx, or NIL
 
-    // Node-to-supernode map (length size()).
-    const std::vector<std::int32_t>& nodeToSnode() const { return mNodeToSnode; }
+    // Node-to-supernode map (length size()): the whole map, and the supernode a single node
+    // belongs to. Indexed by a *node*, unlike the per-supernode accessors.
+    const std::vector<std::int32_t>& nodeToSnode()                  const { return mNodeToSnode; }
+    std::int32_t                     nodeToSnode(std::int32_t node) const { return mNodeToSnode[node]; }
 
     // Per-supernode links (length snodeSize()).
     const std::vector<std::int32_t>& parent()      const { return mParent; }

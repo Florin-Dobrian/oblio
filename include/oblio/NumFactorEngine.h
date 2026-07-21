@@ -161,12 +161,12 @@ private:
     // factorStaticSupernode returns false only for Cholesky, on a non-positive pivot. LDL cannot
     // fail:
     // it perturbs instead, and reports how often.
-    template<class Val>
-    bool factorStaticSupernode(std::size_t frontSize, std::size_t numIdx, Val* block,
+    template<class Val, class Factor>
+    bool factorStaticSupernode(Factor& nf, std::int32_t jj,
                          std::size_t& numPerturbations) const;
 
-    template<class Val>
-    void updateStaticSupernode(std::size_t frontSize, std::size_t numIdx, const Val* block,
+    template<class Val, class Factor>
+    void updateStaticSupernode(const Factor& nf, std::int32_t jj,
                          std::size_t offset, UpdateBlock<Val>& t) const;
 
     // The traversals, named for the *pivoting*, which is the axis the Factorization enum names:

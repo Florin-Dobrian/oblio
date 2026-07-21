@@ -45,7 +45,7 @@ static bool matchesOracle(const SparseMatrix<double>& A, const Permutation& p,
     // Collect each supernode's columns from the map (increasing, so front() is lowest).
     std::vector<std::vector<std::size_t>> cols(s.snodeSize());
     for(std::size_t lc=0; lc<size; ++lc)
-        cols[static_cast<std::size_t>(s.nodeToSnode()[lc])].push_back(lc);
+        cols[static_cast<std::size_t>(s.nodeToSnode(lc))].push_back(lc);
 
     for(std::size_t k=0; k<s.snodeSize(); ++k){
         if(cols[k].empty()) return false;
@@ -84,11 +84,11 @@ static bool columnPatternsMatch(const SparseMatrix<double>& A, const Permutation
     std::vector<std::size_t> posInFront(s.size(), 0);
     std::vector<std::size_t> cursor(s.snodeSize(), 0);
     for(std::size_t lc=0; lc<s.size(); ++lc){
-        const std::size_t k = static_cast<std::size_t>(s.nodeToSnode()[lc]);
+        const std::size_t k = static_cast<std::size_t>(s.nodeToSnode(lc));
         posInFront[lc] = cursor[k]++;
     }
     for(std::size_t lc=0; lc<s.size(); ++lc){
-        const std::size_t k = static_cast<std::size_t>(s.nodeToSnode()[lc]);
+        const std::size_t k = static_cast<std::size_t>(s.nodeToSnode(lc));
         const std::size_t from = s.snodePtr()[k] + posInFront[lc];
         std::vector<std::int32_t> got(s.nodeIdx().begin()+static_cast<std::ptrdiff_t>(from),
                                       s.nodeIdx().begin()+static_cast<std::ptrdiff_t>(s.snodePtr()[k+1]));
@@ -295,9 +295,9 @@ int main(){
           // more, but nothing may be lost: losing an index is exactly the failure mode of
           // taking the fast path when it does not apply.
           std::vector<std::size_t> pos(s.size(),0), cur(s.snodeSize(),0);
-          for(std::size_t lk=0; lk<s.size(); ++lk) pos[lk] = cur[s.nodeToSnode()[lk]]++;
+          for(std::size_t lk=0; lk<s.size(); ++lk) pos[lk] = cur[s.nodeToSnode(lk)]++;
           for(std::size_t lk=0; lk<s.size(); ++lk){
-              const std::size_t kk = s.nodeToSnode()[lk];
+              const std::size_t kk = s.nodeToSnode(lk);
               std::vector<std::int32_t> got(
                   s.nodeIdx().begin()+static_cast<std::ptrdiff_t>(s.snodePtr()[kk]+pos[lk]),
                   s.nodeIdx().begin()+static_cast<std::ptrdiff_t>(s.snodePtr()[kk+1]));

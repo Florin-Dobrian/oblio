@@ -252,6 +252,76 @@ So: **left-looking relays intent, right-looking delivers data.** Right-looking c
 ancestor walk because it acts immediately and stores nothing; left-looking only records that a supernode still
 has someone to update, so it needs the relay to keep that record down to one slot per supernode.
 
+The same push-versus-pull direction has a second, structural consequence: **right-looking assembles A
+into every front in a prepass, before its main loop; left-looking assembles A lazily, at the top of each
+supernode's own iteration.** Because right-looking pushes, a supernode's factorization writes updates into
+ancestors the loop has not yet reached, so those ancestors' fronts must already hold their A values when the
+push lands. `assembleFromA` assigns rather than accumulates, so it cannot run after a push has landed without
+overwriting it; every front is therefore filled up front. Left-looking pulls, so nothing writes into a front
+until its own turn, and A can wait until then. This is the one asymmetry between the two dynamic drivers that
+is essential rather than incidental: every other difference has been aligned away, but the prepass belongs to
+right-looking and the lazy assembly to left-looking, and neither can adopt the other's shape without breaking.
+
+There is a clean way to hold the two loops in the head, and then a small improvement the code takes on top
+of it. **The clear description: both drivers expand a front by preserving what is in it.** Per supernode,
+each loop widens the front to take its children's delayed columns and keeps whatever the front already holds,
+shifting it to make room; that is `expandVal`, and it is the honest mirror-image form. Read this way the two
+drivers differ only in the direction of update flow, nothing else: right-looking assembles A up front and
+carries it through the expand, left-looking assembles A after the expand and carries an empty front through
+it, but both *expand-by-preserving*.
+
+**What the code actually does, with a small improvement: left-looking discards instead of preserving.** When
+left-looking expands a front, nothing has been written into it yet, its A is assembled after the expand, its
+descendants have not pulled through. So the front to preserve is empty, and preserving an empty front is
+wasted work: `expandVal` would allocate the wider block and copy nothing worth copying, then A would be
+assembled at an offset past the delayed columns. Left-looking instead calls `resetVal`, which re-sizes the
+block to the widened shape and zeroes it in one assign, and then assembles A directly at its final offset. It
+is the same result as expand-by-preserving an empty front, reached more cheaply. Right-looking cannot take
+this shortcut: by the time it expands, the front already holds A and every update pushed in by an
+already-factored descendant, so it must preserve. This is the only place the two verbs diverge, and whether to
+give the divergence up for a single uniform loop skeleton is left open in `docs/TODO.md`.
+
+In pseudocode, the symmetric pair first, both expanding by preserving. Right-looking:
+
+```
+for J in supernodes:
+    assemble A into J
+for J in supernodes:
+    expand J from its children
+    assemble children's delays, contract children
+    factor J
+    for K that J updates:
+        update J -> K
+```
+
+Left-looking, the honest mirror, also expanding by preserving:
+
+```
+for K in supernodes:
+    assemble A into K
+    expand K from its children
+    assemble children's delays, contract children
+    for J that updates K:
+        update J -> K
+    factor K
+```
+
+The two read as reflections: right-looking factors then pushes up, left-looking pulls up then factors, and the
+prepass is the price right-looking pays for pushing into fronts it has not reached. What the code actually runs
+is this left-looking loop with the one improvement: the front A would be assembled into, then preserved through
+the expand, is instead expanded empty and filled afterward, so `expandVal` becomes `resetVal` and the A
+assembly moves to after the expand:
+
+```
+for K in supernodes:
+    reset K at its expanded shape
+    assemble A into K
+    assemble children's delays, contract children
+    for J that updates K:
+        update J -> K
+    factor K
+```
+
 One consequence, recorded because it looks like a bug when first noticed. The order in which
 descendants arrive on a queue is by *previous ancestor*, not by their own index, so a queue can be out of index
 order, commonly, on branching forests. Along a single root-path it is always sorted; every

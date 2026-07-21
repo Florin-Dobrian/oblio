@@ -129,17 +129,68 @@ for right-looking, which is the one place the traversals genuinely part company 
 So the extraction is clean and the signature is narrow, something like
 
 ```
-std::int32_t growFrontIndexSet(NumFactorDynamic<Val>& nf, std::int32_t parent,
-                               const std::vector<std::int32_t>& firstChild,
-                               const std::vector<std::int32_t>& nextSibling) const;
+std::int32_t expandFrontIndexSet(NumFactorDynamic<Val>& nf, std::int32_t parent,
+                                 const std::vector<std::int32_t>& firstChild,
+                                 const std::vector<std::int32_t>& nextSibling) const;
 ```
 
-returning the number of delayed columns folded in, with each driver calling its own expansion verb
-afterwards. That also has a documentation benefit beyond the line count: it puts the drivers'
-real difference on one visible line each, instead of at the bottom of a block that otherwise reads
-identically in both.
+returning the number of delayed columns folded in, with each driver calling its own val verb
+afterwards (`resetVal` or `expandVal`). That also has a documentation benefit beyond the line count:
+it puts the drivers' real difference on one visible line each, instead of at the bottom of a block
+that otherwise reads identically in both. (Name uses the current `expand` verb, matching
+`expandNodeIdx` / `expandVal`; an earlier draft of this entry said `grow`, before that rename.)
 
 Lower risk and smaller than the pivot merge, and independent of it. Either can be done first.
+
+### The max1 == 0 swap branch: leave duplicated, do not extract
+
+`factorDynamicSupernode` has the same five-line `max1 == 0` branch in both pivot passes (mark pivot
+found, `swap` if `j_ != k1_`, set `mPivotType` to 1, advance `j_`, break). It reads as a candidate
+for extraction alongside the front expansion, but it is not one, and this note records the decision
+so it is not re-proposed. The five lines are welded to two different scan structures: pass 1 does a
+two-loop partner scan, pass 2 a one-loop scan, and the branch's `break` and `++j_` act on *that
+pass's* loop and cursor. Lifting it would mean either threading "what to do next" signals back out
+to the caller, or extracting the whole pivot-accept region, which would bury the
+pass-1-versus-pass-2 distinction that is the actual content there. Five visible lines repeated is
+the cheaper reading than a helper that has to route control flow. Unlike the front expansion, the
+duplication here is the lesser evil.
+
+### Left-looking A-assembly ordering: whether to align its loop skeleton with right-looking
+
+Open design question, deferred for thought, not a bug. The two dynamic drivers currently order the
+per-supernode work differently, and the difference is the storage-level shadow of pull-versus-push.
+Three orderings are on the table.
+
+Right-looking, as it stands. A separate prepass assembles A into every front first; then the main
+loop, per supernode jj, expands jj from its children (`expandVal`, which *preserves* what is already
+there), contracts children and assembles their delays, factors jj, and pushes jj's updates up into
+ancestors. A is in place before the loop because a push lands on an ancestor not yet reached, and
+`assembleFromA` assigns, so it cannot run after a push without overwriting it.
+
+Left-looking, as it stands. No prepass. Per supernode kk, the loop expands kk from its children
+(`resetVal`, which *discards*: nothing has been written into kk yet, so the widened block is simply
+re-zeroed), assembles A into the now-expanded front at the delayed-column offset, contracts children
+and assembles their delays, pulls updates from descendants, and factors kk last. Assembling A after
+the expand is what lets the expand discard, and discarding is cheaper than the shift `expandVal`
+does: A is placed directly at its final offset rather than written low and moved.
+
+Left-looking, the proposed aligned form. Move `assembleFromA` to the first line of the `kk` loop, so
+every driver reads `assemble A, expand, delays, updates-or-factor` in one skeleton. This is not a
+pure reorder: assembling A before the expand means the expand can no longer discard, so `resetVal`
+must become `expandVal` (preserve and shift), exactly right-looking's verb. The cost is real if
+small: left-looking would assemble A into the unexpanded front and then shift those values
+during the expand, rather than placing them once at the final offset. It also erases a distinction
+the code and `docs/ARCHITECTURE.md` currently draw deliberately: left-looking fills a front from
+scratch each turn (`resetVal`), right-looking carries a front's accumulated state through expansions
+(`expandVal`). Note this does not remove the prepass asymmetry: left-looking would still have no
+prepass, since a front's shape still is not known until its descendants are factored. It removes
+only the `resetVal`-versus-`expandVal` asymmetry.
+
+The trade is uniform loop skeleton against a genuine (if small) efficiency and a meaningful
+distinction. If taken, the change must switch `resetVal` to `expandVal` in left-looking, re-verify
+that A lands identically under assemble-then-shift versus expand-then-assemble-at-offset, and
+rewrite the `resetVal`/`expandVal` header comments in `NumFactorDynamic.h` (currently at the two
+verbs) and the lazy-assembly paragraph in `ARCHITECTURE.md`, which would no longer be accurate.
 
 ## Performance
 

@@ -401,6 +401,208 @@ As with LDL^T the back solve reads `C`'s columns as the rows of `C^T`. The two C
 solves are the LDL^T three-step solve with its diagonal split evenly between them: each
 divides by `sqrt(D[i])`, and the two together account for the single `D[i]` division.
 
+### 0.8 Block Cholesky factorization
+
+The scalar recurrences of 0.6 are the `1 x 1` pivot case of a block factorization. Partition
+symmetric positive-definite `A` into a leading pivot block and a trailing block:
+
+```
+A = [ A11  A12 ]
+    [ A21  A22 ]
+```
+
+with `A11` square and, by symmetry, `A21 = A12^H`. Cholesky produces a block lower-triangular
+`C` with `A = C C^H`:
+
+```
+C = [ C11   0  ]
+    [ C21  C22 ]
+```
+
+Multiplying `C C^H` back out,
+
+```
+C C^H = [ C11        0  ] [ C11^H  C21^H ]
+        [ C21       C22 ] [   0    C22^H ]
+
+      = [ C11 C11^H              C11 C21^H         ]
+        [ C21 C11^H       C21 C21^H + C22 C22^H    ]
+```
+
+and matching blocks against `A` gives three equations,
+
+```
+A11 = C11 C11^H
+A21 = C21 C11^H
+A22 = C21 C21^H + C22 C22^H
+```
+
+which read top to bottom as the factorization:
+
+```
+C11 = chol(A11)                  # LAPACK potrf (dpotrf / zpotrf)
+C21 = A21 C11^-H                 # BLAS trsm (dtrsm / ztrsm)
+C22 = chol( A22 - C21 C21^H )    # Schur update: BLAS herk (zherk, dsyrk in real) + gemm;
+                                 #   then LAPACK potrf on the result
+```
+
+Factor the pivot block, solve the off-diagonal block against `C11^H`, then form the Schur
+complement `A22 - C21 C21^H` and factor it in turn. The scalar `chol_left`/`chol_right` of 0.6
+is this with `A11` a single entry: `C11 = sqrt(A11)`, `C21 = A21 / C11`, and the Schur
+complement the rank-1 trailing update. The block form is the same recurrence with the pivot a
+block and the reciprocal a triangular solve, which is what lets a supernode factor its whole
+front at once through BLAS rather than one column at a time.
+
+### 0.9 Block LDL^T factorization
+
+The complex-symmetric LDL of 0.4 has the same block form, with the pivots kept in a
+block-diagonal `D` instead of absorbed into the factor, and with `^T` throughout because this
+variant does not conjugate. Partition symmetric `A` as before, `A21 = A12^T`, and factor
+`A = L D L^T` with `L` unit block-lower-triangular and `D` block-diagonal:
+
+```
+L = [ L11   0  ]      D = [ D11   0  ]
+    [ L21  L22 ]          [  0   D22 ]
+```
+
+Multiplying `L D L^T` out,
+
+```
+L D L^T = [ L11 D11 L11^T                  L11 D11 L21^T           ]
+          [ L21 D11 L11^T          L21 D11 L21^T + L22 D22 L22^T    ]
+```
+
+and matching against `A`,
+
+```
+A11 = L11 D11 L11^T
+A21 = L21 D11 L11^T
+A22 = L21 D11 L21^T + L22 D22 L22^T
+```
+
+which read as:
+
+```
+(L11, D11) = ldlt(A11)                     # Oblio's own ldl; no library equivalent (see note)
+L21       = A21 L11^-T D11^-1              # BLAS trsm against L11^T, then Oblio scales by D11^-1
+(L22, D22) = ldlt( A22 - L21 D11 L21^T )    # Schur update L21 D11 L21^T: Oblio's own formUpper
+                                          #   + gemmLower + gemm; then Oblio's own ldl
+```
+
+The Oblio-own routines here are not stand-ins for a library call we have not gotten to; the
+standard libraries do not provide them. LAPACK's `sytrf`/`hetrf` factor a symmetric block, but
+as Bunch-Kaufman *with* pivoting, which the static path refuses (its pivots are fixed by the
+symbolic structure) and the dynamic path handles under its own delayed-pivot scheme, so neither
+can call `sytrf`. The Schur update `A22 - L21 D11 L21^T` has no BLAS routine at all: the `D` in
+the middle rules out a rank-k call (`syrk`/`herk` compute `A A^H`, not `A D A^H`), and there is
+no primitive for "`A B` whose product is known symmetric", which is why the update forms
+`U := D L21^T` in a scratch (`formUpper`) and then multiplies (`gemmLower`, `gemm`). Cholesky
+above, by contrast, is BLAS and LAPACK throughout. These are permanent, not a to-do.
+
+The off-diagonal solve splits in two, a unit-triangular solve against `L11^T` and a division
+by the pivot block `D11`, which for a `1 x 1` `D11` is a scalar division and for a `2 x 2` pivot
+a `2 x 2` solve. The Schur complement carries the pivot explicitly, `A22 - L21 D11 L21^T`, where
+Cholesky folded it into `C21 C21^H`. This is the factorization the static and dynamic LDL
+kernels compute, the `2 x 2` `D11` being exactly the delayed-pivot case the dynamic path handles.
+
+### 0.10 Block LDL^H factorization
+
+The Hermitian LDL is the same block factorization with `^H` in place of `^T`, so it conjugates
+where LDL^T does not. Partition Hermitian `A`, `A21 = A12^H`, and factor `A = L D L^H` with `L`
+unit block-lower-triangular and `D` block-diagonal (its `1 x 1` pivots real, its `2 x 2` pivots
+Hermitian):
+
+```
+L = [ L11   0  ]      D = [ D11   0  ]
+    [ L21  L22 ]          [  0   D22 ]
+```
+
+Multiplying `L D L^H` out,
+
+```
+L D L^H = [ L11 D11 L11^H                  L11 D11 L21^H           ]
+          [ L21 D11 L11^H          L21 D11 L21^H + L22 D22 L22^H    ]
+```
+
+and matching against `A`,
+
+```
+A11 = L11 D11 L11^H
+A21 = L21 D11 L11^H
+A22 = L21 D11 L21^H + L22 D22 L22^H
+```
+
+which read as:
+
+```
+(L11, D11) = ldlh(A11)                     # Oblio's own ldl; no BLAS/LAPACK equivalent (see 0.9)
+L21       = A21 L11^-H D11^-1              # BLAS trsm against L11^H, then Oblio scales by D11^-1
+(L22, D22) = ldlh( A22 - L21 D11 L21^H )    # Schur update L21 D11 L21^H: Oblio's own formUpper
+                                          #   + gemmLower + gemm; then Oblio's own ldl
+```
+
+The routine choices match 0.9 exactly, `^H` for `^T`: the pivot block and the D-weighted Schur
+update are Oblio's own for the same reasons, with no library equivalent, while the triangular
+solve is BLAS `trsm`.
+
+The three sections are one factorization seen through three conjugation choices. Cholesky
+carries the pivot under a square root and needs `D > 0`; LDL^T and LDL^H keep the pivot in `D`
+and so reach the indefinite case, differing only in whether the transpose conjugates. In the
+code this is the single `Val` kernel with `hermitian(factorization())` selecting `^H` against
+`^T`, the reason the three share their block structure and split only at the conjugation.
+
+### 0.11 The supernode as a local 2x2 block
+
+The block algebra above describes a whole matrix. A supernode is the same algebra applied to a
+local `2x2` block, and this is the view the numeric kernels are written in. The `2x2` indices
+are the supernode's own, not the global matrix's: the leading block is the supernode's front,
+the block below it is the rows its columns reach into ancestors, and the trailing block is the
+update it sends upward. Name the two inputs `F11` and `F21`, where `F` is the front the kernel
+receives, already carrying whatever was gathered into it (in right-looking, earlier updates were
+scattered in before this supernode is reached; in left-looking, `A` is assembled just in time),
+not raw `A`. The two outputs of factoring are `C11`, `C21` (Cholesky) or `L11`, `D11`, `L21`
+(LDL), and the single update the supernode emits is `U22`. Where `U22` goes, and that its
+ancestors subtract it, is a separate matter (Section 1's traversals); here it is just what comes
+out.
+
+Two functions split the work along the block. `factorSupernode` turns `F11`, `F21` into the
+factor; `updateSupernode` turns the factor into `U22`. For the three factorizations the kernel
+supports:
+
+**Cholesky** (`A = C C^H`):
+
+```
+factorSupernode:   C11 = chol(F11)      # LAPACK potrf
+                   C21 = F21 C11^-H     # BLAS trsm
+updateSupernode:   U22 = C21 C21^H      # BLAS herk (+ gemm), the update this supernode emits
+```
+
+**LDL^T** (`A = L D L^T`, complex-symmetric, no conjugation):
+
+```
+factorSupernode:   (L11, D11) = ldlt(F11)        # Oblio's own ldl
+                   L21       = F21 L11^-T D11^-1  # BLAS trsm against L11^T, then scale by D11^-1
+updateSupernode:   U22       = L21 D11 L21^T      # Oblio's own formUpper (+ gemmLower + gemm)
+```
+
+**LDL^H** (`A = L D L^H`, Hermitian, conjugating):
+
+```
+factorSupernode:   (L11, D11) = ldlh(F11)        # Oblio's own ldl
+                   L21       = F21 L11^-H D11^-1  # BLAS trsm against L11^H, then scale by D11^-1
+updateSupernode:   U22       = L21 D11 L21^H      # Oblio's own formUpper (+ gemmLower + gemm)
+```
+
+The shape is one across all three: factor the pivot block, solve the off-diagonal against the
+pivot's (conjugate) transpose, emit `U22` as the outer product of the off-diagonal block. They
+differ only in the two independent choices the block algebra already drew out. Whether a middle
+`D` is present: Cholesky folds the pivot under the root, so `U22` is a plain rank-k product and
+BLAS `herk` computes it; LDL keeps `D11` in the middle, which no BLAS routine accommodates, so
+the update forms `D11 L21^H` in a scratch with `formUpper` first. And whether the transpose
+conjugates: `^H` for Cholesky and LDL^H, `^T` for LDL^T, which in the code is the
+`hermitian(factorization())` flag driving `maybeConjugate`. One factor per supernode; one `U22`
+emitted, then routed and subtracted by whichever ancestors it reaches.
+
 ## 1. Cholesky
 
 ### 1.1 The factorization

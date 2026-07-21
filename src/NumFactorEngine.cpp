@@ -281,7 +281,7 @@ bool NumFactorEngine::factorStaticSupernode(Factor& nf, std::int32_t jj,
 
 template<class Val, class Factor>
 void NumFactorEngine::updateStaticSupernode(const Factor& nf, std::int32_t jj,
-                                      std::size_t offset, UpdateBlock<Val>& updateBlock) const {
+                                      std::size_t jjUpdateSp, UpdateBlock<Val>& updateBlock) const {
     const std::size_t frontSize  = nf.frontSize(jj);
     const std::size_t numNodeIdx = frontSize + nf.updateSize(jj);
     const Val*        val        = nf.val(jj);
@@ -292,8 +292,23 @@ void NumFactorEngine::updateStaticSupernode(const Factor& nf, std::int32_t jj,
     const int width  = static_cast<int>(updateBlock.mWidth);
     const int dld    = height;
 
-    Val*       updateBlockVal = updateBlock.mVal.data();
-    const Val* L21            = val + offset;   // the update rows that reach this ancestor, and below
+    const Val* l21Val = val + jjUpdateSp;   // the update rows that reach this ancestor, and below
+    Val*       u22Val = updateBlock.mVal.data();
+
+    // The update U22 = L21 (D) L21^H is one outer product, computed in two pieces because it splits
+    // by symmetry, not by anything about the ancestor. Read in jj's own frame: `width` is the run of
+    // jj's update rows that land in the current ancestor, `height` is all of jj's remaining update
+    // rows, this ancestor's plus any that go higher. The top width-by-width square is a block times
+    // its own conjugate transpose, so it is symmetric and only its lower triangle is computed. The
+    // (height - width)-by-width rectangle below is rows-going-higher against this-ancestor's rows, not
+    // symmetric, so a plain multiply. The block is stored as a full rectangle for convenience but no
+    // arithmetic is spent on the square's upper triangle.
+    //
+    // `height == width` means jj has no update rows beyond this ancestor, so there is no rectangle and
+    // only the square runs. It does *not* mean the ancestor is a root: it is a fact about how far jj
+    // reaches, in jj's frame, not about the ancestor's place in the tree. A root ancestor forces
+    // height == width for every jj that reaches it, but height == width also happens at interior
+    // ancestors that jj simply does not extend past.
 
     if (mFactorization == Factorization::Cholesky) {
         // The square part: the block's (0..width, 0..width) -= L21' L21'^H, where L21' is the `width` rows
@@ -302,38 +317,46 @@ void NumFactorEngine::updateStaticSupernode(const Factor& nf, std::int32_t jj,
         // `herk` means "A times A-conjugate-transpose": dsyrk_ for real, zherk_ for complex. The
         // engine never names either, which is what makes 0.9's bug (SYRK on a Hermitian factor)
         // impossible to write here.
-        herk('L', 'N', width, f, -1.0, L21, sld, 1.0, updateBlockVal, dld);
+        herk('L', 'N', width, f, -1.0, l21Val, sld, 1.0, u22Val, dld);
 
-        // The rectangle below: the block's (width.., 0..width) -= L21'' L21'^H, where L21'' is the rows of
-        // the supernode's update val that lie *below* the ancestor's. Not symmetric, so GEMM.
+        // The rectangle below, present only when jj reaches past this ancestor: the block's
+        // (width.., 0..width) -= L21'' L21'^H, where L21'' is the rows of jj's update val below the
+        // ancestor's. Not symmetric, so GEMM.
         if (height > width)
             gemm('N', Blas<Val>::conjTrans, height - width, width, f,
-                 Val(-1), L21 + width, sld,
-                 L21, sld,
-                 Val(1), updateBlockVal + width, dld);
+                 Val(-1), l21Val + width, sld,
+                 l21Val, sld,
+                 Val(1), u22Val + width, dld);
         return;
     }
 
     // LDL. The update is `block -= L21 D L21^H`, and **no BLAS routine computes it**: the D in the
-    // middle rules out a rank-k call, which is why Cholesky gets one and LDL does not.
+    // middle rules out a rank-k call, which is why Cholesky gets one and LDL does not. Cholesky's
+    // block leaves its upper triangle as unused zeros, and `herk` is content with that: it wants no
+    // stored intermediate, only C21. LDL instead materializes U := D L21^H, and this is a choice, not
+    // a necessity. We could have wasted the upper triangle the same way and written a fused kernel, an
+    // `oblioHerk` that forms and consumes D L21^H internally and stores nothing. We do not, because U
+    // is worth keeping: in the factor kernel the same U = D L^H is needed twice (to solve for the next
+    // L, and to update), so it is formed once and stored where Cholesky wasted space. Here in the
+    // update that value goes to a local scratch rather than the block, but the split is the same one:
+    // form U, then multiply. That is why LDL is formUpper + gemmLower where Cholesky is a single herk.
     //
-    // So form U := D L21'^H explicitly, into a scratch, and then two multiplies. The scratch is
-    // f by width, and it is the whole price of the D.
+    // The scratch is f by width, and it is the whole price of the D.
     std::vector<Val> upper(static_cast<std::size_t>(f) * static_cast<std::size_t>(width), Val(0));
-    formUpper(width, f, L21, sld, upper.data(), f, val, sld, hermitian(mFactorization));
+    formUpper(width, f, l21Val, sld, upper.data(), f, val, sld, hermitian(mFactorization));
 
-    // The square part: symmetric, so only its lower triangle is filled. BLAS has nothing for this
-    // either (syrk does A A^T, not A B with B known to make the product symmetric), so gemmLower
-    // is ours as well.
-    gemmLower(width, f, L21, sld, upper.data(), f, updateBlockVal, dld);
+    // The square part, the counterpart of Cholesky's herk: symmetric, so only its lower triangle is
+    // filled. BLAS has nothing for this either (syrk does A A^T, not A B with B known to make the
+    // product symmetric), so gemmLower is ours as well. It multiplies L21 against the U just formed.
+    gemmLower(width, f, l21Val, sld, upper.data(), f, u22Val, dld);
 
-    // The rectangle below: not symmetric, so a plain GEMM. Note 'N','N': the transpose is already
-    // baked into U.
+    // The rectangle below, present only when jj reaches past this ancestor: not symmetric, so a
+    // plain GEMM. Note 'N','N': the transpose is already baked into U.
     if (height > width)
         gemm('N', 'N', height - width, width, f,
-             Val(-1), L21 + width, sld,
+             Val(-1), l21Val + width, sld,
              upper.data(), f,
-             Val(1), updateBlockVal + width, dld);
+             Val(1), u22Val + width, dld);
 }
 
 // =================================================================================================
@@ -863,13 +886,13 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
 
 template<class Val>
 void NumFactorEngine::updateDynamicSupernode(const NumFactorDynamic<Val>& nf, std::int32_t jj,
-                                             std::size_t offset, UpdateBlock<Val>& updateBlock) const {
+                                             std::size_t jjUpdateSp, UpdateBlock<Val>& updateBlock) const {
     // This is the same update the static twin performs: jj's update area updates kk, driven by the
     // update (descendant-to-ancestor) relationship. It is agnostic to whether jj has been contracted.
     // Left-looking calls it with jj already contracted, right-looking with jj not yet contracted, and
     // the result is identical, because the read touches only jj's update area. That area is disjoint
     // from both delay regions: jj's own delayed columns sit below its front but the walk starts past
-    // them at `offset`, and kk's inbound delays arrive by a separate path (assembleDelay), never as
+    // them at `jjUpdateSp`, and kk's inbound delays arrive by a separate path (assembleDelay), never as
     // this update. The stride below counts the delayed rows, so the column layout is the same whether
     // or not the delayed-column storage past the front has been trimmed. updateSize never changes, so
     // the update area is stable ground. The delay flow (child-to-parent) runs independently of the
@@ -889,9 +912,9 @@ void NumFactorEngine::updateDynamicSupernode(const NumFactorDynamic<Val>& nf, st
     const bool          withHermitian = hermitian(nf.factorization());
     const Val*          val           = nf.val(jj);
     const std::int32_t* idx           = nf.nodeIdx(jj);
-    // jj's rows from `offset` down: the block this ancestor is about to receive.
-    const Val*          L21           = val + offset;
-    Val*                updateBlockVal = updateBlock.mVal.data();
+    // jj's rows from `jjUpdateSp` down: the block this ancestor is about to receive.
+    const Val*          l21Val        = val + jjUpdateSp;
+    Val*                u22Val        = updateBlock.mVal.data();
 
     // Column-major positions: `at` into jj's val (and equally into L21, which shares its leading
     // dimension), `atU` into the scratch.
@@ -902,11 +925,17 @@ void NumFactorEngine::updateDynamicSupernode(const NumFactorDynamic<Val>& nf, st
         return static_cast<std::ptrdiff_t>(c) * f + static_cast<std::ptrdiff_t>(r);
     };
 
-    // U := D L21^H, f by width, the conjugate being the identity for a symmetric factorization. The
-    // static twin gets this from formUpper in one call; here D is val-diagonal, so the front is
-    // walked a pivot at a time.
+    // LDL, exactly as in the static twin: the update is `block -= L21 D L21^H`, no BLAS routine
+    // computes it (the D in the middle rules out a rank-k call), so we form U := D L21^H into a
+    // scratch and then multiply, gemmLower for the symmetric square and gemm for the rectangle below.
+    // Dynamic runs only for LDL, so there is no Cholesky branch here; the whole function is the LDL
+    // half of the static twin.
     //
-    // For a 2x2 the four entries of D sit where the factorization left them: the 2x2 elimination
+    // The one departure is forming U. The static twin calls formUpper, which walks D as a plain
+    // diagonal, one d per column. Here D is block-diagonal, 1x1 and 2x2 pivots marked by mPivotType,
+    // so the front is walked a pivot at a time. The 1x1 branch is formUpper line for line; the 2x2
+    // branch is the extension formUpper cannot express, two columns coupled through the four entries
+    // of the pivot. For a 2x2 those entries sit where the factorization left them: the elimination
     // starts at row j1 + 2 and never touches its own corner, so the lower pair are the original
     // matrix entries and the upper one was written back explicitly.
     std::vector<Val> upper(static_cast<std::size_t>(f) * static_cast<std::size_t>(width), Val(0));
@@ -915,7 +944,7 @@ void NumFactorEngine::updateDynamicSupernode(const NumFactorDynamic<Val>& nf, st
         if (nf.mPivotType[idx[j_]] == 1) {
             const Val d = val[at(j_, j_)];
             for (std::int32_t tc = 0; tc < width; ++tc)
-                upper[atU(j_, tc)] = d * maybeConjugate(L21[at(tc, j_)], withHermitian);
+                upper[atU(j_, tc)] = d * maybeConjugate(l21Val[at(tc, j_)], withHermitian);
             ++j_;
         } else {                                   // a 2x2 pivot: two columns solved together
             const std::int32_t j1_ = j_;
@@ -927,8 +956,8 @@ void NumFactorEngine::updateDynamicSupernode(const NumFactorDynamic<Val>& nf, st
             const Val d22 = val[at(j2_, j2_)];
 
             for (std::int32_t tc = 0; tc < width; ++tc) {
-                const Val l1 = maybeConjugate(L21[at(tc, j1_)], withHermitian);
-                const Val l2 = maybeConjugate(L21[at(tc, j2_)], withHermitian);
+                const Val l1 = maybeConjugate(l21Val[at(tc, j1_)], withHermitian);
+                const Val l2 = maybeConjugate(l21Val[at(tc, j2_)], withHermitian);
                 upper[atU(j1_, tc)] = d11 * l1 + d12 * l2;
                 upper[atU(j2_, tc)] = d21 * l1 + d22 * l2;
             }
@@ -936,15 +965,17 @@ void NumFactorEngine::updateDynamicSupernode(const NumFactorDynamic<Val>& nf, st
         }
     }
 
-    // From here it is the static twin exactly: the square part is symmetric and gets gemmLower,
-    // the rectangle below it is not and gets a plain GEMM, with the transpose already baked into U.
-    gemmLower(width, f, L21, sld, upper.data(), f, updateBlockVal, dld);
+    // From here it is the static twin exactly. The square part, the counterpart of Cholesky's herk:
+    // symmetric, so gemmLower fills only its lower triangle, multiplying L21 against the U just formed.
+    gemmLower(width, f, l21Val, sld, upper.data(), f, u22Val, dld);
 
+    // The rectangle below, present only when jj reaches past this ancestor: not symmetric, so a plain
+    // GEMM. Note 'N','N': the transpose is already baked into U.
     if (height > width)
         gemm('N', 'N', height - width, width, f,
-             Val(-1), L21 + width, sld,
+             Val(-1), l21Val + width, sld,
              upper.data(), f,
-             Val(1), updateBlockVal + width, dld);
+             Val(1), u22Val + width, dld);
 }
 
 template<class Val>

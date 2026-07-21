@@ -167,7 +167,7 @@ private:
 
     template<class Val, class Factor>
     void updateStaticSupernode(const Factor& nf, std::int32_t jj,
-                         std::size_t offset, UpdateBlock<Val>& t) const;
+                         std::size_t jjUpdateSp, UpdateBlock<Val>& t) const;
 
     // The traversals, named for the *pivoting*, which is the axis the Factorization enum names:
     // static pivoting is Cholesky and static LDL, dynamic pivoting is dynamic LDL. Left-looking and
@@ -254,7 +254,7 @@ private:
     // needs the index set to be read at all. Ported from 0.9 updateDynamicLDL_.
     template<class Val>
     void updateDynamicSupernode(const NumFactorDynamic<Val>& nf, std::int32_t jj,
-                                std::size_t offset, UpdateBlock<Val>& t) const;
+                                std::size_t jjUpdateSp, UpdateBlock<Val>& t) const;
 
     // Fold supernode jj's delayed columns into kk, its parent, which has already been expanded to
     // hold them. The third assemble, and the only one dynamic pivoting adds: A's values and a

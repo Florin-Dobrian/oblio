@@ -192,6 +192,42 @@ that A lands identically under assemble-then-shift versus expand-then-assemble-a
 rewrite the `resetVal`/`expandVal` header comments in `NumFactorDynamic.h` (currently at the two
 verbs) and the lazy-assembly paragraph in `ARCHITECTURE.md`, which would no longer be accurate.
 
+### Align, and perhaps unify, the two update kernels
+
+`updateStaticSupernode` and `updateDynamicSupernode` compute the same thing, `block -= L21 D L21^H`,
+over the same geometry. Both walk jj's front (`f` columns) against the update rows the ancestor
+receives (`L21`, starting at `offset`), form an upper factor `U := D L21^H` into an `f` by `width`
+scratch, then close with `gemmLower` for the symmetric square and a plain `gemm` for the rectangle
+below. The closing two multiplies are already identical. The geometry matches once the names are
+read correctly: static's `f` is the whole front and its stride is `frontSize + updateSize`;
+dynamic's `f` is the post-factor front (reduced by the delayed columns, which no longer drive
+updates) and its stride is `frontSize + delaySize + updateSize`, the one extra term being the
+delayed columns' rows, which a delayed column keeps even though it left as a column.
+
+Near term, align the coding style so the two read as twins. The prologue is where they diverge
+cosmetically: static pulls `frontSize`/`numNodeIdx` as named `size_t` locals through accessors and
+casts once to `int`; dynamic goes straight to `int` off raw members (`nf.mFrontSize[jj]`,
+`nf.mDelaySize[jj]`, `nf.mUpdateSize[jj]`) and is inconsistent with itself, using accessors for
+`val`/`nodeIdx` but raw members for the sizes. Bring dynamic to static's form: named `size_t` locals
+via accessors, then the cast. Keep the differences that are essential, not cosmetic: dynamic's
+`f == 0` early return (every column delayed, no pivot to update with), and its `withHermitian`/`idx`
+locals, which the pivot walk needs. Leave the kernel free of the pre/post/expand vocabulary; inside
+it jj is simply whatever the caller passed, so bare `frontSize` matches static and does not leak the
+expand-block naming.
+
+The one substantive difference is forming `U`. Static calls `formUpper`, which walks D as a pure
+diagonal, one `d[dp]` per column (`BlasLapack.cpp`), correct because static's D is diagonal
+(identity for Cholesky, a plain diagonal for static LDL). Dynamic inlines its own form-upper loop
+because its D is block diagonal: `mPivotType` marks each column 1x1 or 2x2, the 1x1 branch mirrors
+`formUpper` line for line, and the 2x2 branch couples two columns through four D entries, which
+`formUpper` cannot express. So dynamic's loop is `formUpper` generalized to block-diagonal D.
+
+Longer term, decide whether to truly unify. A pivot-type-aware `formUpper` that handled 2x2 blocks
+would let dynamic call out instead of inlining, after which the two kernels would differ only in
+where `f` and the stride come from, and could plausibly become one templated kernel. The cost is
+coupling the BLAS-adjacent layer to pivot types, and losing the inline pivot walk, which is readable
+where it sits. Align first, then take this decision with the symmetric versions side by side.
+
 ## Performance
 
 ### Measure left-looking against right-looking

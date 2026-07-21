@@ -93,6 +93,16 @@ notes (`CC^H` throughout); the rule only makes it bind on comments too. The one 
 shared numeric-kernel blocks `L11`, `L21`: a single kernel computes them for both factorizations,
 so they are generic and stay `L`.
 
+**Default to `^H` for the conjugate transpose; use `^T` only where the factorization does not
+conjugate.** On a real matrix `^H` is `^T`, since conjugation does nothing there, so `^H` is the
+general form that specializes correctly and needs no "(`^T` in real)" parenthetical. Write `A = CC^H`,
+`C21 = A21 C11^-H`, and so on. Cholesky is always Hermitian, so it is `^H` throughout with no
+exception. LDL has two variants and the notation must track which: the Hermitian variant is
+`A = LDL^H` and the complex-symmetric variant is `A = LDL^T`, which deliberately does not conjugate,
+so `^H` there would be wrong. This mirrors the code, where `hermitian(factorization())` and
+`maybeConjugate(...)` select between the two. So `^H` is the default and the real case is silent
+under it; `^T` is reserved for the complex-symmetric path, where it is load-bearing.
+
 **Static and dynamic mean pivoting on an algorithm, storage on a container.** The two words name
 two different axes, and the noun they qualify says which one is meant, so nothing has to be spelled
 out. On an algorithm object, static and dynamic are about *pivoting*:

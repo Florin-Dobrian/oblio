@@ -471,18 +471,24 @@ int main() {
     int failures = 0;
     const double rLeft  = sweep<double>(40, Traversal::LeftLooking,  rng, failures);
     const double rRight = sweep<double>(40, Traversal::RightLooking, rng, failures);
+    const double rMf    = sweep<double>(40, Traversal::Multifrontal, rng, failures);
     const double cLeft  = sweep<Cplx>  (40, Traversal::LeftLooking,  rng, failures);
     const double cRight = sweep<Cplx>  (40, Traversal::RightLooking, rng, failures);
+    const double cMf    = sweep<Cplx>  (40, Traversal::Multifrontal, rng, failures);
 
-    ck(failures == 0, "random x40 x4       : every matrix factored");
+    ck(failures == 0, "random x40 x6       : every matrix factored");
     ck(rLeft  < tol, "real    left-looking : matches dense Cholesky");
     ck(rRight < tol, "real    right-looking: matches dense Cholesky");
+    ck(rMf    < tol, "real    multifrontal : matches dense Cholesky");
 
-    // These two are the ones 0.9 would fail. Its complex Cholesky uses SYRK and TRSM('T'), the
+    // These three are the ones 0.9 would fail. Its complex Cholesky uses SYRK and TRSM('T'), the
     // complex-symmetric pattern, while its POTRF is Hermitian. With genuinely complex data the
-    // factor comes out wrong.
+    // factor comes out wrong. Multifrontal is the sharpest of the three here: 0.9's multifrontal
+    // update formed the contribution block with SYRK for both scalar types, so complex multifrontal
+    // is exactly where that bug lived. The port's herk wrapper resolves to zherk, so it is correct.
     ck(cLeft  < tol, "complex left-looking : matches dense Cholesky (Hermitian)");
     ck(cRight < tol, "complex right-looking: matches dense Cholesky (Hermitian)");
+    ck(cMf    < tol, "complex multifrontal : matches dense Cholesky (Hermitian)");
 
     // The grid. This is the sparse case: deep forest, real fill, an ordering that matters.
     {
@@ -514,7 +520,8 @@ int main() {
             }
 
             for (const Permutation& p : {pNat, pAmd})
-                for (Traversal tr : {Traversal::LeftLooking, Traversal::RightLooking}) {
+                for (Traversal tr : {Traversal::LeftLooking, Traversal::RightLooking,
+                                     Traversal::Multifrontal}) {
                     const double dr = compare(AR, p, denseR, tr);
                     const double dc = compare(AC, p, denseC, tr);
                     if (dr < 0 || dc < 0) ++gridFail;
@@ -523,9 +530,9 @@ int main() {
         }
 
         ck(gridFail == 0 && worstR < tol,
-           "10x10 grid, real    : matches dense Cholesky, both traversals, natural and AMD");
+           "10x10 grid, real    : matches dense Cholesky, three traversals, natural and AMD");
         ck(gridFail == 0 && worstC < tol,
-           "10x10 grid, complex : matches dense Cholesky, both traversals, natural and AMD");
+           "10x10 grid, complex : matches dense Cholesky, three traversals, natural and AMD");
         ck(heightNat > 50 && supAmd < supNat && idxAmd < idxNat,
            "10x10 grid          : structure exercised (forest height "
            + std::to_string(heightNat) + "; AMD cuts supernodes "
@@ -554,7 +561,8 @@ int main() {
             Permutation pNat(n), pAmd;
             if (!ord.compute(AR, pAmd)) { ++ldlFail; continue; }
 
-            for (Traversal tr : {Traversal::LeftLooking, Traversal::RightLooking}) {
+            for (Traversal tr : {Traversal::LeftLooking, Traversal::RightLooking,
+                                 Traversal::Multifrontal}) {
                 const double dr  = compareLdl(AR,  pAmd, denseR,  Factorization::StaticLDLT, tr, perturbations);
                 const double dcs = compareLdl(ACs, pAmd, denseCs, Factorization::StaticLDLT, tr, perturbations);
                 const double dch = compareLdl(ACh, pAmd, denseCh, Factorization::StaticLDLH, tr, perturbations);
@@ -568,13 +576,13 @@ int main() {
         }
 
         ck(ldlFail == 0 && wR < tol,
-           "LDLT real           : L D L^T reconstructs A, both traversals");
+           "LDLT real           : L D L^T reconstructs A, three traversals");
         ck(ldlFail == 0 && wCs < tol,
-           "LDLT complex        : L D L^T reconstructs A (complex SYMMETRIC, D complex)");
+           "LDLT complex        : L D L^T reconstructs A (complex SYMMETRIC, D complex), three traversals");
 
         // 0.9 does not have this one at all: its complex LDL is symmetric only.
         ck(ldlFail == 0 && wCh < tol,
-           "LDLH complex        : L D L^H reconstructs A (complex HERMITIAN, D real)");
+           "LDLH complex        : L D L^H reconstructs A (complex HERMITIAN, D real), three traversals");
 
         ck(perturbations == 0,
            "LDL                 : no perturbations needed (diagonally dominant input)");

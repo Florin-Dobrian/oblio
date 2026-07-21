@@ -50,6 +50,7 @@ add_library(oblio STATIC
     src/SymFactorEngine.cpp
     src/Types.cpp
     src/UpdateBlock.cpp
+    src/UpdateMatrix.cpp
     src/Vector.cpp
 )
 

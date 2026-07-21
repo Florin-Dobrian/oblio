@@ -17,7 +17,7 @@ file first, but CLAUDE.md is where it lives.
 
 `make test` builds and runs every suite. Each suite is a standalone binary that prints one line per
 assertion and a count, and returns nonzero on any failure. Suites are discovered by wildcard, so a
-new `tests/*.cpp` file needs no Makefile change. Totals today: **148 assertions across 8 suites**.
+new `tests/*.cpp` file needs no Makefile change. Totals today: **153 assertions across 8 suites**.
 
 | suite | assertions | what it establishes |
 |---|---|---|
@@ -26,9 +26,9 @@ new `tests/*.cpp` file needs no Makefile change. Totals today: **148 assertions 
 | `test_order` | 21 | AMD and MMD produce valid permutations |
 | `test_forest` | 23 | elimination forest, supernodes, amalgamation |
 | `test_symfactor` | 29 | supernodal index sets against a dense oracle |
-| `test_numfactor` | 16 | the numeric factor, by oracle and by reconstruction |
+| `test_numfactor` | 18 | the numeric factor, by oracle and by reconstruction |
 | `test_solve` | 14 | the solve step, by residual |
-| `test_pipeline` | 29 | whole-pipeline combinations, by residual |
+| `test_pipeline` | 36 | whole-pipeline combinations, by residual |
 
 ## A note on the word dynamic
 
@@ -107,16 +107,26 @@ amalgamation loses no true nonzero while introducing explicit zeros as extra ind
 paths are asserted to be taken, 6 cases exact and 194 carrying stored zeros, so neither branch is
 silently untested.
 
-### test_numfactor, 16 assertions
+### test_numfactor, 18 assertions
 
-Cholesky against dense Cholesky: a 3x3, then left- and right-looking for real and complex, then a
-10x10 grid under natural and AMD orderings in both traversals. A non-positive-definite 2x2 is
-refused rather than mangled. A random sweep of 40 matrices confirms every one factors. One assertion
-records that the grid case is structurally non-trivial (forest height 90, AMD cutting supernodes
-from 90 to 81 and indices from 954 to 501), so the comparison is not passing on a degenerate case.
+Cholesky against dense Cholesky: a 3x3, then left-looking, right-looking and multifrontal for real
+and complex, then a 10x10 grid under natural and AMD orderings in all three traversals. A
+non-positive-definite 2x2 is refused rather than mangled. A random sweep of 40 matrices per
+(traversal, scalar type) confirms every one factors. One assertion records that the grid case is
+structurally non-trivial (forest height 90, AMD cutting supernodes from 90 to 81 and indices from 954
+to 501), so the comparison is not passing on a degenerate case.
 
-LDL by reconstruction, in all three symmetries: real `L D L^T` in both traversals, complex symmetric
-`L D L^T` with complex D, and complex Hermitian `L D L^H` with real D. One assertion records that no
+The complex multifrontal assertion is the sharpest of the Cholesky set. 0.9's complex Cholesky is
+already wrong in the left- and right-looking engines (SYRK where HERK is needed), and its
+*multifrontal* engine forms the contribution block with SYRK for both scalar types too, so complex
+multifrontal is exactly where that bug lives. The port's operation-named `herk` wrapper resolves to
+zherk, so the factor is correct, and this assertion is what proves it against the dense oracle rather
+than only by residual.
+
+LDL by reconstruction, in all three symmetries and now all three traversals (left-looking,
+right-looking and multifrontal): real `L D L^T`, complex symmetric `L D L^T` with complex D, and
+complex Hermitian `L D L^H` with real D. So static LDL multifrontal is checked here directly, factor
+against reconstruction, the same bar the other two traversals meet. One assertion records that no
 perturbation was needed, the inputs being diagonally dominant.
 
 Two assertions concern storage rather than arithmetic. `static into dynamic` runs every static
@@ -134,7 +144,7 @@ storages: real Cholesky, real static LDL^T, complex Cholesky and complex LDL^H a
 input, and complex LDL^T against complex-symmetric input. A 10x10 grid is checked separately in both
 storages. All are ordered by AMD.
 
-### test_pipeline, 29 assertions
+### test_pipeline, 36 assertions
 
 Added 2026-07-19, with slice 2 of dynamic LDL. Where `test_numfactor` checks the factor against an
 oracle and `test_solve` checks the solve, this suite checks that the phases *compose*, for a given
@@ -162,10 +172,15 @@ right thing" from "did something pointless but arithmetically sound". Only the c
 For real input LDL^T and LDL^H are the same computation. Both are run rather than one being assumed
 to stand in for the other, and tier 1 asserts the equivalence directly.
 
-**Tier 0 refusals, two assertions.** Combinations that must return false rather than answer:
-dynamic pivoting into flat storage, and the multifrontal traversal. These are as much a part of the
-specification as the working cells, because a cell that begins returning a plausible wrong answer
-instead of a refusal is exactly the failure a port invites.
+**Tier 0 multifrontal and the refusal, five assertions.** Multifrontal is now the third working
+traversal for every factorization, static and dynamic alike: each is the same factor as left- and
+right-looking, reached by a postorder pass that carries each supernode's contribution block up a
+stack to its parent, checked here by residual (all at machine precision). The three static ones and
+dynamic LDL on an input that needs no pivoting are all checked here; the delayed-column path is the
+business of tiers 1 and 2. One combination must still return false rather than answer: dynamic
+pivoting into flat storage, which has no per-supernode index storage to grow. That refusal is as
+much a part of the specification as the working cells, because a cell that begins returning a
+plausible wrong answer instead of a refusal is exactly the failure a port invites.
 
 **Tier 1, mild pivoting.** Two banded indefinite matrices of half-bandwidth 3 with random
 off-diagonals and half the diagonal entries zeroed, at n = 40 seed 7 and n = 24 seed 7. Four
@@ -188,6 +203,13 @@ they expand a front by opposite means: left-looking discards an empty front and 
 right-looking must carry forward the values A and the already-factored descendants left in it.
 Agreement on a matrix that delays is what says the second of those is right, and it is the only
 assertion that exercises `expandVal` at all.
+
+A third traversal assertion runs the n = 40 matrix through multifrontal. This is the assertion that
+exercises delayed columns meeting the update stack: the multifrontal driver reaches them by a third
+route, carrying each supernode's contribution block up a stack rather than pulling or pushing per
+ancestor. Its delay and 2x2 counts are required to match left-looking exactly (the pivoting
+decisions are the same), but the residual is checked to tolerance rather than bit-for-bit, since the
+extend-add sums a front in a different order than the pull and the last bits legitimately differ.
 
 **The counts are pinned exactly, and the matrices are built to make that meaningful.** `std::mt19937`
 has its output sequence fixed by the standard, but the distribution templates do not: their
@@ -219,7 +241,7 @@ and hub-and-spoke structures were all tried and all delayed nothing. What does d
 reached while still small relative to its own column, and the banded family above produces those
 reliably.
 
-**Complex, five assertions.** All ten (factorization, scalar type) cells are supported as of
+**Complex, seven assertions.** All ten (factorization, scalar type) cells are supported as of
 2026-07-19, and this section covers the dynamic ones. `StaticLDLT` on a diagonally dominant complex
 symmetric band; `DynamicLDLT` on the same family with half the diagonal zeroed, asserted for residual
 in both traversals and for the traversals agreeing on 2 delayed columns and 2 two-by-two pivots; and
@@ -229,6 +251,11 @@ and for the traversals agreeing. The counts are bounded rather than pinned, and 
 that proved that necessary: the two platforms disagree on them (see the tier 2 note above). The
 traversals must still agree with each other, which is the claim worth asserting, since both run on
 the same machine.
+
+Each dynamic factorization then gets a multifrontal assertion, and the Hermitian one is the last cell
+of the whole matrix to be filled: complex Hermitian dynamic through the update stack, the conjugating
+pivot kernel reached by the multifrontal driver, on the factorization with no reference behind it.
+Residual is the oracle for both (7.24e-16 symmetric, 1.83e-15 Hermitian).
 
 `DynamicLDLH` is the one factorization in the library with **no reference behind it**: 0.9's complex
 LDL is symmetric only. Its oracles are the residual here and reconstruction of `L D L^H` on dense
@@ -262,15 +289,18 @@ built by `make` and never run. The `reached == 10` assertion is the guard agains
 error, and it is why the count is asserted separately from the residual: a silently skipped
 combination would otherwise leave the worst residual looking perfect.
 
-**Tier 2, heavy pivoting, four assertions.** Two families, and between them they cover the two ways
+**Tier 2, heavy pivoting, five assertions.** Two families, and between them they cover the two ways
 pivoting gets hard: many delays, and no 1x1 pivot available at all.
 
 **Saddle point**, `[[H, B^T], [B, 0]]` at 30 variables and 12 constraints, with **both** blocks
 carrying a zero diagonal. The honest use case for an indefinite solver, and the family that delays
-hardest, since a constraint column has no diagonal to pivot on and no update can give it one. Two
-assertions: residual under 1e-11 in both traversals, and heavy delaying with the traversals
-agreeing. Observed 92 delayed columns across 25 supernodes, 16 1x1 and 13 2x2 pivots, residual
-9.43e-14.
+hardest, since a constraint column has no diagonal to pivot on and no update can give it one. Three
+assertions: residual under 1e-11 in both left- and right-looking with those two agreeing on the
+counts, then the same matrix through multifrontal, whose residual is checked to the same tolerance
+while its counts are only bounded, not matched to left-looking. Dozens of threshold decisions under a
+different summation order can tip one, which is a different valid factorization rather than an error,
+so the residual is the oracle. Observed 92 delayed columns across 25 supernodes, 16 1x1 and 13 2x2
+pivots, residual 9.43e-14, and multifrontal at 9.05e-14.
 
 Worth knowing before reaching for this family: a *nonzero* `H` diagonal makes it tier 0 again and it
 delays nothing at all.
@@ -343,19 +373,25 @@ Three gaps stand out, stated as facts rather than as a plan.
 
 **The combination space is still barely sampled.** Three orderings, five factorizations, three
 traversals and two scalar types is ninety cells. `test_solve` exercises ten, all under AMD, and
-`test_pipeline` adds ten more under Natural. Multifrontal is asserted to refuse and is otherwise
-absent. MMD appears only in `test_order`, where its output is checked for validity and never used
-to factor anything.
+`test_pipeline` adds ten more under Natural. Multifrontal now works for every factorization, static
+and dynamic: Cholesky is checked against the dense-Cholesky oracle directly (real and complex,
+natural and AMD, in `test_numfactor`), the static LDLs by reconstruction across all three traversals
+(`test_numfactor`), and all of them end to end by residual (`test_pipeline`), the dynamic ones
+including the delayed-column path at tiers 1 and 2 and complex Hermitian through the stack. Every
+cell of the order-by-factorization-by-traversal matrix now resolves to a residual rather than a
+refusal. MMD appears only in `test_order`, where its output is checked for validity and never used to
+factor anything.
 
-**Refusals are now asserted, but only two of them.** `test_pipeline` covers the two that remain
-reachable. The remaining unsupported cells, both complex dynamic factorizations among them, are
-still indistinguishable from tests nobody wrote. Those two are unsupported for different reasons and
-should not be recorded as one debt: `DynamicLDLT` is unported, `DynamicLDLH` is underived.
+**One refusal is asserted.** `test_pipeline` covers the one reachable unsupported combination:
+dynamic pivoting into flat storage, which has no per-supernode index storage for a delayed column to
+grow. Static factorization into dynamic storage through multifrontal is the one remaining cell that
+still returns false without being asserted to; it is a convenience path, not a missing capability,
+since the same factor is reached through flat storage.
 
-**Dynamic pivoting is covered at tiers 0 and 1 only.** Delayed columns crossing a forest, 2x2
-pivots in the solve, and the expansion of a parent's front are now exercised, but mildly: five delayed
-columns is the most any assertion sees. Tier 2 is where the machinery would be pushed, and it does
-not exist yet.
+**Dynamic pivoting is now covered at all three tiers and all three traversals.** Delayed columns
+crossing a forest, 2x2 pivots in the solve, the expansion of a parent's front, and, with
+multifrontal, delayed columns meeting the update stack are all exercised: mildly at tier 1 with the
+counts pinned, and hard at tier 2 where the saddle point delays dozens of columns.
 
 **Nothing tests the pivot threshold.** It defaults to 0.1 and it directly controls how much
 delaying happens, so every dynamic assertion silently tests one value of it.

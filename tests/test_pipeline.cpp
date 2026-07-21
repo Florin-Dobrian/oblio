@@ -387,8 +387,28 @@ int main() {
         // answer instead of false is exactly the failure a port invites.
         ck(!run<double, FS>(A, OrderMethod::Natural, Factorization::DynamicLDLT, Traversal::LeftLooking).ran,
            "tier 0 refusal    : dynamic pivoting into flat storage");
-        ck(!run<double, FS>(A, OrderMethod::Natural, Factorization::Cholesky, Traversal::Multifrontal).ran,
-           "tier 0 refusal    : multifrontal traversal (not ported yet)");
+
+        // Dynamic multifrontal on an input that needs no pivoting: the basic path, before delayed
+        // columns enter. Same answer as the other two dynamic traversals.
+        const Outcome dynM = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+                                     Traversal::Multifrontal);
+        ck(dynM.solved && dynM.residual < tol && dynM.delayed == 0,
+           with("tier 0 DynamicLDLT: multifrontal residual, nothing delayed", dynM.residual));
+
+        // Multifrontal, the third traversal, for every static factorization now: Cholesky and both
+        // static LDLs, the same factor as left- and right-looking reached by a postorder pass that
+        // carries each supernode's contribution block up a stack to its parent. Checked end to end by
+        // residual (real here; complex multifrontal is checked directly against the dense oracle in
+        // test_numfactor).
+        const Outcome mfC = run<double, FS>(A, OrderMethod::Natural, Factorization::Cholesky,
+                                    Traversal::Multifrontal);
+        const Outcome mfT = run<double, FS>(A, OrderMethod::Natural, Factorization::StaticLDLT,
+                                    Traversal::Multifrontal);
+        const Outcome mfH = run<double, FS>(A, OrderMethod::Natural, Factorization::StaticLDLH,
+                                    Traversal::Multifrontal);
+        ck(mfC.solved && mfC.residual < tol, with("tier 0 Cholesky  : multifrontal residual, real", mfC.residual));
+        ck(mfT.solved && mfT.residual < tol, with("tier 0 StaticLDLT: multifrontal residual, real", mfT.residual));
+        ck(mfH.solved && mfH.residual < tol, with("tier 0 StaticLDLH: multifrontal residual, real", mfH.residual));
     }
 
     // =============================================================================================
@@ -433,6 +453,18 @@ int main() {
         ck(oR.solved && oR.delayed == o.delayed && oR.snodesDelaying == o.snodesDelaying
                      && oR.pivots2x2 == o.pivots2x2 && oR.residual == o.residual,
            "tier 1 band n=40  : right-looking is bit-identical to left-looking");
+
+        // Multifrontal is the third driver over the same two kernels, reaching the delayed columns by
+        // yet another route: it carries each supernode's contribution block up the stack rather than
+        // pulling or pushing per ancestor. This is the assertion that exercises delayed columns
+        // meeting the stack. The pivoting decisions are the same (same delays, same 2x2 pivots); the
+        // residual is checked to tolerance rather than bit-for-bit, since the extend-add sums the
+        // front in a different order than the pull.
+        const Outcome oM = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+                                   Traversal::Multifrontal);
+        ck(oM.solved && oM.residual < tol && oM.delayed == o.delayed
+                     && oM.snodesDelaying == o.snodesDelaying && oM.pivots2x2 == o.pivots2x2,
+           with("tier 1 band n=40  : multifrontal, same delays and 2x2, residual", oM.residual));
     }
     {
         const SparseMatrix<double> A = toSparse(bandIndefinite(24, 3, 0.50, 7));
@@ -472,6 +504,14 @@ int main() {
            with("tier 2 saddle 30+12: residual, both traversals", std::max(L.residual, R.residual)));
         ck(L.delayed >= 40 && L.pivots2x2 >= 5 && R.delayed == L.delayed && R.pivots2x2 == L.pivots2x2,
            counts("tier 2 saddle 30+12: heavy delaying, traversals agree", L));
+
+        // Multifrontal under heavy delaying. Counts are bounded, not matched to left-looking: with
+        // dozens of threshold decisions and a different summation order in the extend-add, a decision
+        // can tip, which is a different valid factorization, not an error. The residual is the oracle.
+        const Outcome M = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+                                  Traversal::Multifrontal);
+        ck(M.solved && M.residual < tol2 && M.delayed >= 40 && M.pivots2x2 >= 5,
+           with("tier 2 saddle 30+12: multifrontal, heavy delaying, residual", M.residual));
     }
     {
         // Every pivot a 2x2, so half the columns are marked as a pair's first. Even order only.
@@ -530,6 +570,11 @@ int main() {
                   && dR.delayed == dL.delayed && dR.pivots2x2 == dL.pivots2x2,
            counts("complex DynamicLDLT: delaying happened, traversals agree", dL));
 
+        const Outcome dM = run<C, FDC>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+                                       Traversal::Multifrontal);
+        ck(dM.solved && dM.residual < tol && dM.delayed >= 1 && dM.pivots2x2 >= 1,
+           with("complex DynamicLDLT: multifrontal, delaying happened, residual", dM.residual));
+
         // And the Hermitian one, on a genuinely Hermitian matrix: conjugate off-diagonals, real
         // diagonal, half of it zeroed so the pivot search has work to do. This is the extension
         // rather than a port, 0.9's complex LDL being symmetric only, so nothing here was checked
@@ -545,6 +590,14 @@ int main() {
         ck(hL.ran && hL.delayed >= 1 && hL.pivots2x2 >= 1
                   && hR.delayed == hL.delayed && hR.pivots2x2 == hL.pivots2x2,
            counts("complex DynamicLDLH: delaying happened, traversals agree", hL));
+
+        // The last cell of the whole matrix: complex Hermitian dynamic through the stack. This is the
+        // trickiest path, the conjugating pivot kernel reached by the multifrontal driver, and the
+        // one with no reference behind it. The residual is the oracle.
+        const Outcome hM = run<C, FDC>(H, OrderMethod::Natural, Factorization::DynamicLDLH,
+                                       Traversal::Multifrontal);
+        ck(hM.solved && hM.residual < tol && hM.delayed >= 1 && hM.pivots2x2 >= 1,
+           with("complex DynamicLDLH: multifrontal, delaying happened, residual", hM.residual));
     }
 
     // =============================================================================================

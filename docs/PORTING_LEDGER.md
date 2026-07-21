@@ -48,6 +48,7 @@ differ.
 | SymFactorEngine | no | checked | 0.9 `SymbolicEngine`; index sets against the dense oracle, natural and AMD ordered. 10.12's design, 0.9's behavior (see DESIGN_DECISIONS) |
 | BlasLapack | yes | checked | wraps potrf/trsm/herk/syrk/gemm, overloaded on the scalar type. Named by *operation*, not routine: `herk` means A times A-conjugate-transpose, so it is `dsyrk_` for real and `zherk_` for complex, and the engine cannot pick the wrong one (0.9 does; see DESIGN_DECISIONS). One trait, `Blas<Val>::conjTrans`. Also carries the three kernels BLAS lacks, ported from 0.9: `ldl` (unpivoted LDL, 0.9's `OBLIO_POTRF2`), `formUpper` (`U = D L^T`, `OBLIO_COMPUTE_U`), `gemmLower` (`A -= L U` with the product known symmetric, `OBLIO_GEMM`). Verified on hand-computed factors and by reconstruction, 1x1 to 23x23 |
 | UpdateBlock | yes | checked | 0.9 `Temporary`; one supernode's update to one ancestor, dense column-major plus its row indices. Not the multifrontal update matrix, which is a different object |
+| UpdateMatrix | yes | checked | the multifrontal contribution block: one supernode's *entire* Schur complement, `u` by `u` (u = update size), symmetric, dense column-major plus its node indices. The per-supernode block of the multifrontal update stack, held in a flat `std::vector<UpdateMatrix>` sized once to the supernode count; `allocate`/`discard` are engine-only, `discard` frees rather than clears so the stack peak stays bounded. Now exercised by multifrontal for every factorization, static and dynamic (residuals at machine precision end to end). Replaces 0.9's abstract `UpdateStack` / concrete `UpdateStackDynamic` (an out-of-core split not needed in core) |
 | NumFactorStatic | yes | checked | 0.9 `FactorsStatic`; SymFactor's structure copied, plus one flat value buffer with per-supernode offsets. Blocks are dense column-major rectangles (the upper front triangle is allocated and zero, so BLAS can take the whole block) |
 | NumFactorDynamic | yes | checked | 0.9 `FactorsDynamic`. One index vector and one value vector per supernode, so a front can expand under delayed pivoting. Written by every factorization: the static ones run into it unchanged and produce a factor identical to the flat one, bit for bit; dynamic LDL writes it through the expansion and contraction verbs (`expandNodeIdx`, `resetVal`, `expandVal`, `swap`,
 `contractVal`). No base class shared with the static one: `experiments/storage-options` showed a pointer array does the job a base would |
@@ -56,8 +57,25 @@ same computation over the reals), with delayed columns crossing the forest and 2
 solve, verified by residual in `test_pipeline` and by right-looking agreeing with left-looking bit
 for bit. 0.9's two dynamic kernels are byte-identical between its left- and right-looking engines,
 so only the driver differs: right-looking expands a front with `expandVal`, which preserves, where
-left-looking uses `resetVal`, which discards. Complex dynamic LDL and `Traversal::Multifrontal` not
-started. **Complex `DynamicLDLT` needed no kernel change at all**: 0.9's complex
+left-looking uses `resetVal`, which discards. **`Traversal::Multifrontal`
+is now complete: multifrontal works for every factorization, static and dynamic** (the third
+traversal, a postorder pass carrying each supernode's contribution block up a
+`std::vector<UpdateMatrix>` stack to its parent). Cholesky is verified against the dense-Cholesky
+oracle directly (real and complex, natural and AMD) and the static LDLs by reconstruction across all
+three traversals, all also end to end by residual. It reuses `factorStaticSupernode` and the new
+`assembleUpdateMatrix` extend-add, and forms the contribution block with `updateStaticMultifrontal`
+(one `herk` for Cholesky, `formStaticUpper` + `gemmLower` for static LDL; the herk resolves to zherk
+for complex, fixing 0.9's complex-Cholesky syrk bug for free). **Dynamic multifrontal, where delayed
+columns meet the stack, is done.** Its driver is the left-looking dynamic skeleton (expand a front by
+its children's delayed columns with `expandNodeIdx` + `resetVal`, assemble A past them, factor, which
+may delay again) with the stack in place of the pull queue: folding a child does both halves of the
+extend-add, its delayed columns become front columns (`assembleDelay`) and its contribution block
+adds in (`assembleUpdateMatrix`), then it is contracted (`contractVal`) and freed. The factor reuses
+`factorDynamicSupernode` unchanged, since the block layout at factor time matches left/right-looking,
+and the contribution block is formed by the new `updateDynamicMultifrontal` (`formDynamicUpper` +
+`gemmLower`, block-diagonal D). Verified by residual at all three tiers, real and complex, symmetric
+and Hermitian; tier 1 matches left-looking's delay and pivot counts exactly, heavier tiers match to
+tolerance. **Complex `DynamicLDLT` needed no kernel change at all**: 0.9's complex
 `factorDynamicLDL_` differs from its real one in six lines, all declaring the pivot magnitudes real
 rather than scalar, and this port declared them `double` from the start, so it was already the
 complex form; `updateDynamicLDL_` is byte-identical between 0.9's two engines. Only the dispatch

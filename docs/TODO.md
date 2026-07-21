@@ -76,6 +76,30 @@ The lesson worth keeping: **a symmetric-to-Hermitian port is not a search for `c
 in the arithmetic.** The arithmetic was nearly all fine. The bug was in a data-movement verb, in an
 entry whose symmetry made it a no-op for every case the reference ever ran.
 
+### Dynamic multifrontal: DONE, 2026-07-21
+
+Recorded as done rather than deleted, because it was the last and hardest traversal, the one where
+delayed columns meet the update stack, and 0.9 needed three attempts at its factor kernel before the
+live one settled. The port needed none of that drama: the multifrontal factor kernel turned out to be
+the same computation as our `factorDynamicSupernode`, reused unchanged. The driver is the left-looking
+dynamic skeleton with the `std::vector<UpdateMatrix>` stack in place of the pull queue; folding a
+child does both halves of the extend-add (`assembleDelay` for its delayed columns, `assembleUpdateMatrix`
+for its contribution block), and the block is formed by the new `updateDynamicMultifrontal`
+(`formDynamicUpper` + `gemmLower`). Verified by residual at all three tiers, real and complex,
+symmetric and Hermitian; tier 1 matches left-looking's counts exactly. See PORTING_LEDGER for the
+mechanism. With this the whole order-by-factorization-by-traversal matrix resolves to a residual.
+
+### Static factorization into dynamic storage through multifrontal
+
+The one cell left returning false without an assertion behind it. `NumFactorEngine::compute` into
+`NumFactorDynamic` dispatches Cholesky and static LDL to left- and right-looking but not to
+multifrontal, where it still returns false. This is a convenience path, not a missing capability: the
+same static factor is reached through flat `NumFactorStatic` storage, which multifrontal already
+serves. `factorStaticMultifrontal` is templated on the factor type and the other two static traversals
+already instantiate for dynamic storage, so wiring this is likely a one-line dispatch change plus a
+test; the reason to leave it for now is that nothing needs a statically pivoted factor in
+delayed-column storage. Trigger: if a caller ever wants one factor object that can hold either.
+
 ### Multiple right-hand sides### Multiple right-hand sides
 
 `Vector<Val>` carries one right-hand side and the solve is scalar, which is the right call for one
@@ -116,15 +140,18 @@ moment one shared body served both. And `readPivotBlock2x2` is the single place 
 decided, `d12 = d21` being the symmetric statement, which makes complex `LDL^H` a change in one
 function rather than four.
 
-### Extract the front expansion shared by both drivers
+### Extract the front expansion shared by all three dynamic drivers
 
-Not previously recorded. `factorDynamicLeftLooking` and `factorDynamicRightLooking` expand a parent's
-index set with about 16 identical lines: extend the index array by the children's total, shift the
-existing indices right by that amount, then prepend each child's delayed globals in sibling order.
-Verified identical apart from local variable names.
+Not previously recorded. `factorDynamicLeftLooking`, `factorDynamicRightLooking`, and now
+`factorDynamicMultifrontal` expand a parent's index set with about 16 identical lines: extend the
+index array by the children's total, shift the existing indices right by that amount, then prepend
+each child's delayed globals in sibling order. Verified identical apart from local variable names.
+The third copy landed with dynamic multifrontal, which raises the payoff and the case for doing this.
 
-They differ only in the verb that closes the block, `resetVal` for left-looking and `expandVal`
-for right-looking, which is the one place the traversals genuinely part company on delayed columns.
+They differ only in the verb that closes the block, `resetVal` for left-looking and multifrontal
+(both discard, nothing being in the front yet) and `expandVal` for right-looking (which preserves the
+values already accumulated). That is the one place the traversals genuinely part company on delayed
+columns.
 
 So the extraction is clean and the signature is narrow, something like
 
@@ -137,7 +164,7 @@ std::int32_t expandFrontIndexSet(NumFactorDynamic<Val>& nf, std::int32_t parent,
 returning the number of delayed columns folded in, with each driver calling its own val verb
 afterwards (`resetVal` or `expandVal`). That also has a documentation benefit beyond the line count:
 it puts the drivers' real difference on one visible line each, instead of at the bottom of a block
-that otherwise reads identically in both. (Name uses the current `expand` verb, matching
+that otherwise reads identically in all three. (Name uses the current `expand` verb, matching
 `expandNodeIdx` / `expandVal`; an earlier draft of this entry said `grow`, before that rename.)
 
 Lower risk and smaller than the pivot merge, and independent of it. Either can be done first.
@@ -227,6 +254,46 @@ would let dynamic call out instead of inlining, after which the two kernels woul
 where `f` and the stride come from, and could plausibly become one templated kernel. The cost is
 coupling the BLAS-adjacent layer to pivot types, and losing the inline pivot walk, which is readable
 where it sits. Align first, then take this decision with the symmetric versions side by side.
+
+### Pass the factor to the assemble functions, as assembleDelay already does
+
+Open readability question, deferred for thought, not a bug. Two of the three assemble functions take
+a raw destination front, `(std::size_t numNodeIdx, Val* block)`, and scatter into it:
+`assembleFromA` (source is A) and `assembleUpdate` (source is an `UpdateBlock` temporary). The third,
+`assembleDelay`, instead takes `NumFactorDynamic& nf` with `jj` and `kk` and resolves both blocks
+itself. The question is whether the first two should follow suit and take `nf` plus the destination
+supernode.
+
+Mechanically it works. At every call site the destination `kk` is still unfactored when the assemble
+runs (the factor call comes later, or `kk` is a not-yet-reached ancestor in the push case), so
+`delaySize(kk) == 0` and the destination derives cleanly: `val = nf.val(kk)` and
+`numNodeIdx = nf.frontSize(kk) + nf.updateSize(kk)`, which is exactly what the callers pass today.
+
+The appeal is readability at the call site and consistency with `assembleDelay` and the factor and
+update functions, which all take `nf`. There is **no execution-time cost**: at `-O3` the accessors
+inline to the same loads the raw-pointer form uses now, and re-deriving `numNodeIdx` per call is an
+add the optimizer absorbs. So the trade is purely surface area against call-site clarity, and the
+standing preference is readability where there is no runtime penalty.
+
+The costs, so they are not rediscovered. Passing `nf` turns `template<class Val>` into
+`template<class Val, class Factor>`, doubling the instantiations, since the static drivers run these
+into both `NumFactorStatic` and `NumFactorDynamic`. The call-site cleanup is smaller than it looks:
+the right-looking drivers bracket the scatter with `setGlobalToLocal(kkNumNodeIdx, kkNodeIdx, ...)`
+and `clearGlobalToLocal(...)`, which need `kkNumNodeIdx` and `kkNodeIdx` regardless, so those locals
+do not go away, the function merely re-derives what the caller still holds. And it gives up the
+storage-blind raw-block shape that `assembleFromA` and `assembleUpdate` share today, which is the same
+principle that keeps the numeric kernels blind to static-versus-dynamic storage (the storage-options
+experiment, cited in `ARCHITECTURE.md`).
+
+Two notes for whoever takes it. `assembleDelay` taking `nf` is not a precedent to extend blindly: both
+its endpoints are supernodes *inside* `nf` and it reads dynamic-only sizes (`mDelaySize[jj]`), whereas
+`assembleUpdate`'s source is a free-standing temporary, so only its destination lives in the factor.
+And if this is done, do `assembleFromA` and `assembleUpdate` **together**, since they share the shape;
+`assembleFromA` is the piece-ier of the two, threading five destination-side arguments
+(`delaySize, frontSize, numNodeIdx, rowIdx, block`), so it is where passing `nf` removes the most
+clutter. Doing only one would leave the two looking like they follow different rules. Finally, the
+storage-blindness rationale is written down in `ARCHITECTURE.md` and the storage-options experiment, so
+if the code stops following it, adjust the doc in the same step (code and docs move together).
 
 ## Performance
 

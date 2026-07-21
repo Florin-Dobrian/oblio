@@ -39,6 +39,7 @@ OBLIO_SRCS = \
   src/SymFactorEngine.cpp \
   src/BlasLapack.cpp \
   src/UpdateBlock.cpp \
+  src/UpdateMatrix.cpp \
   src/NumFactorStatic.cpp \
   src/NumFactorDynamic.cpp \
   src/NumFactorEngine.cpp \

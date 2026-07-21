@@ -167,7 +167,7 @@ private:
 
     template<class Val, class Factor>
     void updateStaticSupernode(const Factor& nf, std::int32_t jj,
-                         std::size_t jjUpdateSp, UpdateBlock<Val>& t) const;
+                         std::size_t jjKkUpdateSp, UpdateBlock<Val>& t) const;
 
     // The traversals, named for the *pivoting*, which is the axis the Factorization enum names:
     // static pivoting is Cholesky and static LDL, dynamic pivoting is dynamic LDL. Left-looking and
@@ -240,21 +240,21 @@ private:
     bool factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int32_t jj,
                                 std::vector<std::int32_t>& gblToLcl) const;
 
-    // Form the update supernode jj owes one ancestor, taking jj's rows from `offset` down. The
+    // Form the update supernode jj owes one ancestor, taking jj's rows from `jjKkUpdateSp` down. The
     // dynamic counterpart of updateStaticSupernode, and it differs from it in exactly two places.
     //
     // The leading dimension is the block's *height*, which still counts the delayed columns:
     // contractVal dropped their columns and kept their rows, so a delayed row is a genuine row of
     // L and the stride steps over it.
     //
-    // And D is no longer diagonal. The static twin hands the whole D L21^T scratch to formUpper in
-    // one call; here a 2x2 pivot makes D block-diagonal, so the scratch is built by walking the
-    // front and consulting pivotType to know whether to step one column or two. That walk is why
-    // this takes the factor rather than a block: the pivot kind is stored per *global* node, so it
-    // needs the index set to be read at all. Ported from 0.9 updateDynamicLDL_.
+    // And D is no longer diagonal. The static twin forms its D L21^T scratch with formStaticUpper;
+    // here a 2x2 pivot makes D block-diagonal, so the scratch comes from formDynamicUpper, which
+    // walks the front consulting pivotType to step one column or two. The pivot kind is stored per
+    // *global* node, so formDynamicUpper takes the index set to read it. Ported from 0.9
+    // updateDynamicLDL_.
     template<class Val>
     void updateDynamicSupernode(const NumFactorDynamic<Val>& nf, std::int32_t jj,
-                                std::size_t jjUpdateSp, UpdateBlock<Val>& t) const;
+                                std::size_t jjKkUpdateSp, UpdateBlock<Val>& t) const;
 
     // Fold supernode jj's delayed columns into kk, its parent, which has already been expanded to
     // hold them. The third assemble, and the only one dynamic pivoting adds: A's values and a

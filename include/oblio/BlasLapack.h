@@ -37,6 +37,7 @@
 // never a separate parameter.
 
 #include <complex>
+#include <cstdint>
 
 namespace Oblio {
 
@@ -249,10 +250,21 @@ int ldl(int n, Val* a, int lda, double perturbation, int* numPerturbations, bool
 //
 // `l` is the n x k lower block, `d` the diagonal of the factored leading block, `u` the k x n
 // upper block to fill. Note U is the *transpose* shape of L, which is why the index walk is what
-// it is.
+// it is. Two forms, one per pivot structure, called identically from the two update kernels:
+//
+//   formStaticUpper   D is a plain diagonal (Cholesky, static LDL): one d per column.
+//   formDynamicUpper  D is block-diagonal (dynamic LDL): 1x1 and 2x2 pivots marked by pivotType,
+//                     indexed by the global node nodeIdx[c], the same shape LAPACK's ipiv records. A
+//                     2x2 couples its two columns through four D entries, which the static walk
+//                     cannot express.
 template<class Val>
-void formUpper(int n, int k, const Val* l, int ldl, Val* u, int ldu,
-               const Val* d, int ldd, bool hermitian);
+void formStaticUpper(int n, int k, const Val* l, int ldl, Val* u, int ldu,
+                     const Val* d, int ldd, bool hermitian);
+
+template<class Val>
+void formDynamicUpper(int n, int k, const Val* l, int ldl, Val* u, int ldu,
+                      const Val* d, int ldd, const std::int32_t* pivotType,
+                      const std::int32_t* nodeIdx, bool hermitian);
 
 // A -= L U, filling **only the lower triangle**, because the product is symmetric. 0.9's
 // OBLIO_GEMM.

@@ -21,17 +21,59 @@ double absVal(Cplx v)        { return std::abs(v); }
 } // namespace
 
 template<class Val>
-void formUpper(int n, int k, const Val* l, int ldl, Val* u, int ldu,
-               const Val* d, int ldd, bool hermitian) {
+void formStaticUpper(int n, int k, const Val* l, int ldl, Val* u, int ldu,
+                     const Val* d, int ldd, bool hermitian) {
     // For each column i of L (there are k of them), and each row j (there are n):
     //
     //     U[i][j] = D[i] * conj?(L[j][i])
     //
-    // U is L's transpose, scaled row-wise by D. The pointer walk is 0.9's: lp steps down L's
-    // columns (by ldl), up steps across U's rows (by 1), dp walks D's diagonal (by ldd + 1).
+    // U is L's transpose, scaled row-wise by D. D is a plain diagonal, one entry per column. The
+    // pointer walk is 0.9's: lp steps down L's columns (by ldl), up steps across U's rows (by 1),
+    // dp walks D's diagonal (by ldd + 1).
     for (int i = 0, lp = 0, up = 0, dp = 0; i < k; ++i, lp += ldl, ++up, dp += ldd + 1)
         for (int j = 0, lq = lp, uq = up; j < n; ++j, ++lq, uq += ldu)
             u[uq] = d[dp] * maybeConjugate(l[lq], hermitian);
+}
+
+template<class Val>
+void formDynamicUpper(int n, int k, const Val* l, int ldl, Val* u, int ldu,
+                      const Val* d, int ldd, const std::int32_t* pivotType,
+                      const std::int32_t* nodeIdx, bool hermitian) {
+    // The same U := D conj?(L^T) as formStaticUpper, but D is block-diagonal: dynamic LDL pivots in
+    // 1x1 and 2x2 blocks, marked by pivotType (indexed by the global node nodeIdx[c], as LAPACK's ipiv
+    // marks its own). A 1x1 column scales like the static case, one d per column. A 2x2 couples its
+    // two columns through the four entries of the pivot, which no single-d-per-column walk expresses.
+    //
+    // Positions are column-major: `at` into L and D (leading dimension ldl == ldd, both into the
+    // supernode's val), `atU` into U (leading dimension ldu).
+    const auto at  = [ldl](int r, int c) { return static_cast<std::ptrdiff_t>(c) * ldl + r; };
+    const auto atU = [ldu](int r, int c) { return static_cast<std::ptrdiff_t>(c) * ldu + r; };
+    (void)ldd;   // ldd == ldl here: D and L share the supernode's leading dimension.
+
+    for (int c = 0; c < k; ) {
+        if (pivotType[nodeIdx[c]] == 1) {
+            const Val dc = d[at(c, c)];
+            for (int j = 0; j < n; ++j)
+                u[atU(c, j)] = dc * maybeConjugate(l[at(j, c)], hermitian);
+            ++c;
+        } else {                                   // a 2x2 pivot: two columns solved together
+            const int c1 = c;
+            const int c2 = c + 1;
+
+            const Val d11 = d[at(c1, c1)];
+            const Val d12 = d[at(c1, c2)];   // the upper part, written back by the pivot
+            const Val d21 = d[at(c2, c1)];   // the lower part, never overwritten
+            const Val d22 = d[at(c2, c2)];
+
+            for (int j = 0; j < n; ++j) {
+                const Val l1 = maybeConjugate(l[at(j, c1)], hermitian);
+                const Val l2 = maybeConjugate(l[at(j, c2)], hermitian);
+                u[atU(c1, j)] = d11 * l1 + d12 * l2;
+                u[atU(c2, j)] = d21 * l1 + d22 * l2;
+            }
+            c += 2;
+        }
+    }
 }
 
 template<class Val>
@@ -93,7 +135,7 @@ int ldl(int n, Val* a, int lda, double perturbation, int* numPerturbations, bool
 
     // U12 = D11 L21^T, into a12. Needed twice: it is the upper block of the factor, and it is the
     // right-hand factor of the Schur complement below.
-    formUpper(n2, n1, a21, lda, a12, lda, a11, lda, hermitian);
+    formStaticUpper(n2, n1, a21, lda, a12, lda, a11, lda, hermitian);
 
     // A22 -= L21 U12. Symmetric, so only the lower triangle is filled.
     gemmLower(n2, n1, a21, lda, a12, lda, a22, lda);
@@ -106,10 +148,17 @@ int ldl(int n, Val* a, int lda, double perturbation, int* numPerturbations, bool
 template int  ldl<double>(int, double*, int, double, int*, bool);
 template int  ldl<Cplx>(int, Cplx*, int, double, int*, bool);
 
-template void formUpper<double>(int, int, const double*, int, double*, int,
-                                const double*, int, bool);
-template void formUpper<Cplx>(int, int, const Cplx*, int, Cplx*, int,
-                              const Cplx*, int, bool);
+template void formStaticUpper<double>(int, int, const double*, int, double*, int,
+                                      const double*, int, bool);
+template void formStaticUpper<Cplx>(int, int, const Cplx*, int, Cplx*, int,
+                                    const Cplx*, int, bool);
+
+template void formDynamicUpper<double>(int, int, const double*, int, double*, int,
+                                       const double*, int, const std::int32_t*,
+                                       const std::int32_t*, bool);
+template void formDynamicUpper<Cplx>(int, int, const Cplx*, int, Cplx*, int,
+                                     const Cplx*, int, const std::int32_t*,
+                                     const std::int32_t*, bool);
 
 template void gemmLower<double>(int, int, const double*, int, const double*, int, double*, int);
 template void gemmLower<Cplx>(int, int, const Cplx*, int, const Cplx*, int, Cplx*, int);

@@ -281,52 +281,62 @@ bool NumFactorEngine::factorStaticSupernode(Factor& nf, std::int32_t jj,
 
 template<class Val, class Factor>
 void NumFactorEngine::updateStaticSupernode(const Factor& nf, std::int32_t jj,
-                                      std::size_t jjUpdateSp, UpdateBlock<Val>& updateBlock) const {
-    const std::size_t frontSize  = nf.frontSize(jj);
-    const std::size_t numNodeIdx = frontSize + nf.updateSize(jj);
-    const Val*        val        = nf.val(jj);
+                                      std::size_t jjKkUpdateSp, UpdateBlock<Val>& updateBlock) const {
+    // `jjKkUpdateSp` is a position into jj's index set, and it is what selects the ancestor kk this
+    // update reaches: kk == nf.nodeToSnode(nf.nodeIdx(jj)[jjKkUpdateSp]). The kernel never names kk
+    // (it forms jj's outer product from that row down, and the caller has already sized the block to
+    // the rows kk owns), but that is the position's meaning and it is worth seeing first.
+    const std::size_t jjFrontSize  = nf.frontSize(jj);
+    const std::size_t jjNumNodeIdx = jjFrontSize + nf.updateSize(jj);
+    const Val*        jjVal        = nf.val(jj);
 
-    const int f      = static_cast<int>(frontSize);
-    const int sld    = static_cast<int>(numNodeIdx);
-    const int height = static_cast<int>(updateBlock.mHeight);
-    const int width  = static_cast<int>(updateBlock.mWidth);
-    const int dld    = height;
+    const int f          = static_cast<int>(jjFrontSize);
+    const int sld        = static_cast<int>(jjNumNodeIdx);
+    const int jjKkHeight = static_cast<int>(updateBlock.mHeight);
+    const int jjKkWidth  = static_cast<int>(updateBlock.mWidth);
+    const int dld        = jjKkHeight;
 
-    const Val* l21Val = val + jjUpdateSp;   // the update rows that reach this ancestor, and below
-    Val*       u22Val = updateBlock.mVal.data();
+    const bool withHermitian = hermitian(mFactorization);
+    const Val* l21Val        = jjVal + jjKkUpdateSp;   // the update rows that reach this ancestor, and below
+    Val*       u22Val        = updateBlock.mVal.data();
 
-    // The update U22 = L21 (D) L21^H is one outer product, computed in two pieces because it splits
-    // by symmetry, not by anything about the ancestor. Read in jj's own frame: `width` is the run of
-    // jj's update rows that land in the current ancestor, `height` is all of jj's remaining update
-    // rows, this ancestor's plus any that go higher. The top width-by-width square is a block times
-    // its own conjugate transpose, so it is symmetric and only its lower triangle is computed. The
-    // (height - width)-by-width rectangle below is rows-going-higher against this-ancestor's rows, not
-    // symmetric, so a plain multiply. The block is stored as a full rectangle for convenience but no
-    // arithmetic is spent on the square's upper triangle.
+    // `jjKkHeight` and `jjKkWidth` are dimensions of the (jj, kk) *edge*, not of either supernode
+    // alone. `jjKkWidth` is how many of jj's rows land in kk, a two-supernode count: change jj or kk
+    // and it moves. `jjKkHeight` is all of jj's rows from `jjKkUpdateSp` down, kk's run plus any that
+    // reach higher ancestors, so it too is anchored at kk's start. Only `f`, jj's own front, is a
+    // one-supernode dimension here. This kernel is the edge's work: it never forms all of jj's L, only
+    // the `f`-by-`jjKkWidth` slice D L21_kk^H restricted to jj's kk-landing rows, which is why it runs
+    // once per (jj, kk) the traversal visits rather than once per jj.
     //
-    // `height == width` means jj has no update rows beyond this ancestor, so there is no rectangle and
-    // only the square runs. It does *not* mean the ancestor is a root: it is a fact about how far jj
-    // reaches, in jj's frame, not about the ancestor's place in the tree. A root ancestor forces
-    // height == width for every jj that reaches it, but height == width also happens at interior
-    // ancestors that jj simply does not extend past.
+    // The outer product U22 = L21 (D) L21^H splits into two pieces by symmetry, not by anything about
+    // the ancestor. The top jjKkWidth-by-jjKkWidth square is a block times its own conjugate transpose,
+    // symmetric, so only its lower triangle is computed. The (jjKkHeight - jjKkWidth)-by-jjKkWidth
+    // rectangle below is jj's higher-reaching rows against kk's rows, not symmetric, a plain multiply.
+    // The block is stored as a full rectangle for convenience but no arithmetic is spent on the
+    // square's upper triangle.
+    //
+    // `jjKkHeight == jjKkWidth` means jj has no rows beyond kk, so there is no rectangle and only the
+    // square runs. It does *not* mean kk is a root: it is a fact about how far jj reaches, not about
+    // kk's place in the tree. A root kk forces it for every jj that reaches it, but it also happens at
+    // interior ancestors jj simply does not extend past.
 
     if (mFactorization == Factorization::Cholesky) {
-        // The square part: the block's (0..width, 0..width) -= L21' L21'^H, where L21' is the `width` rows
+        // The square part: the block's (0..jjKkWidth, 0..jjKkWidth) -= L21' L21'^H, where L21' is the `jjKkWidth` rows
         // that land in the ancestor. Symmetric, so HERK, which touches only the lower triangle.
         //
         // `herk` means "A times A-conjugate-transpose": dsyrk_ for real, zherk_ for complex. The
         // engine never names either, which is what makes 0.9's bug (SYRK on a Hermitian factor)
         // impossible to write here.
-        herk('L', 'N', width, f, -1.0, l21Val, sld, 1.0, u22Val, dld);
+        herk('L', 'N', jjKkWidth, f, -1.0, l21Val, sld, 1.0, u22Val, dld);
 
         // The rectangle below, present only when jj reaches past this ancestor: the block's
-        // (width.., 0..width) -= L21'' L21'^H, where L21'' is the rows of jj's update val below the
+        // (jjKkWidth.., 0..jjKkWidth) -= L21'' L21'^H, where L21'' is the rows of jj's update val below the
         // ancestor's. Not symmetric, so GEMM.
-        if (height > width)
-            gemm('N', Blas<Val>::conjTrans, height - width, width, f,
-                 Val(-1), l21Val + width, sld,
+        if (jjKkHeight > jjKkWidth)
+            gemm('N', Blas<Val>::conjTrans, jjKkHeight - jjKkWidth, jjKkWidth, f,
+                 Val(-1), l21Val + jjKkWidth, sld,
                  l21Val, sld,
-                 Val(1), u22Val + width, dld);
+                 Val(1), u22Val + jjKkWidth, dld);
         return;
     }
 
@@ -339,24 +349,25 @@ void NumFactorEngine::updateStaticSupernode(const Factor& nf, std::int32_t jj,
     // is worth keeping: in the factor kernel the same U = D L^H is needed twice (to solve for the next
     // L, and to update), so it is formed once and stored where Cholesky wasted space. Here in the
     // update that value goes to a local scratch rather than the block, but the split is the same one:
-    // form U, then multiply. That is why LDL is formUpper + gemmLower where Cholesky is a single herk.
+    // form U, then multiply. That is why LDL is formStaticUpper + gemmLower where Cholesky is a
+    // single herk.
     //
-    // The scratch is f by width, and it is the whole price of the D.
-    std::vector<Val> upper(static_cast<std::size_t>(f) * static_cast<std::size_t>(width), Val(0));
-    formUpper(width, f, l21Val, sld, upper.data(), f, val, sld, hermitian(mFactorization));
+    // The scratch is f by jjKkWidth, and it is the whole price of the D.
+    std::vector<Val> upper(static_cast<std::size_t>(f) * static_cast<std::size_t>(jjKkWidth), Val(0));
+    formStaticUpper(jjKkWidth, f, l21Val, sld, upper.data(), f, jjVal, sld, withHermitian);
 
     // The square part, the counterpart of Cholesky's herk: symmetric, so only its lower triangle is
     // filled. BLAS has nothing for this either (syrk does A A^T, not A B with B known to make the
     // product symmetric), so gemmLower is ours as well. It multiplies L21 against the U just formed.
-    gemmLower(width, f, l21Val, sld, upper.data(), f, u22Val, dld);
+    gemmLower(jjKkWidth, f, l21Val, sld, upper.data(), f, u22Val, dld);
 
     // The rectangle below, present only when jj reaches past this ancestor: not symmetric, so a
     // plain GEMM. Note 'N','N': the transpose is already baked into U.
-    if (height > width)
-        gemm('N', 'N', height - width, width, f,
-             Val(-1), l21Val + width, sld,
+    if (jjKkHeight > jjKkWidth)
+        gemm('N', 'N', jjKkHeight - jjKkWidth, jjKkWidth, f,
+             Val(-1), l21Val + jjKkWidth, sld,
              upper.data(), f,
-             Val(1), u22Val + width, dld);
+             Val(1), u22Val + jjKkWidth, dld);
 }
 
 // =================================================================================================
@@ -424,21 +435,21 @@ bool NumFactorEngine::factorStaticLeftLooking(const SparseMatrix<Val>& A, const 
 
             // How many of jj's remaining rows belong to kk. They are contiguous, because jj's
             // index set is sorted and the supernodes partition it in increasing order.
-            const std::size_t jjUpdateSp = nextUpdateSp[jj];
-            const std::size_t jjHeight   = jjNumNodeIdx - jjUpdateSp;
-            std::size_t       jjWidth    = 0;
-            while (jjUpdateSp + jjWidth < jjNumNodeIdx
-                   && nf.nodeToSnode(jjNodeIdx[jjUpdateSp + jjWidth]) == kk)
-                ++jjWidth;
+            const std::size_t jjKkUpdateSp = nextUpdateSp[jj];
+            const std::size_t jjKkHeight   = jjNumNodeIdx - jjKkUpdateSp;
+            std::size_t       jjKkWidth    = 0;
+            while (jjKkUpdateSp + jjKkWidth < jjNumNodeIdx
+                   && nf.nodeToSnode(jjNodeIdx[jjKkUpdateSp + jjKkWidth]) == kk)
+                ++jjKkWidth;
 
-            UpdateBlock<Val> updateBlock(jjHeight, jjWidth);
-            std::copy(jjNodeIdx + jjUpdateSp, jjNodeIdx + jjNumNodeIdx, updateBlock.mRowIdx.begin());
+            UpdateBlock<Val> updateBlock(jjKkHeight, jjKkWidth);
+            std::copy(jjNodeIdx + jjKkUpdateSp, jjNodeIdx + jjNumNodeIdx, updateBlock.mRowIdx.begin());
 
-            updateStaticSupernode(nf, jj, jjUpdateSp, updateBlock);
+            updateStaticSupernode(nf, jj, jjKkUpdateSp, updateBlock);
             assembleUpdate(gblToLcl, updateBlock, kkNumNodeIdx, kkVal);
 
             // jj has updated kk. Queue it for the next ancestor it must update.
-            nextUpdateSp[jj] = jjUpdateSp + jjWidth;
+            nextUpdateSp[jj] = jjKkUpdateSp + jjKkWidth;
             if (nextUpdateSp[jj] < jjNumNodeIdx)
                 descendantUpdateQueue[nf.nodeToSnode(jjNodeIdx[nextUpdateSp[jj]])].push_back(jj);
         }
@@ -505,31 +516,31 @@ bool NumFactorEngine::factorStaticRightLooking(const SparseMatrix<Val>& A, const
             return false;   // not positive definite (Cholesky only; LDL perturbs instead)
 
         // Walk jj's update rows. Each run of them belonging to one ancestor is one update.
-        std::size_t jjUpdateSp = jjFrontSize;
-        while (jjUpdateSp < jjNumNodeIdx) {
-            const std::int32_t kk = nf.nodeToSnode(jjNodeIdx[jjUpdateSp]);
+        std::size_t jjKkUpdateSp = jjFrontSize;
+        while (jjKkUpdateSp < jjNumNodeIdx) {
+            const std::int32_t kk = nf.nodeToSnode(jjNodeIdx[jjKkUpdateSp]);
 
             const std::size_t   kkFrontSize  = nf.frontSize(kk);
             const std::size_t   kkNumNodeIdx = kkFrontSize + nf.updateSize(kk);
             const std::int32_t* kkNodeIdx    = nf.nodeIdx(kk);
             Val*                kkVal        = nf.val(kk);
 
-            const std::size_t jjHeight = jjNumNodeIdx - jjUpdateSp;
-            std::size_t       jjWidth  = 0;
-            while (jjUpdateSp + jjWidth < jjNumNodeIdx
-                   && nf.nodeToSnode(jjNodeIdx[jjUpdateSp + jjWidth]) == kk)
-                ++jjWidth;
+            const std::size_t jjKkHeight = jjNumNodeIdx - jjKkUpdateSp;
+            std::size_t       jjKkWidth  = 0;
+            while (jjKkUpdateSp + jjKkWidth < jjNumNodeIdx
+                   && nf.nodeToSnode(jjNodeIdx[jjKkUpdateSp + jjKkWidth]) == kk)
+                ++jjKkWidth;
 
-            UpdateBlock<Val> updateBlock(jjHeight, jjWidth);
-            std::copy(jjNodeIdx + jjUpdateSp, jjNodeIdx + jjNumNodeIdx, updateBlock.mRowIdx.begin());
+            UpdateBlock<Val> updateBlock(jjKkHeight, jjKkWidth);
+            std::copy(jjNodeIdx + jjKkUpdateSp, jjNodeIdx + jjNumNodeIdx, updateBlock.mRowIdx.begin());
 
-            updateStaticSupernode(nf, jj, jjUpdateSp, updateBlock);
+            updateStaticSupernode(nf, jj, jjKkUpdateSp, updateBlock);
 
             setGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
             assembleUpdate(gblToLcl, updateBlock, kkNumNodeIdx, kkVal);
             clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
 
-            jjUpdateSp += jjWidth;
+            jjKkUpdateSp += jjKkWidth;
         }
     }
 
@@ -886,96 +897,79 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
 
 template<class Val>
 void NumFactorEngine::updateDynamicSupernode(const NumFactorDynamic<Val>& nf, std::int32_t jj,
-                                             std::size_t jjUpdateSp, UpdateBlock<Val>& updateBlock) const {
+                                             std::size_t jjKkUpdateSp, UpdateBlock<Val>& updateBlock) const {
+    // `jjKkUpdateSp` is a position into jj's index set, and it is what selects the ancestor kk this
+    // update reaches: kk == nf.nodeToSnode(nf.nodeIdx(jj)[jjKkUpdateSp]). The kernel never names kk
+    // (it forms jj's outer product from that row down, and the caller has already sized the block to
+    // the rows kk owns), but that is the position's meaning and it is worth seeing first.
+    //
     // This is the same update the static twin performs: jj's update area updates kk, driven by the
     // update (descendant-to-ancestor) relationship. It is agnostic to whether jj has been contracted.
     // Left-looking calls it with jj already contracted, right-looking with jj not yet contracted, and
     // the result is identical, because the read touches only jj's update area. That area is disjoint
     // from both delay regions: jj's own delayed columns sit below its front but the walk starts past
-    // them at `jjUpdateSp`, and kk's inbound delays arrive by a separate path (assembleDelay), never as
+    // them at `jjKkUpdateSp`, and kk's inbound delays arrive by a separate path (assembleDelay), never as
     // this update. The stride below counts the delayed rows, so the column layout is the same whether
     // or not the delayed-column storage past the front has been trimmed. updateSize never changes, so
     // the update area is stable ground. The delay flow (child-to-parent) runs independently of the
     // update flow (descendant-to-ancestor); they share these drivers but are not aligned.
-    const int f = static_cast<int>(nf.mFrontSize[jj]);
+    //
+    // The update's rank is `f`, jj's *post-factor* front, the pivots actually eliminated here. A
+    // delayed column is not among them, so it never updates an ancestor from jj: its row was updated
+    // in place by those pivots back inside factorDynamicSupernode, and it then migrates to the parent
+    // as a delayed column (assembleDelay, contractVal) to be pivoted there. So this kernel touches
+    // only the update area; the delay area was finished in the factor step and leaves by the delay
+    // path.
+    const std::size_t jjFrontSize  = nf.frontSize(jj);
+    // The one term that differs from the static twin, where it is just frontSize + updateSize: a
+    // delayed column keeps its row, so the index count (and thus the stride) still counts it.
+    const std::size_t jjNumNodeIdx = jjFrontSize + nf.delaySize(jj) + nf.updateSize(jj);
+    const Val*        jjVal        = nf.val(jj);
+
+    const int f = static_cast<int>(jjFrontSize);
     if (f == 0)
         return;   // every column of jj was delayed: there is no pivot here to update anyone with
 
-    // The height, and the one number that differs from the static twin, where it is just
-    // frontSize + updateSize. A delayed column keeps its row, so the stride still counts it.
-    const int sld     = f + static_cast<int>(nf.mDelaySize[jj])
-                         + static_cast<int>(nf.mUpdateSize[jj]);
-    const int height = static_cast<int>(updateBlock.mHeight);
-    const int width  = static_cast<int>(updateBlock.mWidth);
-    const int dld    = height;
+    const int sld        = static_cast<int>(jjNumNodeIdx);
+    const int jjKkHeight = static_cast<int>(updateBlock.mHeight);
+    const int jjKkWidth  = static_cast<int>(updateBlock.mWidth);
+    const int dld        = jjKkHeight;
+
+    // As in the static twin, jjKkHeight and jjKkWidth are the (jj, kk) edge's dimensions, not either
+    // supernode's: jjKkWidth is jj's rows landing in kk (change jj or kk and it moves), jjKkHeight all
+    // of jj's rows from jjKkUpdateSp down. Only f is jj's alone. This kernel is the edge's work, and
+    // formDynamicUpper forms only the f-by-jjKkWidth slice for this one (jj, kk) pair.
 
     const bool          withHermitian = hermitian(nf.factorization());
-    const Val*          val           = nf.val(jj);
-    const std::int32_t* idx           = nf.nodeIdx(jj);
-    // jj's rows from `jjUpdateSp` down: the block this ancestor is about to receive.
-    const Val*          l21Val        = val + jjUpdateSp;
+    const std::int32_t* jjNodeIdx     = nf.nodeIdx(jj);
+    // jj's rows from `jjKkUpdateSp` down: the block this ancestor is about to receive.
+    const Val*          l21Val        = jjVal + jjKkUpdateSp;
     Val*                u22Val        = updateBlock.mVal.data();
-
-    // Column-major positions: `at` into jj's val (and equally into L21, which shares its leading
-    // dimension), `atU` into the scratch.
-    const auto at = [sld](std::int32_t r, std::int32_t c) {
-        return static_cast<std::ptrdiff_t>(c) * sld + static_cast<std::ptrdiff_t>(r);
-    };
-    const auto atU = [f](std::int32_t r, std::int32_t c) {
-        return static_cast<std::ptrdiff_t>(c) * f + static_cast<std::ptrdiff_t>(r);
-    };
 
     // LDL, exactly as in the static twin: the update is `block -= L21 D L21^H`, no BLAS routine
     // computes it (the D in the middle rules out a rank-k call), so we form U := D L21^H into a
     // scratch and then multiply, gemmLower for the symmetric square and gemm for the rectangle below.
     // Dynamic runs only for LDL, so there is no Cholesky branch here; the whole function is the LDL
-    // half of the static twin.
+    // half of the static twin, and past forming U it is line-for-line the static code.
     //
-    // The one departure is forming U. The static twin calls formUpper, which walks D as a plain
-    // diagonal, one d per column. Here D is block-diagonal, 1x1 and 2x2 pivots marked by mPivotType,
-    // so the front is walked a pivot at a time. The 1x1 branch is formUpper line for line; the 2x2
-    // branch is the extension formUpper cannot express, two columns coupled through the four entries
-    // of the pivot. For a 2x2 those entries sit where the factorization left them: the elimination
-    // starts at row j1 + 2 and never touches its own corner, so the lower pair are the original
-    // matrix entries and the upper one was written back explicitly.
-    std::vector<Val> upper(static_cast<std::size_t>(f) * static_cast<std::size_t>(width), Val(0));
-
-    for (std::int32_t j_ = 0; j_ < f; ) {
-        if (nf.mPivotType[idx[j_]] == 1) {
-            const Val d = val[at(j_, j_)];
-            for (std::int32_t tc = 0; tc < width; ++tc)
-                upper[atU(j_, tc)] = d * maybeConjugate(l21Val[at(tc, j_)], withHermitian);
-            ++j_;
-        } else {                                   // a 2x2 pivot: two columns solved together
-            const std::int32_t j1_ = j_;
-            const std::int32_t j2_ = j_ + 1;
-
-            const Val d11 = val[at(j1_, j1_)];
-            const Val d12 = val[at(j1_, j2_)];   // the upper part, written back by the pivot
-            const Val d21 = val[at(j2_, j1_)];   // the lower part, never overwritten
-            const Val d22 = val[at(j2_, j2_)];
-
-            for (std::int32_t tc = 0; tc < width; ++tc) {
-                const Val l1 = maybeConjugate(l21Val[at(tc, j1_)], withHermitian);
-                const Val l2 = maybeConjugate(l21Val[at(tc, j2_)], withHermitian);
-                upper[atU(j1_, tc)] = d11 * l1 + d12 * l2;
-                upper[atU(j2_, tc)] = d21 * l1 + d22 * l2;
-            }
-            j_ += 2;
-        }
-    }
+    // The one departure is which form-upper. Static calls formStaticUpper, whose D is a plain
+    // diagonal; dynamic calls formDynamicUpper, whose D is block-diagonal, 1x1 and 2x2 pivots marked
+    // by mPivotType (indexed by the global node jjNodeIdx). Both fill the same f-by-jjKkWidth scratch.
+    std::vector<Val> upper(static_cast<std::size_t>(f) * static_cast<std::size_t>(jjKkWidth), Val(0));
+    formDynamicUpper(jjKkWidth, f, l21Val, sld, upper.data(), f, jjVal, sld,
+                     nf.mPivotType.data(), jjNodeIdx, withHermitian);
 
     // From here it is the static twin exactly. The square part, the counterpart of Cholesky's herk:
     // symmetric, so gemmLower fills only its lower triangle, multiplying L21 against the U just formed.
-    gemmLower(width, f, l21Val, sld, upper.data(), f, u22Val, dld);
+    gemmLower(jjKkWidth, f, l21Val, sld, upper.data(), f, u22Val, dld);
 
     // The rectangle below, present only when jj reaches past this ancestor: not symmetric, so a plain
     // GEMM. Note 'N','N': the transpose is already baked into U.
-    if (height > width)
-        gemm('N', 'N', height - width, width, f,
-             Val(-1), l21Val + width, sld,
+    if (jjKkHeight > jjKkWidth)
+        gemm('N', 'N', jjKkHeight - jjKkWidth, jjKkWidth, f,
+             Val(-1), l21Val + jjKkWidth, sld,
              upper.data(), f,
-             Val(1), u22Val + width, dld);
+             Val(1), u22Val + jjKkWidth, dld);
 }
 
 template<class Val>
@@ -1163,21 +1157,21 @@ bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const
             const std::int32_t* jjNodeIdx             = nf.nodeIdx(jj);
 
             // How many of jj's remaining rows belong to kk. Contiguous, as in the static case.
-            const std::size_t jjUpdateSp = nextUpdateSp[jj];
-            const std::size_t jjHeight   = jjNumNodeIdx - jjUpdateSp;
-            std::size_t       jjWidth    = 0;
-            while (jjUpdateSp + jjWidth < jjNumNodeIdx
-                   && nf.nodeToSnode(jjNodeIdx[jjUpdateSp + jjWidth]) == kk)
-                ++jjWidth;
+            const std::size_t jjKkUpdateSp = nextUpdateSp[jj];
+            const std::size_t jjKkHeight   = jjNumNodeIdx - jjKkUpdateSp;
+            std::size_t       jjKkWidth    = 0;
+            while (jjKkUpdateSp + jjKkWidth < jjNumNodeIdx
+                   && nf.nodeToSnode(jjNodeIdx[jjKkUpdateSp + jjKkWidth]) == kk)
+                ++jjKkWidth;
 
-            UpdateBlock<Val> updateBlock(jjHeight, jjWidth);
-            std::copy(jjNodeIdx + jjUpdateSp, jjNodeIdx + jjNumNodeIdx, updateBlock.mRowIdx.begin());
+            UpdateBlock<Val> updateBlock(jjKkHeight, jjKkWidth);
+            std::copy(jjNodeIdx + jjKkUpdateSp, jjNodeIdx + jjNumNodeIdx, updateBlock.mRowIdx.begin());
 
-            updateDynamicSupernode(nf, jj, jjUpdateSp, updateBlock);
+            updateDynamicSupernode(nf, jj, jjKkUpdateSp, updateBlock);
             assembleUpdate(gblToLcl, updateBlock, kkNumNodeIdx, kkVal);
 
             // jj has updated kk. Queue it for the next ancestor it must update.
-            nextUpdateSp[jj] = jjUpdateSp + jjWidth;
+            nextUpdateSp[jj] = jjKkUpdateSp + jjKkWidth;
             if (nextUpdateSp[jj] < jjNumNodeIdx)
                 descendantUpdateQueue[nf.nodeToSnode(jjNodeIdx[nextUpdateSp[jj]])].push_back(jj);
         }
@@ -1355,9 +1349,9 @@ bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, cons
         // Push. The walk starts past the front *and* the delayed columns, for the same reason the
         // left-looking nextUpdateSp seed does: both are jj's own rows and neither updates an
         // ancestor, the delayed ones going up by assembleDelay instead.
-        std::size_t jjUpdateSp = jjPostFactorFrontSize + jjDelaySize;
-        while (jjUpdateSp < jjNumNodeIdx) {
-            const std::int32_t kk = nf.nodeToSnode(jjNodeIdx[jjUpdateSp]);
+        std::size_t jjKkUpdateSp = jjPostFactorFrontSize + jjDelaySize;
+        while (jjKkUpdateSp < jjNumNodeIdx) {
+            const std::int32_t kk = nf.nodeToSnode(jjNodeIdx[jjKkUpdateSp]);
 
             // kk has not expanded yet, and need not have: jj's update rows are kk's own nodes, which
             // its index set already holds. When kk later expands, expandVal carries these values
@@ -1367,22 +1361,22 @@ bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, cons
             const std::int32_t* kkNodeIdx            = nf.nodeIdx(kk);
             Val*                kkVal                = nf.val(kk);
 
-            const std::size_t jjHeight = jjNumNodeIdx - jjUpdateSp;
-            std::size_t       jjWidth  = 0;
-            while (jjUpdateSp + jjWidth < jjNumNodeIdx
-                   && nf.nodeToSnode(jjNodeIdx[jjUpdateSp + jjWidth]) == kk)
-                ++jjWidth;
+            const std::size_t jjKkHeight = jjNumNodeIdx - jjKkUpdateSp;
+            std::size_t       jjKkWidth  = 0;
+            while (jjKkUpdateSp + jjKkWidth < jjNumNodeIdx
+                   && nf.nodeToSnode(jjNodeIdx[jjKkUpdateSp + jjKkWidth]) == kk)
+                ++jjKkWidth;
 
-            UpdateBlock<Val> updateBlock(jjHeight, jjWidth);
-            std::copy(jjNodeIdx + jjUpdateSp, jjNodeIdx + jjNumNodeIdx, updateBlock.mRowIdx.begin());
+            UpdateBlock<Val> updateBlock(jjKkHeight, jjKkWidth);
+            std::copy(jjNodeIdx + jjKkUpdateSp, jjNodeIdx + jjNumNodeIdx, updateBlock.mRowIdx.begin());
 
-            updateDynamicSupernode(nf, jj, jjUpdateSp, updateBlock);
+            updateDynamicSupernode(nf, jj, jjKkUpdateSp, updateBlock);
 
             setGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
             assembleUpdate(gblToLcl, updateBlock, kkNumNodeIdx, kkVal);
             clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
 
-            jjUpdateSp += jjWidth;
+            jjKkUpdateSp += jjKkWidth;
         }
 
         if (jjDelaySize > 0 && parent[jj] == NIL)

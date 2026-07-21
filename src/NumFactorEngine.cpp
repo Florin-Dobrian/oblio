@@ -864,6 +864,16 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
 template<class Val>
 void NumFactorEngine::updateDynamicSupernode(const NumFactorDynamic<Val>& nf, std::int32_t jj,
                                              std::size_t offset, UpdateBlock<Val>& updateBlock) const {
+    // This is the same update the static twin performs: jj's update area updates kk, driven by the
+    // update (descendant-to-ancestor) relationship. It is agnostic to whether jj has been contracted.
+    // Left-looking calls it with jj already contracted, right-looking with jj not yet contracted, and
+    // the result is identical, because the read touches only jj's update area. That area is disjoint
+    // from both delay regions: jj's own delayed columns sit below its front but the walk starts past
+    // them at `offset`, and kk's inbound delays arrive by a separate path (assembleDelay), never as
+    // this update. The stride below counts the delayed rows, so the column layout is the same whether
+    // or not the delayed-column storage past the front has been trimmed. updateSize never changes, so
+    // the update area is stable ground. The delay flow (child-to-parent) runs independently of the
+    // update flow (descendant-to-ancestor); they share these drivers but are not aligned.
     const int f = static_cast<int>(nf.mFrontSize[jj]);
     if (f == 0)
         return;   // every column of jj was delayed: there is no pivot here to update anyone with
@@ -1047,28 +1057,30 @@ bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const
         if (kkInboundDelaySize > 0) {
             // The height after expanding, which is also the height before it: the new columns come
             // from rows the val already had. Only the front/update split moves.
-            const std::size_t kkNewNumNodeIdx =
-                kkInboundDelaySize + nf.frontSize(kk) + nf.updateSize(kk);
+            const std::size_t kkPreExpandFrontSize = nf.frontSize(kk);
+            const std::size_t kkPostExpandNumNodeIdx =
+                kkInboundDelaySize + kkPreExpandFrontSize + nf.updateSize(kk);
 
             // The index set. Extend first, then shift kk's own indices right by the delayed count,
             // descending so the copy does not overwrite its own source.
             nf.expandNodeIdx(kk, kkInboundDelaySize);
-            std::vector<std::int32_t>& kkNodeIdx = nf.mNodeIdx[kk];
+            std::vector<std::int32_t>& kkPostExpandNodeIdx = nf.mNodeIdx[kk];
 
-            for (std::size_t ssp = kkNewNumNodeIdx - kkInboundDelaySize; ssp-- > 0; ) {
+            for (std::size_t ssp = kkPostExpandNumNodeIdx - kkInboundDelaySize; ssp-- > 0; ) {
                 const std::size_t dsp = ssp + kkInboundDelaySize;
-                kkNodeIdx[dsp] = kkNodeIdx[ssp];
+                kkPostExpandNodeIdx[dsp] = kkPostExpandNodeIdx[ssp];
             }
 
             // Then the vacated slots at the left, filled from the children in sibling order. Each
             // child's delayed columns are the run just past its (already reduced) front.
             std::size_t dsp = 0;
             for (std::int32_t ii = firstChild[kk]; ii != NIL; ii = nextSibling[ii]) {
-                const std::size_t   iiFrontSize = nf.frontSize(ii);
-                const std::int32_t* iiNodeIdx   = nf.nodeIdx(ii);
+                const std::size_t   iiPostFactorFrontSize = nf.frontSize(ii);
+                const std::int32_t* iiNodeIdx             = nf.nodeIdx(ii);
 
-                for (std::size_t ssp = iiFrontSize; ssp < iiFrontSize + nf.delaySize(ii); ++ssp, ++dsp)
-                    kkNodeIdx[dsp] = iiNodeIdx[ssp];
+                for (std::size_t ssp = iiPostFactorFrontSize;
+                     ssp < iiPostFactorFrontSize + nf.delaySize(ii); ++ssp, ++dsp)
+                    kkPostExpandNodeIdx[dsp] = iiNodeIdx[ssp];
             }
 
             // And the val. The front is wider, so the old contents are discarded rather than
@@ -1080,17 +1092,17 @@ bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const
 
         // The full height, captured before the factorization reclassifies part of the front as
         // delayed. Every use below wants this number and not the contracted front.
-        const std::size_t   kkFrontSize  = nf.frontSize(kk);
-        const std::size_t   kkNumNodeIdx = kkFrontSize + nf.updateSize(kk);
-        const std::int32_t* kkNodeIdx    = nf.nodeIdx(kk);
-        Val*                kkVal        = nf.val(kk);   // stays valid across the loop below: kk was
+        const std::size_t   kkPreFactorFrontSize = nf.frontSize(kk);
+        const std::size_t   kkNumNodeIdx         = kkPreFactorFrontSize + nf.updateSize(kk);
+        const std::int32_t* kkNodeIdx            = nf.nodeIdx(kk);
+        Val*                kkVal                = nf.val(kk);   // stays valid across the loop below: kk was
                                                          // resized once in the migration above, and
                                                          // nothing inside the loop resizes it again
 
         setGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
 
         if (!assembleFromA(A, p, gblToLcl, kkInboundDelaySize,
-                           kkFrontSize, kkNumNodeIdx, kkNodeIdx, kkVal)) {
+                           kkPreFactorFrontSize, kkNumNodeIdx, kkNodeIdx, kkVal)) {
             clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
             return false;
         }
@@ -1100,21 +1112,24 @@ bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const
         // calls are no-ops for those that did not. A child of kk is factored in an earlier iteration
         // (ascending order), so its delays are known here, exactly as in the right-looking driver.
         if (kkInboundDelaySize > 0)
-            for (std::int32_t ii = firstChild[kk]; ii != NIL; ii = nextSibling[ii])
-                if (nf.delaySize(ii) > 0) {
+            for (std::int32_t ii = firstChild[kk]; ii != NIL; ii = nextSibling[ii]) {
+                const std::size_t iiDelaySize = nf.delaySize(ii);
+                if (iiDelaySize > 0) {
                     assembleDelay(nf, ii, kk, gblToLcl);
-                    nf.contractVal(ii, nf.delaySize(ii));
+                    nf.contractVal(ii, iiDelaySize);
                 }
+            }
 
         // Every descendant jj queued to update kk.
         while (!descendantUpdateQueue[kk].empty()) {
             const std::int32_t jj = descendantUpdateQueue[kk].front();
             descendantUpdateQueue[kk].pop_front();
 
-            const std::size_t   jjFrontSize  = nf.frontSize(jj);
-            const std::size_t   jjDelaySize  = nf.delaySize(jj);
-            const std::size_t   jjNumNodeIdx = jjFrontSize + jjDelaySize + nf.updateSize(jj);
-            const std::int32_t* jjNodeIdx    = nf.nodeIdx(jj);
+            const std::size_t   jjPostFactorFrontSize = nf.frontSize(jj);
+            const std::size_t   jjDelaySize           = nf.delaySize(jj);
+            const std::size_t   jjNumNodeIdx          = jjPostFactorFrontSize + jjDelaySize
+                                                      + nf.updateSize(jj);
+            const std::int32_t* jjNodeIdx             = nf.nodeIdx(jj);
 
             // How many of jj's remaining rows belong to kk. Contiguous, as in the static case.
             const std::size_t jjUpdateSp = nextUpdateSp[jj];
@@ -1130,6 +1145,7 @@ bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const
             updateDynamicSupernode(nf, jj, jjUpdateSp, updateBlock);
             assembleUpdate(gblToLcl, updateBlock, kkNumNodeIdx, kkVal);
 
+            // jj has updated kk. Queue it for the next ancestor it must update.
             nextUpdateSp[jj] = jjUpdateSp + jjWidth;
             if (nextUpdateSp[jj] < jjNumNodeIdx)
                 descendantUpdateQueue[nf.nodeToSnode(jjNodeIdx[nextUpdateSp[jj]])].push_back(jj);
@@ -1144,14 +1160,10 @@ bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const
         // together**, not the front alone: both are kk's own rows, neither updates an ancestor, and
         // the delayed ones are handed over by assembleDelay rather than as an update. Getting
         // this wrong sends the delayed rows into a temporary and corrupts the parent quietly.
-        nextUpdateSp[kk] = nf.frontSize(kk) + nf.delaySize(kk);
+        const std::size_t kkDelaySize = nf.delaySize(kk);
+        nextUpdateSp[kk] = nf.frontSize(kk) + kkDelaySize;
         if (nextUpdateSp[kk] < kkNumNodeIdx)
             descendantUpdateQueue[nf.nodeToSnode(kkNodeIdx[nextUpdateSp[kk]])].push_back(kk);
-
-        // A root has no parent to take a delayed column, so a delay there is unrecoverable. 0.9
-        // treats it as an error rather than a numeric failure, and so do we: it means the pivoting
-        // strategy did not do its job, not that the matrix is singular.
-        const bool delayedAtRoot = nf.delaySize(kk) > 0 && parent[kk] == NIL;
 
         // Clear the whole height, delayed columns included. 0.9 clears only frontSize + updateSize
         // here, and since frontSize has just contracted it leaves the delayed entries stale.
@@ -1161,8 +1173,11 @@ bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const
         // supernode in hand), and assembleFromA's NIL test is exactly a check that relies on it.
         clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
 
-        if (delayedAtRoot)
-            return false;
+        // A root has no parent to take a delayed column, so a delay there is unrecoverable. 0.9
+        // treats it as an error rather than a numeric failure, and so do we: it means the pivoting
+        // strategy did not do its job, not that the matrix is singular.
+        if (kkDelaySize > 0 && parent[kk] == NIL)
+            return false;   // delayed at a root: nowhere left to put it
     }
 
     return true;
@@ -1221,14 +1236,14 @@ bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, cons
     // is filled before the loop begins. This runs while every front is still the width symbolic
     // predicted, so nothing has expanded yet and the delayed-column offset is zero everywhere.
     for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(snodeSize); ++jj) {
-        const std::size_t   jjFrontSize  = nf.frontSize(jj);
-        const std::size_t   jjNumNodeIdx = jjFrontSize + nf.updateSize(jj);
-        const std::int32_t* jjNodeIdx    = nf.nodeIdx(jj);
-        Val*                jjVal        = nf.val(jj);
+        const std::size_t   jjPreFactorFrontSize = nf.frontSize(jj);
+        const std::size_t   jjNumNodeIdx         = jjPreFactorFrontSize + nf.updateSize(jj);
+        const std::int32_t* jjNodeIdx            = nf.nodeIdx(jj);
+        Val*                jjVal                = nf.val(jj);
 
         setGlobalToLocal(jjNumNodeIdx, jjNodeIdx, gblToLcl);
 
-        if (!assembleFromA(A, p, gblToLcl, 0, jjFrontSize,
+        if (!assembleFromA(A, p, gblToLcl, 0, jjPreFactorFrontSize,
                            jjNumNodeIdx, jjNodeIdx, jjVal)) {
             clearGlobalToLocal(jjNumNodeIdx, jjNodeIdx, gblToLcl);
             return false;
@@ -1243,26 +1258,28 @@ bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, cons
             jjInboundDelaySize += nf.delaySize(ii);
 
         if (jjInboundDelaySize > 0) {
-            const std::size_t jjNewNumNodeIdx =
-                jjInboundDelaySize + nf.frontSize(jj) + nf.updateSize(jj);
+            const std::size_t jjPreExpandFrontSize = nf.frontSize(jj);
+            const std::size_t jjPostExpandNumNodeIdx =
+                jjInboundDelaySize + jjPreExpandFrontSize + nf.updateSize(jj);
 
             // The index set, exactly as in the left-looking driver: extend, shift right, prepend
             // the children's delayed globals in sibling order.
             nf.expandNodeIdx(jj, jjInboundDelaySize);
-            std::vector<std::int32_t>& jjNodeIdx = nf.mNodeIdx[jj];
+            std::vector<std::int32_t>& jjPostExpandNodeIdx = nf.mNodeIdx[jj];
 
-            for (std::size_t ssp = jjNewNumNodeIdx - jjInboundDelaySize; ssp-- > 0; ) {
+            for (std::size_t ssp = jjPostExpandNumNodeIdx - jjInboundDelaySize; ssp-- > 0; ) {
                 const std::size_t dsp = ssp + jjInboundDelaySize;
-                jjNodeIdx[dsp] = jjNodeIdx[ssp];
+                jjPostExpandNodeIdx[dsp] = jjPostExpandNodeIdx[ssp];
             }
 
             std::size_t dsp = 0;
             for (std::int32_t ii = firstChild[jj]; ii != NIL; ii = nextSibling[ii]) {
-                const std::size_t   iiFrontSize = nf.frontSize(ii);
-                const std::int32_t* iiNodeIdx   = nf.nodeIdx(ii);
+                const std::size_t   iiPostFactorFrontSize = nf.frontSize(ii);
+                const std::int32_t* iiNodeIdx             = nf.nodeIdx(ii);
 
-                for (std::size_t ssp = iiFrontSize; ssp < iiFrontSize + nf.delaySize(ii); ++ssp, ++dsp)
-                    jjNodeIdx[dsp] = iiNodeIdx[ssp];
+                for (std::size_t ssp = iiPostFactorFrontSize;
+                     ssp < iiPostFactorFrontSize + nf.delaySize(ii); ++ssp, ++dsp)
+                    jjPostExpandNodeIdx[dsp] = iiNodeIdx[ssp];
             }
 
             // And the val, keeping what A and the descendants already put there.
@@ -1273,8 +1290,9 @@ bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, cons
         // The full height, captured before the factorization reclassifies part of the front as
         // delayed. The map is computed once and serves both the delayed assembly and the factor,
         // since jj's index set does not change between them.
-        const std::size_t   jjNumNodeIdx = nf.frontSize(jj) + nf.updateSize(jj);
-        const std::int32_t* jjNodeIdx    = nf.nodeIdx(jj);
+        const std::size_t   jjPreFactorFrontSize = nf.frontSize(jj);
+        const std::size_t   jjNumNodeIdx         = jjPreFactorFrontSize + nf.updateSize(jj);
+        const std::int32_t* jjNodeIdx            = nf.nodeIdx(jj);
 
         setGlobalToLocal(jjNumNodeIdx, jjNodeIdx, gblToLcl);
 
@@ -1282,11 +1300,13 @@ bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, cons
         // child, not just on the total: one child delaying does not mean its siblings did, and the
         // calls are no-ops for those that did not.
         if (jjInboundDelaySize > 0)
-            for (std::int32_t ii = firstChild[jj]; ii != NIL; ii = nextSibling[ii])
-                if (nf.mDelaySize[ii] > 0) {
+            for (std::int32_t ii = firstChild[jj]; ii != NIL; ii = nextSibling[ii]) {
+                const std::size_t iiDelaySize = nf.delaySize(ii);
+                if (iiDelaySize > 0) {
                     assembleDelay(nf, ii, jj, gblToLcl);
-                    nf.contractVal(ii, nf.delaySize(ii));
+                    nf.contractVal(ii, iiDelaySize);
                 }
+            }
 
         if (!factorDynamicSupernode(nf, jj, gblToLcl)) {
             clearGlobalToLocal(jjNumNodeIdx, jjNodeIdx, gblToLcl);
@@ -1295,12 +1315,26 @@ bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, cons
 
         clearGlobalToLocal(jjNumNodeIdx, jjNodeIdx, gblToLcl);
 
+        // From here jj is factored: part of its front was reclassified as delayed, so the front is
+        // now smaller. Everything below reads this post-factor front, never nf.frontSize(jj) bare,
+        // which would hide whether it is the pre- or post-factor value.
+        const std::size_t jjPostFactorFrontSize = nf.frontSize(jj);
+        const std::size_t jjDelaySize           = nf.delaySize(jj);
+
         // Push. The walk starts past the front *and* the delayed columns, for the same reason the
         // left-looking nextUpdateSp seed does: both are jj's own rows and neither updates an
         // ancestor, the delayed ones going up by assembleDelay instead.
-        std::size_t jjUpdateSp = nf.frontSize(jj) + nf.delaySize(jj);
+        std::size_t jjUpdateSp = jjPostFactorFrontSize + jjDelaySize;
         while (jjUpdateSp < jjNumNodeIdx) {
             const std::int32_t kk = nf.nodeToSnode(jjNodeIdx[jjUpdateSp]);
+
+            // kk has not expanded yet, and need not have: jj's update rows are kk's own nodes, which
+            // its index set already holds. When kk later expands, expandVal carries these values
+            // along with the rest.
+            const std::size_t   kkPreFactorFrontSize = nf.frontSize(kk);
+            const std::size_t   kkNumNodeIdx         = kkPreFactorFrontSize + nf.updateSize(kk);
+            const std::int32_t* kkNodeIdx            = nf.nodeIdx(kk);
+            Val*                kkVal                = nf.val(kk);
 
             const std::size_t jjHeight = jjNumNodeIdx - jjUpdateSp;
             std::size_t       jjWidth  = 0;
@@ -1313,21 +1347,14 @@ bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, cons
 
             updateDynamicSupernode(nf, jj, jjUpdateSp, updateBlock);
 
-            // kk has not expanded yet, and need not have: jj's update rows are kk's own nodes, which
-            // its index set already holds. When kk later expands, expandVal carries these values
-            // along with the rest.
-            const std::size_t   kkFrontSize  = nf.frontSize(kk);
-            const std::size_t   kkNumNodeIdx = kkFrontSize + nf.updateSize(kk);
-            const std::int32_t* kkNodeIdx    = nf.nodeIdx(kk);
-
             setGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
-            assembleUpdate(gblToLcl, updateBlock, kkNumNodeIdx, nf.val(kk));
+            assembleUpdate(gblToLcl, updateBlock, kkNumNodeIdx, kkVal);
             clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
 
             jjUpdateSp += jjWidth;
         }
 
-        if (nf.delaySize(jj) > 0 && parent[jj] == NIL)
+        if (jjDelaySize > 0 && parent[jj] == NIL)
             return false;   // delayed at a root: nowhere left to put it
     }
 

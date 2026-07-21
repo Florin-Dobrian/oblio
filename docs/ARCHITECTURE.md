@@ -87,6 +87,18 @@ Two flows run over the elimination forest during dynamic LDL, and they have diff
 the tree and may skip levels; this is the flow the traversals disagree about, left-looking pulling
 and right-looking pushing. A **delay** goes from a child to its parent, one edge, never further.
 
+It helps to see the asymmetries between left- and right-looking in two layers. The first layer is
+already present in the *static* drivers, where there are no delays at all: left-looking pulls updates
+from descendants and factors last, right-looking factors first and pushes updates to ancestors, and
+that difference forces right-looking's A-assembly prepass (a push lands on a front not yet reached, so
+A must be there first). These asymmetries are essential to the two orderings and visible in the
+simplest code. The second layer appears only in the *dynamic* drivers, and it is the delay flow. The
+delay flow is driven by the child-to-parent relationship, which is not the relationship the update
+flow follows, so laying it on top of the update flow adds asymmetries that have nothing to do with
+left-versus-right: they come from fitting a tree-shaped migration into a loop whose shape was chosen
+for updates. Much of the dynamic drivers' apparent divergence is this second layer, and separating it
+from the first is what keeps the two drivers legible.
+
 Only one flow is contested, so the delay machinery is identical in both drivers, which fell out
 rather than being designed. A delay can still travel further than one edge, but only by being
 delayed again: a column passed up to the parent becomes an ordinary front column there and may fail
@@ -140,6 +152,20 @@ The section above followed a delayed column, which travels one edge. An update t
 from a supernode to *any* ancestor holding one of its update rows, possibly several of them, and
 possibly skipping levels. How that gets scheduled is the one place the two traversals genuinely
 disagree, and it is worth setting down because the mechanism is not obvious from either driver.
+
+**Two independent flows share these drivers.** The update flow moves a supernode's update area to its
+ancestors, driven by the update (descendant-to-ancestor) relationship. The delay flow moves a
+supernode's unpivotable columns to its parent, driven by the child-to-parent relationship. They are
+not aligned: an ancestor that receives an update is usually not the parent, and the parent that
+receives a delayed column is usually not an update target. The two lives in these two sections are
+that pair of flows. A useful consequence is that the update itself is exactly what the static twin
+does, in static and dynamic alike: the update area out of `jj` updates `kk`, and the delay machinery
+does not touch that path. In the dynamic drivers this shows up as the update being *contract-agnostic*.
+Left-looking updates from `jj` after `jj` has been contracted, right-looking before; the result is
+identical, because the update reads only `jj`'s update area, which is disjoint from both delay regions
+(`jj`'s own delayed columns, which the update walk starts past, and `kk`'s inbound delays, which
+arrive by `assembleDelay` instead) and which never changes size. The delay flow runs alongside the
+update flow without perturbing it.
 
 **The structural fact underneath everything here** is the elimination tree's absorption property:
 every update row of `jj` also appears in `parent(jj)`'s index set. Measured across grids and random
@@ -321,6 +347,17 @@ for K in supernodes:
         update J -> K
     factor K
 ```
+
+One asymmetry is deliberately *not* visible in any of these blocks, and its invisibility is the point.
+At the `update J -> K` step, J has already been contracted in left-looking but not yet in right-looking:
+left-looking contracts a child when it processes that child's parent, which for the update target is the
+same iteration and comes first; right-looking contracts J only later, when it reaches J's own parent,
+which is after J has pushed. So the update runs from a contracted J in one driver and an uncontracted J
+in the other. The pseudocode does not distinguish the two, and neither does the code, because the update
+does not need to: it reads only J's update area, which is disjoint from the delayed columns that
+contraction trims (see *The life of an update*). This is where the two flows come apart. Contraction is
+on the delay flow's schedule (child to parent), the update is on its own (descendant to ancestor), and
+the update operation is written so it never has to know which side of J's contraction it is on.
 
 One consequence, recorded because it looks like a bug when first noticed. The order in which
 descendants arrive on a queue is by *previous ancestor*, not by their own index, so a queue can be out of index

@@ -138,6 +138,19 @@ rather than past the front alone. Advancing by the front alone would push the de
 parent as an update *as well as* handing them over as delays, and the parent would double-count
 them silently.
 
+**Where a delayed column gets its values.** `factorStaticSupernode` pivots every front column, so
+nothing is left behind. `factorDynamicSupernode` pivots only the columns it accepts, its *post-factor*
+front, but eliminating those pivots applies the Schur update across the whole trailing block, and the
+delay region sits in that block. So a delayed column is brought fully current during the factor call;
+it is simply not used as a pivot there. The update kernel never touches it: `updateDynamicSupernode`
+reads only past `frontSize + delaySize`, so it carries the update area to ancestors and leaves the
+delay region alone. A delayed column is therefore factored-into where it sits, migrated intact to the
+parent by `assembleDelay` and `contractVal`, and pivoted there. It is never short-changed and never
+double-updated: the factor step updates it once, the update kernel never does, and the parent pivots
+it once. This falls out rather than being arranged, since the pivot loop's trailing update does not
+care whether a trailing column is destined for delay or for update, it updates the whole tail either
+way.
+
 **This set has expanded.** The solve reads `delaySize(jj)` and `pivotType()` from the
 dynamic factor, the first because a delayed column leaves its row behind so the leading dimension is
 `frontSize + delaySize + updateSize`, the second because a 2x2 pivot puts D's
@@ -145,6 +158,37 @@ off-diagonal where L's first sub-diagonal entry would be. Both are dynamic-only,
 `SolveEngine`'s three passes are paired: `forwardStatic` and `forwardDynamic`, and so on, the static
 three templated on the factor and the dynamic three naming `NumFactorDynamic` outright. Same split,
 same reason, as the traversals in `NumFactorEngine`.
+
+### The shape of an update: the (jj, kk) edge
+
+An update from `jj` to `kk` is a rank-`f` outer product, and its two other dimensions, the width `w`
+(`jjKkWidth` in the code) and height `h` (`jjKkHeight`), are properties of the **(jj, kk) edge**, not
+of either supernode alone. Only `f`, jj's post-factor front, is jj's on its own: it is the number of
+pivots eliminated at `jj`, and so the rank of every update `jj` makes.
+
+`w` is how many of jj's rows land in `kk`. Those rows are nodes owned by `kk`, and a node owned by
+`kk` is a front column of `kk`, so the same `w` nodes are at once a horizontal band of jj's rows and a
+subset of kk's columns. That identity is why an update is possible at all: one index is a row in jj's
+block and a column in kk's, the structure being symmetric. Change `jj` or change `kk` and `w` moves,
+which is what makes it a two-supernode quantity rather than either one's.
+
+`h` is that band plus everything below it in jj: all of jj's rows from the band's start to the end of
+jj's index set. So `w` measures a subset of kk's columns and `h` a subset of jj's rows, each the set
+it is most naturally a subset of, and `w <= h` always, with equality exactly when nothing of jj
+reaches past `kk`.
+
+Both are contiguous, which is what lets the kernel take one start position and two lengths instead of
+an index list. jj's index set is sorted and the supernodes partition it in increasing order, so kk's
+band is a single run and `h` is a suffix: the `w` band on top, jj's higher-reaching rows beneath. The
+update block is `h` by `w`. Its top `w`-by-`w` square is a block against its own conjugate transpose,
+symmetric, filled by `gemmLower`; the `(h - w)`-by-`w` rectangle below is jj's higher-reaching rows
+against kk's rows, not symmetric, a plain `gemm`.
+
+So the unit of work is the edge: subsets of jj's rows updating subsets of kk's columns, `f` summed
+over. The kernel forms only the `f`-by-`w` slice `D L21_kk^H` for this one pair, which is why it runs
+once per (jj, kk) the traversal visits rather than once per `jj`, and why the same function serves both
+traversals. The edge is symmetric to which end one stands at: `kk` held fixed while its descendants
+arrive (left-looking), or `jj` held fixed while its ancestors are visited (right-looking).
 
 ### The life of an update
 

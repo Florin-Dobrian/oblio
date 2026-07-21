@@ -101,10 +101,15 @@ void NumFactorEngine::clearGlobalToLocal(std::size_t numNodeIdx, const std::int3
 }
 
 template<class Val>
-void NumFactorEngine::setSymFactor(const SymFactor& sf, NumFactorStatic<Val>& nf) const {
+void NumFactorEngine::initNumFactor(const SymFactor& sf, NumFactorStatic<Val>& nf) const {
     nf.mSize          = sf.size();
     nf.mSnodeSize     = sf.snodeSize();
     nf.mFactorization = mFactorization;
+
+    // This run's perturbation count starts at zero; the static LDL factorization accumulates into
+    // it (Cholesky never perturbs, dynamic LDL delays instead). Reset here, not at construction, so
+    // a reused factor does not carry a previous run's count.
+    nf.mNumPerturbations = 0;
 
     // The structure, copied. The factor owns it, so SymFactor may be discarded afterwards, and so
     // dynamic LDL can expand its copy without disturbing the prediction.
@@ -132,10 +137,15 @@ void NumFactorEngine::setSymFactor(const SymFactor& sf, NumFactorStatic<Val>& nf
 }
 
 template<class Val>
-void NumFactorEngine::setSymFactor(const SymFactor& sf, NumFactorDynamic<Val>& nf) const {
+void NumFactorEngine::initNumFactor(const SymFactor& sf, NumFactorDynamic<Val>& nf) const {
     nf.mSize          = sf.size();
     nf.mSnodeSize     = sf.snodeSize();
     nf.mFactorization = mFactorization;
+
+    // This run's perturbation count starts at zero. Dynamic LDL never perturbs (it delays), but a
+    // static factorization run into this storage does, and a reused factor must not carry a previous
+    // run's count.
+    nf.mNumPerturbations = 0;
 
     // The structure, copied, exactly as for the static factor.
     nf.mNodeToSnode = sf.nodeToSnode();
@@ -235,8 +245,7 @@ void NumFactorEngine::assembleUpdate(const std::vector<std::int32_t>& gblToLcl,
 }
 
 template<class Val, class Factor>
-bool NumFactorEngine::factorStaticSupernode(Factor& nf, std::int32_t jj,
-                                      std::size_t& numPerturbations) const {
+bool NumFactorEngine::factorStaticSupernode(Factor& nf, std::int32_t jj) const {
     const std::size_t frontSize   = nf.frontSize(jj);
     const std::size_t numNodeIdx  = frontSize + nf.updateSize(jj);
     Val*              val         = nf.val(jj);
@@ -268,7 +277,7 @@ bool NumFactorEngine::factorStaticSupernode(Factor& nf, std::int32_t jj,
     // definiteness to violate; a pivot too small to divide by is perturbed and counted.
     int numPert = 0;
     ldl(f, val, ld, mPerturbation, &numPert, hermitian(mFactorization));
-    numPerturbations += static_cast<std::size_t>(numPert);
+    nf.numPerturbations() += static_cast<std::size_t>(numPert);
 
     // The update rows: L21 = A21 U11^-1, where U11 = D11 L11^H sits in the front's *upper*
     // triangle. So the solve is against the upper, untransposed, which is exactly what storing U
@@ -397,7 +406,7 @@ void NumFactorEngine::updateStaticSupernode(const Factor& nf, std::int32_t jj,
 template<class Val, class Factor>
 bool NumFactorEngine::factorStaticLeftLooking(const SparseMatrix<Val>& A, const Permutation& p,
                                         const SymFactor& sf, Factor& nf) const {
-    setSymFactor(sf, nf);
+    initNumFactor(sf, nf);
 
     const std::size_t size      = nf.size();
     const std::size_t snodeSize = nf.snodeSize();
@@ -454,7 +463,7 @@ bool NumFactorEngine::factorStaticLeftLooking(const SparseMatrix<Val>& A, const 
                 descendantUpdateQueue[nf.nodeToSnode(jjNodeIdx[nextUpdateSp[jj]])].push_back(jj);
         }
 
-        if (!factorStaticSupernode<Val>(nf, kk, nf.numPerturbations())) {
+        if (!factorStaticSupernode<Val>(nf, kk)) {
             clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
             return false;   // not positive definite (Cholesky only; LDL perturbs instead)
         }
@@ -483,7 +492,7 @@ bool NumFactorEngine::factorStaticLeftLooking(const SparseMatrix<Val>& A, const 
 template<class Val, class Factor>
 bool NumFactorEngine::factorStaticRightLooking(const SparseMatrix<Val>& A, const Permutation& p,
                                                const SymFactor& sf, Factor& nf) const {
-    setSymFactor(sf, nf);
+    initNumFactor(sf, nf);
 
     const std::size_t size      = nf.size();
     const std::size_t snodeSize = nf.snodeSize();
@@ -512,7 +521,7 @@ bool NumFactorEngine::factorStaticRightLooking(const SparseMatrix<Val>& A, const
         const std::size_t   jjNumNodeIdx = jjFrontSize + nf.updateSize(jj);
         const std::int32_t* jjNodeIdx    = nf.nodeIdx(jj);
 
-        if (!factorStaticSupernode<Val>(nf, jj, nf.numPerturbations()))
+        if (!factorStaticSupernode<Val>(nf, jj))
             return false;   // not positive definite (Cholesky only; LDL perturbs instead)
 
         // Walk jj's update rows. Each run of them belonging to one ancestor is one update.
@@ -1051,7 +1060,7 @@ void NumFactorEngine::assembleDelay(NumFactorDynamic<Val>& nf, std::int32_t jj, 
 template<class Val>
 bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const Permutation& p,
                                                const SymFactor& sf, NumFactorDynamic<Val>& nf) const {
-    setSymFactor(sf, nf);
+    initNumFactor(sf, nf);
 
     const std::size_t size      = nf.size();
     const std::size_t snodeSize = nf.snodeSize();
@@ -1242,7 +1251,7 @@ bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const
 template<class Val>
 bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, const Permutation& p,
                                                 const SymFactor& sf, NumFactorDynamic<Val>& nf) const {
-    setSymFactor(sf, nf);
+    initNumFactor(sf, nf);
 
     const std::size_t size      = nf.size();
     const std::size_t snodeSize = nf.snodeSize();

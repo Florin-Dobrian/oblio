@@ -88,20 +88,23 @@ private:
     double        mPivotThreshold = 0.1;
     double        mPerturbation  = 1e-14;
 
-    // Copy the structure from SymFactor and allocate the value blocks, zeroed. Every traversal
-    // starts here, so it is shared.
+    // Initialize the numeric factor for a factorization run: copy the structure from SymFactor,
+    // allocate the value blocks (zeroed), and reset the per-run state, the perturbation count here
+    // and, for the dynamic twin, the delay and pivot arrays. Every traversal starts here, so it is
+    // shared. The name is deliberately not "setSymFactor": the symbolic copy is only part of what it
+    // does.
     //
     // The blocks are rectangles: indexSize rows by frontSize columns, column-major. The strictly
     // upper triangle of the front is allocated and left zero, which is what lets the whole block
     // go to a level-3 BLAS call with a leading dimension.
     template<class Val>
-    void setSymFactor(const SymFactor& sf, NumFactorStatic<Val>& nf) const;
+    void initNumFactor(const SymFactor& sf, NumFactorStatic<Val>& nf) const;
 
     // The dynamic twin: same structure copied, but the value blocks are one vector per supernode
     // rather than offsets into one buffer, so a front can later expand without moving its
     // neighbors.
     template<class Val>
-    void setSymFactor(const SymFactor& sf, NumFactorDynamic<Val>& nf) const;
+    void initNumFactor(const SymFactor& sf, NumFactorDynamic<Val>& nf) const;
 
     // A supernode's rows, in *its own* local coordinates: gblToLcl[globalRow] = local position.
     // Set before working on a supernode, cleared after, so the array is allocated once and reused
@@ -159,15 +162,13 @@ private:
     //           part and GEMM on the rectangle. The scratch is the price of the D.
     //
     // factorStaticSupernode returns false only for Cholesky, on a non-positive pivot. LDL cannot
-    // fail:
-    // it perturbs instead, and reports how often.
+    // fail: it perturbs instead, and records how many times in nf.numPerturbations().
     template<class Val, class Factor>
-    bool factorStaticSupernode(Factor& nf, std::int32_t jj,
-                         std::size_t& numPerturbations) const;
+    bool factorStaticSupernode(Factor& nf, std::int32_t jj) const;
 
     template<class Val, class Factor>
     void updateStaticSupernode(const Factor& nf, std::int32_t jj,
-                         std::size_t jjKkUpdateSp, UpdateBlock<Val>& t) const;
+                         std::size_t jjKkUpdateSp, UpdateBlock<Val>& updateBlock) const;
 
     // The traversals, named for the *pivoting*, which is the axis the Factorization enum names:
     // static pivoting is Cholesky and static LDL, dynamic pivoting is dynamic LDL. Left-looking and
@@ -254,7 +255,7 @@ private:
     // updateDynamicLDL_.
     template<class Val>
     void updateDynamicSupernode(const NumFactorDynamic<Val>& nf, std::int32_t jj,
-                                std::size_t jjKkUpdateSp, UpdateBlock<Val>& t) const;
+                                std::size_t jjKkUpdateSp, UpdateBlock<Val>& updateBlock) const;
 
     // Fold supernode jj's delayed columns into kk, its parent, which has already been expanded to
     // hold them. The third assemble, and the only one dynamic pivoting adds: A's values and a

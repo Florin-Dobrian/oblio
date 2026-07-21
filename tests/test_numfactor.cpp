@@ -583,7 +583,7 @@ int main() {
     // The static factorizations run into the dynamic factor. Same traversals, same kernels, only
     // per-supernode storage in place of one flat buffer, so the factor must come out identical to
     // the flat one, block for block. This exercises NumFactorDynamic's whole read/produce API
-    // (setSymFactor, the accessors, the friend write path) without any of the growth verbs dynamic
+    // (initNumFactor, the accessors, the friend write path) without any of the growth verbs dynamic
     // LDL will add.
     {
         OrderEngine ord(OrderMethod::AMD);

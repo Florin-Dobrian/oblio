@@ -2426,6 +2426,30 @@ first; ties to the largest front size; ties again to the first child in the list
 rule is arbitrariness made deterministic, which is exactly what a canonical algorithm never
 needs. Fundamental supernodes are unique because they *refuse* to make this choice.
 
+**What threshold zero leaves behind.** The zero-fill expression `|indexSet(K)| - |update(J)|`
+is always `>= 0` by containment, and equals zero exactly at an identical-pattern pair, the free
+merge. A fundamental forest can still hold such pairs: the star's root has two children, each at
+zero, that fundamental compression could not take because neither is an only child.
+Threshold-zero amalgamation exists to consume exactly these. It absorbs one free child, which
+widens the parent's front and lifts every remaining sibling off zero (in the star, the second
+child jumps from zero to one), then looks again, and stops only when no child sits at zero any
+longer. So its post-condition is clean: **after threshold-zero amalgamation, no parent-child
+pair has zero fill.** Equivalently, no two supernodes still in a parent-child relation share the
+identical-pattern property, because if they did the merge would have been free and already
+taken. Every surviving pair is strictly positive, which is why raising the threshold above zero
+is what it takes to merge anything more.
+
+**Why one pass suffices.** That the equality cases vanish can be seen directly, without appeal
+to the loop's mechanics. Run one pass over the children at threshold zero: the merge condition
+fires exactly on the zero-fill pairs, so every equality present is caught and merged in that
+pass. Could a later pass find a fresh equality? It would have to have either existed during the
+first pass, in which case it was not missed and was already taken, or been created by one of the
+first pass's merges. But a merge only ever widens the parent's front, and a wider front raises
+every remaining child's fill or leaves it unchanged; it can never lower a positive fill back to
+zero. So no new equality can be manufactured. Neither source is possible, and the equality cases
+are therefore gone after a single pass. The same monotonicity, that a merge never decreases
+another child's fill, is what lets a child ruled out of budget be struck off for good.
+
 **Spending fill on purpose.** So far the threshold has been zero. Raising it lets a merge
 through even when it costs zeros, and the reason is Section 4.6: a supernode's nonzeros form
 a dense block, and dense blocks run on BLAS level 3. A wider block is a better block, and past
@@ -2497,6 +2521,32 @@ supernode `{1,3}` skips column 2, and no renumbering fixes it, because 2 must pr
 cannot precede 1. So consumers must gather a supernode's front indices through `supernode[]`
 and never assume a contiguous range. Both the symbolic factorization of 4.6 and the numeric
 one depend on this.
+
+**What does survive, and why the sort is safe.** Contiguity is lost, but a weaker property is
+not, and it is the one that actually matters: within each supernode, every front index is
+smaller than every update index. A supernode's update indices are the rows below its whole
+front, which is to say the ancestors of its top column. Under a postorder the top column is the
+parent, the **largest** of the front columns, and an ancestor of the parent is numbered above
+it. So every update index exceeds the parent, which in turn is at least every front column:
+front-max is below update-min, always. Amalgamation does not touch this. It scatters the front,
+a non-merged sibling can sit numerically between two merged columns, but that gap is filled by
+some *other* supernode's column, never by this supernode's own update rows, which remain
+strictly above the parent. The star shows it: supernode `{1,3}` has a gap at 2, but 2 is a
+different supernode's column, not an update row of `{1,3}`.
+
+This is why the indices can be sorted front and update **together**, in one pass, without
+interleaving the two groups. It is worth being clear about what is required and what is chosen.
+The factor is retrieved entirely through indirection, an entry found by its row and column
+index, so **the indices do not need to be sorted at all**; the one real requirement is that the
+front indices be **separated** from the update indices, front before update. Sorting is a
+convenience laid on top of that requirement, not the requirement itself. We choose to sort
+anyway: it is linear time (the transpose-based bucket sort of 4.6, cheap next to the
+factorization), and a factor whose indices are in order is easier to read and to check by eye.
+The separation comes for free from front-max below update-min; the ordering within each group
+is the part we pay a small, optional price for. (One later wrinkle, noted here so it is not a
+surprise: dynamic pivoting can reorder the front indices of a supernode, though never the update
+indices; the numeric factorization tolerates this precisely because order was never required,
+only separation.)
 
 **Where it fits.** Amalgamation runs on any forest, nodal or supernodal, since a nodal forest
 is just one whose supernodes are all trivial. In practice one runs it *after* fundamental

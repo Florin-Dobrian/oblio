@@ -226,10 +226,10 @@ void ElmForestEngine::compressFundamental(ElmForest& ef) const {
 
     // Assign every column to a supernode. Column lk continues its child lj's supernode when the
     // two form a fundamental supernode, otherwise it starts a new one. Increasing order, so
-    // nodeToSnode[lj] is settled before lk needs it: a child's column is numbered below its
-    // parent's.
-    std::vector<std::int32_t> nodeToSnode(size, NIL);
-    std::int32_t snodeSize = 0;
+    // newNodeToSnode[lj] is settled before lk needs it: a child's column is numbered below its
+    // newParent's.
+    std::vector<std::int32_t> newNodeToSnode(size, NIL);
+    std::int32_t newSnodeSize = 0;
     for (std::int32_t lk = 0; lk < static_cast<std::int32_t>(size); ++lk) {
         const std::int32_t lj = ef.mFirstChild[lk];
 
@@ -239,7 +239,7 @@ void ElmForestEngine::compressFundamental(ElmForest& ef) const {
         //
         // The guard is not decoration. firstChild == lastChild also holds when both are
         // NIL, that is at every leaf, so without it a leaf would report exactly one child
-        // and the pattern test would subscript updateSize with NIL. Short-circuit order
+        // and the pattern test would subscript newUpdateSize with NIL. Short-circuit order
         // matters: the guard protects the clauses to its right, which is a property of
         // this expression, not something a later test could restore.
         //
@@ -247,7 +247,7 @@ void ElmForestEngine::compressFundamental(ElmForest& ef) const {
         //
         //     |update(J)| = |front(K)| + |update(K)|
         //
-        // for a child supernode J and its parent K. The forest is nodal here, so a supernode is
+        // for a child supernode J and its newParent K. The forest is nodal here, so a supernode is
         // a column: J is lj and K is lk. It is written as an addition rather than a subtraction.
         // A subtraction (0.9's |update(J)| - 1) is unsigned and would wrap if its right side
         // ever exceeded its left; the addition has nothing to wrap. Nor can it overflow: the sum
@@ -262,19 +262,19 @@ void ElmForestEngine::compressFundamental(ElmForest& ef) const {
                     == ef.mUpdateSize[lj]);
 
         if (merge)
-            nodeToSnode[lk] = nodeToSnode[lj];   // lk continues lj's
+            newNodeToSnode[lk] = newNodeToSnode[lj];   // lk continues lj's
         else
-            nodeToSnode[lk] = snodeSize++;                                  // lk starts a new one
+            newNodeToSnode[lk] = newSnodeSize++;        // lk starts a new one
     }
 
-    // The parent links and the sizes of the supernodes. Scanning columns in decreasing
-    // order, the first column seen for a given supernode is its topmost: its parent link is
+    // The newParent links and the sizes of the supernodes. Scanning columns in decreasing
+    // order, the first column seen for a given supernode is its topmost: its newParent link is
     // the one that leaves the supernode, and its rows below are the supernode's update
     // rows. Front sizes instead accumulate over every column, so that runs before the test.
-    std::vector<std::int32_t> parent(snodeSize, NIL);
-    std::vector<std::size_t>  frontSize(snodeSize, 0);
-    std::vector<std::size_t>  updateSize(snodeSize, 0);
-    std::vector<bool>         seen(snodeSize, false);
+    std::vector<std::int32_t> newParent(newSnodeSize, NIL);
+    std::vector<std::size_t>  newFrontSize(newSnodeSize, 0);
+    std::vector<std::size_t>  newUpdateSize(newSnodeSize, 0);
+    std::vector<bool>         seen(newSnodeSize, false);
 
     // Counting down, not indexing down: see finalizeLinks for why a std::size_t descending
     // loop must be written this way.
@@ -286,28 +286,33 @@ void ElmForestEngine::compressFundamental(ElmForest& ef) const {
     // child's, and the assignment then reads as the fact it derives: the supernode of lj's
     // parent column is the parent of lj's supernode.
     for (std::int32_t lj = static_cast<std::int32_t>(size) - 1; lj >= 0; --lj) {
-        const std::int32_t jj = nodeToSnode[lj];                     // its supernode
+        const std::int32_t jj = newNodeToSnode[lj];                     // its supernode
 
-        ++frontSize[jj];   // every column of jj adds one to it
+        // Every column of jj adds one to its front. The forest here is nodal, so each column's
+        // own front size is 1, left implicit in the `++` (threshold compression, running on a
+        // supernodal forest, must instead add the child's actual front size). And unlike there,
+        // these sizes are only tallied into the output, never read back to drive a decision, so
+        // no mutable working copy of the front sizes is needed.
+        ++newFrontSize[jj];
 
         if (seen[jj])
             continue;      // jj's topmost column came earlier; the rest is taken from it
 
         const std::int32_t lk = ef.mParent[lj];
         if (lk != NIL) {
-            const std::int32_t kk = nodeToSnode[lk];
-            parent[jj] = kk;
+            const std::int32_t kk = newNodeToSnode[lk];
+            newParent[jj] = kk;
         }
         // the rows below lj are the rows below jj
-        updateSize[jj] = ef.mUpdateSize[lj];
+        newUpdateSize[jj] = ef.mUpdateSize[lj];
         seen[jj] = true;
     }
 
-    ef.mSnodeSize = snodeSize;   // the next free label is also the count
-    ef.mNodeToSnode.swap(nodeToSnode);   // was the identity, now column -> supernode
-    ef.mParent.swap(parent);
-    ef.mFrontSize.swap(frontSize);
-    ef.mUpdateSize.swap(updateSize);
+    ef.mSnodeSize = newSnodeSize;   // the next free label is also the count
+    ef.mNodeToSnode.swap(newNodeToSnode);   // was the identity, now column -> supernode
+    ef.mParent.swap(newParent);
+    ef.mFrontSize.swap(newFrontSize);
+    ef.mUpdateSize.swap(newUpdateSize);
 
     // mFirstChild, mLastChild, mNextSibling, mPreviousSibling and the roots still describe
     // the nodal forest and are now stale. The caller rebuilds them with finalizeLinks.
@@ -334,9 +339,10 @@ void ElmForestEngine::compressThreshold(ElmForest& ef, std::size_t threshold) co
     // itself by the time we look at it. 10.12 omits this update (the line is in its source,
     // commented out, because it had made the array const), which silently understates both
     // the fill and the resulting block.
-    std::vector<std::size_t> frontSize = ef.mFrontSize;
+    std::vector<std::size_t>        frontSize = ef.mFrontSize;
+    const std::vector<std::size_t>& updateSize = ef.mUpdateSize;
 
-    std::size_t numSnode = snodeSize;
+    std::size_t newSnodeSize = snodeSize;
 
     // Whether any merge actually stored a zero. At threshold zero none can, so the merged
     // supernodes still have exactly matching patterns and the forest stays "exact"; above it,
@@ -345,17 +351,26 @@ void ElmForestEngine::compressThreshold(ElmForest& ef, std::size_t threshold) co
 
     // For every supernode kk, absorb as many of its children as the budget allows.
     for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(snodeSize); ++kk) {
-        std::size_t fillInc  = 0;   // zeros already bought for kk
-        std::size_t frontInc = 0;   // columns already absorbed into kk
+        std::size_t kkZerosFillInc = 0;   // zeros already bought for kk
+        std::size_t kkFrontSizeInc = 0;   // columns already absorbed into kk
 
-        // kk's index set before any of this parent's merges. It grows by frontInc as we go.
-        const std::size_t kkSize = frontSize[kk] + ef.mUpdateSize[kk];
+        // kk's index set before any of this parent's merges. It grows by kkFrontSizeInc as we go.
+        const std::size_t kkNumNodeIdx = frontSize[kk] + updateSize[kk];
 
         for (;;) {
+            // The best child so far and its zero-fill. "Best" is the full rule below, least fill
+            // then widest front, so bestZerosFill is the winner's fill, not simply the least on
+            // offer: at a tie the wider-front child wins with the same fill.
             std::int32_t bestChild = NIL;
-            std::size_t  bestFill  = 0;
+            std::size_t  bestZerosFill = 0;
 
-            for (std::int32_t jj = ef.mFirstChild[kk]; jj != NIL; jj = ef.mNextSibling[jj]) {
+            // Scanned back to front, from the last child to the first, using the doubly-linked
+            // sibling chain. This is a free choice: it does not change the fill or the block sizes,
+            // only which of several equal-cost partitions is produced. Scanning backward strands the
+            // *lower*-numbered child of a full tie as its own supernode and merges the higher one, so
+            // the supernode labels come out more nearly monotone in column order, which is easier to
+            // reason about downstream. (Forward scanning would strand the higher child instead.)
+            for (std::int32_t jj = ef.mLastChild[kk]; jj != NIL; jj = ef.mPreviousSibling[jj]) {
                 if (!candidate[jj])
                     continue;
 
@@ -363,21 +378,21 @@ void ElmForestEngine::compressThreshold(ElmForest& ef, std::size_t threshold) co
                 // update(jj) rows below itself, and must now hold the whole of kk's index
                 // set. By the containment theorem update(jj) is a subset of that index set,
                 // so this is a set-difference size and cannot go negative.
-                const std::size_t zerosPerCol = kkSize + frontInc - ef.mUpdateSize[jj];
-                const std::size_t fill = fillInc + zerosPerCol * frontSize[jj];
+                const std::size_t zerosFillPerCol = kkNumNodeIdx + kkFrontSizeInc - updateSize[jj];
+                const std::size_t zerosFill = zerosFillPerCol * frontSize[jj];   // this child alone
 
-                if (fill > threshold) {
+                if (kkZerosFillInc + zerosFill > threshold) {
                     candidate[jj] = false;   // over budget, and kk only grows from here
                     continue;
                 }
 
-                // Least fill; ties to the widest front; ties again to the first child in the
-                // list, which is arbitrariness made deterministic. A canonical algorithm
-                // would need no such rule.
-                if (bestChild == NIL || fill < bestFill
-                        || (fill == bestFill && frontSize[jj] > frontSize[bestChild])) {
+                // Least fill; ties to the widest front; ties again to the first child *reached*,
+                // which with the backward scan is the last in the list. Arbitrariness made
+                // deterministic: a canonical algorithm would need no such rule.
+                if (bestChild == NIL || zerosFill < bestZerosFill
+                        || (zerosFill == bestZerosFill && frontSize[jj] > frontSize[bestChild])) {
                     bestChild = jj;
-                    bestFill  = fill;
+                    bestZerosFill = zerosFill;
                 }
             }
 
@@ -385,15 +400,15 @@ void ElmForestEngine::compressThreshold(ElmForest& ef, std::size_t threshold) co
                 break;   // nothing more fits the budget
 
             snodeOldToNew[bestChild] = kk;
-            if (bestFill > 0)
+            if (bestZerosFill > 0)
                 storedAZero = true;   // this merge pays in explicitly stored zeros
-            fillInc  = bestFill;
-            frontInc += frontSize[bestChild];
+            kkZerosFillInc += bestZerosFill;
+            kkFrontSizeInc += frontSize[bestChild];
             candidate[bestChild] = false;
-            --numSnode;
+            --newSnodeSize;
         }
 
-        frontSize[kk] += frontInc;   // kk has grown; later parents must see it
+        frontSize[kk] += kkFrontSizeInc;   // kk has grown; later parents must see it
     }
 
     // Resolve chains: a supernode may have been absorbed into one that was itself absorbed.
@@ -418,38 +433,40 @@ void ElmForestEngine::compressThreshold(ElmForest& ef, std::size_t threshold) co
         snodeOldToNew[jj] = label[snodeOldToNew[jj]];
 
     // Carry the column map through.
-    std::vector<std::int32_t> nodeToSnode(size);
+    std::vector<std::int32_t> newNodeToSnode(size);
     for (std::int32_t lj = 0; lj < static_cast<std::int32_t>(size); ++lj)
-        nodeToSnode[lj] = snodeOldToNew[ef.mNodeToSnode[lj]];
+        newNodeToSnode[lj] = snodeOldToNew[ef.mNodeToSnode[lj]];
 
     // Parent links and sizes of the merged supernodes. Scanning old supernodes in decreasing
     // order, the first one seen for a given survivor is the absorber itself (its label is the
     // largest in the merged set): its parent link leaves the merged supernode, and its update
     // rows are the merged supernode's. Front sizes instead accumulate over every member, from
     // the *input* sizes, not the working copy, which already holds the accumulated total.
-    std::vector<std::int32_t> parent(numSnode, NIL);
-    std::vector<std::size_t>  newFrontSize(numSnode, 0);
-    std::vector<std::size_t>  newUpdateSize(numSnode, 0);
-    std::vector<bool>         seen(numSnode, false);
+    std::vector<std::int32_t> newParent(newSnodeSize, NIL);
+    std::vector<std::size_t>  newFrontSize(newSnodeSize, 0);
+    std::vector<std::size_t>  newUpdateSize(newSnodeSize, 0);
+    std::vector<bool>         seen(newSnodeSize, false);
 
-    for (std::int32_t jj = static_cast<std::int32_t>(snodeSize) - 1; jj >= 0; --jj) {
-        const std::int32_t jjNew = snodeOldToNew[jj];
+    for (std::int32_t jjOld = static_cast<std::int32_t>(snodeSize) - 1; jjOld >= 0; --jjOld) {
+        const std::int32_t jjNew = snodeOldToNew[jjOld];
 
-        newFrontSize[jjNew] += ef.mFrontSize[jj];
+        newFrontSize[jjNew] += ef.mFrontSize[jjOld];
 
         if (seen[jjNew])
             continue;
 
-        const std::int32_t kk = ef.mParent[jj];
-        if (kk != NIL)
-            parent[jjNew] = snodeOldToNew[kk];
-        newUpdateSize[jjNew] = ef.mUpdateSize[jj];
+        const std::int32_t kkOld = ef.mParent[jjOld];
+        if (kkOld != NIL) {
+            const std::int32_t kkNew = snodeOldToNew[kkOld];
+            newParent[jjNew] = kkNew;
+        }
+        newUpdateSize[jjNew] = ef.mUpdateSize[jjOld];
         seen[jjNew] = true;
     }
 
-    ef.mSnodeSize = numSnode;
-    ef.mNodeToSnode.swap(nodeToSnode);
-    ef.mParent.swap(parent);
+    ef.mSnodeSize = newSnodeSize;
+    ef.mNodeToSnode.swap(newNodeToSnode);
+    ef.mParent.swap(newParent);
     ef.mFrontSize.swap(newFrontSize);
     ef.mUpdateSize.swap(newUpdateSize);
 

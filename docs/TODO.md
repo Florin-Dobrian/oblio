@@ -366,6 +366,30 @@ before concluding anything about the traversal itself.
 Worth doing alongside any other timing work rather than on its own, and worth doing before either
 traversal is chosen as a default for anything.
 
+### Amalgamation tie-break: front size versus list position
+
+`compressThreshold` in ElmForestEngine breaks a fill tie between two children by taking the one with
+the larger front, and only then by list position. The larger-front rule is a greedy heuristic,
+"absorb the wide children before the parent's front grows and prices them out", and section 4.5 of
+docs/sparse_factorization.md explains it. It is locally tempting but has no global guarantee: each
+absorption widens the shared front, so a locally good pick changes the state every later pick is
+priced against and can foreclose a better sequence. The objective it optimizes, block quality, is
+itself machine-dependent and fuzzy, so there is no clean optimum being approximated.
+
+That raises a simpler alternative: drop the front-size level and break fill ties on list position
+alone. It loses an unproven heuristic and gains a shorter, more honest rule, one that does not imply
+a rigor the greedy algorithm lacks. It does not remove arbitrariness, only moves it from front size
+to list order, but both are conventions, not theorems.
+
+Which is better is empirical, and the two variants differ by one line, so the experiment is clean:
+run both over a matrix suite, holding everything else fixed, and measure. Worth reporting how often
+the tie-break even fires (it needs an exact fill tie *and* differing front sizes, likely rare), how
+often the partition then differs, and, the thing that actually matters, the factor flops or timing
+of the resulting blocks on the target machine. If the deltas are in the noise, positional-only wins
+on simplicity; if front-size-first measurably helps, it earns its complexity. Fits the experiments/
+prototype-first pattern: an isolated harness that runs both and reports the comparison, kept out of
+the main code until the conclusion is drawn.
+
 ## Testing
 
 ### Examples are built but never run

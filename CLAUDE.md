@@ -135,6 +135,20 @@ Linux: replace `-framework Accelerate` with `-lblas -llapack -lm`.
 - Both are starting points, not yet calibrated to the tree; see the headers in each
   config before mass-applying.
 
+**Where `clang-tidy` comes from.** Apple ships Clang but not `clang-tidy`, so it comes from
+Homebrew's `llvm`. Only that one binary is exposed, by symlink:
+
+```
+brew install llvm
+ln -s /opt/homebrew/opt/llvm/bin/clang-tidy /opt/homebrew/bin/clang-tidy
+```
+
+**Do not put `/opt/homebrew/opt/llvm/bin` on PATH instead.** That directory also holds `clang`
+and `clang++`, which would shadow Apple's and silently change the compiler the whole tree builds
+with, including which BLAS headers and which OpenMP spelling apply. The symlink takes the one
+tool we lack and leaves the compiler alone. Homebrew's `clang++` remains reachable by full path
+when a second toolchain is wanted deliberately.
+
 ### Editor navigation (CLion, terminal build kept)
 
 The build stays in the terminal; CLion is a read-and-navigate surface only, driven by a

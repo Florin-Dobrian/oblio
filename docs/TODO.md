@@ -135,6 +135,11 @@ the pinned tier-1 counts depend on. A LIFO refactor is right for the fold and wr
 and the two cannot be swept together. Trigger: when the extra scratch needs bounding, whether for
 parallelism or an out-of-core path.
 
+**Read this together with the forest parallelism entry below.** The per-supernode slots that make this
+a deviation are what make concurrent branches conflict-free, since a true LIFO is shared mutable state
+every branch would contend for. Bounding the scratch and parallelizing the forest pull in opposite
+directions, and whichever is done first constrains the other.
+
 ### Forest (tree) parallelism on Apple Silicon
 
 ARCHITECTURE's parallelism note ends on the observation that Oblio gets node parallelism for free
@@ -153,13 +158,109 @@ process-based and memory-heavy on a single shared-memory node, where threads are
 pthreads, which means hand-rolling the work-stealing DAG; not the GPU, which is the wrong shape for
 many small irregular tasks.
 
-One thing to bake in from the start: inside a parallel forest region, cap Accelerate to one thread per
-front, or the self-threading BLAS oversubscribes the cores. Forest parallelism pays at the leaves
-(small NEON fronts), while the big root fronts stay with Accelerate and the shared AMX; split that
-way, the two do not contend.
+**Measured 2026-07-23 on alpamayo (M4); see `experiments/openmp/` for the tables and method.** Two
+paragraphs of the above were written from documentation and are now corrected by measurement.
+
+The cap is a no-op here, and worse, it may be unimplementable. `VECLIB_MAXIMUM_THREADS=1` changes
+nothing at any order, and neither does `OMP_NUM_THREADS=1`. The second is the informative one: if
+Accelerate threaded *through OpenMP*, capping OpenMP would have capped it, so either the library does
+not thread at these sizes or it threads through something honoring neither variable, with Grand
+Central Dispatch the obvious candidate. If the latter, then when fronts eventually run as concurrent
+tasks each front's BLAS call could spawn its own work with no lever to stop it, and the instruction
+this entry gives, cap Accelerate to one thread per front, could not be carried out at all. One lever
+remains untried, Accelerate's own `BLASSetThreading` called from code rather than set in the
+environment; checking Apple's documentation for it is the cheapest next step and would settle the
+threading question at the same time, since a GF/s column that moves at all proves the threading was
+there.
+
+**The split between library threading and own threading is a machine-dependent decision, not a
+design to commit to.** A solver that assumes a sequential BLAS and threads the dense work itself is
+tuned for x86, where each core has its own vector units, and wasted here, where the threads would
+funnel into one shared matrix unit. A solver that assumes a threaded BLAS is tuned for here and
+leaves x86 cores idle. This is why the MUMPS work reaches for a performance model rather than a fixed
+rule, and it argues against baking either assumption into Oblio.
+
+The window is far narrower than "the leaves" suggests. Running two whole `dgemm`s side by side rather
+than back to back gains about 1.5x at order 32, 1.14x at 64, and nothing from 128 up. A hand-written
+triple loop under identical scheduling gains 1.9x across that whole range, which is the control
+proving the cores are real and the shortfall belongs to the kernel. So the dense side has a payoff
+window of roughly order 32 to 64 and no more. The mechanism is not fully resolved: either Accelerate
+already spreads a call across cores, so the serial baseline was never serial, or the cores are free
+and all funnel into a matrix unit shared per cluster that one call already saturates. Both may hold.
+For this decision the disjunction suffices, since either way a second core adds nothing above order 64.
+
+**Where the opportunity actually is.** Dense kernels run at about 448 GF/s against the hand loop's 21,
+so they are already at the hardware ceiling and cannot get faster, while everything else in a
+multifrontal pass is our own code: the extend-add and `gblToLcl` scatter, the update stack, and for
+dynamic LDL the threshold pivot search, which is a scan with no BLAS in it. That work uses per-core
+resources, which is precisely what the hand loop's steady 1.9x says two cores deliver. As the kernels
+stay pinned and problems grow, the structural share only rises. **The number that decides this item is
+therefore the structural-to-dense time ratio inside `factorMultifrontal`, and nothing else needs
+measuring first.** Timers around the BLAS calls against everything else would answer it; bucketing by
+supernode size afterwards sharpens it into the front-size histogram the same instrumentation gives.
+
+**Why multifrontal and not the other two.** MF's dependency set is exactly the parent-child edge: a
+front is ready when its children are done, which is a dependency the tree already encodes and which
+`task depend` expresses natively. LL gathers from a scattered set of descendants and RL pushes to a
+scattered set of ancestors, so both have a dependency graph much denser than the tree even though
+their traversal order is tree-consistent. The memory argument is stronger still: MF accumulates into
+a private contribution block per supernode and the branches meet only at the extend-add into the
+shared parent, whereas concurrent branches under RL would accumulate into the same ancestor columns
+and need locks or per-thread privatization. MF is the traversal whose parallel form needs no
+synchronization its serial form did not already have.
+
+**What `factorStaticMultifrontal` would need.** Four changes, none large, listed so the work can be
+picked up cold.
+
+The driver loop has the wrong shape. It is a flat loop over supernodes in increasing order, relying
+on the postorder numbering to have children done before parents. A `#pragma omp for` over it is
+simply incorrect, since it expresses that children come earlier and not that `kk` waits for them.
+Either a recursive walk that spawns a task per child and waits before assembling, or `task depend`
+keyed on the stack slots. The recursive form is natural and needs no `depend` clauses.
+
+`gblToLcl` is a genuine race. One `std::vector<std::int32_t>` sized to the matrix order, filled by
+`setGlobalToLocal` and emptied by `clearGlobalToLocal` around every supernode. It must become
+per-thread, at `O(n)` per thread, which is cheap at these thread counts.
+
+The early exits cannot stay. Two `return false` paths sit inside the loop, for `assembleFromA`
+failure and for non-positive-definite Cholesky, and a return cannot leave an OpenMP structured block.
+They become an atomic flag, read by sibling tasks if they should stop rather than finish.
+
+Task granularity needs a cutoff, since spawning a task per order-32 front spends more on scheduling
+than on arithmetic. Relatedly, `updateStaticMultifrontal` allocates a local `upper` buffer per call,
+which at leaf granularity becomes allocator traffic from every thread at once and may want a
+per-thread buffer.
+
+**One structure is already right, and it is the one recorded above as a wart.** `stack` is a
+`std::vector<UpdateMatrix<Val>>` with one slot per supernode, written by `kk` and read by its parent,
+so concurrent branches touch disjoint slots. The preceding entry records this non-LIFO shape as a
+deviation from 0.9 to be repaid; for parallelism it is exactly right, since a true LIFO is shared
+mutable state that every concurrent branch would contend for. Anyone reintroducing stack discipline
+should read that entry and this one together.
+
+All of the above is the static path. Dynamic multifrontal is harder, because a delayed column
+migrates from a child into its parent's index set, which is real cross-front coupling rather than the
+clean parent-child handoff the static case has.
+
+**Order of attack, by effort against certainty.** Take the free parallelism first, which means
+leaving dense kernels to whatever the BLAS does, since the measurement says there is nothing left to
+take there on this hardware. Then do the work no library can do, the structural loops, which pays on
+any machine because it uses per-core resources rather than a shared unit and does not depend on which
+BLAS is linked. Branch parallelism comes with that rather than before it: it is worth about 1.5x on
+dense fronts below order 64 and nothing above, but it needs the same restructuring the structural
+work needs, a driver expressed as a tree walk with per-thread scratch, so the two arrive together.
+Getting smarter than that, a performance model choosing per region of the tree, is a later and much
+larger project.
 
 Requires multifrontal, whose subtrees are already independent tasks with a per-subtree stack. Trigger:
-when the serial leaf-front time is a measured bottleneck, not before.
+when the structural share of `factorMultifrontal` is measured and found large, which supersedes the
+earlier trigger of serial leaf-front time, since the dense leaf window is now known to be narrow.
+
+Reference: J.-Y. L'Excellent and W. M. Sid-Lakhdar, "A study of shared-memory parallelism in a
+multifrontal solver", *Parallel Computing*, 2014, already cited in ARCHITECTURE. It measures threaded
+BLAS and solver OpenMP as separate contributors rather than lumping them, proposes the performance
+model mentioned above, and finds the payoff turns on the ratio of large fronts to small ones, which
+is the same front-size question named here.
 
 ## Structure
 

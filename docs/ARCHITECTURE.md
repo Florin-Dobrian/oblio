@@ -616,7 +616,7 @@ difference the faster it gets, since the un-threaded remainder becomes the large
 Amdahl's law read the pessimistic way.
 
 This sharpens what OpenMP is for, which is easy to misread as simply threading the dense front, since
-the BLAS already does that. The MUMPS shared-memory study (L'Excellent and Sid-Lakhdar, 2014) is
+the BLAS already does that. The MUMPS shared-memory study (L'Excellent and Sid-Lakhdar, *Parallel Computing*, 2014; full citation in `TODO.md`, forest parallelism) is
 explicit that a node has two sources of
 threading: the multithreaded BLAS, and OpenMP directives inserted into the solver's own loops. A
 vendor BLAS supplies the first. The second is the assembly of the front, the pivoting and scaling

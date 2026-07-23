@@ -67,6 +67,158 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-07-22, Forest parallelism, when we build it: portable threading first, architecture-targeted second
+
+ARCHITECTURE records that Oblio gets node parallelism for free through Accelerate but that tree
+parallelism, factoring independent forest branches on separate cores, is Oblio's to build. This entry
+is the how, worked out ahead of the need so the reasoning is not lost. It is a recommendation, not a
+commitment: nothing here is built. Apple Silicon is the immediate target, but portability is a
+first-class constraint here, because Oblio's defining property is that it runs on any CPU with some
+BLAS and LAPACK, and forest parallelism must not cost that. So the recommendation leads with what is
+portable and treats the architecture-specific options as a deliberate trade, not the default.
+
+**The shape of the work dictates the tool.** Forest parallelism is not a parallel loop. The
+elimination tree is a dependency graph, a parent's task waiting on its children's, and the subtrees
+are wildly uneven, one near the root enormous and a leaf subtree trivial. Static assignment, thread i
+takes subtree i, load-balances badly. What the work needs is dynamic work-stealing over an irregular
+task DAG, and that single requirement sorts every option below.
+
+**The real fork is portable versus architecture-targeted, and portability wins by default.** The
+options divide cleanly. Portable: OpenMP, and the C++ task-graph libraries (Taskflow, oneTBB), which
+run on Linux, macOS, and Windows, x86 and arm64 alike. Architecture-targeted: Apple's GCD, and the
+equivalent vendor stacks elsewhere, a different one per platform. The architecture-targeted route buys
+tuning, P-core placement on Apple and the analogous thing on an AMD or Intel box, at the cost of a
+separate implementation per platform and the loss of the any-CPU property. For Oblio that trade is
+usually the wrong way round: the whole point of the solver is that it runs anywhere a BLAS does, so
+the parallel layer should too, and the architecture-specifics belong as tuning on top of a portable
+base, exactly as the choice of BLAS (Accelerate, MKL, OpenBLAS) is tuning on top of a portable
+BLAS/LAPACK interface.
+
+**For shared memory, the model is threads, not processes, which means OpenMP, not MPI.** Both are
+portable, so both keep the any-CPU property, but they are not interchangeable here. MPI is a model of
+separate processes that communicate by messages; on one multicore machine the ranks do run across the
+cores, and a good MPI routes intra-node messages through a shared-memory buffer rather than a network,
+but each rank still has its own address space, so data is replicated across ranks and a message is a
+copy through a buffer. Threads share one address space, so a subtree handed to another core is a
+pointer, not a copy, and nothing is replicated. On genuinely shared memory the thread model is simply
+lighter, which is exactly why MUMPS, MPI-first by origin, grew an OpenMP layer for multicore nodes.
+Oblio starts where MUMPS had to retrofit: it is already single-process, so a threading runtime is the
+natural and lighter fit, and MPI would be the wrong tool for single-node forest parallelism even
+though it is portable.
+
+**pthreads: no.** It gives raw threads, mutexes, and condition variables and nothing else, so forest
+parallelism on it means hand-building a work-stealing task pool with DAG dependencies, which is the
+exact wheel every alternative already provides and a hard one to get right (deque design, termination
+detection, load balancing). Reserve pthreads for a hard no-dependency constraint, and even then macOS
+offers a better low-level primitive in GCD.
+
+**Recommended, ordered for Oblio: OpenMP first.** It is a compiler feature rather than a library
+dependency, so on Linux and Windows there is nothing new to link, and its `task` construct with
+`depend` clauses maps onto the tree DAG directly, with the runtime doing the work-stealing. Its
+decisive property for Oblio is graceful degradation: with OpenMP switched off the pragmas are ignored,
+so a postorder tree walk annotated with tasks compiles and runs as valid serial code everywhere, which
+preserves the any-CPU property exactly. It is also the layer MUMPS uses, a proven path. The
+portability is the same kind Oblio already accepts for BLAS and LAPACK: a standard interface with a
+per-platform backing chosen at link time, Accelerate or MKL or OpenBLAS behind the one and libomp or
+libgomp or the MSVC runtime behind the other, with the code compiling against the interface rather
+than the backing. The one asymmetry from the BLAS case is how the backing is obtained on Apple:
+Accelerate is a macOS system framework that needs no install (`-framework Accelerate` and nothing
+else), whereas Apple's Clang ships no OpenMP runtime, so macOS needs libomp from Homebrew or a
+Homebrew toolchain. Every other platform has OpenMP in the compiler, and there the asymmetry can
+invert, OpenMP built in while the BLAS is the thing to install.
+
+**Then the C++ task-graph libraries, Taskflow or oneTBB, for better ergonomics at the price of a
+dependency.** The elimination forest maps onto a task graph one to one, each supernode a task and each
+child-to-parent edge a dependency, and the work-stealing scheduler absorbs the uneven subtree sizes,
+which is the whole difficulty. Both are portable and build native on arm64 macOS; Taskflow is
+header-only, oneTBB more mature, with `task_group` and `flow_graph`. They express the DAG more cleanly
+than OpenMP pragmas, but they are a hard dependency to link rather than a compiler feature, and they
+do not degrade to nothing when disabled. Reach for them if the pragma ergonomics grate and the
+dependency is acceptable.
+
+**Architecture-targeted, only if portability is being deliberately traded for tuning: GCD on Apple.**
+Grand Central Dispatch is zero external dependency on macOS, callable from C++, and P-core / E-core
+aware through QoS classes, so high-priority work lands on the performance cores, which the portable
+options cannot request, since macOS gives no hard thread-to-core affinity, only QoS hints. The cost is
+that it is Apple-only and expresses DAG dependencies more manually. It is the right choice only when
+the platform is fixed and the P-core placement is worth a per-platform implementation, and the
+equivalent statement holds for a vendor-specific stack on any other architecture.
+
+**The caveat that bites regardless of choice, and on every platform: nested parallelism against the
+BLAS.** Running N subtrees on N cores while each subtree's fronts call a self-threading BLAS
+oversubscribes the machine. The fix is the tree-versus-node decision made concrete: inside a parallel
+forest region, cap the BLAS to one thread per front (Accelerate, MKL, and OpenBLAS each expose a
+thread cap), and let it thread out only when factoring one large front alone near the root. On Apple
+Silicon the AMX-contention inversion makes this clean rather than a compromise: forest parallelism
+pays at the leaves, small fronts that run on NEON and barely thread in the BLAS anyway, while the big
+root fronts are left to Accelerate and the shared AMX single-stream. Forest across cores at the
+bottom, the BLAS at the top, and the two do not fight. The oversubscription caveat is
+platform-independent; only the AMX detail is Apple's.
+
+**The GPU is the wrong axis for this, on any platform.** Forest parallelism is many small irregular
+tasks, the opposite of what a GPU wants; small fronts on a GPU would drown in launch and transfer
+overhead. The GPU is a separate axis, offloading the large dense root fronts, which is node
+parallelism; on Apple that overlaps with what AMX already does, and everywhere it carries the
+host-to-device transfer cost. A much larger and later lift, orthogonal to forest parallelism, and idle
+by design for it.
+
+**Bottom line.** OpenMP first, because it is portable, is a compiler feature rather than a dependency,
+and degrades to valid serial code, so it keeps Oblio's any-CPU property intact; the C++ task-graph
+runtimes (Taskflow, oneTBB) as the portable, nicer-ergonomics option that costs a dependency; GCD or
+another vendor stack only when portability is knowingly traded for platform tuning. Not MPI, which is
+portable but process-based and memory-heavy on a single shared-memory node; not pthreads, which means
+hand-rolling the work-stealing DAG; not the GPU, which is the wrong shape for the task. And any of
+these requires multifrontal, whose subtrees are already independent tasks with a per-subtree stack;
+the looking traversals, with their cross-tree update flow, do not decompose this way.
+
+---
+
+## 2026-07-22, The update stack is random-access by supernode, not a true LIFO
+
+The multifrontal update stack was, in 0.9 and in the classical design, an actual stack: each
+supernode pushes its contribution block as it finishes, in first-to-next child order, and a parent
+pops its children off the top, which is last-to-previous order since the last child pushed sits on
+top. One arena, one stack pointer, the peak bounded into contiguous memory, and that contiguity is
+the natural on-ramp to an out-of-core factorization.
+
+**Our stack is not that.** It is a `std::vector<UpdateMatrix>` indexed by supernode: `allocate` fills
+an arbitrary slot when its supernode is reached, `discard` frees an arbitrary slot once its parent
+has folded it, and the fold walks children first-to-next. We keep neither the push/pop discipline
+nor the reverse pop order. Read strictly, this departs from the original design, and the departure is
+worth naming rather than leaving implicit.
+
+**Correctness is untouched, on two independent counts.** First, the postorder numbering means a true
+LIFO would in fact work here; the structure is present, we simply do not lean on it. Second, the fold
+is order-free regardless: `assembleUpdateMatrix` accumulates (`+=`, commutative) and `assembleDelay`
+assigns into disjoint positions, so folding a parent's children in any order lands the same block,
+give or take the last bit of the update sum. That last-bit freedom is not hypothetical; it is why the
+tier-2 multifrontal pivot counts are bounded rather than pinned, and why multifrontal residuals
+differ from left-looking in the low bits. The same summation-order freedom is recorded from the
+testing side in TESTING_SPECIFICATION.
+
+**What we give up is the contiguous arena, and only that.** The set of blocks live at any instant is
+identical to what a true stack would hold, since a block lives from its supernode's turn until its
+parent folds it, so the peak in bytes is the same. It is merely scattered across per-supernode heap
+allocations instead of managed by one stack pointer over one buffer. This is the same decision
+recorded from the other side in the UpdateMatrix row of PORTING_LEDGER: we dropped 0.9's abstract
+`UpdateStack` and its out-of-core concrete `UpdateStackDynamic` as unneeded in core. The departure
+here is precisely that in-core choice, restated in stack-discipline terms.
+
+**The one order that is not free, and must stay first-to-next, is the delay prepend.** The two orders
+are decoupled, and that is the trap in any future "reverse everything to make it a real stack"
+refactor. The fold is free because it is commutative. The delay prepend is structural: it writes kk's
+index set, which fixes the front's column order, and the pivot sequence reads that order. `gblToLcl`
+keeps the values self-consistent for whatever prepend order is used, so reversing it is not a
+correctness fault, but it would give kk a different though still valid column ordering, diverge from
+0.9's canonical index set, and move the pinned tier-1 pivot counts. So a LIFO refactor would be right
+for the fold and wrong for the delays; the two cannot be swept together.
+
+**When to revisit.** If a contiguous arena or an out-of-core path is ever wanted, reintroduce the
+stack discipline for the fold, with 0.9's `UpdateStack` / `UpdateStackDynamic` split as the reference
+for the arena and the out-of-core spill. Leave the delay prepend first-to-next.
+
+---
+
 ## 2026-07-19, The per-supernode lookups drop `Ptr`: `nodeIdx(jj)` and `val(jj)`
 
 The naming entry below (07-17) settled the arrays and, in passing, gave `Ptr` a job: an offset is

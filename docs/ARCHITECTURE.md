@@ -194,8 +194,11 @@ arrive (left-looking), or `jj` held fixed while its ancestors are visited (right
 
 The section above followed a delayed column, which travels one edge. An update travels differently:
 from a supernode to *any* ancestor holding one of its update rows, possibly several of them, and
-possibly skipping levels. How that gets scheduled is the one place the two traversals genuinely
+possibly skipping levels. How that gets scheduled is where the two *looking* traversals genuinely
 disagree, and it is worth setting down because the mechanism is not obvious from either driver.
+Multifrontal, the third traversal, schedules updates a third way again, carrying each supernode's
+whole block one edge up a stack rather than relaying or pushing it across the tree; *Choosing a
+traversal* below weighs all three. This section is the two looking ones, pull against push.
 
 **Two independent flows share these drivers.** The update flow moves a supernode's update area to its
 ancestors, driven by the update (descendant-to-ancestor) relationship. The delay flow moves a
@@ -409,7 +412,7 @@ order, commonly, on branching forests. Along a single root-path it is always sor
 inversion observed was between different branches. Order does not affect correctness, since the
 updates are summed, but it does affect the last bits of that sum.
 
-#### What the two traversals actually cost
+#### What the two looking traversals actually cost
 
 **Both do work proportional to the same count: the number of (descendant, ancestor) pairs**, which
 is the right unit here rather than supernodes. On an 8x8 grid Laplacian under AMD, 54 supernodes,
@@ -458,7 +461,7 @@ at all.** If an element could sit on two lists at once the encoding breaks.
 
 Keep the tail array if this is ever done. Dropping it gives LIFO with two arrays instead of three,
 but that reverses the order updates are summed into an ancestor, which perturbs the last bits and
-would break `test_pipeline`'s assertion that the two traversals agree bit for bit.
+would break `test_pipeline`'s assertion that the two looking traversals agree bit for bit.
 
 **And be precise about what it would buy.** The complexity does not change: push and pop are O(1)
 either way. What changes is the constant, and the reason the constant is worth caring about is that
@@ -470,6 +473,194 @@ is the part neither an operation count nor an allocation count expresses.
 The port uses `std::vector<std::list<std::int32_t>>` today. 0.9 used an `ArraySingleLinkedList`,
 whose source did not come across with the rest of the reference, so whether it pooled its nodes is
 not known here.
+
+### Choosing a traversal: what each costs and buys
+
+The two sections above followed the two looking traversals and weighed them against each other, one
+allocation against one warm sweep per pair. Multifrontal does not fit that comparison, because it
+moves updates by a third route. Left-looking pulls each descendant's update when the ancestor is
+reached; right-looking pushes each supernode's updates as it finishes; multifrontal does neither. It
+forms each supernode's *entire* contribution block once, leaves it on a stack, and a parent folds in
+its children's blocks when its own turn comes, so an update reaches a distant ancestor one edge at a
+time, riding up inside each parent's block rather than by a relay or a cross-tree push. The stack
+itself is described in DESIGN_DECISIONS (2026-07-22).
+
+Multifrontal's classical motivation was out-of-core factorization: the stack spills to disk, and one
+contiguous arena is what makes that spill cheap. That is not the motivation here. Today the case for
+it is parallelism, and the paragraphs below build to that.
+
+**Multifrontal costs more working memory in core, and that is the first thing to be honest about.**
+Left- and right-looking hold one update block at a time and fold it straight into L; they never keep
+a standing Schur complement. Multifrontal keeps a stack of contribution blocks, scratch that is not
+part of L, alive from each supernode's turn until its parent consumes it. Stack discipline bounds
+that peak, but it is still strictly more scratch than the looking traversals need. So frugality is a
+real reason to prefer left-looking, and "why pay for multifrontal?" is the right question rather than
+a tie.
+
+**What the memory buys is where the arithmetic happens.** Multifrontal concentrates each supernode's
+numeric work into one dense, contiguous frontal matrix, and the split is visible in the code:
+`assembleUpdateMatrix` is the irregular part, the `gblToLcl` scatter, and it is cheap data movement;
+`factorDynamicSupernode` and `updateDynamicMultifrontal` are the expensive part, and they run as a
+dense factor, a triangular solve and a symmetric update over one column-major block, a large BLAS-3
+call apiece near peak flops. The index chasing sits *outside* the arithmetic, confined to assembly.
+The looking traversals invert this: `updateDynamicSupernode` re-forms each descendant's contribution
+against one ancestor at a time, so the update is chopped into many smaller index-mapped pieces, each
+fronted by a gather, worse flop-per-byte and worse locality. The multiplicative work that forms L is
+the same either way, and the surplus is purely assembly, extra additions, never a repeated multiply.
+Take `I` updating both `J` and `K`, with `J` also updating `K`. Left- and right-looking send `I`'s
+contribution to `K` straight from `I`: one addition. Multifrontal forms `I`'s whole contribution
+block once, at `I`, then only moves it: the block extend-adds into `J`, where the part bound for `K`
+lands in `J`'s update rows; `J` forms its own block, which now carries those `I` rows alongside its
+own; that block extend-adds into `K`. So `I`'s contribution to `K` is added twice, transiting `J`,
+rather than once. The extra cost is exactly that transit `+=`, because a contribution once formed is
+data the tree moves rather than recomputes: `J` re-forms only its own Schur complement, never `I`'s.
+So the trade is not free flops against fragmented flops, it is slightly more arithmetic, all of it in
+assembly, bought for far less fragmentation. **Multifrontal localizes the heavy arithmetic into one
+dense block and pushes the sparsity out to assembly; the looking traversals smear the sparsity
+through the arithmetic.**
+
+**Parallelism is the other half, and today it is the point.** It comes in two forms, and they hand
+off across the tree. Near the leaves the forest is wide, so independent branches factor concurrently,
+one task per branch: *tree parallelism*, many small fronts at once. Near the root the tree narrows to
+a few big supernodes and branch parallelism runs out, but the fronts are now large, so the
+parallelism moves *inside* each front, the big dense factor, solve and update threaded or handed to
+an accelerator: *node parallelism*. The bottom of the tree parallelizes across fronts, the top within
+a front, and a scheduler rides the transition. Multifrontal maps onto both cleanly; the scattered
+updates of the looking traversals get neither. On multicore and GPUs this is frequently the deciding
+factor, more than single-thread locality, and it is what replaced out-of-core as the reason the
+method is worth its overhead.
+
+The reference implementation of this split is MUMPS, whose scheduler sorts fronts into three node
+types, and they are exactly the two models with node parallelism split in two. A type-1 node is
+handled by a single process, so type 1 *is* tree parallelism: the concurrency is many type-1 nodes at
+once across the branches. A type-2 node is a large interior front whose rows are partitioned across a
+master, which owns the pivot rows, and slave processes, which take the update rows, so it is node
+parallelism in 1D. A type-3 node is the root, large enough to be worth a 2D block-cyclic distribution
+over a process grid, node parallelism in 2D. So node parallelism bifurcates, 1D for interior fronts
+and 2D for the root, while tree parallelism is just the type-1 leaves.
+
+MUMPS distributes these node types across MPI ranks, with shared-memory parallelism inside each rank,
+OpenMP threads and a multithreaded BLAS, and ScaLAPACK driving the 2D root. That is the whole of its
+parallel model, and it fixes what MUMPS is: a distributed-memory solver, written in Fortran and C,
+whose production form is hybrid MPI plus OpenMP and which therefore runs on shared- and
+distributed-memory machines alike, from a single multicore workstation to a large cluster. Beyond MPI
+it depends on BLAS, ScaLAPACK, and BLACS, and it builds on Unix-like systems and Windows. As of the
+5.8 series (January 2026) the settled core is CPU-only; recent work targets GPU acceleration and
+mixed precision, an active direction rather than the mature base.
+
+MUMPS also ships a genuinely sequential build, and naming it matters because it is where Oblio sits.
+The sequential and parallel libraries share one interface and cannot coexist in an application, so the
+choice is made at compile time, not at runtime, and the sequential library is the same source with
+the MPI layer removed. Sequential there means no MPI, one process, no message passing, no ScaLAPACK
+root, but it can still be threaded, because the within-rank OpenMP and the multithreaded BLAS sit
+below the MPI layer, in the dense front kernels. So the ladder is three rungs: fully serial and
+single-threaded, sequential but multithreaded (one process over many BLAS threads), and hybrid MPI
+plus OpenMP across a cluster, the same multifrontal algorithm on all three with the parallel layers
+switched on or off.
+
+Oblio's own control flow is the bottom rung, one process with one contribution stack in memory and
+the three traversals a serial choice, and MUMPS is a reference for the rungs above rather than a
+dependency. The comparison
+earns its place because multifrontal is the traversal that reaches up the ladder: its fronts are
+already dense BLAS-3 kernels, which is the node-parallelism hook, and the forest already exposes
+independent branches, which is the tree-parallelism hook. This is not a plan, only what makes
+multifrontal worth having in a serial solver that might not stay serial, and it is why the sequential
+case has to be correct first: the algorithm is the same across the rungs, and the parallelism is
+meaningless until the one-process factorization is right.
+
+But the control flow is only half the story, and the BLAS is the other half. On Apple Silicon Oblio
+links Accelerate, and Accelerate's linear algebra runs on the CPU, not the GPU. It abstracts the
+processor and selects instructions at runtime: NEON SIMD across the vector lanes, and, for matrix
+work, the AMX matrix coprocessor, an undocumented on-CPU matrix unit that Accelerate's BLAS and
+LAPACK are built to drive and that is reachable, in practice, only through Accelerate. The GPU is a
+separate world: matrix work there goes through Metal and the Metal Performance Shaders, needs Metal
+code, and nothing a `-framework Accelerate` build calls ever touches it. So Oblio's `herk`, `gemm`,
+`potrf` and `trsm` run on the CPU cores and the AMX unit, and the GPU sits idle.
+
+And Accelerate is multithreaded, through Apple's own threading rather than OpenMP, with a
+BLAS_THREADING control in its documentation. The coprocessor complicates what multithreaded means:
+the AMX unit runs independently of the cores and a single thread drives it, so a large matrix-matrix
+multiply can appear to use one thread while the parallel work happens across the AMX lanes in
+hardware. It is also routine-dependent, a level-3 `gemm` spreading across a few cores where some
+LAPACK factorizations lean almost entirely on the AMX unit. So the parallelism inside the library is
+a blend, SIMD across NEON lanes, hardware-parallel across AMX lanes, and multiple cores for some
+routines, none of it visible to the caller.
+
+The consequence places Oblio a rung higher than its control flow alone would suggest. It writes no
+threading code, opens no parallel regions, and simply calls the BLAS, yet every front it hands to
+Accelerate is factored with NEON, the AMX unit, and Apple's threading underneath. So Oblio already
+has node parallelism on its large supernodes, exactly the role OpenMP-plus-BLAS plays inside a single
+MUMPS rank, and it has it for free. That is the node-parallelism hook made real rather than
+hypothetical: the dense BLAS-3 fronts are being accelerated within each front, on the large
+supernodes near the root where it pays, with nothing asked of Oblio but the link line. On the ladder,
+Oblio is on the middle rung, a sequential process over a parallel BLAS, and it got there by doing
+nothing.
+
+What does not come for free is tree parallelism. Factoring independent branches of the forest on
+different cores is concurrency in Oblio's own control flow, above the BLAS rather than inside a BLAS
+call, so Accelerate cannot supply it: Oblio would have to schedule the branches across threads
+itself. That is the one rung the framework will not climb on its behalf, and it is the natural place
+Oblio could do more on Apple Silicon, factoring disjoint subtrees on separate cores while each
+subtree's fronts still ride the AMX unit beneath. Multifrontal is once more the traversal that makes
+it reachable, since its subtrees are already independent tasks and its contribution stack is
+per-subtree; the looking traversals, with their cross-tree update flow, do not decompose so cleanly.
+Node parallelism is present and free; tree parallelism is absent and would be Oblio's to build.
+
+It is worth being exact about why the one is free and the other is not, because it draws the real line
+between what a vendor BLAS gives and what it structurally never will. Accelerate threads the inside of
+one dense operation, a single `gemm` or `potrf`. It has no view of the algorithm around that
+operation, so everything between and outside the BLAS calls is beyond it: the extend-add and scatter
+that assemble a front, the pivot search and the row and column swaps, the traversal of the tree, the
+choice of how many threads a given front deserves. A threaded BLAS makes proportionally less
+difference the faster it gets, since the un-threaded remainder becomes the larger share, which is
+Amdahl's law read the pessimistic way.
+
+This sharpens what OpenMP is for, which is easy to misread as simply threading the dense front, since
+the BLAS already does that. The MUMPS shared-memory study (L'Excellent and Sid-Lakhdar, 2014) is
+explicit that a node has two sources of
+threading: the multithreaded BLAS, and OpenMP directives inserted into the solver's own loops. A
+vendor BLAS supplies the first. The second is the assembly of the front, the pivoting and scaling
+loops (for an indefinite front, the threshold pivot search and 2x2 selection, the same work Oblio's
+dynamic LDL does), the copies and the contribution-block stacking, none of which is a BLAS call. For a
+genuinely large front near the root the BLAS is most of the node parallelism and OpenMP adds little
+beyond the assembly. Where OpenMP earns its keep is the small and medium fronts: below some size a
+BLAS thread's fork-and-join overhead exceeds the work in the call, so the library runs those fronts
+nearly serially even though there are thousands of them. Extracting parallelism there is not more
+BLAS threading, it is running many fronts at once, which is tree parallelism, and it needs a scheduler
+above the BLAS, driven by a performance model, to decide per region of the tree between one front on
+many threads and many fronts on one thread each. That decision, and the NUMA-aware placement of a
+front's memory near the cores that touch it, are things a BLAS cannot do because it sees only the one
+call it was handed.
+
+So the history runs opposite to the tempting reading that a good BLAS made OpenMP unnecessary.
+Threaded BLAS long predated MUMPS's own OpenMP, the vendor and open libraries threaded their kernels
+for years and MUMPS could always link one; MUMPS added its own OpenMP layer only in the 2010s, and
+precisely because the threaded BLAS was not enough, once the kernels were fast the assembly and the
+small-front swarm were the bottleneck. The free lunch and the explicit work have always coexisted;
+the explicit work is whatever the BLAS structurally cannot see, which is the algorithm above the
+kernel, not the kernel.
+
+One Apple Silicon detail tempers even the free part, and it is worth recording before anyone builds
+tree parallelism here. The AMX coprocessor is shared, roughly one block per CPU cluster rather than
+one per core, so the free node parallelism (a large front driving the AMX) and any tree parallelism
+Oblio might add (several fronts on several cores) partly contend for the same hardware. They are not
+additive: four AMX-heavy fronts on four cores do not give four times the throughput if they queue for
+one AMX block. The inversion is the useful part to see. The free parallelism is strongest exactly
+where tree parallelism would help least, the big fronts near the root that already saturate the shared
+AMX through Accelerate, and tree parallelism would help most exactly where the free parallelism is
+weakest, the leaf swarm of small fronts that run on NEON without leaning on AMX. So if Oblio ever
+builds tree parallelism on Apple Silicon, the leaves are where it would pay, not the root.
+
+**None of this is a strict win, which is why the engine keeps all three.** Multifrontal pays the
+stack memory and the assembly overhead, extend-adds that carry whole blocks up the tree and re-sum
+the same rows at several levels, to buy dense kernels and parallelism. When fronts are large, the 3D
+PDEs and heavy-fill problems, that trade is lopsided in its favor. When fronts are small, very sparse
+and tree-like with little fill, the dense-BLAS payoff is thin and the extend-add and stack overhead
+dominate, and left-looking is both leaner and faster. The right traversal is problem- and
+machine-dependent, which is the whole reason the engine exposes the choice rather than picking one:
+left-looking is the frugal default, and multifrontal earns its memory when the fronts are fat or the
+machine is parallel. **None of this is measured here**; as with the left-versus-right cost note
+above, it is the shape of the tradeoff, and the measurement is a work item in docs/TODO.md.
 
 ### The parallel with the matrix, and where it stops
 

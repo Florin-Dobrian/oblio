@@ -109,6 +109,58 @@ back pays for itself. 0.9 has this as its `MultipleVector` path, so the algorith
 is missing on our side is `DenseMatrix`, which the ledger lists as a unit and which nothing has
 needed yet.
 
+### The update stack is not a true LIFO; proper stacking would bound the extra scratch
+
+Our multifrontal update stack is a `std::vector<UpdateMatrix>` indexed by supernode, with
+arbitrary-slot allocate and discard, not the classical push/pop arena moved by a single stack
+pointer. This is a deliberate in-core choice and correct as it stands; the full reasoning is in
+DESIGN_DECISIONS (2026-07-22). It is recorded here because it is easy to forget and because more than
+one future direction turns on it.
+
+Multifrontal already costs more working memory than the looking traversals, a standing stack of
+contribution blocks rather than one update block at a time, so keeping that extra scratch small is
+worth doing on its own account. A true stack is how: one arena, the peak bounded into a single
+buffer. The historical payoff was out-of-core, where that arena spills to disk, and 0.9's abstract
+`UpdateStack` and its out-of-core concrete `UpdateStackDynamic` are the reference shape for it. The
+payoff that matters now is parallelism: independent forest branches run as independent tasks, each
+carrying its own stack, so a bounded per-branch peak is what keeps the aggregate in hand. Our
+scattered per-supernode allocations hold the same live set and the same peak in bytes as a true
+stack, so nothing is lost today, but they are not arena-managed and do not bound as cleanly under
+either direction. Not now, but eventually.
+
+**The trap, for anyone reintroducing stack discipline: reverse the fold order but not the delay
+prepend.** The fold is commutative and free to reorder; the delay prepend is structural, since it
+writes kk's index set and so fixes the front's column order that the pivot sequence reads and that
+the pinned tier-1 counts depend on. A LIFO refactor is right for the fold and wrong for the delays,
+and the two cannot be swept together. Trigger: when the extra scratch needs bounding, whether for
+parallelism or an out-of-core path.
+
+### Forest (tree) parallelism on Apple Silicon
+
+ARCHITECTURE's parallelism note ends on the observation that Oblio gets node parallelism for free
+through Accelerate, but that tree parallelism, factoring independent forest branches on separate
+cores, is Oblio's to build. This is that item. The node side needs nothing; this is the tree side.
+
+The how is worked out in DESIGN_DECISIONS (2026-07-22). The split that matters is portable versus
+architecture-targeted, and portability wins by default, since Oblio runs anywhere a BLAS does. Portable
+and recommended first is OpenMP: a compiler feature rather than a dependency, its `task depend` pragmas
+map onto the tree DAG, and they degrade to valid serial code when OpenMP is off, so the any-CPU
+property is untouched (the one snag is Apple Clang shipping no runtime, so macOS needs libomp). The C++
+task-graph runtimes (Taskflow, oneTBB) are the portable, nicer-ergonomics option at the cost of a
+dependency. Architecture-targeted stacks (GCD on Apple, a vendor equivalent elsewhere) come only when
+platform tuning like P-core placement is worth giving up portability. Not MPI, which is portable but
+process-based and memory-heavy on a single shared-memory node, where threads are the right model; not
+pthreads, which means hand-rolling the work-stealing DAG; not the GPU, which is the wrong shape for
+many small irregular tasks.
+
+One thing to bake in from the start: inside a parallel forest region, cap Accelerate to one thread per
+front, or the self-threading BLAS oversubscribes the cores. Forest parallelism pays at the leaves
+(small NEON fronts), while the big root fronts stay with Accelerate and the shared AMX; split that
+way, the two do not contend.
+
+Requires multifrontal, whose subtrees are already independent tasks with a per-subtree stack. Trigger:
+when the serial leaf-front time is a measured bottleneck, not before.
+
 ## Structure
 
 Two extractions are available in the dynamic factorization code, recorded here in enough detail to
@@ -313,30 +365,6 @@ before concluding anything about the traversal itself.
 
 Worth doing alongside any other timing work rather than on its own, and worth doing before either
 traversal is chosen as a default for anything.
-
-### Amalgamation tie-break: front size versus list position
-
-`compressThreshold` in ElmForestEngine breaks a fill tie between two children by taking the one with
-the larger front, and only then by list position. The larger-front rule is a greedy heuristic,
-"absorb the wide children before the parent's front grows and prices them out", and section 4.5 of
-docs/sparse_factorization.md explains it. It is locally tempting but has no global guarantee: each
-absorption widens the shared front, so a locally good pick changes the state every later pick is
-priced against and can foreclose a better sequence. The objective it optimizes, block quality, is
-itself machine-dependent and fuzzy, so there is no clean optimum being approximated.
-
-That raises a simpler alternative: drop the front-size level and break fill ties on list position
-alone. It loses an unproven heuristic and gains a shorter, more honest rule, one that does not imply
-a rigor the greedy algorithm lacks. It does not remove arbitrariness, only moves it from front size
-to list order, but both are conventions, not theorems.
-
-Which is better is empirical, and the two variants differ by one line, so the experiment is clean:
-run both over a matrix suite, holding everything else fixed, and measure. Worth reporting how often
-the tie-break even fires (it needs an exact fill tie *and* differing front sizes, likely rare), how
-often the partition then differs, and, the thing that actually matters, the factor flops or timing
-of the resulting blocks on the target machine. If the deltas are in the noise, positional-only wins
-on simplicity; if front-size-first measurably helps, it earns its complexity. Fits the experiments/
-prototype-first pattern: an isolated harness that runs both and reports the comparison, kept out of
-the main code until the conclusion is drawn.
 
 ## Testing
 

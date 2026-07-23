@@ -418,6 +418,35 @@ void NumFactorEngine::updateStaticSupernode(const Factor& nf, std::int32_t jj,
              Val(1), u22Val + jjKkWidth, dld);
 }
 
+template<class Val, class Factor>
+void NumFactorEngine::updateStaticMultifrontal(const Factor& nf, std::int32_t kk,
+                                               UpdateMatrix<Val>& kkUpdate) const {
+    const int u = static_cast<int>(nf.updateSize(kk));
+    if (u == 0)
+        return;   // a root, or a supernode reaching nowhere: no contribution to leave
+
+    const int  f   = static_cast<int>(nf.frontSize(kk));
+    const int  ld  = f + u;                 // kk's lu block height
+    const Val* val = nf.val(kk);            // kk's factored block
+    const Val* l21 = val + f;               // its update rows
+    Val*       uVal = kkUpdate.val();       // the contribution block, ld == u
+
+    if (mFactorization == Factorization::Cholesky) {
+        // U -= L21 L21^H, one rank-k call. herk resolves to syrk for real and herk for complex by
+        // the scalar type, so the complex case is Hermitian without the engine choosing, which is
+        // where 0.9's multifrontal was silently wrong (it used syrk for both).
+        herk('L', 'N', u, f, -1.0, l21, ld, 1.0, uVal, u);
+        return;
+    }
+
+    // LDL: U -= L21 D L21^H. The D in the middle rules out a rank-k call, so form U := D L21^H into a
+    // scratch and then multiply, exactly the square part of the left/right-looking LDL update with no
+    // rectangle below (the whole contribution block is the symmetric square).
+    std::vector<Val> upper(static_cast<std::size_t>(f) * static_cast<std::size_t>(u), Val(0));
+    formStaticUpper(u, f, l21, ld, upper.data(), f, val, ld, hermitian(mFactorization));
+    gemmLower(u, f, l21, ld, upper.data(), f, uVal, u);
+}
+
 // =================================================================================================
 // Left-looking. For each supernode: pull in every update to it from below, then factor.
 //
@@ -639,8 +668,8 @@ bool NumFactorEngine::factorStaticMultifrontal(const SparseMatrix<Val>& A, const
         stack[kk].allocate(kkUpdateSize);
         {
             std::int32_t* kkUpdateIdx = stack[kk].nodeIdx();
-            for (std::size_t i = 0; i < kkUpdateSize; ++i)
-                kkUpdateIdx[i] = kkNodeIdx[kkFrontSize + i];
+            for (std::size_t sp = 0; sp < kkUpdateSize; ++sp)
+                kkUpdateIdx[sp] = kkNodeIdx[kkFrontSize + sp];
         }
 
         // Extend-add each child's contribution block into kk's frontal, then free it. A child of kk
@@ -664,60 +693,6 @@ bool NumFactorEngine::factorStaticMultifrontal(const SparseMatrix<Val>& A, const
     }
 
     return true;
-}
-
-template<class Val, class Factor>
-void NumFactorEngine::updateStaticMultifrontal(const Factor& nf, std::int32_t kk,
-                                               UpdateMatrix<Val>& kkUpdate) const {
-    const int u = static_cast<int>(nf.updateSize(kk));
-    if (u == 0)
-        return;   // a root, or a supernode reaching nowhere: no contribution to leave
-
-    const int  f   = static_cast<int>(nf.frontSize(kk));
-    const int  ld  = f + u;                 // kk's lu block height
-    const Val* val = nf.val(kk);            // kk's factored block
-    const Val* l21 = val + f;               // its update rows
-    Val*       uVal = kkUpdate.val();       // the contribution block, ld == u
-
-    if (mFactorization == Factorization::Cholesky) {
-        // U -= L21 L21^H, one rank-k call. herk resolves to syrk for real and herk for complex by
-        // the scalar type, so the complex case is Hermitian without the engine choosing, which is
-        // where 0.9's multifrontal was silently wrong (it used syrk for both).
-        herk('L', 'N', u, f, -1.0, l21, ld, 1.0, uVal, u);
-        return;
-    }
-
-    // LDL: U -= L21 D L21^H. The D in the middle rules out a rank-k call, so form U := D L21^H into a
-    // scratch and then multiply, exactly the square part of the left/right-looking LDL update with no
-    // rectangle below (the whole contribution block is the symmetric square).
-    std::vector<Val> upper(static_cast<std::size_t>(f) * static_cast<std::size_t>(u), Val(0));
-    formStaticUpper(u, f, l21, ld, upper.data(), f, val, ld, hermitian(mFactorization));
-    gemmLower(u, f, l21, ld, upper.data(), f, uVal, u);
-}
-
-template<class Val>
-void NumFactorEngine::updateDynamicMultifrontal(const NumFactorDynamic<Val>& nf, std::int32_t kk,
-                                                UpdateMatrix<Val>& kkUpdate) const {
-    const int f = static_cast<int>(nf.frontSize(kk));    // post-factor front
-    const int u = static_cast<int>(nf.updateSize(kk));
-    if (f == 0 || u == 0)
-        return;
-
-    // The block height counts the front, the delayed columns, and the update rows: the update rows
-    // sit past the front *and* the delayed columns, which is the only place this differs from the
-    // static form.
-    const int           d       = static_cast<int>(nf.delaySize(kk));
-    const int           ld      = f + d + u;
-    const bool          herm    = hermitian(mFactorization);
-    const Val*          val     = nf.val(kk);
-    const std::int32_t* nodeIdx = nf.nodeIdx(kk);
-    const Val*          l21     = val + f + d;
-
-    // U -= L21 D L21^H with a block-diagonal D. formDynamicUpper walks pivotType over the front,
-    // handling 1x1 and 2x2 pivots, to build D L21^H into a scratch; gemmLower then multiplies.
-    std::vector<Val> upper(static_cast<std::size_t>(f) * static_cast<std::size_t>(u), Val(0));
-    formDynamicUpper(u, f, l21, ld, upper.data(), f, val, ld, nf.mPivotType.data(), nodeIdx, herm);
-    gemmLower(u, f, l21, ld, upper.data(), f, kkUpdate.val(), u);
 }
 
 // =================================================================================================
@@ -1143,6 +1118,31 @@ void NumFactorEngine::updateDynamicSupernode(const NumFactorDynamic<Val>& nf, st
              Val(-1), l21Val + jjKkWidth, sld,
              upper.data(), f,
              Val(1), u22Val + jjKkWidth, dld);
+}
+
+template<class Val>
+void NumFactorEngine::updateDynamicMultifrontal(const NumFactorDynamic<Val>& nf, std::int32_t kk,
+                                                UpdateMatrix<Val>& kkUpdate) const {
+    const int f = static_cast<int>(nf.frontSize(kk));    // post-factor front
+    const int u = static_cast<int>(nf.updateSize(kk));
+    if (f == 0 || u == 0)
+        return;
+
+    // The block height counts the front, the delayed columns, and the update rows: the update rows
+    // sit past the front *and* the delayed columns, which is the only place this differs from the
+    // static form.
+    const int           d       = static_cast<int>(nf.delaySize(kk));
+    const int           ld      = f + d + u;
+    const bool          herm    = hermitian(mFactorization);
+    const Val*          val     = nf.val(kk);
+    const std::int32_t* nodeIdx = nf.nodeIdx(kk);
+    const Val*          l21     = val + f + d;
+
+    // U -= L21 D L21^H with a block-diagonal D. formDynamicUpper walks pivotType over the front,
+    // handling 1x1 and 2x2 pivots, to build D L21^H into a scratch; gemmLower then multiplies.
+    std::vector<Val> upper(static_cast<std::size_t>(f) * static_cast<std::size_t>(u), Val(0));
+    formDynamicUpper(u, f, l21, ld, upper.data(), f, val, ld, nf.mPivotType.data(), nodeIdx, herm);
+    gemmLower(u, f, l21, ld, upper.data(), f, kkUpdate.val(), u);
 }
 
 template<class Val>
@@ -1586,8 +1586,8 @@ bool NumFactorEngine::factorDynamicMultifrontal(const SparseMatrix<Val>& A, cons
 
     for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(snodeSize); ++kk) {
         std::size_t kkInboundDelaySize = 0;
-        for (std::int32_t ii = firstChild[kk]; ii != NIL; ii = nextSibling[ii])
-            kkInboundDelaySize += nf.delaySize(ii);
+        for (std::int32_t jj = firstChild[kk]; jj != NIL; jj = nextSibling[jj])
+            kkInboundDelaySize += nf.delaySize(jj);
 
         if (kkInboundDelaySize > 0) {
             // Expand kk's front by its children's delayed columns: extend the index set, shift kk's
@@ -1607,12 +1607,12 @@ bool NumFactorEngine::factorDynamicMultifrontal(const SparseMatrix<Val>& A, cons
             }
 
             std::size_t dsp = 0;
-            for (std::int32_t ii = firstChild[kk]; ii != NIL; ii = nextSibling[ii]) {
-                const std::size_t   iiPostFactorFrontSize = nf.frontSize(ii);
-                const std::int32_t* iiNodeIdx             = nf.nodeIdx(ii);
-                for (std::size_t ssp = iiPostFactorFrontSize;
-                     ssp < iiPostFactorFrontSize + nf.delaySize(ii); ++ssp, ++dsp)
-                    kkPostExpandNodeIdx[dsp] = iiNodeIdx[ssp];
+            for (std::int32_t jj = firstChild[kk]; jj != NIL; jj = nextSibling[jj]) {
+                const std::size_t   jjPostFactorFrontSize = nf.frontSize(jj);
+                const std::int32_t* jjNodeIdx             = nf.nodeIdx(jj);
+                for (std::size_t ssp = jjPostFactorFrontSize;
+                     ssp < jjPostFactorFrontSize + nf.delaySize(jj); ++ssp, ++dsp)
+                    kkPostExpandNodeIdx[dsp] = jjNodeIdx[ssp];
             }
 
             nf.mFrontSize[kk] += kkInboundDelaySize;
@@ -1642,21 +1642,24 @@ bool NumFactorEngine::factorDynamicMultifrontal(const SparseMatrix<Val>& A, cons
         stack[kk].allocate(kkUpdateSize);
         {
             std::int32_t* kkUpdateIdx = stack[kk].nodeIdx();
-            for (std::size_t i = 0; i < kkUpdateSize; ++i)
-                kkUpdateIdx[i] = kkNodeIdx[kkPreFactorFrontSize + i];
+            for (std::size_t sp = 0; sp < kkUpdateSize; ++sp)
+                kkUpdateIdx[sp] = kkNodeIdx[kkPreFactorFrontSize + sp];
         }
 
-        // Fold in each child: its delayed columns become kk front columns (assembleDelay, a no-op
-        // for a child that delayed nothing), its contribution block extend-adds into kk's frontal
-        // (assembleUpdateMatrix), then it is contracted and its block freed. Both halves run before
-        // the contraction, since assembleDelay reads the columns contractVal then reclaims.
+        // Fold in each child. Its delayed columns become kk front columns (assembleDelay) and their
+        // storage is then reclaimed (contractVal); that pair is the child's delayed-column handling,
+        // a no-op for a child that delayed nothing. Its contribution block extend-adds into kk's
+        // frontal (assembleUpdateMatrix) and is then freed. The extend-add is independent of the
+        // contraction, it reads the block on the stack rather than jj's front, so the only order that
+        // matters is assembleDelay before contractVal (read the columns before reclaiming them) and
+        // the extend-add before discard.
         for (std::int32_t jj = firstChild[kk]; jj != NIL; jj = nextSibling[jj]) {
             const std::size_t jjDelaySize = nf.delaySize(jj);
-            if (jjDelaySize > 0)
+            if (jjDelaySize > 0) {
                 assembleDelay(nf, jj, kk, gblToLcl);
-            assembleUpdateMatrix(stack[jj], kk, nf, stack[kk], gblToLcl);
-            if (jjDelaySize > 0)
                 nf.contractVal(jj, jjDelaySize);
+            }
+            assembleUpdateMatrix(stack[jj], kk, nf, stack[kk], gblToLcl);
             stack[jj].discard();
         }
 

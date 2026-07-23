@@ -26,17 +26,24 @@
 //
 // A slice versus the whole; per-pair versus per-supernode; immediate versus carried.
 //
-// **The stack.** Multifrontal keeps one UpdateMatrix per supernode in a flat
-// `std::vector<UpdateMatrix<Val>>`, sized once to the supernode count. It is a stack only in
-// lifetime, not in layout: a supernode's matrix is `allocate`d when the supernode is reached and
-// `discard`ed once its parent has assembled it, and because everything in multifrontal flows child
-// to parent, that lifetime is bounded. `discard` releases the storage rather than clearing it, so
-// the peak is the storage live at one cut across the tree, not the sum over the whole run. The
-// abstract UpdateStack / concrete UpdateStackDynamic split in 0.9 existed to carry an out-of-core
-// hook and storage-size counters; in core, the bare vector is the stack and neither is needed.
+// **The container.** Multifrontal keeps one UpdateMatrix per supernode in a flat
+// `std::vector<UpdateMatrix<Val>>`, named `updateMatrix` and sized once to the supernode count. A
+// supernode's matrix is `allocate`d when the supernode is reached and `discard`ed once its parent
+// has assembled it, and because everything in multifrontal flows child to parent, that lifetime is
+// bounded. `discard` releases the storage rather than clearing it, so the peak is the storage live
+// at one cut across the tree, not the sum over the whole run.
 //
-// allocate and discard are the engine's, through friendship, so the stack's lifetime stays under
-// the traversal's control and no other caller can grow or free a slot.
+// **It is not called a stack, deliberately.** The literature calls this the update stack and the
+// lifetimes are indeed nested, but nothing here is pushed or popped: the slots are independent
+// allocations indexed by supernode, freed in child order rather than from a top, and a parent's own
+// matrix is allocated *before* its children are freed, so it sits above blocks that then die
+// beneath it, which no stack pointer can express. The name would claim a discipline the code does
+// not keep. The abstract UpdateStack / concrete UpdateStackDynamic split in 0.9 existed to carry an
+// out-of-core hook and storage-size counters; in core, the bare vector suffices and neither is
+// needed. See the TODO entry on the stack for what a true LIFO would and would not buy.
+//
+// allocate and discard are the engine's, through friendship, so each slot's lifetime stays under
+// the traversal's control and no other caller can grow or free one.
 
 #include "oblio/Types.h"
 
@@ -55,7 +62,10 @@ public:
     UpdateMatrix() = default;   // empty; the engine allocates it when the supernode is reached
 
     std::size_t         size()    const { return mSize; }   // rows == cols == the supernode's update size
-    const std::int32_t* nodeIdx() const { return mNodeIdx.data(); }
+
+    // The row indices and the values, read-only. Reads go through these even from the engine,
+    // which is a friend: friendship is for writing, not for reaching past the interface to read.
+    const std::int32_t* rowIdx()  const { return mRowIdx.data(); }
     const Val*          val()     const { return mVal.data(); }
 
     // The block's leading dimension, for BLAS. Column-major square, so it is the size.
@@ -74,14 +84,15 @@ private:
     void allocate(std::size_t size);
 
     // Release the storage, back to the empty state, once the parent has assembled this block. This
-    // frees rather than clears, which is what keeps the stack's peak bounded.
+    // frees rather than clears, which is what keeps the peak bounded.
     void discard();
 
-    std::int32_t* nodeIdx() { return mNodeIdx.data(); }
-    Val*          val()     { return mVal.data(); }
+    // The writable views, private, so only the engine reaches them through friendship.
+    std::int32_t* rowIdx() { return mRowIdx.data(); }
+    Val*          val()    { return mVal.data(); }
 
     std::size_t               mSize = 0;
-    std::vector<std::int32_t> mNodeIdx;   // the `size` global indices
+    std::vector<std::int32_t> mRowIdx;    // the `size` global row indices, as in UpdateBlock
     std::vector<Val>          mVal;       // size * size, column-major, lower triangle meaningful
 
     friend class NumFactorEngine;

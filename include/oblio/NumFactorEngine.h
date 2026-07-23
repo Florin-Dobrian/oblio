@@ -125,7 +125,7 @@ private:
     // them. The count is therefore a property of the *destination*, not of A.
     //
     // Assigns rather than accumulates, and so does assembleDelay below: the block was zeroed and
-    // each of these positions has exactly one writer. Only assembleUpdate accumulates, because only
+    // each of these positions has exactly one writer. Only assembleUpdateBlock accumulates, because only
     // it lands where A's values and other descendants' updates already sit. (0.9 writes `+=` here,
     // which differs only if A stores a duplicate entry, and A is assumed valid.)
     //
@@ -140,21 +140,21 @@ private:
 
     // Scatter an UpdateBlock into the ancestor it was formed for. Adds, does not overwrite: an
     // ancestor collects updates from many descendants.
-    template<class Val>
-    void assembleUpdate(const std::vector<std::int32_t>& gblToLcl,
-                        const UpdateBlock<Val>& t,
-                        std::size_t numIdx, Val* block) const;
-
-    // Extend-add a child's contribution block into its parent's frontal, for multifrontal. The
-    // child's UpdateMatrix is `childSize` by `childSize` over the child's update indices, all of
-    // which lie in the parent kk's index set (the elimination forest's absorption property). Each
-    // column routes by where its global index falls in kk: a pivot column of kk lands in kk's `lu`
-    // block (leading dimension kk's index size), an update row of kk lands in kk's own contribution
-    // block `kkUpdate` (leading dimension kk's update size). Lower triangle only, and it adds. This
-    // is 0.9's second assemble_ overload; its delayed-column half belongs to dynamic multifrontal.
     template<class Val, class Factor>
-    void assembleUpdateMatrix(const UpdateMatrix<Val>& childUpdate, std::int32_t kk, Factor& nf,
-                              UpdateMatrix<Val>& kkUpdate,
+    void assembleUpdateBlock(const UpdateBlock<Val>& jjKkUpdateBlock, Factor& nf, std::int32_t kk,
+                             const std::vector<std::int32_t>& gblToLcl) const;
+
+    // Assemble supernode jj's contribution block into its parent kk's frontal, for multifrontal.
+    // jj's UpdateMatrix is `jjUpdateSize` square over jj's update row indices, all of which lie in
+    // kk's index set (the elimination forest's absorption property). Each column routes by where its
+    // global index falls in kk: a pivot column of kk lands in kk's `lu` block (leading dimension
+    // kk's index size), an update row of kk lands in kk's own contribution block
+    // `kkUpdateMatrix` (leading dimension kk's update size). Lower triangle only, and it adds.
+    // This is 0.9's second assemble_ overload; its delayed-column half belongs to dynamic
+    // multifrontal.
+    template<class Val, class Factor>
+    void assembleUpdateMatrix(const UpdateMatrix<Val>& jjUpdateMatrix, Factor& nf, std::int32_t kk,
+                              UpdateMatrix<Val>& kkUpdateMatrix,
                               const std::vector<std::int32_t>& gblToLcl) const;
 
     // Factor one supernode's block in place, and form the update it owes an ancestor. **These two
@@ -180,17 +180,17 @@ private:
     bool factorStaticSupernode(Factor& nf, std::int32_t jj) const;
 
     template<class Val, class Factor>
-    void updateStaticSupernode(const Factor& nf, std::int32_t jj,
-                         std::size_t jjKkUpdateSp, UpdateBlock<Val>& updateBlock) const;
+    void updateStaticUpdateBlock(const Factor& nf, std::int32_t jj,
+                         std::size_t jjKkUpdateSp, UpdateBlock<Val>& jjKkUpdateBlock) const;
 
     // Form one supernode's contribution block for multifrontal: U -= L21 (D) L21^H over its update
-    // rows, the whole updateSize-by-updateSize Schur complement, into `kkUpdate` on the stack. The
-    // multifrontal counterpart of updateStaticSupernode above, and simpler: the block is the
+    // rows, the whole updateSize-by-updateSize Schur complement, into `kkUpdateMatrix`, kk's slot. The
+    // multifrontal counterpart of updateStaticUpdateBlock above, and simpler: the block is the
     // symmetric square with no rectangle below, so Cholesky is a single herk and LDL is
     // formStaticUpper + gemmLower, exactly the square part of the left/right-looking update.
     template<class Val, class Factor>
-    void updateStaticMultifrontal(const Factor& nf, std::int32_t kk,
-                                  UpdateMatrix<Val>& kkUpdate) const;
+    void updateStaticUpdateMatrix(const Factor& nf, std::int32_t kk,
+                                  UpdateMatrix<Val>& kkUpdateMatrix) const;
 
     // The traversals, named for the *pivoting*, which is the axis the Factorization enum names:
     // static pivoting is Cholesky and static LDL, dynamic pivoting is dynamic LDL. Left-looking and
@@ -208,7 +208,7 @@ private:
     // traversal below names NumFactorDynamic outright. See dynamicPivoting() in Types.h.
     //
     // These two do not know which factorization they are running. They call
-    // factorStaticSupernode and updateStaticSupernode, and those branch on mFactorization to
+    // factorStaticSupernode and updateStaticUpdateBlock, and those branch on mFactorization to
     // choose Cholesky or LDL.
     template<class Val, class Factor>
     bool factorStaticLeftLooking(const SparseMatrix<Val>& A, const Permutation& p,
@@ -220,14 +220,14 @@ private:
     // Static multifrontal. A third traversal producing the same factor as the two above, visited
     // differently: one postorder-compatible pass (supernodes in increasing order), where each
     // supernode assembles A and its children's contribution blocks into its frontal, factors, and
-    // leaves its own contribution block on a stack for its parent. The contribution flows one edge
-    // at a time, child to parent, which is what makes it multifrontal rather than left- or
-    // right-looking. The stack is a flat vector of UpdateMatrix, one slot per supernode, allocated
-    // when the supernode is reached and freed once its parent has assembled it.
+    // leaves its own contribution block in `updateMatrix` for its parent. The contribution flows one
+    // edge at a time, child to parent, which is what makes it multifrontal rather than left- or
+    // right-looking. `updateMatrix` is a flat vector of UpdateMatrix, one slot per supernode,
+    // allocated when the supernode is reached and freed once its parent has assembled it.
     //
     // All three static factorizations: the factor reuses factorStaticSupernode, and the contribution
-    // block is formed by updateStaticMultifrontal (one herk for Cholesky, formStaticUpper + gemmLower
-    // for static LDL). Dynamic multifrontal, where delayed columns meet the stack, is the next step.
+    // block is formed by updateStaticUpdateMatrix (one herk for Cholesky, formStaticUpper + gemmLower
+    // for static LDL). Dynamic multifrontal is the same shape, with delayed columns as well.
     template<class Val, class Factor>
     bool factorStaticMultifrontal(const SparseMatrix<Val>& A, const Permutation& p,
                                   const SymFactor& sf, Factor& nf) const;
@@ -258,7 +258,7 @@ private:
                                 std::vector<std::int32_t>& gblToLcl) const;
 
     // Form the update supernode jj owes one ancestor, taking jj's rows from `jjKkUpdateSp` down. The
-    // dynamic counterpart of updateStaticSupernode, and it differs from it in exactly two places.
+    // dynamic counterpart of updateStaticUpdateBlock, and it differs from it in exactly two places.
     //
     // The leading dimension is the block's *height*, which still counts the delayed columns:
     // contractVal dropped their columns and kept their rows, so a delayed row is a genuine row of
@@ -270,18 +270,18 @@ private:
     // *global* node, so formDynamicUpper takes the index set to read it. Ported from 0.9
     // updateDynamicLDL_.
     template<class Val>
-    void updateDynamicSupernode(const NumFactorDynamic<Val>& nf, std::int32_t jj,
-                                std::size_t jjKkUpdateSp, UpdateBlock<Val>& updateBlock) const;
+    void updateDynamicUpdateBlock(const NumFactorDynamic<Val>& nf, std::int32_t jj,
+                                std::size_t jjKkUpdateSp, UpdateBlock<Val>& jjKkUpdateBlock) const;
 
-    // The multifrontal counterpart of updateDynamicSupernode above: form kk's contribution block
+    // The multifrontal counterpart of updateDynamicUpdateBlock above: form kk's contribution block
     // U -= L21 D L21^H with a block-diagonal D, walking pivotType for the 1x1 and 2x2 pivots exactly
-    // as its twin does, into `kkUpdate`. The update rows start past the front *and* the delayed
+    // as its twin does, into `kkUpdateMatrix`. The update rows start past the front *and* the delayed
     // columns, so the leading dimension counts all three. Dynamic storage only.
     template<class Val>
-    void updateDynamicMultifrontal(const NumFactorDynamic<Val>& nf, std::int32_t kk,
-                                   UpdateMatrix<Val>& kkUpdate) const;
+    void updateDynamicUpdateMatrix(const NumFactorDynamic<Val>& nf, std::int32_t kk,
+                                   UpdateMatrix<Val>& kkUpdateMatrix) const;
 
-    // Fold supernode jj's delayed columns into kk, its parent, which has already been expanded to
+    // Assemble supernode jj's delayed columns into kk, its parent, which has already been expanded
     // hold them. The third assemble, and the only one dynamic pivoting adds: A's values and a
     // descendant's update both land in a block the symbolic factorization predicted, while these
     // columns are the part it did not.
@@ -295,7 +295,7 @@ private:
                        const std::vector<std::int32_t>& gblToLcl) const;
 
     // Dynamic LDL, left-looking: the full traversal. Grows a front by whatever its children could
-    // not pivot, assembles A past those columns, folds each child's delayed columns into it before
+    // not pivot, assembles A past those columns, brings each child's delayed columns into it before
     // contracting them away, then factors, which may delay in turn. Real only so far, serving both
     // `DynamicLDLT` and `DynamicLDLH`, which are the same computation over the reals. Complex is
     // where the two part company; right-looking and multifrontal come after.
@@ -315,14 +315,14 @@ private:
     bool factorDynamicRightLooking(const SparseMatrix<Val>& A, const Permutation& p,
                                    const SymFactor& sf, NumFactorDynamic<Val>& nf) const;
 
-    // Dynamic LDL, multifrontal: the last traversal, where delayed columns meet the update stack.
+    // Dynamic LDL, multifrontal: the last traversal, where delayed columns meet the update matrices.
     // The driver is the left-looking dynamic skeleton, expand a front by its children's delayed
-    // columns (expandNodeIdx + resetVal), assemble A past them, then fold each child in, with the
-    // multifrontal stack in place of the pull queue. Folding a child does both halves of the
-    // extend-add: its delayed columns become kk front columns (assembleDelay), and its contribution
+    // columns (expandNodeIdx + resetVal), assemble A past them, then assemble each child, with the
+    // per-supernode update matrices in place of the pull queue. Assembling a child does both halves of
+    // assembly: its delayed columns become kk front columns (assembleDelay), and its contribution
     // block adds into kk's frontal (assembleUpdateMatrix); then it is contracted and freed. The
     // factor reuses factorDynamicSupernode, and the contribution block is formed by
-    // updateDynamicMultifrontal. Dynamic storage only.
+    // updateDynamicUpdateMatrix. Dynamic storage only.
     template<class Val>
     bool factorDynamicMultifrontal(const SparseMatrix<Val>& A, const Permutation& p,
                                    const SymFactor& sf, NumFactorDynamic<Val>& nf) const;

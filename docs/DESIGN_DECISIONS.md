@@ -183,14 +183,15 @@ the natural on-ramp to an out-of-core factorization.
 
 **Our stack is not that.** It is a `std::vector<UpdateMatrix>` indexed by supernode: `allocate` fills
 an arbitrary slot when its supernode is reached, `discard` frees an arbitrary slot once its parent
-has folded it, and the fold walks children first-to-next. We keep neither the push/pop discipline
+has assembled it, and the assembly walks children first-to-next. We keep neither the push/pop discipline
 nor the reverse pop order. Read strictly, this departs from the original design, and the departure is
 worth naming rather than leaving implicit.
 
 **Correctness is untouched, on two independent counts.** First, the postorder numbering means a true
-LIFO would in fact work here; the structure is present, we simply do not lean on it. Second, the fold
-is order-free regardless: `assembleUpdateMatrix` accumulates (`+=`, commutative) and `assembleDelay`
-assigns into disjoint positions, so folding a parent's children in any order lands the same block,
+LIFO would in fact work here; the structure is present, we simply do not lean on it. Second, the
+assembly is order-free regardless: `assembleUpdateMatrix` accumulates (`+=`, commutative) and
+`assembleDelay`
+assigns into disjoint positions, so assembling a parent's children in any order lands the same block,
 give or take the last bit of the update sum. That last-bit freedom is not hypothetical; it is why the
 tier-2 multifrontal pivot counts are bounded rather than pinned, and why multifrontal residuals
 differ from left-looking in the low bits. The same summation-order freedom is recorded from the
@@ -198,7 +199,7 @@ testing side in TESTING_SPECIFICATION.
 
 **What we give up is the contiguous arena, and only that.** The set of blocks live at any instant is
 identical to what a true stack would hold, since a block lives from its supernode's turn until its
-parent folds it, so the peak in bytes is the same. It is merely scattered across per-supernode heap
+parent assembles it, so the peak in bytes is the same. It is merely scattered across per-supernode heap
 allocations instead of managed by one stack pointer over one buffer. This is the same decision
 recorded from the other side in the UpdateMatrix row of PORTING_LEDGER: we dropped 0.9's abstract
 `UpdateStack` and its out-of-core concrete `UpdateStackDynamic` as unneeded in core. The departure
@@ -206,15 +207,15 @@ here is precisely that in-core choice, restated in stack-discipline terms.
 
 **The one order that is not free, and must stay first-to-next, is the delay prepend.** The two orders
 are decoupled, and that is the trap in any future "reverse everything to make it a real stack"
-refactor. The fold is free because it is commutative. The delay prepend is structural: it writes kk's
+refactor. The assembly is free because it is commutative. The delay prepend is structural: it writes kk's
 index set, which fixes the front's column order, and the pivot sequence reads that order. `gblToLcl`
 keeps the values self-consistent for whatever prepend order is used, so reversing it is not a
 correctness fault, but it would give kk a different though still valid column ordering, diverge from
 0.9's canonical index set, and move the pinned tier-1 pivot counts. So a LIFO refactor would be right
-for the fold and wrong for the delays; the two cannot be swept together.
+for the assembly and wrong for the delays; the two cannot be swept together.
 
 **When to revisit.** If a contiguous arena or an out-of-core path is ever wanted, reintroduce the
-stack discipline for the fold, with 0.9's `UpdateStack` / `UpdateStackDynamic` split as the reference
+stack discipline for the assembly, with 0.9's `UpdateStack` / `UpdateStackDynamic` split as the reference
 for the arena and the out-of-core spill. Leave the delay prepend first-to-next.
 
 ---

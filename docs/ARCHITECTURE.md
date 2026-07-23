@@ -142,7 +142,7 @@ them silently.
 nothing is left behind. `factorDynamicSupernode` pivots only the columns it accepts, its *post-factor*
 front, but eliminating those pivots applies the Schur update across the whole trailing block, and the
 delay region sits in that block. So a delayed column is brought fully current during the factor call;
-it is simply not used as a pivot there. The update kernel never touches it: `updateDynamicSupernode`
+it is simply not used as a pivot there. The update kernel never touches it: `updateDynamicUpdateBlock`
 reads only past `frontSize + delaySize`, so it carries the update area to ancestors and leaves the
 delay region alone. A delayed column is therefore factored-into where it sits, migrated intact to the
 parent by `assembleDelay` and `contractVal`, and pivoted there. It is never short-changed and never
@@ -480,7 +480,7 @@ The two sections above followed the two looking traversals and weighed them agai
 allocation against one warm sweep per pair. Multifrontal does not fit that comparison, because it
 moves updates by a third route. Left-looking pulls each descendant's update when the ancestor is
 reached; right-looking pushes each supernode's updates as it finishes; multifrontal does neither. It
-forms each supernode's *entire* contribution block once, leaves it on a stack, and a parent folds in
+forms each supernode's *entire* contribution block once, leaves it on a stack, and a parent assembles
 its children's blocks when its own turn comes, so an update reaches a distant ancestor one edge at a
 time, riding up inside each parent's block rather than by a relay or a cross-tree push. The stack
 itself is described in DESIGN_DECISIONS (2026-07-22).
@@ -490,7 +490,7 @@ contiguous arena is what makes that spill cheap. That is not the motivation here
 it is parallelism, and the paragraphs below build to that.
 
 **Multifrontal costs more working memory in core, and that is the first thing to be honest about.**
-Left- and right-looking hold one update block at a time and fold it straight into L; they never keep
+Left- and right-looking hold one update block at a time and assemble it straight into L; they never keep
 a standing Schur complement. Multifrontal keeps a stack of contribution blocks, scratch that is not
 part of L, alive from each supernode's turn until its parent consumes it. Stack discipline bounds
 that peak, but it is still strictly more scratch than the looking traversals need. So frugality is a
@@ -500,18 +500,18 @@ a tie.
 **What the memory buys is where the arithmetic happens.** Multifrontal concentrates each supernode's
 numeric work into one dense, contiguous frontal matrix, and the split is visible in the code:
 `assembleUpdateMatrix` is the irregular part, the `gblToLcl` scatter, and it is cheap data movement;
-`factorDynamicSupernode` and `updateDynamicMultifrontal` are the expensive part, and they run as a
+`factorDynamicSupernode` and `updateDynamicUpdateMatrix` are the expensive part, and they run as a
 dense factor, a triangular solve and a symmetric update over one column-major block, a large BLAS-3
 call apiece near peak flops. The index chasing sits *outside* the arithmetic, confined to assembly.
-The looking traversals invert this: `updateDynamicSupernode` re-forms each descendant's contribution
+The looking traversals invert this: `updateDynamicUpdateBlock` re-forms each descendant's contribution
 against one ancestor at a time, so the update is chopped into many smaller index-mapped pieces, each
 fronted by a gather, worse flop-per-byte and worse locality. The multiplicative work that forms L is
 the same either way, and the surplus is purely assembly, extra additions, never a repeated multiply.
 Take `I` updating both `J` and `K`, with `J` also updating `K`. Left- and right-looking send `I`'s
 contribution to `K` straight from `I`: one addition. Multifrontal forms `I`'s whole contribution
-block once, at `I`, then only moves it: the block extend-adds into `J`, where the part bound for `K`
+block once, at `I`, then only moves it: the block is assembled into `J`, where the part bound for `K`
 lands in `J`'s update rows; `J` forms its own block, which now carries those `I` rows alongside its
-own; that block extend-adds into `K`. So `I`'s contribution to `K` is added twice, transiting `J`,
+own; that block is assembled into `K`. So `I`'s contribution to `K` is added twice, transiting `J`,
 rather than once. The extra cost is exactly that transit `+=`, because a contribution once formed is
 data the tree moves rather than recomputes: `J` re-forms only its own Schur complement, never `I`'s.
 So the trade is not free flops against fragmented flops, it is slightly more arithmetic, all of it in
@@ -609,7 +609,7 @@ Node parallelism is present and free; tree parallelism is absent and would be Ob
 It is worth being exact about why the one is free and the other is not, because it draws the real line
 between what a vendor BLAS gives and what it structurally never will. Accelerate threads the inside of
 one dense operation, a single `gemm` or `potrf`. It has no view of the algorithm around that
-operation, so everything between and outside the BLAS calls is beyond it: the extend-add and scatter
+operation, so everything between and outside the BLAS calls is beyond it: the assembly and scatter
 that assemble a front, the pivot search and the row and column swaps, the traversal of the tree, the
 choice of how many threads a given front deserves. A threaded BLAS makes proportionally less
 difference the faster it gets, since the un-threaded remainder becomes the larger share, which is
@@ -652,10 +652,10 @@ weakest, the leaf swarm of small fronts that run on NEON without leaning on AMX.
 builds tree parallelism on Apple Silicon, the leaves are where it would pay, not the root.
 
 **None of this is a strict win, which is why the engine keeps all three.** Multifrontal pays the
-stack memory and the assembly overhead, extend-adds that carry whole blocks up the tree and re-sum
+stack memory and the assembly overhead, assemblies that carry whole blocks up the tree and re-sum
 the same rows at several levels, to buy dense kernels and parallelism. When fronts are large, the 3D
 PDEs and heavy-fill problems, that trade is lopsided in its favor. When fronts are small, very sparse
-and tree-like with little fill, the dense-BLAS payoff is thin and the extend-add and stack overhead
+and tree-like with little fill, the dense-BLAS payoff is thin and the assembly and stack overhead
 dominate, and left-looking is both leaner and faster. The right traversal is problem- and
 machine-dependent, which is the whole reason the engine exposes the choice rather than picking one:
 left-looking is the frugal default, and multifrontal earns its memory when the fronts are fat or the

@@ -24,7 +24,7 @@ new `tests/*.cpp` file needs no Makefile change. Totals today: **153 assertions 
 | `smoke` | 5 | the tree builds and the basic objects work |
 | `test_permutation` | 11 | the index map and its composition |
 | `test_order` | 21 | AMD and MMD produce valid permutations |
-| `test_forest` | 23 | elimination forest, supernodes, amalgamation |
+| `test_forest` | 28 | elimination forest, supernodes, amalgamation, multifrontal child order |
 | `test_symfactor` | 29 | supernodal index sets against a dense oracle |
 | `test_numfactor` | 18 | the numeric factor, by oracle and by reconstruction |
 | `test_solve` | 14 | the solve step, by residual |
@@ -82,7 +82,7 @@ and 100, a 5x5 diagonal, and a complex arrow.
 The orderings are checked for *validity*, not against 0.9's output, and not for quality. Nothing
 asserts that AMD or MMD reduces fill.
 
-### test_forest, 23 assertions
+### test_forest, 28 assertions
 
 Parent, child and sibling links, roots, height, column sizes, fundamental compression and threshold
 amalgamation. Small cases with hand-computable answers: tridiagonals at n = 4 and 6 (a path, with
@@ -93,6 +93,19 @@ threshold 8 it merges 768 supernodes into 214. Four assertions cover `exactPatte
 distinguishing an index set with no stored zeros from one carrying them.
 
 Amalgamation is greedy and not canonical, so only its tie-break-invariant properties are asserted.
+
+Five assertions cover `setOptimizeMultifrontal`, the child reordering and postorder relabeling
+ported from 0.9. The forest is built twice from one 8x8 grid under AMD, once with the option off and
+once on, and the two compared. Off is asserted to be the default. On, the forest must be the same
+forest, same supernode count, height, tree count, and the same multiset of front and update sizes,
+since the pair moves labels and links and nothing else; the links must stay consistent in both
+directions, checked by the same `validLinks` the rest of the file uses; every child list must come
+out in non-increasing key order, the key being `maximumStorage(jj) - updateSize(jj)^2` recomputed
+from the sorted forest; and the labels must form a postorder, every subtree holding a contiguous run
+ending at its own label, verified by walking each range back up the parent chain. That last one is
+the assertion that matters most, because it is the property the multifrontal drivers depend on: they
+loop over labels, not links, so the sort buys nothing without it. A grid is used rather than a chain
+deliberately: a chain has no sibling choice to make and would assert nothing.
 
 ### test_symfactor, 29 assertions
 
@@ -209,7 +222,7 @@ exercises delayed columns meeting the update stack: the multifrontal driver reac
 route, carrying each supernode's contribution block up a stack rather than pulling or pushing per
 ancestor. Its delay and 2x2 counts are required to match left-looking exactly (the pivoting
 decisions are the same), but the residual is checked to tolerance rather than bit-for-bit, since the
-extend-add sums a front in a different order than the pull and the last bits legitimately differ.
+assembly sums a front in a different order than the pull and the last bits legitimately differ.
 
 **The counts are pinned exactly, and the matrices are built to make that meaningful.** `std::mt19937`
 has its output sequence fixed by the standard, but the distribution templates do not: their

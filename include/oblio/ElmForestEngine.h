@@ -51,6 +51,25 @@ public:
     void setThreshold(std::optional<std::size_t> threshold) { mThreshold = threshold; }
     std::optional<std::size_t> threshold() const            { return mThreshold; }
 
+    // Reorder each supernode's children so that assembling them first to last minimizes the
+    // multifrontal update stack's peak. 0.9's `optimizeMultifrontalCore_`, and off by default
+    // there as here, because it is not free of consequence:
+    //
+    // It changes the child order for *every* traversal, not only multifrontal, the forest being
+    // shared. Left- and right-looking do not care for the static factorizations, where the assembly is
+    // a commutative sum, but dynamic LDL does: a parent's front is expanded by prepending its
+    // children's delayed columns in sibling order, so reordering the siblings reorders those
+    // columns, which the pivot sequence then reads. The result is a different and equally valid
+    // factorization with different delay and pivot counts, not a wrong one, but different.
+    //
+    // It also does not move the stack peak on its own. Our multifrontal drivers loop over
+    // supernodes in increasing label order, so a contribution block lives from its own supernode to
+    // its parent *in the numbering*, and the child links do not enter that. 0.9 follows this sort
+    // with `labelDepthFirst_`, relabeling so the numbering follows the new child order, which is
+    // what realizes the saving; that relabeling is not ported. See TODO.
+    void setOptimizeMultifrontal(bool optimize) { mOptimizeMultifrontal = optimize; }
+    bool optimizeMultifrontal() const           { return mOptimizeMultifrontal; }
+
     // Compute the elimination forest of A under the permutation p.
     //
     // Two overloads, the same layering used throughout this engine. The forest depends on
@@ -71,6 +90,7 @@ public:
 private:
     Supernodes                 mSupernodes = Supernodes::Fundamental;
     std::optional<std::size_t> mThreshold;   // absent: no amalgamation
+    bool                       mOptimizeMultifrontal = false;   // reorder children for the stack
     // Every helper below is free of Val. The adaptation happens once, at the public
     // boundary above, so nothing in here is templated and nothing in here is compiled twice.
     // The matrix appears only as its sparsity pattern, colPtr and rowIdx. The Permutation
@@ -171,6 +191,25 @@ private:
     //   writes:  mSnodeSize, mNodeToSnode, mParent, mFrontSize, mUpdateSize
     //   stales:  the child, sibling and root links, as above
     void compressThreshold(ElmForest& ef, std::size_t threshold) const;
+
+    // Reorder each supernode's children into the order that minimizes the multifrontal stack
+    // peak, when `mOptimizeMultifrontal` is set. Ported from 0.9 `sortForOptimalMultifrontal_`.
+    // Runs after both compressions, on the final supernodes, and rewrites the links in place,
+    // so unlike the compressions it leaves nothing stale and needs no finalizeLinks after it.
+    //
+    //   reads:   mSnodeSize, mFirstChild, mNextSibling, mUpdateSize
+    //   writes:  mFirstChild, mLastChild, mNextSibling, mPreviousSibling
+    void sortForOptimalMultifrontal(ElmForest& ef) const;
+
+    // Relabel the supernodes into a postorder, so that each subtree holds a contiguous run of
+    // labels. Ported from 0.9 `labelDepthFirst_`, which 0.9 calls straight after the sort above.
+    // It is the half that realizes the saving: the drivers loop in increasing label order, so the
+    // stack peak follows the labels, not the links, and only a postorder makes the two agree.
+    //
+    //   reads:   mSize, mSnodeSize, mNodeToSnode, mFirstRoot, mFirstChild, mNextSibling
+    //   writes:  mNodeToSnode, mParent, mFirstChild, mLastChild, mNextSibling, mPreviousSibling,
+    //            mFrontSize, mUpdateSize, mFirstRoot, mLastRoot
+    void labelDepthFirst(ElmForest& ef) const;
 };
 
 extern template bool ElmForestEngine::compute(const SparseMatrix<double>&, const Permutation&, ElmForest&) const;

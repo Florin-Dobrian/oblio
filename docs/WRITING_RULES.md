@@ -116,6 +116,21 @@ The axes are aligned but not identical, and the asymmetry is worth knowing: stat
 either storage, while dynamic pivoting requires the dynamic one, because delaying a column grows a
 front. `dynamicPivoting()` in `Types.h` is where that rule is stated once.
 
+**Assembly. Not folding, and not extend-add.** The operation that adds a child's contribution into
+its parent is **assembly**. Write *assembled into*, *assembles*, *the assembly step*, *assembly
+order*. Every function that performs it is already named for it, `assembleFromA`, `assembleUpdate`,
+`assembleUpdateMatrix`, `assembleDelay`, so the prose and the identifiers say one word between them.
+
+Two alternatives are excluded. *Folded in*, *folds*, *the fold* is an informal coinage with no
+standing anywhere. *Extend-add* does have standing, being the usual term in the multifrontal
+literature, but it names a mechanism (extend the index set, add the values) where we want the
+operation, and it reads as jargon beside four functions that already say `assemble`. Where the
+sparse-to-dense routing itself is the point, name that directly: the *scatter*, or `gblToLcl`.
+
+*Fold* stays correct in its ordinary English sense of absorbing one thing into another where no
+assembly is meant, as in Cholesky folding its diagonal into `C`, or a prepass being folded into a
+driver to keep one shape. The rule is about the operation, not about the word.
+
 ## Dated entries (DESIGN_DECISIONS, CHANGELOG, the devlog)
 
 **Read the date before writing it.** An entry is stamped with the date it is *written*, and that

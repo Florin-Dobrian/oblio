@@ -63,16 +63,16 @@ traversal, a postorder pass carrying each supernode's contribution block up a
 `std::vector<UpdateMatrix>` stack to its parent). Cholesky is verified against the dense-Cholesky
 oracle directly (real and complex, natural and AMD) and the static LDLs by reconstruction across all
 three traversals, all also end to end by residual. It reuses `factorStaticSupernode` and the new
-`assembleUpdateMatrix` extend-add, and forms the contribution block with `updateStaticMultifrontal`
+`assembleUpdateMatrix` assembly, and forms the contribution block with `updateStaticUpdateMatrix`
 (one `herk` for Cholesky, `formStaticUpper` + `gemmLower` for static LDL; the herk resolves to zherk
 for complex, fixing 0.9's complex-Cholesky syrk bug for free). **Dynamic multifrontal, where delayed
 columns meet the stack, is done.** Its driver is the left-looking dynamic skeleton (expand a front by
 its children's delayed columns with `expandNodeIdx` + `resetVal`, assemble A past them, factor, which
-may delay again) with the stack in place of the pull queue: folding a child does both halves of the
-extend-add, its delayed columns become front columns (`assembleDelay`) and its contribution block
+may delay again) with the stack in place of the pull queue: assembling a child does both halves of the
+assembly, its delayed columns become front columns (`assembleDelay`) and its contribution block
 adds in (`assembleUpdateMatrix`), then it is contracted (`contractVal`) and freed. The factor reuses
 `factorDynamicSupernode` unchanged, since the block layout at factor time matches left/right-looking,
-and the contribution block is formed by the new `updateDynamicMultifrontal` (`formDynamicUpper` +
+and the contribution block is formed by the new `updateDynamicUpdateMatrix` (`formDynamicUpper` +
 `gemmLower`, block-diagonal D). Verified by residual at all three tiers, real and complex, symmetric
 and Hermitian; tier 1 matches left-looking's delay and pivot counts exactly, heavier tiers match to
 tolerance. **Complex `DynamicLDLT` needed no kernel change at all**: 0.9's complex
@@ -163,6 +163,26 @@ obviated by lambdas).
   consuming these structures, because a difference the oracle cannot see (index
   order within a supernode's block, say) is exactly the kind that surfaces as a
   numeric bug much later.
-- **`sortForOptimalMultifrontal`** (0.9) / `rOptimizeForMultifrontal` (10.12) is not ported.
-  Both references call it after compression to reorder children for the multifrontal stack;
-  10.12's call site is commented out. Not needed until the numeric factorization exists.
+- **`sortForOptimalMultifrontal`** (0.9) / `rOptimizeForMultifrontal` (10.12) **is ported**, as
+  `ElmForestEngine::sortForOptimalMultifrontal`, gated by `setOptimizeMultifrontal` and off by
+  default as in both references. It runs after both compressions, exactly where 0.9 calls it, and
+  reorders each supernode's children by decreasing `maximumStorage(c) - updateSize(c)^2`, which is
+  Liu's rule. 0.9 reaches that order by selecting the largest key onto the front of a list and then
+  popping that list onto the front of the child list, two reversals that cancel; the port sorts
+  directly, stably, to match 0.9's tie-breaking. Verified against a symbolic simulation: with the
+  option on, the peak the tree model predicts drops to the computed optimum on every grid tested,
+  16 to 38 percent below the unsorted order.
+- **`labelDepthFirst`** (0.9 `labelDepthFirst_`) **is ported**, called immediately after the sort
+  under the same option, as 0.9 calls it. It relabels the supernodes into a postorder, so every
+  subtree holds a contiguous run of labels. This is the half that makes the sort pay: the drivers
+  loop in increasing label order, so a contribution block is live from its own supernode to its
+  parent *in the numbering*, which the child links alone do not affect. The traversal is 0.9's, a
+  stack seeded with the roots pushed first to last and extended with each supernode's children the
+  same way, so each set pops last to first, while the label counts down from `snodeSize - 1`; the
+  two reversals leave the children of any supernode in increasing label order, preserving what the
+  sort chose. It rewrites the map and permutes every per-supernode array, and it is contained
+  entirely within the forest, since `SymFactorEngine` reads the forest through its accessors and
+  derives everything fresh.
+  With the pair on, the peak the multifrontal driver actually reaches falls to the computed
+  optimum: 1845 to 1218 on grid2D 20x20, 42735 to 26425 on grid2D 80x80, 357398 to 255433 on
+  grid3D 16x16x16, and unchanged on banded matrices, which have no sibling choice to make.

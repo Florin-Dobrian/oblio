@@ -57,10 +57,20 @@ public:
     std::size_t height() const { return mHeight; }
     std::size_t width()  const { return mWidth; }
 
+    // The row indices and the values, read-only. Reads go through these even from the engine,
+    // which is a friend: friendship is for writing, not for reaching past the interface to read.
+    const std::int32_t* rowIdx() const { return mRowIdx.data(); }
+    const Val*          val()    const { return mVal.data(); }
+
     // The block's leading dimension, for BLAS. Column-major, so it is the height.
     std::size_t ld() const { return mHeight; }
 
 private:
+    // The writable views, private, so only the engine reaches them through friendship: the row
+    // indices as the driver fills them, the values as the update kernel writes them.
+    std::int32_t* rowIdx() { return mRowIdx.data(); }
+    Val*          val()    { return mVal.data(); }
+
     std::size_t mHeight = 0;
     std::size_t mWidth  = 0;
 

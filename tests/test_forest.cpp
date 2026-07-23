@@ -326,6 +326,108 @@ int main(){
       ck(!fAmal8.exactPatterns() || fAmal8.snodeSize()==fFund.snodeSize(),
          "exactPatterns       : false once a zero is stored"); }
 
+    { // ---------------------------------------------------------------------------------------
+      // sortForOptimalMultifrontal: children reordered by decreasing (maximumStorage - block).
+      //
+      // The forest is built twice from the same matrix, once with the option off and once on, and
+      // the two are compared. Off, nothing may move. On, the invariants must hold and every child
+      // list must come out in non-increasing key order, which is the property the sort exists to
+      // establish. A grid is used because its forest genuinely branches; a chain has no sibling
+      // choice to make and would assert nothing.
+      const std::size_t g = 8, n = g * g;
+      std::vector<std::size_t>  cp(n + 1, 0);
+      std::vector<std::int32_t> ri;
+      std::vector<double>       v;
+      for (std::size_t j = 0; j < n; ++j) {
+          const std::size_t r = j / g, c = j % g;
+          std::vector<std::int32_t> col;
+          col.push_back(static_cast<std::int32_t>(j));
+          if (r) col.push_back(static_cast<std::int32_t>(j - g));
+          if (c) col.push_back(static_cast<std::int32_t>(j - 1));
+          if (r + 1 < g) col.push_back(static_cast<std::int32_t>(j + g));
+          if (c + 1 < g) col.push_back(static_cast<std::int32_t>(j + 1));
+          std::sort(col.begin(), col.end());
+          for (std::int32_t i : col) {
+              ri.push_back(i);
+              v.push_back(i == static_cast<std::int32_t>(j) ? 8.0 : -1.0);
+          }
+          cp[j + 1] = ri.size();
+      }
+      SparseMatrix<double> A(n, cp, ri, v);
+
+      Permutation p;
+      OrderEngine oe; oe.setMethod(OrderMethod::AMD);
+      oe.compute(A, p);
+
+      ElmForest fOff, fOn;
+      ElmForestEngine eOff;
+      ElmForestEngine eOn;  eOn.setOptimizeMultifrontal(true);
+      eOff.compute(A, p, fOff);
+      eOn.compute(A, p, fOn);
+
+      ck(!eOff.optimizeMultifrontal() && eOn.optimizeMultifrontal(),
+         "optimizeMultifrontal: off by default, settable");
+
+      // The pair rewrites links and relabels, so the supernodes themselves survive but their labels
+      // move. What must hold is that the forest is the same forest: same count, same height, same
+      // number of trees, and the same multiset of front and update sizes.
+      std::vector<std::size_t> fsOff(fOff.frontSize()), fsOn(fOn.frontSize());
+      std::vector<std::size_t> usOff(fOff.updateSize()), usOn(fOn.updateSize());
+      std::sort(fsOff.begin(), fsOff.end()); std::sort(fsOn.begin(), fsOn.end());
+      std::sort(usOff.begin(), usOff.end()); std::sort(usOn.begin(), usOn.end());
+      ck(fOn.snodeSize() == fOff.snodeSize() && fOn.height() == fOff.height()
+             && fOn.numTrees() == fOff.numTrees() && fsOn == fsOff && usOn == usOff,
+         "optimizeMultifrontal: same forest, relabeled");
+
+      ck(validLinks(fOn), "optimizeMultifrontal: links still consistent both ways");
+
+      // Every child list in non-increasing key order, the key being 0.9's
+      // maximumStorage(jj) - updateSize(jj)^2, recomputed here from the sorted forest.
+      std::vector<std::size_t> ms(fOn.snodeSize(), 0);
+      bool sorted = true;
+      for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(fOn.snodeSize()); ++kk) {
+          const std::size_t kkBlock = fOn.updateSize(kk) * fOn.updateSize(kk);
+          std::size_t running = 0, best = 0, prevKey = 0;
+          bool first = true;
+          for (std::int32_t jj = fOn.firstChild()[kk]; jj != NIL; jj = fOn.nextSibling()[jj]) {
+              const std::size_t key = ms[jj] - fOn.updateSize(jj) * fOn.updateSize(jj);
+              if (!first && key > prevKey) sorted = false;
+              prevKey = key; first = false;
+              best = std::max(best, running + ms[jj]);
+              running += fOn.updateSize(jj) * fOn.updateSize(jj);
+          }
+          ms[kk] = std::max(best, running + kkBlock);
+      }
+      ck(sorted, "optimizeMultifrontal: children in non-increasing key order");
+
+      // The labels are now a postorder: every subtree holds a contiguous run ending at its root.
+      // This is the property the multifrontal drivers need, since they walk labels, not links.
+      // Asserted for the sorted forest and denied for nothing: the unsorted one may or may not be
+      // a postorder already, which is exactly why the relabeling cannot be skipped.
+      std::vector<std::size_t> sub(fOn.snodeSize(), 1);
+      bool postorder = true;
+      for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(fOn.snodeSize()); ++kk) {
+          std::size_t total = 1;
+          for (std::int32_t jj = fOn.firstChild()[kk]; jj != NIL; jj = fOn.nextSibling()[jj]) {
+              if (jj > kk) postorder = false;          // a child must be labeled below its parent
+              total += sub[jj];
+          }
+          sub[kk] = total;
+          // the subtree of kk is exactly [kk - sub(kk) + 1, kk]
+          if (static_cast<std::size_t>(kk) + 1 < sub[kk]) postorder = false;
+      }
+      for (std::int32_t kk = 0; postorder && kk < static_cast<std::int32_t>(fOn.snodeSize()); ++kk) {
+          const std::int32_t lo = kk - static_cast<std::int32_t>(sub[kk]) + 1;
+          for (std::int32_t jj = lo; jj <= kk; ++jj) {
+              // every label in the range must have kk as an ancestor
+              std::int32_t aa = jj;
+              while (aa != NIL && aa != kk) aa = fOn.parent()[aa];
+              if (aa != kk) { postorder = false; break; }
+          }
+      }
+      ck(postorder, "optimizeMultifrontal: labels are a postorder, subtrees contiguous");
+    }
+
     std::cout<<"\nElmForest tests: "<<pass<<"/"<<(pass+fail)<<" passed\n";
     return fail==0?0:1;
 }

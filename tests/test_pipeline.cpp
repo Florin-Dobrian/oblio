@@ -458,7 +458,7 @@ int main() {
         // yet another route: it carries each supernode's contribution block up the stack rather than
         // pulling or pushing per ancestor. This is the assertion that exercises delayed columns
         // meeting the stack. The pivoting decisions are the same (same delays, same 2x2 pivots); the
-        // residual is checked to tolerance rather than bit-for-bit, since the extend-add sums the
+        // residual is checked to tolerance rather than bit-for-bit, since the assembly sums the
         // front in a different order than the pull.
         const Outcome oM = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
                                    Traversal::Multifrontal);
@@ -506,7 +506,7 @@ int main() {
            counts("tier 2 saddle 30+12: heavy delaying, traversals agree", L));
 
         // Multifrontal under heavy delaying. Counts are bounded, not matched to left-looking: with
-        // dozens of threshold decisions and a different summation order in the extend-add, a decision
+        // dozens of threshold decisions and a different summation order in the assembly, a decision
         // can tip, which is a different valid factorization, not an error. The residual is the oracle.
         const Outcome M = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
                                   Traversal::Multifrontal);

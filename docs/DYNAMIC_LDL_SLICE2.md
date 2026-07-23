@@ -50,7 +50,7 @@ then forms the update with two GEMM calls. Those map onto our existing `gemm` an
 
 Three `assemble_` overloads matter. The one at 84 takes the matrix and a
 `delaySize` offset, assembling A's original values into a front that has
-already been expanded. The one at 153 takes two supernode indices, `jj` and `kk`, and folds
+already been expanded. The one at 153 takes two supernode indices, `jj` and `kk`, and assembles
 `jj`'s delayed columns into its parent `kk`. The one at 210 assembles a temporary into a
 front, and is the analogue of our `assembleUpdate`.
 

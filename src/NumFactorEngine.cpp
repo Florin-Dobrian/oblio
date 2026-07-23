@@ -215,69 +215,94 @@ bool NumFactorEngine::assembleFromA(const SparseMatrix<Val>& A, const Permutatio
     return true;
 }
 
-template<class Val>
-void NumFactorEngine::assembleUpdate(const std::vector<std::int32_t>& gblToLcl,
-                                     const UpdateBlock<Val>& updateBlock,
-                                     std::size_t numNodeIdx, Val* val) const {
-    // The update val's rows and columns carry global row indices; gblToLcl maps them into the
-    // ancestor's local coordinates. Only the lower triangle of the val is meaningful (row at or
-    // below column), which is exactly the part the two BLAS calls filled. Entry (si, sj) of the
-    // update sits at updateBlock.mVal[sj * updateBlock.mHeight + si], the same column-major layout
-    // the solve reads; (di, dj) is where that entry lands in the destination front. The global
-    // (L-ordering) index in between is what gblToLcl converts.
+template<class Val, class Factor>
+void NumFactorEngine::assembleUpdateBlock(const UpdateBlock<Val>& jjKkUpdateBlock, Factor& nf,
+                                          std::int32_t kk,
+                                          const std::vector<std::int32_t>& gblToLcl) const {
+    const std::size_t   jjKkHeight    = jjKkUpdateBlock.height();
+    const std::size_t   jjKkWidth     = jjKkUpdateBlock.width();
+    const std::int32_t* jjKkRowIdx    = jjKkUpdateBlock.rowIdx();
+    const Val*          jjKkUpdateVal = jjKkUpdateBlock.val();
+
+    // kk is always unfactored when this runs, so its front is at full width and the destination
+    // derives cleanly, the same two values every caller used to pass.
+    const std::size_t kkNumNodeIdx = nf.frontSize(kk) + nf.updateSize(kk);
+    Val*              kkFrontVal   = nf.val(kk);
+
+    // The update block's rows and columns carry global row indices; gblToLcl maps them into kk's
+    // local coordinates. Only its lower triangle is meaningful (row at or below column), which is
+    // exactly the part the two BLAS calls filled. Entry (si, sj) of the update sits at
+    // jjKkUpdateVal[sj * jjKkHeight + si], the same column-major layout the solve reads, and
+    // (di, dj) is where that entry lands in kk's front. The global (L-ordering) index in between
+    // is what gblToLcl converts.
     //
     // si, sj, di, dj are column/row indices (int32_t), as in the solve; the two positions here are
     // the flat column offsets into the source and destination vals, both size_t in the cp family.
-    for (std::int32_t sj = 0; sj < static_cast<std::int32_t>(updateBlock.mWidth); ++sj) {
-        const std::int32_t lj = updateBlock.mRowIdx[sj];   // this column's global (L-ordering) index
-        const std::int32_t dj = gblToLcl[lj];              // its column in the destination front
 
-        const std::size_t scp = static_cast<std::size_t>(sj) * updateBlock.mHeight;  // source column
-        const std::size_t dcp = static_cast<std::size_t>(dj) * numNodeIdx;            // dest column
+    for (std::int32_t sj = 0; sj < static_cast<std::int32_t>(jjKkWidth); ++sj) {
+        const std::int32_t lj = jjKkRowIdx[sj];                // this column's global index
+        const std::int32_t dj = gblToLcl[lj];                  // its column in kk's front
 
-        for (std::int32_t si = sj; si < static_cast<std::int32_t>(updateBlock.mHeight); ++si) {
-            const std::int32_t li = updateBlock.mRowIdx[si];
+        const std::size_t scp = static_cast<std::size_t>(sj) * jjKkHeight;     // source column
+        const std::size_t dcp = static_cast<std::size_t>(dj) * kkNumNodeIdx;   // dest column
+
+        for (std::int32_t si = sj; si < static_cast<std::int32_t>(jjKkHeight); ++si) {
+            const std::int32_t li = jjKkRowIdx[si];
             const std::int32_t di = gblToLcl[li];
 
-            val[dcp + di] += updateBlock.mVal[scp + si];
+            kkFrontVal[dcp + di] += jjKkUpdateVal[scp + si];
         }
     }
 }
 
 template<class Val, class Factor>
-void NumFactorEngine::assembleUpdateMatrix(const UpdateMatrix<Val>& childUpdate, std::int32_t kk,
-                                           Factor& nf, UpdateMatrix<Val>& kkUpdate,
+void NumFactorEngine::assembleUpdateMatrix(const UpdateMatrix<Val>& jjUpdateMatrix, Factor& nf,
+                                           std::int32_t kk, UpdateMatrix<Val>& kkUpdateMatrix,
                                            const std::vector<std::int32_t>& gblToLcl) const {
-    const std::int32_t  childSize = static_cast<std::int32_t>(childUpdate.size());
-    const std::int32_t* childIdx  = childUpdate.nodeIdx();
-    const Val*          childVal  = childUpdate.val();   // childSize by childSize, ld == childSize
+    const std::size_t   jjUpdateSize = jjUpdateMatrix.size();
+    const std::int32_t* jjRowIdx     = jjUpdateMatrix.rowIdx();
+    const Val*          jjUpdateVal  = jjUpdateMatrix.val();   // jjUpdateSize square, ld the same
 
-    const std::int32_t kkFrontSize  = static_cast<std::int32_t>(nf.frontSize(kk));
-    const std::int32_t kkUpdateSize = static_cast<std::int32_t>(nf.updateSize(kk));
-    const std::size_t  kkIndexSize  = static_cast<std::size_t>(kkFrontSize) + kkUpdateSize;
-    Val*               kkVal        = nf.val(kk);         // lu block, ld == kkIndexSize
-    Val*               kkUpdateVal  = kkUpdate.val();     // kk's contribution block, ld == kkUpdateSize
+    const std::size_t kkFrontSize  = nf.frontSize(kk);
+    const std::size_t kkUpdateSize = nf.updateSize(kk);
+    const std::size_t kkNumNodeIdx = kkFrontSize + kkUpdateSize;
+    Val*              kkFrontVal   = nf.val(kk);              // lu block, ld == kkNumNodeIdx
+    Val*              kkUpdateVal  = kkUpdateMatrix.val();    // ld == kkUpdateSize
 
-    // Each column of the child's block carries a global index that lies somewhere in kk's index set.
-    // Where it lands decides which block receives it: a pivot column of kk (local position below
-    // kkFrontSize) goes into the lu block, an update row of kk into kk's contribution block. The
-    // child's indices are sorted and gblToLcl preserves order, so within a column the rows run at or
-    // below the diagonal, and only the lower triangle is written.
-    for (std::int32_t c = 0; c < childSize; ++c) {
-        const std::int32_t dj = gblToLcl[childIdx[c]];
-        const std::size_t  sc = static_cast<std::size_t>(c) * childSize;   // child column offset
+    // Each column of jj's update matrix carries a global row index that lies somewhere in kk's
+    // index set. Where it lands decides which block receives it: a pivot column of kk (local
+    // position below kkFrontSize) goes into the lu block, an update row of kk into kk's own update
+    // matrix. jj's row indices are sorted and gblToLcl preserves order, so within a column the rows
+    // run at or below the diagonal, and only the lower triangle is written.
+    //
+    // Same shape and same names as assembleUpdateBlock: sj and si index jj's columns and rows, lj
+    // and li are the global (L-ordering) indices they carry, dj and di are where those land in kk,
+    // and scp and dcp are the flat column positions in the source and destination vals. The sizes
+    // measure, so they are size_t, and the comparisons against them carry the one cast that meets
+    // the int32_t indices.
+    for (std::int32_t sj = 0; sj < static_cast<std::int32_t>(jjUpdateSize); ++sj) {
+        const std::int32_t lj  = jjRowIdx[sj];   // this column's global (L-ordering) index
+        const std::int32_t dj  = gblToLcl[lj];   // its column in kk
+        const std::size_t  scp = static_cast<std::size_t>(sj) * jjUpdateSize;   // source column
 
-        if (dj < kkFrontSize) {
-            const std::size_t dc = static_cast<std::size_t>(dj) * kkIndexSize;
-            for (std::int32_t r = c; r < childSize; ++r) {
-                const std::int32_t di = gblToLcl[childIdx[r]];
-                kkVal[dc + di] += childVal[sc + r];
+        if (dj < static_cast<std::int32_t>(kkFrontSize)) {
+            const std::size_t dcp = static_cast<std::size_t>(dj) * kkNumNodeIdx;   // dest column
+
+            for (std::int32_t si = sj; si < static_cast<std::int32_t>(jjUpdateSize); ++si) {
+                const std::int32_t li = jjRowIdx[si];
+                const std::int32_t di = gblToLcl[li];
+
+                kkFrontVal[dcp + di] += jjUpdateVal[scp + si];
             }
         } else {
-            const std::size_t dc = static_cast<std::size_t>(dj - kkFrontSize) * kkUpdateSize;
-            for (std::int32_t r = c; r < childSize; ++r) {
-                const std::int32_t di = gblToLcl[childIdx[r]];
-                kkUpdateVal[dc + di - kkFrontSize] += childVal[sc + r];
+            const std::size_t dcp =
+                (static_cast<std::size_t>(dj) - kkFrontSize) * kkUpdateSize;   // dest column
+
+            for (std::int32_t si = sj; si < static_cast<std::int32_t>(jjUpdateSize); ++si) {
+                const std::int32_t li = jjRowIdx[si];
+                const std::int32_t di = gblToLcl[li];
+
+                kkUpdateVal[dcp + di - kkFrontSize] += jjUpdateVal[scp + si];
             }
         }
     }
@@ -328,8 +353,8 @@ bool NumFactorEngine::factorStaticSupernode(Factor& nf, std::int32_t jj) const {
 }
 
 template<class Val, class Factor>
-void NumFactorEngine::updateStaticSupernode(const Factor& nf, std::int32_t jj,
-                                      std::size_t jjKkUpdateSp, UpdateBlock<Val>& updateBlock) const {
+void NumFactorEngine::updateStaticUpdateBlock(const Factor& nf, std::int32_t jj,
+                                      std::size_t jjKkUpdateSp, UpdateBlock<Val>& jjKkUpdateBlock) const {
     // `jjKkUpdateSp` is a position into jj's index set, and it is what selects the ancestor kk this
     // update reaches: kk == nf.nodeToSnode(nf.nodeIdx(jj)[jjKkUpdateSp]). The kernel never names kk
     // (it forms jj's outer product from that row down, and the caller has already sized the block to
@@ -340,13 +365,13 @@ void NumFactorEngine::updateStaticSupernode(const Factor& nf, std::int32_t jj,
 
     const int f          = static_cast<int>(jjFrontSize);
     const int sld        = static_cast<int>(jjNumNodeIdx);
-    const int jjKkHeight = static_cast<int>(updateBlock.mHeight);
-    const int jjKkWidth  = static_cast<int>(updateBlock.mWidth);
+    const int jjKkHeight = static_cast<int>(jjKkUpdateBlock.height());
+    const int jjKkWidth  = static_cast<int>(jjKkUpdateBlock.width());
     const int dld        = jjKkHeight;
 
     const bool withHermitian = hermitian(mFactorization);
     const Val* l21Val        = jjVal + jjKkUpdateSp;   // the update rows that reach this ancestor, and below
-    Val*       u22Val        = updateBlock.mVal.data();
+    Val*       u22Val        = jjKkUpdateBlock.val();
 
     // `jjKkHeight` and `jjKkWidth` are dimensions of the (jj, kk) *edge*, not of either supernode
     // alone. `jjKkWidth` is how many of jj's rows land in kk, a two-supernode count: change jj or kk
@@ -419,8 +444,8 @@ void NumFactorEngine::updateStaticSupernode(const Factor& nf, std::int32_t jj,
 }
 
 template<class Val, class Factor>
-void NumFactorEngine::updateStaticMultifrontal(const Factor& nf, std::int32_t kk,
-                                               UpdateMatrix<Val>& kkUpdate) const {
+void NumFactorEngine::updateStaticUpdateMatrix(const Factor& nf, std::int32_t kk,
+                                               UpdateMatrix<Val>& kkUpdateMatrix) const {
     const int u = static_cast<int>(nf.updateSize(kk));
     if (u == 0)
         return;   // a root, or a supernode reaching nowhere: no contribution to leave
@@ -429,7 +454,7 @@ void NumFactorEngine::updateStaticMultifrontal(const Factor& nf, std::int32_t kk
     const int  ld  = f + u;                 // kk's lu block height
     const Val* val = nf.val(kk);            // kk's factored block
     const Val* l21 = val + f;               // its update rows
-    Val*       uVal = kkUpdate.val();       // the contribution block, ld == u
+    Val*       uVal = kkUpdateMatrix.val();       // the contribution block, ld == u
 
     if (mFactorization == Factorization::Cholesky) {
         // U -= L21 L21^H, one rank-k call. herk resolves to syrk for real and herk for complex by
@@ -519,11 +544,11 @@ bool NumFactorEngine::factorStaticLeftLooking(const SparseMatrix<Val>& A, const 
                    && nf.nodeToSnode(jjNodeIdx[jjKkUpdateSp + jjKkWidth]) == kk)
                 ++jjKkWidth;
 
-            UpdateBlock<Val> updateBlock(jjKkHeight, jjKkWidth);
-            std::copy(jjNodeIdx + jjKkUpdateSp, jjNodeIdx + jjNumNodeIdx, updateBlock.mRowIdx.begin());
+            UpdateBlock<Val> jjKkUpdateBlock(jjKkHeight, jjKkWidth);
+            std::copy(jjNodeIdx + jjKkUpdateSp, jjNodeIdx + jjNumNodeIdx, jjKkUpdateBlock.rowIdx());
 
-            updateStaticSupernode(nf, jj, jjKkUpdateSp, updateBlock);
-            assembleUpdate(gblToLcl, updateBlock, kkNumNodeIdx, kkVal);
+            updateStaticUpdateBlock(nf, jj, jjKkUpdateSp, jjKkUpdateBlock);
+            assembleUpdateBlock(jjKkUpdateBlock, nf, kk, gblToLcl);
 
             // jj has updated kk. Queue it for the next ancestor it must update.
             nextUpdateSp[jj] = jjKkUpdateSp + jjKkWidth;
@@ -600,7 +625,6 @@ bool NumFactorEngine::factorStaticRightLooking(const SparseMatrix<Val>& A, const
             const std::size_t   kkFrontSize  = nf.frontSize(kk);
             const std::size_t   kkNumNodeIdx = kkFrontSize + nf.updateSize(kk);
             const std::int32_t* kkNodeIdx    = nf.nodeIdx(kk);
-            Val*                kkVal        = nf.val(kk);
 
             const std::size_t jjKkHeight = jjNumNodeIdx - jjKkUpdateSp;
             std::size_t       jjKkWidth  = 0;
@@ -608,13 +632,13 @@ bool NumFactorEngine::factorStaticRightLooking(const SparseMatrix<Val>& A, const
                    && nf.nodeToSnode(jjNodeIdx[jjKkUpdateSp + jjKkWidth]) == kk)
                 ++jjKkWidth;
 
-            UpdateBlock<Val> updateBlock(jjKkHeight, jjKkWidth);
-            std::copy(jjNodeIdx + jjKkUpdateSp, jjNodeIdx + jjNumNodeIdx, updateBlock.mRowIdx.begin());
+            UpdateBlock<Val> jjKkUpdateBlock(jjKkHeight, jjKkWidth);
+            std::copy(jjNodeIdx + jjKkUpdateSp, jjNodeIdx + jjNumNodeIdx, jjKkUpdateBlock.rowIdx());
 
-            updateStaticSupernode(nf, jj, jjKkUpdateSp, updateBlock);
+            updateStaticUpdateBlock(nf, jj, jjKkUpdateSp, jjKkUpdateBlock);
 
             setGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
-            assembleUpdate(gblToLcl, updateBlock, kkNumNodeIdx, kkVal);
+            assembleUpdateBlock(jjKkUpdateBlock, nf, kk, gblToLcl);
             clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
 
             jjKkUpdateSp += jjKkWidth;
@@ -627,7 +651,7 @@ bool NumFactorEngine::factorStaticRightLooking(const SparseMatrix<Val>& A, const
 // =================================================================================================
 // Static multifrontal. One postorder-compatible pass (supernodes in increasing order): assemble A
 // and every child's contribution block into the frontal, factor, then leave this supernode's own
-// contribution block on the stack for its parent. Cholesky only for now; see the header.
+// contribution block in updateMatrix for its parent. Cholesky only for now; see the header.
 // =================================================================================================
 
 template<class Val, class Factor>
@@ -644,7 +668,7 @@ bool NumFactorEngine::factorStaticMultifrontal(const SparseMatrix<Val>& A, const
 
     // One contribution block per supernode, allocated when the supernode is reached and freed once
     // its parent has assembled it. Sized once; the slots start empty.
-    std::vector<UpdateMatrix<Val>> stack(snodeSize);
+    std::vector<UpdateMatrix<Val>> updateMatrix(snodeSize);
 
     for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(snodeSize); ++kk) {
         const std::size_t   kkFrontSize  = nf.frontSize(kk);
@@ -654,7 +678,7 @@ bool NumFactorEngine::factorStaticMultifrontal(const SparseMatrix<Val>& A, const
         Val*                kkVal        = nf.val(kk);
 
         // Map kk's whole index set, front and update rows alike: assembleFromA fills the front
-        // columns, and the extend-add routes each child entry by where its index falls in kk.
+        // columns, and the assembly routes each child entry by where its index falls in kk.
         setGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
 
         // A's own values into kk's lu block.
@@ -665,18 +689,18 @@ bool NumFactorEngine::factorStaticMultifrontal(const SparseMatrix<Val>& A, const
 
         // Allocate kk's contribution block over its update rows; allocate zeroes the values, so only
         // the indices are filled here, from kk's update-row indices.
-        stack[kk].allocate(kkUpdateSize);
+        updateMatrix[kk].allocate(kkUpdateSize);
         {
-            std::int32_t* kkUpdateIdx = stack[kk].nodeIdx();
+            std::int32_t* kkUpdateRowIdx = updateMatrix[kk].rowIdx();
             for (std::size_t sp = 0; sp < kkUpdateSize; ++sp)
-                kkUpdateIdx[sp] = kkNodeIdx[kkFrontSize + sp];
+                kkUpdateRowIdx[sp] = kkNodeIdx[kkFrontSize + sp];
         }
 
-        // Extend-add each child's contribution block into kk's frontal, then free it. A child of kk
+        // Assemble each child's contribution block into kk's frontal, then free it. A child of kk
         // is factored in an earlier iteration (increasing order), so its block is present here.
         for (std::int32_t jj = firstChild[kk]; jj != NIL; jj = nextSibling[jj]) {
-            assembleUpdateMatrix(stack[jj], kk, nf, stack[kk], gblToLcl);
-            stack[jj].discard();
+            assembleUpdateMatrix(updateMatrix[jj], nf, kk, updateMatrix[kk], gblToLcl);
+            updateMatrix[jj].discard();
         }
 
         // Factor kk's pivots, the same per-supernode kernel the other traversals use: Cholesky is
@@ -686,8 +710,8 @@ bool NumFactorEngine::factorStaticMultifrontal(const SparseMatrix<Val>& A, const
             return false;   // Cholesky non-positive-definite; LDL perturbs instead and cannot fail
         }
 
-        // Form kk's contribution block from the factored pivots and leave it on the stack.
-        updateStaticMultifrontal(nf, kk, stack[kk]);
+        // Form kk's contribution block from the factored pivots and leave it for kk's parent.
+        updateStaticUpdateMatrix(nf, kk, updateMatrix[kk]);
 
         clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
     }
@@ -1044,8 +1068,8 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
 }
 
 template<class Val>
-void NumFactorEngine::updateDynamicSupernode(const NumFactorDynamic<Val>& nf, std::int32_t jj,
-                                             std::size_t jjKkUpdateSp, UpdateBlock<Val>& updateBlock) const {
+void NumFactorEngine::updateDynamicUpdateBlock(const NumFactorDynamic<Val>& nf, std::int32_t jj,
+                                             std::size_t jjKkUpdateSp, UpdateBlock<Val>& jjKkUpdateBlock) const {
     // `jjKkUpdateSp` is a position into jj's index set, and it is what selects the ancestor kk this
     // update reaches: kk == nf.nodeToSnode(nf.nodeIdx(jj)[jjKkUpdateSp]). The kernel never names kk
     // (it forms jj's outer product from that row down, and the caller has already sized the block to
@@ -1079,8 +1103,8 @@ void NumFactorEngine::updateDynamicSupernode(const NumFactorDynamic<Val>& nf, st
         return;   // every column of jj was delayed: there is no pivot here to update anyone with
 
     const int sld        = static_cast<int>(jjNumNodeIdx);
-    const int jjKkHeight = static_cast<int>(updateBlock.mHeight);
-    const int jjKkWidth  = static_cast<int>(updateBlock.mWidth);
+    const int jjKkHeight = static_cast<int>(jjKkUpdateBlock.height());
+    const int jjKkWidth  = static_cast<int>(jjKkUpdateBlock.width());
     const int dld        = jjKkHeight;
 
     // As in the static twin, jjKkHeight and jjKkWidth are the (jj, kk) edge's dimensions, not either
@@ -1092,7 +1116,7 @@ void NumFactorEngine::updateDynamicSupernode(const NumFactorDynamic<Val>& nf, st
     const std::int32_t* jjNodeIdx     = nf.nodeIdx(jj);
     // jj's rows from `jjKkUpdateSp` down: the block this ancestor is about to receive.
     const Val*          l21Val        = jjVal + jjKkUpdateSp;
-    Val*                u22Val        = updateBlock.mVal.data();
+    Val*                u22Val        = jjKkUpdateBlock.val();
 
     // LDL, exactly as in the static twin: the update is `block -= L21 D L21^H`, no BLAS routine
     // computes it (the D in the middle rules out a rank-k call), so we form U := D L21^H into a
@@ -1121,8 +1145,8 @@ void NumFactorEngine::updateDynamicSupernode(const NumFactorDynamic<Val>& nf, st
 }
 
 template<class Val>
-void NumFactorEngine::updateDynamicMultifrontal(const NumFactorDynamic<Val>& nf, std::int32_t kk,
-                                                UpdateMatrix<Val>& kkUpdate) const {
+void NumFactorEngine::updateDynamicUpdateMatrix(const NumFactorDynamic<Val>& nf, std::int32_t kk,
+                                                UpdateMatrix<Val>& kkUpdateMatrix) const {
     const int f = static_cast<int>(nf.frontSize(kk));    // post-factor front
     const int u = static_cast<int>(nf.updateSize(kk));
     if (f == 0 || u == 0)
@@ -1142,7 +1166,7 @@ void NumFactorEngine::updateDynamicMultifrontal(const NumFactorDynamic<Val>& nf,
     // handling 1x1 and 2x2 pivots, to build D L21^H into a scratch; gemmLower then multiplies.
     std::vector<Val> upper(static_cast<std::size_t>(f) * static_cast<std::size_t>(u), Val(0));
     formDynamicUpper(u, f, l21, ld, upper.data(), f, val, ld, nf.mPivotType.data(), nodeIdx, herm);
-    gemmLower(u, f, l21, ld, upper.data(), f, kkUpdate.val(), u);
+    gemmLower(u, f, l21, ld, upper.data(), f, kkUpdateMatrix.val(), u);
 }
 
 template<class Val>
@@ -1193,7 +1217,7 @@ void NumFactorEngine::assembleDelay(NumFactorDynamic<Val>& nf, std::int32_t jj, 
 //               indices right to make room, prepend the children's delayed globals, widen the
 //               front, and discard-and-rezero the val.
 //   Assemble A. Starting past the prepended columns, which hold no entry of A.
-//   Update.     For each jj owing kk: if kk is jj's parent, fold jj's delayed columns in and only
+//   Update.     For each jj owing kk: if kk is jj's parent, assemble jj's delayed columns and only
 //               then contract them away. Then the ordinary update.
 //   Factor.     Which may itself delay, reducing frontSize[kk] and setting
 //               delaySize[kk].
@@ -1214,7 +1238,7 @@ void NumFactorEngine::assembleDelay(NumFactorDynamic<Val>& nf, std::int32_t jj, 
 // is dimensioned by column count and there are no columns left. The nodeIdx is not shrunk to match,
 // and it does not need to be. Nothing reads it afterward: assembleDelay already extracted the
 // delayed globals while the columns were still present, and every later reader is gated on
-// frontSize (the solve loops j < frontSize, updateDynamicSupernode returns on f == 0), so a
+// frontSize (the solve loops j < frontSize, updateDynamicUpdateBlock returns on f == 0), so a
 // zero-front supernode is uniformly skipped. The surviving rows are vestigial, kept because
 // "nodeIdx never contracts" is a simpler invariant to hold than one with an emptying special case,
 // not because anyone consults them. Clearing them would be equally correct and save a little
@@ -1293,9 +1317,7 @@ bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const
         const std::size_t   kkPreFactorFrontSize = nf.frontSize(kk);
         const std::size_t   kkNumNodeIdx         = kkPreFactorFrontSize + nf.updateSize(kk);
         const std::int32_t* kkNodeIdx            = nf.nodeIdx(kk);
-        Val*                kkVal                = nf.val(kk);   // stays valid across the loop below: kk was
-                                                         // resized once in the migration above, and
-                                                         // nothing inside the loop resizes it again
+        Val*                kkVal                = nf.val(kk);   // for assembleFromA just below
 
         setGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
 
@@ -1337,11 +1359,11 @@ bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const
                    && nf.nodeToSnode(jjNodeIdx[jjKkUpdateSp + jjKkWidth]) == kk)
                 ++jjKkWidth;
 
-            UpdateBlock<Val> updateBlock(jjKkHeight, jjKkWidth);
-            std::copy(jjNodeIdx + jjKkUpdateSp, jjNodeIdx + jjNumNodeIdx, updateBlock.mRowIdx.begin());
+            UpdateBlock<Val> jjKkUpdateBlock(jjKkHeight, jjKkWidth);
+            std::copy(jjNodeIdx + jjKkUpdateSp, jjNodeIdx + jjNumNodeIdx, jjKkUpdateBlock.rowIdx());
 
-            updateDynamicSupernode(nf, jj, jjKkUpdateSp, updateBlock);
-            assembleUpdate(gblToLcl, updateBlock, kkNumNodeIdx, kkVal);
+            updateDynamicUpdateBlock(nf, jj, jjKkUpdateSp, jjKkUpdateBlock);
+            assembleUpdateBlock(jjKkUpdateBlock, nf, kk, gblToLcl);
 
             // jj has updated kk. Queue it for the next ancestor it must update.
             nextUpdateSp[jj] = jjKkUpdateSp + jjKkWidth;
@@ -1394,7 +1416,7 @@ bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const
 // columns are inserted at its left, which is expandVal; left-looking, whose fronts are still
 // empty when they expand, calls resetVal instead.
 //
-// The second difference is smaller and follows from the direction. Left-looking folds a child's
+// The second difference is smaller and follows from the direction. Left-looking assembles a child's
 // delayed columns into the parent when it reaches the parent's update list; here the parent takes
 // them from all its children at once, at the moment it expands, since by then every child is
 // finished. The order that matters is unchanged: assemble the delayed columns, then contract them
@@ -1532,7 +1554,6 @@ bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, cons
             const std::size_t   kkPreFactorFrontSize = nf.frontSize(kk);
             const std::size_t   kkNumNodeIdx         = kkPreFactorFrontSize + nf.updateSize(kk);
             const std::int32_t* kkNodeIdx            = nf.nodeIdx(kk);
-            Val*                kkVal                = nf.val(kk);
 
             const std::size_t jjKkHeight = jjNumNodeIdx - jjKkUpdateSp;
             std::size_t       jjKkWidth  = 0;
@@ -1540,13 +1561,13 @@ bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, cons
                    && nf.nodeToSnode(jjNodeIdx[jjKkUpdateSp + jjKkWidth]) == kk)
                 ++jjKkWidth;
 
-            UpdateBlock<Val> updateBlock(jjKkHeight, jjKkWidth);
-            std::copy(jjNodeIdx + jjKkUpdateSp, jjNodeIdx + jjNumNodeIdx, updateBlock.mRowIdx.begin());
+            UpdateBlock<Val> jjKkUpdateBlock(jjKkHeight, jjKkWidth);
+            std::copy(jjNodeIdx + jjKkUpdateSp, jjNodeIdx + jjNumNodeIdx, jjKkUpdateBlock.rowIdx());
 
-            updateDynamicSupernode(nf, jj, jjKkUpdateSp, updateBlock);
+            updateDynamicUpdateBlock(nf, jj, jjKkUpdateSp, jjKkUpdateBlock);
 
             setGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
-            assembleUpdate(gblToLcl, updateBlock, kkNumNodeIdx, kkVal);
+            assembleUpdateBlock(jjKkUpdateBlock, nf, kk, gblToLcl);
             clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
 
             jjKkUpdateSp += jjKkWidth;
@@ -1561,9 +1582,10 @@ bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, cons
 
 // =================================================================================================
 // Dynamic LDL, multifrontal. The left-looking dynamic skeleton (expand a front by its children's
-// delayed columns, assemble A past them, factor, which may delay again) with the update stack in
-// place of the pull queue: fold each child by both halves of the extend-add, then factor and leave
-// this supernode's contribution block on the stack. This is where delayed columns meet the stack.
+// delayed columns, assemble A past them, factor, which may delay again) with the per-supernode
+// update matrices in place of the pull queue: assemble each child by both halves of the assembly, then
+// factor and leave this supernode's contribution block for its parent. This is where delayed columns
+// meet the update matrices.
 // =================================================================================================
 
 template<class Val>
@@ -1581,8 +1603,8 @@ bool NumFactorEngine::factorDynamicMultifrontal(const SparseMatrix<Val>& A, cons
     std::vector<std::int32_t> gblToLcl(size, NIL);
 
     // One contribution block per supernode, allocated when the supernode is reached and freed once
-    // its parent has folded it in.
-    std::vector<UpdateMatrix<Val>> stack(snodeSize);
+    // its parent has assembled it.
+    std::vector<UpdateMatrix<Val>> updateMatrix(snodeSize);
 
     for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(snodeSize); ++kk) {
         std::size_t kkInboundDelaySize = 0;
@@ -1639,28 +1661,28 @@ bool NumFactorEngine::factorDynamicMultifrontal(const SparseMatrix<Val>& A, cons
 
         // Allocate kk's contribution block over its update rows; allocate zeroes the values, so only
         // the indices are filled here.
-        stack[kk].allocate(kkUpdateSize);
+        updateMatrix[kk].allocate(kkUpdateSize);
         {
-            std::int32_t* kkUpdateIdx = stack[kk].nodeIdx();
+            std::int32_t* kkUpdateRowIdx = updateMatrix[kk].rowIdx();
             for (std::size_t sp = 0; sp < kkUpdateSize; ++sp)
-                kkUpdateIdx[sp] = kkNodeIdx[kkPreFactorFrontSize + sp];
+                kkUpdateRowIdx[sp] = kkNodeIdx[kkPreFactorFrontSize + sp];
         }
 
-        // Fold in each child. Its delayed columns become kk front columns (assembleDelay) and their
+        // Assemble each child. Its delayed columns become kk front columns (assembleDelay) and their
         // storage is then reclaimed (contractVal); that pair is the child's delayed-column handling,
-        // a no-op for a child that delayed nothing. Its contribution block extend-adds into kk's
-        // frontal (assembleUpdateMatrix) and is then freed. The extend-add is independent of the
-        // contraction, it reads the block on the stack rather than jj's front, so the only order that
+        // a no-op for a child that delayed nothing. Its contribution block is assembled into kk's
+        // frontal (assembleUpdateMatrix) and is then freed. The assembly is independent of the
+        // contraction, it reads jj's update matrix rather than jj's front, so the only order that
         // matters is assembleDelay before contractVal (read the columns before reclaiming them) and
-        // the extend-add before discard.
+        // the assembly before discard.
         for (std::int32_t jj = firstChild[kk]; jj != NIL; jj = nextSibling[jj]) {
             const std::size_t jjDelaySize = nf.delaySize(jj);
             if (jjDelaySize > 0) {
                 assembleDelay(nf, jj, kk, gblToLcl);
                 nf.contractVal(jj, jjDelaySize);
             }
-            assembleUpdateMatrix(stack[jj], kk, nf, stack[kk], gblToLcl);
-            stack[jj].discard();
+            assembleUpdateMatrix(updateMatrix[jj], nf, kk, updateMatrix[kk], gblToLcl);
+            updateMatrix[jj].discard();
         }
 
         // Factor kk's pivots (dynamic threshold pivoting; may delay columns to kk's parent).
@@ -1669,8 +1691,8 @@ bool NumFactorEngine::factorDynamicMultifrontal(const SparseMatrix<Val>& A, cons
             return false;
         }
 
-        // Form kk's contribution block from the factored pivots and leave it on the stack.
-        updateDynamicMultifrontal(nf, kk, stack[kk]);
+        // Form kk's contribution block from the factored pivots and leave it for kk's parent.
+        updateDynamicUpdateMatrix(nf, kk, updateMatrix[kk]);
 
         clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
 

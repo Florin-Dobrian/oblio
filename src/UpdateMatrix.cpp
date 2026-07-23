@@ -5,7 +5,7 @@ namespace Oblio {
 template<class Val>
 void UpdateMatrix<Val>::allocate(std::size_t size) {
     mSize = size;
-    mNodeIdx.assign(size, 0);          // sized; the engine fills the global indices
+    mRowIdx.assign(size, 0);           // sized; the engine fills the global row indices
     mVal.assign(size * size, Val(0));  // zeroed, because assembly adds into it
 }
 
@@ -14,7 +14,7 @@ void UpdateMatrix<Val>::discard() {
     mSize = 0;
     // Free rather than clear: clear keeps the capacity, which would let the stack's peak grow to
     // the sum of every block ever allocated. Swapping with an empty vector releases the storage.
-    std::vector<std::int32_t>().swap(mNodeIdx);
+    std::vector<std::int32_t>().swap(mRowIdx);
     std::vector<Val>().swap(mVal);
 }
 

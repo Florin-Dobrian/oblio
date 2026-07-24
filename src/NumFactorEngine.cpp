@@ -243,8 +243,8 @@ void NumFactorEngine::assembleUpdateBlock(const UpdateBlock<Val>& jjKkUpdateBloc
         const std::int32_t lj = jjKkRowIdx[sj];                // this column's global index
         const std::int32_t dj = gblToLcl[lj];                  // its column in kk's front
 
-        const std::size_t scp = static_cast<std::size_t>(sj) * jjKkHeight;     // source column
-        const std::size_t dcp = static_cast<std::size_t>(dj) * kkNumNodeIdx;   // dest column
+        const std::size_t scp = sj * jjKkHeight;     // source column
+        const std::size_t dcp = dj * kkNumNodeIdx;   // dest column
 
         for (std::int32_t si = sj; si < static_cast<std::int32_t>(jjKkHeight); ++si) {
             const std::int32_t li = jjKkRowIdx[si];
@@ -283,10 +283,10 @@ void NumFactorEngine::assembleUpdateMatrix(const UpdateMatrix<Val>& jjUpdateMatr
     for (std::int32_t sj = 0; sj < static_cast<std::int32_t>(jjUpdateSize); ++sj) {
         const std::int32_t lj  = jjRowIdx[sj];   // this column's global (L-ordering) index
         const std::int32_t dj  = gblToLcl[lj];   // its column in kk
-        const std::size_t  scp = static_cast<std::size_t>(sj) * jjUpdateSize;   // source column
+        const std::size_t  scp = sj * jjUpdateSize;   // source column
 
         if (dj < static_cast<std::int32_t>(kkFrontSize)) {
-            const std::size_t dcp = static_cast<std::size_t>(dj) * kkNumNodeIdx;   // dest column
+            const std::size_t dcp = dj * kkNumNodeIdx;   // dest column
 
             for (std::int32_t si = sj; si < static_cast<std::int32_t>(jjUpdateSize); ++si) {
                 const std::int32_t li = jjRowIdx[si];
@@ -295,8 +295,7 @@ void NumFactorEngine::assembleUpdateMatrix(const UpdateMatrix<Val>& jjUpdateMatr
                 kkFrontVal[dcp + di] += jjUpdateVal[scp + si];
             }
         } else {
-            const std::size_t dcp =
-                (static_cast<std::size_t>(dj) - kkFrontSize) * kkUpdateSize;   // dest column
+            const std::size_t dcp = (dj - kkFrontSize) * kkUpdateSize;   // dest column
 
             for (std::int32_t si = sj; si < static_cast<std::int32_t>(jjUpdateSize); ++si) {
                 const std::int32_t li = jjRowIdx[si];
@@ -1058,11 +1057,10 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
     }
 
     // Whatever is left could not be pivoted here; delay it to an ancestor. frontSize contracts by
-    // that
-    // count, and the val height (frontSize + delaySize + updateSize) is preserved.
-    const std::int32_t delayed = static_cast<std::int32_t>(pivotList.size());
-    nf.mDelaySize[jj] = static_cast<std::size_t>(delayed);
-    nf.mFrontSize[jj] -= static_cast<std::size_t>(delayed);
+    // that count, and the val height (frontSize + delaySize + updateSize) is preserved.
+    const std::size_t delaySize = pivotList.size();
+    nf.mDelaySize[jj]  = delaySize;
+    nf.mFrontSize[jj] -= delaySize;
 
     return true;
 }

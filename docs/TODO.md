@@ -137,30 +137,49 @@ for it. The factor L normally dominates the total, but the update stack is the p
 scratch: it holds no results and is gone when the factorization ends. So if memory binds, the stack is
 the first place to look, precisely because shrinking it costs nothing in output.
 
-**Out of core is the one regime where the LIFO discipline does algorithmic work rather than tidying,
-and the reason is eviction rather than contiguity.** Contiguity matters, a sequential transfer beating
-a scattered one by more the slower the medium, which is most of why the classical solvers are built
-this way. But the deeper property is what a postorder gives: the live intervals nest, so among the
-blocks currently live, the one pushed earliest is the one whose parent lies furthest in the future.
-The bottom of the stack is therefore exactly the block that will be wanted last, and *spill from the
-bottom* is optimal eviction, Belady's rule obtained by construction, with no lookahead and no
-bookkeeping. A stack pointer plus one policy, both free.
+**Out of core is the one regime where the LIFO discipline is required rather than merely tidy, and
+the reason is the shape of a file.** A file is a linear sequence of bytes that can be appended to and
+truncated at its end cheaply and at neither of those cheaply anywhere else. A stack maps onto that
+exactly: pushing is an append, popping is a truncate, and the file's one end is the stack's one end.
+Our per-supernode slots do not map onto it at all, since freeing a block in the middle of the run
+would mean freeing bytes in the middle of the file, and the ways out of that are all bad. Compacting
+rewrites the tail on every free. Leaving holes and tracking them is a free-space allocator on disk,
+written by hand. One file per update matrix avoids both and is overkill, thousands of files with the
+open, close and metadata cost of each, for blocks that live a few steps.
 
-Our per-supernode slots hold the same blocks but carry none of that shape. Spilling correctly from
-them would mean computing, for every live block, when its parent arrives, and evicting by that,
-which is reconstructing by hand what a stack encodes in its geometry. So out of core does not merely
-prefer an arena; it is the case where the discipline is buying something no reordering can supply.
-The same nesting is also why the discipline collapses under concurrency, since interleaved branches
-destroy the nesting outright, and why per-thread stacks each spilling their own arena is the shape an
-out-of-core parallel solver would need.
+So out of core does not merely prefer an arena; it is the case where nothing else works, and the
+requirement comes from the medium rather than from any property of the factorization. The postorder
+is what makes the mapping available, since nesting live intervals is exactly the condition under
+which a one-ended structure suffices, and that in turn is why the discipline collapses under
+concurrency: interleaved branches destroy the nesting, so per-thread stacks each spilling their own
+file is the shape an out-of-core parallel solver would need.
+
+One consequence is worth keeping: the resident part of a file-backed stack is always a suffix, the
+most recently pushed blocks, so deciding how much to hold in memory is sizing a single buffer rather
+than choosing among blocks. Sequential transfers come along as well, but that is the append pattern
+restated rather than a second argument for it, and contiguity in core is a different question, the
+fragmentation one below, on which our scattered per-supernode allocations do not deliver anything.
+
+**The shortest argument against a stack in core needs no measurement at all: the hole.**
+`updateMatrix[K]` is allocated while its children are still live, so it necessarily sits above them,
+and freeing them opens a gap beneath it. In an arena there are only two ways out, moving K's block
+down into the gap, which is a copy of `U(K)` bytes per supernode, or leaving the gap and abandoning
+the bump pointer, at which point it is not a stack. With separate allocations there is no gap to
+close, because there was no adjacency to preserve in the first place.
+
+The cost of that compaction is what settles the question, because it is bought with different things
+in the two regimes. In core it buys contiguity, which we have argued is worth little, while the peak
+does not move at all: paying a copy per supernode for nothing. Out of core the same copy is what
+keeps the file a file, so it buys the ability to run at all. The compaction is therefore the visible
+symptom of a discipline applied outside the regime that pays for it.
 
 **The three regimes, then, and they do not agree.** In core and serial, random-access slots are fine:
 the peak is identical to a stack's and the child ordering is what pays. In core and parallel, the
 slots are actively better, disjoint by construction with no shared stack pointer, and a single global
-arena is incoherent once branches interleave. Out of core, the stack earns its keep, for eviction
-first and contiguity second. So the arena is not a general good being deferred; it is specifically the
-out-of-core enabler, plus a fragmentation hedge in core, which is narrower than a plain reading of
-this entry suggests.
+arena is incoherent once branches interleave. Out of core, the stack is not an optimization but a
+requirement, a file having only one cheap end. So the arena is not a general good being deferred;
+it is specifically the out-of-core enabler, plus a fragmentation hedge in core, which is narrower
+than a plain reading of this entry suggests.
 
 **If it does bind, the target differs between the serial and the parallel case.** Serially the answer
 is unambiguous: one arena, full LIFO discipline, the smallest peak the traversal admits. Under

@@ -47,6 +47,7 @@
 #include <algorithm>
 #include <complex>
 #include <cstdint>
+#include <optional>
 #include <cstdio>
 #include <iostream>
 #include <random>
@@ -623,7 +624,8 @@ int main() {
         for (Factorization fz : {Factorization::Cholesky, Factorization::StaticLDLT,
                                  Factorization::StaticLDLH, Factorization::DynamicLDLT,
                                  Factorization::DynamicLDLH})
-            for (Traversal tr : {Traversal::LeftLooking, Traversal::RightLooking}) {
+            for (Traversal tr : {Traversal::LeftLooking, Traversal::RightLooking,
+                                 Traversal::Multifrontal}) {
                 DirectSolver<double> solver(OrderMethod::Natural, fz, tr);
                 if (!solver.analyze(A) || !solver.factor(A) || !solver.solve(b, x))
                     continue;
@@ -631,9 +633,69 @@ int main() {
                 worst = std::max(worst, solver.relativeResidual(A, b, x));
             }
 
-        ck(reached == 10, "DirectSolver      : all five factorizations reached, both traversals");
-        ck(reached == 10 && worst < tol,
-           with("DirectSolver      : worst residual over all ten", worst));
+        ck(reached == 15, "DirectSolver      : all five factorizations reached, all three traversals");
+        ck(reached == 15 && worst < tol,
+           with("DirectSolver      : worst residual over all fifteen", worst));
+
+        // The multifrontal child ordering is computed during analyze, so the traversal has to be
+        // known by then. Switching between left- and right-looking reads the same forest and must
+        // not throw the analysis away; switching into or out of multifrontal must, because the
+        // forest itself differs, its children reordered and its supernodes relabeled.
+        DirectSolver<double> ds(OrderMethod::Natural, Factorization::Cholesky,
+                                Traversal::LeftLooking);
+        ck(ds.analyze(A) && ds.analyzed(), "DirectSolver      : analyze succeeds");
+
+        ds.setTraversal(Traversal::RightLooking);
+        ck(ds.analyzed(), "DirectSolver      : analysis survives left- to right-looking");
+
+        ds.setTraversal(Traversal::Multifrontal);
+        ck(!ds.analyzed(), "DirectSolver      : analysis invalidated switching to multifrontal");
+
+        ck(ds.analyze(A) && ds.factor(A) && ds.solve(b, x)
+               && ds.relativeResidual(A, b, x) < tol,
+           "DirectSolver      : re-analyzed multifrontal solves");
+
+        ds.setTraversal(Traversal::LeftLooking);
+        ck(!ds.analyzed(), "DirectSolver      : analysis invalidated switching out of multifrontal");
+
+        // Supernodes and amalgamation are constructor-only, so there is nothing to invalidate.
+        // Fundamental and no amalgamation are the defaults; nodal and an amalgamating solver must
+        // both reach the same answer, since neither changes what is being computed, only the block
+        // structure it is computed in.
+        DirectSolver<double> dsDefault(OrderMethod::Natural, Factorization::Cholesky,
+                                       Traversal::LeftLooking);
+        ck(dsDefault.supernodes() == Supernodes::Fundamental && !dsDefault.amalgamation().has_value(),
+           "DirectSolver      : fundamental supernodes and no amalgamation by default");
+
+        DirectSolver<double> dsNodal(OrderMethod::Natural, Factorization::Cholesky,
+                                     Traversal::LeftLooking, Supernodes::Nodal);
+        ck(dsNodal.supernodes() == Supernodes::Nodal
+               && dsNodal.analyze(A) && dsNodal.factor(A) && dsNodal.solve(b, x)
+               && dsNodal.relativeResidual(A, b, x) < tol,
+           "DirectSolver      : nodal supernodes reachable and solve correct");
+
+        DirectSolver<double> dsAmal(OrderMethod::Natural, Factorization::Cholesky,
+                                    Traversal::Multifrontal, Supernodes::Fundamental, 8);
+        ck(dsAmal.amalgamation().has_value() && *dsAmal.amalgamation() == 8
+               && dsAmal.analyze(A) && dsAmal.factor(A) && dsAmal.solve(b, x)
+               && dsAmal.relativeResidual(A, b, x) < tol,
+           "DirectSolver      : amalgamation reachable, with multifrontal, and solve correct");
+
+        // Both are settable afterwards too, and both invalidate the analysis, since the forest is
+        // what they change and the analysis is the forest.
+        ck(dsAmal.analyzed(), "DirectSolver      : analyzed after the amalgamating run");
+        dsAmal.setSupernodes(Supernodes::Nodal);
+        ck(!dsAmal.analyzed() && dsAmal.supernodes() == Supernodes::Nodal,
+           "DirectSolver      : setSupernodes takes and invalidates the analysis");
+
+        dsAmal.analyze(A);
+        dsAmal.setAmalgamation(std::nullopt);
+        ck(!dsAmal.analyzed() && !dsAmal.amalgamation().has_value(),
+           "DirectSolver      : setAmalgamation takes and invalidates the analysis");
+
+        ck(dsAmal.analyze(A) && dsAmal.factor(A) && dsAmal.solve(b, x)
+               && dsAmal.relativeResidual(A, b, x) < tol,
+           "DirectSolver      : solves again after both forest settings changed");
     }
 
     std::cout << "\nPipeline tests: " << pass << "/" << (pass + fail) << " passed\n";

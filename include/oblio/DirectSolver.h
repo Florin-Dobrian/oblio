@@ -39,6 +39,7 @@
 
 #include <complex>
 #include <cstddef>
+#include <optional>
 
 namespace Oblio {
 
@@ -50,11 +51,17 @@ public:
     // no arguments behaves as the engines it drives would.
     explicit DirectSolver(OrderMethod   method        = OrderMethod::MMD,
                           Factorization factorization = Factorization::Cholesky,
-                          Traversal     traversal     = Traversal::LeftLooking)
-        : mOrderMethod(method), mFactorization(factorization), mTraversal(traversal) {}
+                          Traversal     traversal     = Traversal::LeftLooking,
+                          Supernodes    supernodes    = Supernodes::Fundamental,
+                          std::optional<std::size_t> amalgamation = std::nullopt)
+        : mOrderMethod(method), mFactorization(factorization), mTraversal(traversal),
+          mSupernodes(supernodes), mAmalgamation(amalgamation) {}
 
-    // Configuration. Changing any of these invalidates what has been computed so far: the ordering
-    // choice changes the analysis, the factorization and traversal change the numeric factor.
+    // Configuration. Every setting is available in the constructor, in pipeline order, and through
+    // a setter here. Changing one invalidates what it must and no more: the ordering and the two
+    // forest settings change the analysis, the factorization changes only the numeric factor, and
+    // the traversal changes the analysis only across the multifrontal boundary, since that is where
+    // the forest differs.
     void          setOrderMethod(OrderMethod method);
     OrderMethod   orderMethod() const   { return mOrderMethod; }
     void          setFactorization(Factorization factorization);
@@ -66,6 +73,18 @@ public:
     // accepted in place rather than delayed. See NumFactorEngine.
     void   setPivotThreshold(double threshold) { mPivotThreshold = threshold; }
     double pivotThreshold() const              { return mPivotThreshold; }
+
+    // The two forest settings. Both change the forest itself, so both invalidate a completed
+    // analysis, as setOrderMethod does. Fundamental supernodes and no amalgamation are the
+    // defaults, matching ElmForestEngine; Nodal exists to make an unamalgamated,
+    // one-column-per-supernode factorization reachable for comparison.
+    void       setSupernodes(Supernodes supernodes);
+    Supernodes supernodes() const { return mSupernodes; }
+
+    // Absent means no amalgamation, which is the default. A value is the number of explicitly
+    // stored zeros a merge may buy per column. See ElmForestEngine.
+    void                       setAmalgamation(std::optional<std::size_t> amalgamation);
+    std::optional<std::size_t> amalgamation() const { return mAmalgamation; }
 
     // The three phases, in order. factor requires a prior analyze, solve a prior factor, and each
     // returns false rather than pretending otherwise. A matrix passed to factor must have the same
@@ -98,9 +117,11 @@ public:
 
 private:
     // Set by the constructor, which is where their defaults live, so they are not repeated here.
-    OrderMethod   mOrderMethod;
-    Factorization mFactorization;
-    Traversal     mTraversal;
+    OrderMethod                mOrderMethod;
+    Factorization              mFactorization;
+    Traversal                  mTraversal;
+    Supernodes                 mSupernodes;
+    std::optional<std::size_t> mAmalgamation;
 
     double mPivotThreshold = 0.1;   // not a constructor argument: dynamic LDL tuning, as on the engine
 

@@ -52,7 +52,7 @@ Three `assemble_` overloads matter. The one at 84 takes the matrix and a
 `delaySize` offset, assembling A's original values into a front that has
 already been expanded. The one at 153 takes two supernode indices, `jj` and `kk`, and assembles
 `jj`'s delayed columns into its parent `kk`. The one at 210 assembles a temporary into a
-front, and is the analogue of our `assembleUpdate`.
+front, and is the analogue of our `assembleUpdateBlock`.
 
 The driver is inside `run`, roughly 1527 to 1700 in absolute terms.
 
@@ -112,8 +112,8 @@ The port renamed its traversals onto the pivoting axis after this note was first
 `factorStaticLeftLooking` and `factorStaticRightLooking` for Cholesky and static LDL,
 `factorDynamicLeftLooking` for the dynamic driver, and `factorDynamicSupernode` for the pivot
 kernel (the dynamic counterpart of `factorStaticSupernode`). By the same rule the update kernel
-ported in this slice should land as `updateDynamicSupernode`, beside the existing
-`updateStaticSupernode`. 0.9's
+ported in this slice should land as `updateDynamicUpdateBlock`, beside the existing
+`updateStaticUpdateBlock`. 0.9's
 own names keep their trailing underscore here (`factorDynamicLDL_`, `updateDynamicLDL_`) so that
 line references stay greppable against the reference sources.
 

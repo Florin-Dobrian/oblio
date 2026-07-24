@@ -24,11 +24,11 @@ new `tests/*.cpp` file needs no Makefile change. Totals today: **153 assertions 
 | `smoke` | 5 | the tree builds and the basic objects work |
 | `test_permutation` | 11 | the index map and its composition |
 | `test_order` | 21 | AMD and MMD produce valid permutations |
-| `test_forest` | 28 | elimination forest, supernodes, amalgamation, multifrontal child order |
+| `test_forest` | 29 | elimination forest, supernodes, amalgamation, multifrontal child order |
 | `test_symfactor` | 29 | supernodal index sets against a dense oracle |
 | `test_numfactor` | 18 | the numeric factor, by oracle and by reconstruction |
 | `test_solve` | 14 | the solve step, by residual |
-| `test_pipeline` | 36 | whole-pipeline combinations, by residual |
+| `test_pipeline` | 48 | whole-pipeline combinations, by residual |
 
 ## A note on the word dynamic
 
@@ -82,7 +82,7 @@ and 100, a 5x5 diagonal, and a complex arrow.
 The orderings are checked for *validity*, not against 0.9's output, and not for quality. Nothing
 asserts that AMD or MMD reduces fill.
 
-### test_forest, 28 assertions
+### test_forest, 29 assertions
 
 Parent, child and sibling links, roots, height, column sizes, fundamental compression and threshold
 amalgamation. Small cases with hand-computable answers: tridiagonals at n = 4 and 6 (a path, with
@@ -94,18 +94,26 @@ distinguishing an index set with no stored zeros from one carrying them.
 
 Amalgamation is greedy and not canonical, so only its tie-break-invariant properties are asserted.
 
-Five assertions cover `setOptimizeMultifrontal`, the child reordering and postorder relabeling
+Six assertions cover `setOptimizeMultifrontal`, the child reordering and postorder relabeling
 ported from 0.9. The forest is built twice from one 8x8 grid under AMD, once with the option off and
 once on, and the two compared. Off is asserted to be the default. On, the forest must be the same
 forest, same supernode count, height, tree count, and the same multiset of front and update sizes,
 since the pair moves labels and links and nothing else; the links must stay consistent in both
 directions, checked by the same `validLinks` the rest of the file uses; every child list must come
-out in non-increasing key order, the key being `maximumStorage(jj) - updateSize(jj)^2` recomputed
+out in non-increasing key order, the key being `maxStorage(jj) - updateSize(jj)^2` recomputed
 from the sorted forest; and the labels must form a postorder, every subtree holding a contiguous run
 ending at its own label, verified by walking each range back up the parent chain. That last one is
 the assertion that matters most, because it is the property the multifrontal drivers depend on: they
 loop over labels, not links, so the sort buys nothing without it. A grid is used rather than a chain
 deliberately: a chain has no sibling choice to make and would assert nothing.
+
+The sixth pins the *correspondence* between the two, that a parent's children increase in label order
+as they run first to last in the link order, and it is not implied by the other five. Reverse the
+direction in which `labelDepthFirst` pushes children and the links are still correctly sorted, the
+labels are still a valid postorder with contiguous subtrees, and every other assertion still passes,
+while the order actually realized is the reverse of the one the sort chose. Since reversing an
+optimum tends toward the pessimum, that mutation would turn the saving into a loss silently. It was
+checked by making exactly that mutation and confirming this assertion alone fails.
 
 ### test_symfactor, 29 assertions
 
@@ -157,7 +165,7 @@ storages: real Cholesky, real static LDL^T, complex Cholesky and complex LDL^H a
 input, and complex LDL^T against complex-symmetric input. A 10x10 grid is checked separately in both
 storages. All are ordered by AMD.
 
-### test_pipeline, 36 assertions
+### test_pipeline, 48 assertions
 
 Added 2026-07-19, with slice 2 of dynamic LDL. Where `test_numfactor` checks the factor against an
 oracle and `test_solve` checks the solve, this suite checks that the phases *compose*, for a given
@@ -290,17 +298,48 @@ Worth stating as a rule, since it has now caught the suite three times: **a fail
 new matrix is more often the matrix than the code.** Singular inputs, structurally absent diagonals,
 and now a matrix handed to a factorization whose preconditions it does not meet.
 
-**The facade, two assertions.** The tier 0 matrix again, this time through `DirectSolver`, over all
-five factorizations and both traversals: that all ten are reached, and that the worst residual is at
-machine precision.
+**The facade, fourteen assertions.** The tier 0 matrix again, this time through `DirectSolver`, over
+all five factorizations and all three traversals: that all fifteen are reached, and that the worst
+residual is at machine precision.
 
 Not redundant with the by-hand sweep. The facade owns both factors and chooses between them with
 `dynamicPivoting()`, so it can fail to reach a combination that works. That is exactly the defect
 `examples/pipeline.cpp` carried: it fixed the storage at `NumFactorStatic`, so every dynamic cell
 printed "not implemented" long after it was implemented. Nothing caught it because examples are
-built by `make` and never run. The `reached == 10` assertion is the guard against that shape of
+built by `make` and never run. The `reached == 15` assertion is the guard against that shape of
 error, and it is why the count is asserted separately from the residual: a silently skipped
 combination would otherwise leave the worst residual looking perfect.
+
+Five further assertions cover the one thing the facade decides that the by-hand caller does not: the
+multifrontal child ordering is computed during `analyze`, not during `factor`, so `DirectSolver` has
+to know the traversal by analysis time and passes it to `ElmForestEngine`'s constructor. That makes
+`setTraversal` able to invalidate an analysis, which no other setter of its kind does. The assertions
+are that `analyze` succeeds and reports itself analyzed; that the analysis *survives* a switch from
+left- to right-looking, which read the same forest; that it is *invalidated* switching into
+multifrontal, and again switching back out, because the forest itself differs, its children reordered
+and its supernodes relabeled; and that a re-analyzed multifrontal solver still solves to machine
+precision. The pair of invalidation assertions is the point: asserting only that it invalidates would
+pass for a setter that invalidated unconditionally, which would make every left-right switch redo the
+ordering for nothing.
+
+Seven more cover the two forest settings the facade now exposes, supernodes and amalgamation,
+available in the constructor and through setters like every other setting. Three take the
+constructor route: that the defaults are fundamental supernodes and no amalgamation, matching
+`ElmForestEngine`; that nodal supernodes are reachable and still solve to machine precision; and that
+an amalgamating solver does too, taken with multifrontal so the two forest settings are exercised
+together. Neither changes what is computed, only the block structure it is computed in, so the
+residual is the right oracle for both.
+
+The other four take the setter route, and what they pin is the invalidation. Both settings change the
+forest, and the analysis *is* the forest, so both must clear it, which is asserted for each in turn
+and then followed by a full re-analyze, factor and solve to machine precision. That last one matters
+because clearing the flag is only half the contract: a solver that invalidates and then cannot
+recompute would pass the first two assertions.
+
+What none of these observe is whether the multifrontal ordering was actually *applied*, only that the
+code path differs. Nothing exposes the forest or the stack peak through the facade, so the saving measured in
+TODO is not pinned by any assertion here. That is the same gap as `maxStorage` being computed and
+discarded, recorded in TODO.
 
 **Tier 2, heavy pivoting, five assertions.** Two families, and between them they cover the two ways
 pivoting gets hard: many delays, and no 1x1 pivot available at all.

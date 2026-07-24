@@ -23,9 +23,31 @@ void DirectSolver<Val>::setFactorization(Factorization factorization) {
 }
 
 template<class Val>
+void DirectSolver<Val>::setSupernodes(Supernodes supernodes) {
+    mSupernodes = supernodes;
+    mAnalyzed   = false;   // the forest is built from this, and the analysis is the forest
+    mFactored   = false;
+}
+
+template<class Val>
+void DirectSolver<Val>::setAmalgamation(std::optional<std::size_t> amalgamation) {
+    mAmalgamation = amalgamation;
+    mAnalyzed     = false;   // as above: merging supernodes changes the forest
+    mFactored     = false;
+}
+
+template<class Val>
 void DirectSolver<Val>::setTraversal(Traversal traversal) {
+    // The analysis survives a change between left- and right-looking, which read the same forest,
+    // but not one into or out of multifrontal: that reorders the children and relabels the
+    // supernodes, so the forest itself differs. See ElmForestEngine::sortForOptimalMultifrontal.
+    const bool wasMultifrontal = mTraversal  == Traversal::Multifrontal;
+    const bool isMultifrontal  = traversal   == Traversal::Multifrontal;
+
     mTraversal = traversal;
     mFactored  = false;
+    if (wasMultifrontal != isMultifrontal)
+        mAnalyzed = false;
 }
 
 template<class Val>
@@ -37,7 +59,9 @@ bool DirectSolver<Val>::analyze(const SparseMatrix<Val>& A) {
     if (!ord.compute(A, mPermutation))
         return false;
 
-    const ElmForestEngine fe;
+    // The multifrontal child ordering is part of the analysis, not the factorization, so the
+    // traversal has to be known here. setTraversal invalidates the analysis when it changes this.
+    const ElmForestEngine fe(mSupernodes, mAmalgamation, mTraversal == Traversal::Multifrontal);
     if (!fe.compute(A, mPermutation, mForest))
         return false;
 

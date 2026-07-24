@@ -55,14 +55,8 @@ bool ElmForestEngine::compute(const std::vector<std::size_t>&  colPtr,
     // Child order for the multifrontal stack, when asked for. Last of the structural steps, on the
     // final supernodes and the final links, exactly where 0.9 calls it. It rewrites the links in
     // place rather than staling them, so no finalizeLinks follows.
-    //
-    // The relabeling follows immediately, as in 0.9, and the pair is what makes the sort pay: the
-    // sort chooses the child order, the relabeling makes the labels follow it, and the drivers,
-    // which walk labels rather than links, then reach the smaller peak.
-    if (mOptimizeMultifrontal) {
-        sortForOptimalMultifrontal(ef);
-        labelDepthFirst(ef);
-    }
+    if (mOptimizeMultifrontal)
+        orderForMultifrontal(ef);
 
     // Height last, so it is computed once, on the final forest. Compression shortens the
     // trees, every merged chain collapsing to a single level, so this cannot be carried
@@ -490,79 +484,96 @@ void ElmForestEngine::compressThreshold(ElmForest& ef, std::size_t threshold) co
     // them with finalizeLinks.
 }
 
+// The multifrontal ordering, both steps. The sort chooses each supernode's child order; the
+// relabeling makes the supernode labels follow that order, as a postorder. Neither is useful alone,
+// and this wrapper exists so that the pairing is a property of the code rather than of a call site
+// that a later edit could come between. 0.9 calls the two in exactly this sequence.
+void ElmForestEngine::orderForMultifrontal(ElmForest& ef) const {
+    sortForOptimalMultifrontal(ef);
+    labelDepthFirst(ef);
+}
+
 // Reorder each supernode's children so that assembling them first to last needs the smallest update
 // stack. Ported from 0.9 sortForOptimalMultifrontal_.
 //
-// With children assembled in order c_1 .. c_k, and writing B(x) for updateSize(x) squared, the storage
-// a supernode's whole subtree needs is
+// With children assembled in order J_1 .. J_m, and `storage(x)` being what one supernode's update
+// matrix occupies, updateSize(x) squared, the storage a supernode's whole subtree needs is
 //
-//   maximumStorage(kk) = max( max_i [ sum_{j<i} B(c_j) + maximumStorage(c_i) ],   during c_i
-//                             sum_all B(c_j) + B(kk) )                            at kk itself
+//   maxStorage(K) = max( max_J [ sum_{I<J} storage(I) + maxStorage(J) ],   term 1, while J runs
+//                        sum_J storage(J) + storage(K) )                   term 2, at K's assembly
 //
-// because a finished child's block waits, occupied, while its later siblings run, and because kk
-// allocates its own block while every child's is still live. Minimizing that maximum sorts the
-// children by decreasing `maximumStorage(c) - B(c)`, which is Liu's rule and 0.9's key: a child
-// whose subtree needs much more than it leaves behind should run while few blocks are waiting.
-// Supernodes are visited in increasing label order, so a child's storage is always known before its
-// parent asks for it.
+// Term 1 is the worst moment while one of K's subtrees is still running: J's own subtree at its
+// peak, on top of the update matrices its earlier siblings have already finished and left waiting.
+// It is a maximum over the m children, and the only place the order enters, through `sum_{I<J}`.
+// Term 2 is the single moment at K itself: every child finished and waiting, and K allocating its
+// own on top of them. It is a plain total, so no order can change it.
+//
+// The formula takes an order and measures it. Minimizing over orders is a separate question, and
+// its answer is to sort the children by decreasing `maxStorage(J) - storage(J)`, which is Liu's
+// rule and 0.9's key: a child whose subtree needs much more than it leaves behind should run while
+// little is waiting. Supernodes are visited in increasing label order, so a child's storage is
+// always known before its parent asks for it.
 //
 // 0.9 orders the children by repeatedly selecting the largest key, pushing each onto the front of a
 // list, then popping that list from the front and prepending each to the child list. The two
-// reversals cancel, so the children end in decreasing key order, which is what this writes directly.
+// reversals cancel, so the children end in decreasing key order, which is what this writes
+// directly.
 // The selection scan keeps the earlier child on a tie (it advances only on a strict >), so the sort
 // here is stable to match.
 void ElmForestEngine::sortForOptimalMultifrontal(ElmForest& ef) const {
     const std::size_t snodeSize = ef.mSnodeSize;
 
-    // maximumStorage(kk) for every supernode, filled as the loop passes it. Elements, not bytes.
-    std::vector<std::size_t> maximumStorage(snodeSize, 0);
+    // maxStorage(kk) for every supernode, filled as the loop passes it. Elements, not bytes.
+    std::vector<std::size_t> maxStorage(snodeSize, 0);
 
-    auto block = [&ef](std::int32_t xx) {
-        return ef.mUpdateSize[xx] * ef.mUpdateSize[xx];
+    // The storage one supernode's update matrix occupies: it is updateSize square.
+    auto storage = [&ef](std::int32_t jj) {
+        return ef.mUpdateSize[jj] * ef.mUpdateSize[jj];
     };
 
-    std::vector<std::int32_t> kkChild;   // reused across supernodes
+    std::vector<std::int32_t> children;   // reused across supernodes
 
     for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(snodeSize); ++kk) {
-        const std::size_t kkBlock = block(kk);
-
-        if (ef.mFirstChild[kk] == NIL) {
-            // A leaf holds nothing but its own contribution block.
-            maximumStorage[kk] = kkBlock;
-            continue;
-        }
-
-        kkChild.clear();
         for (std::int32_t jj = ef.mFirstChild[kk]; jj != NIL; jj = ef.mNextSibling[jj])
-            kkChild.push_back(jj);
+            children.push_back(jj);
 
-        std::stable_sort(kkChild.begin(), kkChild.end(),
-                         [&](std::int32_t aa, std::int32_t bb) {
-                             return maximumStorage[aa] - block(aa) >
-                                    maximumStorage[bb] - block(bb);
-                         });
+        // Choose the order: Liu's key, descending. Stable, so equal keys keep the order they had,
+        // which is what 0.9's strict > in its selection scan does.
+        if (!children.empty()) {
+            std::stable_sort(children.begin(), children.end(),
+                             [&](std::int32_t jj1, std::int32_t jj2) {
+                                 return maxStorage[jj1] - storage(jj1) >
+                                        maxStorage[jj2] - storage(jj2);
+                             });
 
-        // Relink kk's children in the sorted order. Both directions and both ends, since the
-        // forest carries lastChild and previousSibling as well.
-        const std::size_t kkNumChild = kkChild.size();
-        ef.mFirstChild[kk] = kkChild.front();
-        ef.mLastChild[kk]  = kkChild.back();
-        for (std::size_t cp = 0; cp < kkNumChild; ++cp) {
-            ef.mPreviousSibling[kkChild[cp]] = (cp == 0)               ? NIL : kkChild[cp - 1];
-            ef.mNextSibling[kkChild[cp]]     = (cp + 1 == kkNumChild)  ? NIL : kkChild[cp + 1];
+            // Relink kk's children in that order. Both directions and both ends, since the forest
+            // carries lastChild and previousSibling as well.
+            const std::size_t kkNumChildren = children.size();
+            ef.mFirstChild[kk] = children.front();
+            ef.mLastChild[kk]  = children.back();
+            for (std::size_t cp = 0; cp < kkNumChildren; ++cp) {
+                const std::int32_t jj = children[cp];
+                ef.mPreviousSibling[jj] = (cp == 0)                 ? NIL : children[cp - 1];
+                ef.mNextSibling[jj]     = (cp + 1 == kkNumChildren) ? NIL : children[cp + 1];
+            }
         }
 
-        // kk's own storage under the order just written. 0.9 recomputes the running sum of earlier
-        // siblings inside an inner loop; accumulating it is the same quantity in one pass.
-        std::size_t running = 0;   // blocks of the children already assembled, still waiting on kk
-        std::size_t best    = 0;
-        for (std::int32_t jj : kkChild) {
-            best = std::max(best, running + maximumStorage[jj]);
-            running += block(jj);
+        // Measure that order, which is the formula above evaluated for kk. The sort chose an order;
+        // this only reads it. 0.9 recomputes the sum of earlier siblings in an inner loop, where
+        // carrying it in `waitingStorage` is the same quantity in one pass. A leaf falls out of
+        // this with no special case: it has no children, so both accumulators stay zero and the
+        // maximum is its own storage.
+        std::size_t waitingStorage = 0;   // children finished, update matrices waiting on kk
+        std::size_t term1          = 0;
+        for (std::int32_t jj : children) {
+            term1 = std::max(term1, waitingStorage + maxStorage[jj]);
+            waitingStorage += storage(jj);
         }
-        best = std::max(best, running + kkBlock);
+        const std::size_t term2 = waitingStorage + storage(kk);
 
-        maximumStorage[kk] = best;
+        maxStorage[kk] = std::max(term1, term2);
+
+        children.clear();
     }
 }
 
@@ -587,57 +598,71 @@ void ElmForestEngine::labelDepthFirst(ElmForest& ef) const {
     if (snodeSize == 0)
         return;
 
-    // Node membership gathered contiguously, so relabeling a supernode rewrites its columns in one
-    // pass. The map holds the same information scattered, which is what 0.9 gathers here too.
-    std::vector<std::size_t> snodePtr(snodeSize + 1, 0);
-    for (std::size_t lj = 0; lj < size; ++lj)
-        ++snodePtr[static_cast<std::size_t>(ef.mNodeToSnode[lj]) + 1];
-    for (std::size_t jj = 0; jj < snodeSize; ++jj)
-        snodePtr[jj + 1] += snodePtr[jj];
+    // The nodes of each supernode, gathered contiguously, so that relabeling one rewrites its
+    // columns in a single pass. Those nodes are exactly its front, so the group sizes *are*
+    // mFrontSize, and the shape is the CSR grouping used throughout:
+    //
+    //   frontNodeIdx[snodeFrontPtr[jj] .. snodeFrontPtr[jj + 1])   the columns of supernode jj
+    //
+    // the same pair `SymFactorEngine` builds under these names, snodeFrontPtr : frontNodeIdx as
+    // snodePtr : nodeIdx, walked by the same `sfp`. That one is built from this forest and so does
+    // not exist yet, and the forest holds only the map the other way, node to supernode, which
+    // would make the rewrite a scan of every column per supernode.
+    //
+    // The offsets are those sizes accumulated, a plain exclusive sum. No counting pass and no
+    // shift-by-one: both are for tallying counts in place, and here the counts already exist.
+    // `getFrontalIndices` builds it the same way and for the same reason.
+    std::vector<std::size_t> snodeFrontPtr(snodeSize + 1, 0);
+    for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(snodeSize); ++jj)
+        snodeFrontPtr[jj + 1] = snodeFrontPtr[jj] + ef.mFrontSize[jj];
 
-    std::vector<std::int32_t> snodeNode(size);
+    // Scatter each column into its supernode's slot. sfp[jj] is the next free position in
+    // frontNodeIdx for supernode jj, so it is an sfp in the usual sense, one per supernode rather
+    // than one in hand: it starts at the offsets and advances as the columns land. The copy is what
+    // keeps snodeFrontPtr intact, since the walk below needs the offsets afterward.
+    std::vector<std::int32_t> frontNodeIdx(size);
     {
-        std::vector<std::size_t> fill(snodePtr.begin(), snodePtr.end() - 1);
-        for (std::size_t lj = 0; lj < size; ++lj)
-            snodeNode[fill[static_cast<std::size_t>(ef.mNodeToSnode[lj])]++] =
-                static_cast<std::int32_t>(lj);
+        std::vector<std::size_t> sfp(snodeFrontPtr.begin(), snodeFrontPtr.end() - 1);
+        for (std::int32_t lj = 0; lj < static_cast<std::int32_t>(size); ++lj) {
+            const std::int32_t jj = ef.mNodeToSnode[lj];   // the supernode of column lj
+            frontNodeIdx[sfp[jj]++] = lj;
+        }
     }
 
     // Depth first, rewriting the map as each supernode is reached.
-    std::vector<std::int32_t> oldToNew(snodeSize, NIL);
-    std::vector<std::int32_t> stack;
+    std::vector<std::int32_t> snodeOldToNew(snodeSize, NIL);
+    std::vector<std::int32_t> snodeStack;
     for (std::int32_t rr = ef.mFirstRoot; rr != NIL; rr = ef.mNextSibling[rr])
-        stack.push_back(rr);
+        snodeStack.push_back(rr);
 
-    std::int32_t label = static_cast<std::int32_t>(snodeSize) - 1;
-    while (!stack.empty()) {
-        const std::int32_t kk = stack.back();
-        stack.pop_back();
+    std::int32_t kkNew = static_cast<std::int32_t>(snodeSize) - 1;
+    while (!snodeStack.empty()) {
+        const std::int32_t kkOld = snodeStack.back();
+        snodeStack.pop_back();
 
-        oldToNew[kk] = label;
-        for (std::size_t sp = snodePtr[kk]; sp < snodePtr[kk + 1]; ++sp)
-            ef.mNodeToSnode[snodeNode[sp]] = label;
-        --label;
+        snodeOldToNew[kkOld] = kkNew;
+        for (std::size_t sfp = snodeFrontPtr[kkOld]; sfp < snodeFrontPtr[kkOld + 1]; ++sfp)
+            ef.mNodeToSnode[frontNodeIdx[sfp]] = kkNew;
+        --kkNew;
 
-        for (std::int32_t jj = ef.mFirstChild[kk]; jj != NIL; jj = ef.mNextSibling[jj])
-            stack.push_back(jj);
+        for (std::int32_t jj = ef.mFirstChild[kkOld]; jj != NIL; jj = ef.mNextSibling[jj])
+            snodeStack.push_back(jj);
     }
 
     // Rewrite the per-supernode arrays under the new labels. A link array carries labels, so both
     // its position and its contents move; a size array carries counts, so only its position does.
     // Neither can be done in place, as 0.9 notes.
-    auto relabelLinks = [&](std::vector<std::int32_t>& link) {
+    auto relabelLinks = [&](std::vector<std::int32_t>& links) {
         std::vector<std::int32_t> relabeled(snodeSize, NIL);
-        for (std::size_t jj = 0; jj < snodeSize; ++jj)
-            relabeled[static_cast<std::size_t>(oldToNew[jj])] =
-                link[jj] == NIL ? NIL : oldToNew[link[jj]];
-        link.swap(relabeled);
+        for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(snodeSize); ++jj)
+            relabeled[snodeOldToNew[jj]] = links[jj] == NIL ? NIL : snodeOldToNew[links[jj]];
+        links.swap(relabeled);
     };
 
     auto relabelSizes = [&](std::vector<std::size_t>& sizes) {
         std::vector<std::size_t> relabeled(snodeSize, 0);
-        for (std::size_t jj = 0; jj < snodeSize; ++jj)
-            relabeled[static_cast<std::size_t>(oldToNew[jj])] = sizes[jj];
+        for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(snodeSize); ++jj)
+            relabeled[snodeOldToNew[jj]] = sizes[jj];
         sizes.swap(relabeled);
     };
 
@@ -649,8 +674,8 @@ void ElmForestEngine::labelDepthFirst(ElmForest& ef) const {
     relabelSizes(ef.mFrontSize);
     relabelSizes(ef.mUpdateSize);
 
-    if (ef.mFirstRoot != NIL) ef.mFirstRoot = oldToNew[ef.mFirstRoot];
-    if (ef.mLastRoot  != NIL) ef.mLastRoot  = oldToNew[ef.mLastRoot];
+    if (ef.mFirstRoot != NIL) ef.mFirstRoot = snodeOldToNew[ef.mFirstRoot];
+    if (ef.mLastRoot  != NIL) ef.mLastRoot  = snodeOldToNew[ef.mLastRoot];
 }
 
 

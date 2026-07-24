@@ -35,7 +35,15 @@ enum class Supernodes { Nodal, Fundamental };
 class ElmForestEngine {
 public:
     ElmForestEngine() = default;
-    explicit ElmForestEngine(Supernodes supernodes) : mSupernodes(supernodes) {}
+    // The three settings in pipeline order: which supernodes to form, whether to amalgamate them
+    // and how hard, and whether to order the children for the multifrontal stack. Each is also a
+    // setter below; the constructor exists so a caller that knows all three up front, as
+    // DirectSolver does, can say so in one place and hold the engine const.
+    explicit ElmForestEngine(Supernodes                 supernodes,
+                             std::optional<std::size_t> threshold            = std::nullopt,
+                             bool                       optimizeMultifrontal = false)
+        : mSupernodes(supernodes), mThreshold(threshold),
+          mOptimizeMultifrontal(optimizeMultifrontal) {}
 
     void       setSupernodes(Supernodes supernodes) { mSupernodes = supernodes; }
     Supernodes supernodes() const                   { return mSupernodes; }
@@ -56,17 +64,28 @@ public:
     // there as here, because it is not free of consequence:
     //
     // It changes the child order for *every* traversal, not only multifrontal, the forest being
-    // shared. Left- and right-looking do not care for the static factorizations, where the assembly is
-    // a commutative sum, but dynamic LDL does: a parent's front is expanded by prepending its
-    // children's delayed columns in sibling order, so reordering the siblings reorders those
-    // columns, which the pivot sequence then reads. The result is a different and equally valid
-    // factorization with different delay and pivot counts, not a wrong one, but different.
+    // shared. Left- and right-looking do not care for the static factorizations, where the
+    // assembly is a commutative sum, but dynamic LDL does: a parent's front is expanded by
+    // prepending its children's delayed columns in sibling order, so reordering the siblings
+    // reorders those columns, which the pivot sequence then reads. The result is a different and
+    // equally valid factorization with different delay and pivot counts, not wrong, just different.
     //
-    // It also does not move the stack peak on its own. Our multifrontal drivers loop over
-    // supernodes in increasing label order, so a contribution block lives from its own supernode to
-    // its parent *in the numbering*, and the child links do not enter that. 0.9 follows this sort
-    // with `labelDepthFirst_`, relabeling so the numbering follows the new child order, which is
-    // what realizes the saving; that relabeling is not ported. See TODO.
+    // Setting it runs two steps, not one, as 0.9 does. `sortForOptimalMultifrontal` chooses the
+    // child order, and `labelDepthFirst` then relabels the supernodes into a postorder so that the
+    // labels follow that order. The second is what realizes the saving: the multifrontal drivers
+    // loop over supernodes in increasing label order, so a contribution block lives from its own
+    // supernode to its parent *in the numbering*, which the child links alone do not affect. The
+    // sort without the relabeling would be inert.
+    //
+    // **Whoever drives the engines by hand owns this decision.** The forest is built long before a
+    // traversal is chosen, so this object cannot know that multifrontal is coming; a caller running
+    // OrderEngine, ElmForestEngine and SymFactorEngine themselves must set it when they intend
+    // multifrontal. `DirectSolver` does it for them, passing `traversal() == Multifrontal` to the
+    // constructor, which is the only place both facts are known at once.
+    //
+    // Forgetting it is silent: the factorization is correct and the residual unchanged, only the
+    // update stack's peak is larger, measured at 16 to 38 percent on grids. Nothing detects that,
+    // which is why it is written down here. See TODO for the measurements.
     void setOptimizeMultifrontal(bool optimize) { mOptimizeMultifrontal = optimize; }
     bool optimizeMultifrontal() const           { return mOptimizeMultifrontal; }
 
@@ -192,8 +211,23 @@ private:
     //   stales:  the child, sibling and root links, as above
     void compressThreshold(ElmForest& ef, std::size_t threshold) const;
 
+    // The two steps of the multifrontal ordering, run as a pair. They are written apart because
+    // they are separate ideas, one choosing an order among siblings and the other making the
+    // labels carry it, but they are not independently useful and this is their only caller.
+    //
+    // The asymmetry is worth knowing. `labelDepthFirst` alone is harmless: it produces a valid
+    // postorder, the factor is unchanged, and it simply buys nothing when no sort has chosen an
+    // order for it to follow. `sortForOptimalMultifrontal` alone is worse than useless, because it
+    // is *inert while looking like it worked*: the links carry the chosen order, the drivers walk
+    // labels and never read them, and the stack peak does not move. Measured, on a 3D grid: sort
+    // alone leaves the peak at 357398 while the model it optimizes reports 255433.
+    //
+    //   reads / writes:  whatever the two below do
+    void orderForMultifrontal(ElmForest& ef) const;
+
     // Reorder each supernode's children into the order that minimizes the multifrontal stack
-    // peak, when `mOptimizeMultifrontal` is set. Ported from 0.9 `sortForOptimalMultifrontal_`.
+    // peak. Ported from 0.9 `sortForOptimalMultifrontal_`. Never call this without the relabeling
+    // below; call `orderForMultifrontal` instead.
     // Runs after both compressions, on the final supernodes, and rewrites the links in place,
     // so unlike the compressions it leaves nothing stale and needs no finalizeLinks after it.
     //
@@ -203,6 +237,7 @@ private:
 
     // Relabel the supernodes into a postorder, so that each subtree holds a contiguous run of
     // labels. Ported from 0.9 `labelDepthFirst_`, which 0.9 calls straight after the sort above.
+    // Safe on its own, though pointless on its own: see `orderForMultifrontal`.
     // It is the half that realizes the saving: the drivers loop in increasing label order, so the
     // stack peak follows the labels, not the links, and only a postorder makes the two agree.
     //

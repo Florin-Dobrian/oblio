@@ -166,7 +166,7 @@ obviated by lambdas).
 - **`sortForOptimalMultifrontal`** (0.9) / `rOptimizeForMultifrontal` (10.12) **is ported**, as
   `ElmForestEngine::sortForOptimalMultifrontal`, gated by `setOptimizeMultifrontal` and off by
   default as in both references. It runs after both compressions, exactly where 0.9 calls it, and
-  reorders each supernode's children by decreasing `maximumStorage(c) - updateSize(c)^2`, which is
+  reorders each supernode's children by decreasing `maxStorage(c) - updateSize(c)^2`, which is
   Liu's rule. 0.9 reaches that order by selecting the largest key onto the front of a list and then
   popping that list onto the front of the child list, two reversals that cancel; the port sorts
   directly, stably, to match 0.9's tie-breaking. Verified against a symbolic simulation: with the

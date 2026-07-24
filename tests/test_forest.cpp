@@ -327,7 +327,7 @@ int main(){
          "exactPatterns       : false once a zero is stored"); }
 
     { // ---------------------------------------------------------------------------------------
-      // sortForOptimalMultifrontal: children reordered by decreasing (maximumStorage - block).
+      // sortForOptimalMultifrontal: children reordered by decreasing (maxStorage - block).
       //
       // The forest is built twice from the same matrix, once with the option off and once on, and
       // the two are compared. Off, nothing may move. On, the invariants must hold and every child
@@ -382,7 +382,7 @@ int main(){
       ck(validLinks(fOn), "optimizeMultifrontal: links still consistent both ways");
 
       // Every child list in non-increasing key order, the key being 0.9's
-      // maximumStorage(jj) - updateSize(jj)^2, recomputed here from the sorted forest.
+      // maxStorage(jj) - updateSize(jj)^2, recomputed here from the sorted forest.
       std::vector<std::size_t> ms(fOn.snodeSize(), 0);
       bool sorted = true;
       for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(fOn.snodeSize()); ++kk) {
@@ -426,6 +426,21 @@ int main(){
           }
       }
       ck(postorder, "optimizeMultifrontal: labels are a postorder, subtrees contiguous");
+
+      // The two assertions above are independent, and neither implies this one. The links can be
+      // sorted and every subtree contiguous while the labels still run the children in a different
+      // order than the sort chose, in which case the drivers, which walk labels and not links,
+      // realize some other valid order and the sort buys nothing. So the correspondence itself
+      // has to be checked: first-to-last in the link order must be increasing in the label order.
+      bool ordered = true;
+      for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(fOn.snodeSize()); ++kk) {
+          std::int32_t previous = NIL;
+          for (std::int32_t jj = fOn.firstChild()[kk]; jj != NIL; jj = fOn.nextSibling()[jj]) {
+              if (previous != NIL && jj < previous) ordered = false;
+              previous = jj;
+          }
+      }
+      ck(ordered, "optimizeMultifrontal: label order follows the sorted child order");
     }
 
     std::cout<<"\nElmForest tests: "<<pass<<"/"<<(pass+fail)<<" passed\n";

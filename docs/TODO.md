@@ -724,7 +724,7 @@ spent. With it, the numbers exist. It blocks nothing and informs everything, whi
 to hold it.
 
 **The numbers are currently computed and thrown away.** `sortForOptimalMultifrontal` fills a local
-`maximumStorage` array over all supernodes and lets it die at the end of the call. Keeping it on the
+`maxStorage` array over all supernodes and lets it die at the end of the call. Keeping it on the
 forest would give a scheduler its inputs directly. The live total at any instant is not only the
 active subtrees but `sum of peak(J) over active subtrees`, plus `sum of U(I) over siblings finished
 and not yet assembled`, plus whatever ancestors hold, all of which is arithmetic on that same array.

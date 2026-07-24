@@ -118,7 +118,7 @@ front. `dynamicPivoting()` in `Types.h` is where that rule is stated once.
 
 **Assembly. Not folding, and not extend-add.** The operation that adds a child's contribution into
 its parent is **assembly**. Write *assembled into*, *assembles*, *the assembly step*, *assembly
-order*. Every function that performs it is already named for it, `assembleFromA`, `assembleUpdate`,
+order*. Every function that performs it is already named for it, `assembleFromA`, `assembleUpdateBlock`,
 `assembleUpdateMatrix`, `assembleDelay`, so the prose and the identifiers say one word between them.
 
 Two alternatives are excluded. *Folded in*, *folds*, *the fold* is an informal coinage with no

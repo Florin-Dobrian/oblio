@@ -5584,6 +5584,395 @@ every downstream measurement drifts. That equivalence is the thing that makes it
 rather than a stylistic pass, and it is also the thing that makes it testable: run both, compare
 the permutations, and the vendored code is its own oracle.
 
+## 6. Multifrontal factorization
+
+Section 1.4 gave two schedules for the same arithmetic, left-looking and right-looking, and
+Section 4.6 lifted both to supernodes. This section is the third, and it is different in kind. Left
+and right-looking disagree about *when* an update is applied; multifrontal disagrees about *where
+it lives in between*. That one change is what carried the method out of core in the 1970s and what
+makes it the natural shape for parallelism now, and it is also what makes it cost more memory than
+either of the other two. All three are in the same file: our `factorStaticMultifrontal` and
+`factorDynamicMultifrontal` sit beside the left- and right-looking drivers and reuse their kernels
+unchanged.
+
+The section is arranged around that trade. 6.1 and 6.2 say what the method is and follow one
+example through. 6.3 and 6.4 say why it was invented and why it survived its original purpose.
+6.5 through 6.8 are about the price, which is the extra storage the method needs, and about the
+one classical technique for lowering it.
+
+### 6.1 The frontal matrix, and an update that travels one edge
+
+Supernode `K` owns a set of columns, its **front**, and its index set is those columns followed by
+the rows below them, `update(K)` in the vocabulary of 2.3. Gather the whole of that into one dense
+block and it is the **frontal matrix** of `K`. Factor its front columns and two things come out:
+the finished columns of `C` or `L`, which go to the factor and are never touched again, and a
+Schur complement over `update(K)` alone, square and symmetric, which is not part of the factor and
+must reach `K`'s ancestors somehow. That square is the **update matrix** of `K`, and it is the
+object the whole method is built around. We write `U(K)` for its size in entries, `|update(K)|`
+squared.
+
+**A note on the frontal matrix's shape, because implementations differ and the difference is
+visible in the memory.** The classical presentation makes it the full `|indexSet(K)|` square, with
+the update matrix its trailing submatrix, so the whole square is what goes on the stack and comes
+back off. Ours is the `|indexSet(K)|`-by-`|front(K)|` rectangle instead: the columns being factored
+and the rows below them, which is precisely the block the factor already needs to store, with the
+update matrix allocated separately. Nothing algorithmic turns on the choice, but the scratch does.
+A stack of whole squares carries `|indexSet|` squared per supernode; a stack of update matrices
+carries `|update|` squared, and the front columns are not duplicated because they live in the
+factor. Everything counted in 6.5 is the second arrangement.
+
+The three traversals differ in what happens to it.
+
+Left-looking never forms it. When `K` is reached, `K` asks each descendant `J` that reaches into it
+for the part of `J`'s update that lands in `K`, one rectangle per `(J, K)` pair, and each rectangle
+is built, assembled and destroyed on the spot. Right-looking is the mirror: `J`, once factored,
+walks its ancestors and pushes the corresponding rectangle into each. Both hold one rectangle at a
+time, and neither keeps anything between supernodes.
+
+Multifrontal forms the whole square once, and moves it exactly one edge:
+
+```
+J finishes  ->  its update matrix waits
+                parent(J) is reached  ->  the update matrix is assembled into the parent's
+                                          frontal matrix, then freed
+```
+
+Nothing is sent to a grandparent. What `J` owed an ancestor higher up is now inside the parent's
+frontal matrix, and it travels on inside the parent's own update matrix when the parent finishes.
+An update reaches a distant ancestor by riding up the tree one level at a time, in someone else's
+luggage.
+
+**The containment theorem is what permits this.** By 2.3, `update(J)` is a subset of the index set
+of `parent(J)`. Every row and column of `J`'s update matrix therefore has a place in the parent's
+frontal matrix, so the assembly is total: nothing is left over, and no entry has to be held back
+for a further ancestor. Without containment the method would not close.
+
+**The assembly is a scatter, not a copy.** `J`'s update matrix is indexed by `J`'s update rows,
+which are a subset of the parent's index set but not a contiguous one, so each entry is routed by
+where its global index falls in the parent. An entry whose row and column both land in the parent's
+front columns goes into the part of the frontal matrix that is about to be factored. An entry that
+lands in the parent's update rows goes into the parent's own update matrix instead, to travel on.
+Both destinations are one dense block each, and the routing is a lookup through the global-to-local
+map. The literature calls this operation *extend-add*; we call it **assembly**, and our
+`assembleUpdateMatrix` is the routine that performs it.
+
+### 6.2 A worked example
+
+Take the forest
+
+```
+            K
+           / \
+          P   J
+              |
+              M
+```
+
+with these sizes, in columns:
+
+```
+snode   front   update      indexSet
+  M       2       3         its 2 columns, then 3 rows shared with J
+  J       2       2         its 2 columns, then 2 rows shared with K
+  P       1       2         its 1 column,  then 2 rows shared with K
+  K       3       0         its 3 columns, root, nothing below
+```
+
+Multifrontal walks the supernodes in an order that reaches every child before its parent, so
+`M, J, P, K` will do. Following the update matrices:
+
+```
+M factored     frontal 5x2, factor 2 columns, leaves a 3x3 update matrix   U(M) = 9
+                 live: M
+J reached      assemble M's 3x3 into J, routed by index: some entries into the
+                 columns J is about to factor, the rest into J's own update
+                 matrix; free M
+                 J factored, leaves a 2x2 update matrix                    U(J) = 4
+                 live: J
+P reached      nothing to assemble, P is a leaf
+                 P factored, leaves a 2x2 update matrix                    U(P) = 4
+                 live: J, P
+K reached      assemble J's 2x2 and P's 2x2 into K, both entirely into K's own
+                 columns since K is a root; free both
+                 K factored, no update rows, nothing left                  U(K) = 0
+                 live: nothing
+```
+
+Two things to notice, and both matter later.
+
+`M`'s contribution reaches `K` without ever being addressed to `K`. It is assembled into `J`, and
+whatever part of it belongs to `K` is carried inside `J`'s update matrix when `J` finishes. `M` and
+`K` are never in contact.
+
+And the peak is not at the end. At the moment `K` is reached, `J`'s and `P`'s update matrices are
+both live and `K`'s frontal matrix is being built. Earlier, while `P` was being factored, `J`'s
+update matrix was already waiting. That waiting is the extra storage the method costs, and 6.5
+counts it.
+
+### 6.3 Why it was invented: a file has only one cheap end
+
+The method is older than the memory it now runs in. The frontal method (Irons, 1970) came out of
+finite element work, where the matrix did not fit: assemble one element front at a time, factor
+what can be factored, write it out, and keep only the active front in core. Duff and Reid (1983)
+generalized one front to many, organized by the elimination tree, and the multifrontal method is
+that generalization.
+
+What makes the organization work out of core is a property of the lifetimes. A supernode's update
+matrix is created when the supernode is factored and destroyed when its parent is reached. If the
+supernodes are numbered so that each subtree occupies a contiguous run, then those lifetimes
+**nest**: any two are either disjoint, or one contains the other. A set of nested intervals is
+exactly what a stack holds, so the update matrices can live on one, pushed as they are created and
+popped as they are consumed. That is why the literature calls the storage the **update stack**, and
+why the peak is called the stack peak.
+
+And a stack is what a file can be. A file is a linear sequence of bytes with one cheap end: it can
+be appended to and truncated there, and neither anywhere else. Push is an append and pop is a
+truncate, so a stack spills to a file without further machinery. Every alternative is worse.
+Freeing a block in the middle means either compacting, which rewrites the tail on every free, or
+tracking holes, which is a free-space allocator on disk written by hand, or giving each update
+matrix its own file, which trades the problem for thousands of files with the open, close and
+metadata cost of each, for blocks that live a few steps.
+
+So the discipline was not a stylistic preference. Out of core, it is the only arrangement that
+works, and the requirement comes from the medium rather than from anything about the
+factorization.
+
+**None of that applies in core.** Main memory is randomly addressable, so a block can be freed
+wherever it sits and the peak is unchanged: what is live at any instant is fixed by the traversal
+and the lifetimes, not by how the bytes were obtained. Our implementation keeps one update matrix
+per supernode in a plain vector, allocated when the supernode is reached and freed when its parent
+consumes it, and it holds exactly the same set at every moment a stack would. The word *stack*
+survives in the name of the quantity, which is standard, and we keep it in prose for that reason;
+the code does not claim it.
+
+### 6.4 Why it survived: the shape matches parallelism
+
+The out-of-core motivation is largely historical. What kept multifrontal central is that the same
+organization is the one parallelism wants, and for reasons that have nothing to do with disks.
+
+**The heavy arithmetic is concentrated.** Each supernode's numeric work happens inside one dense,
+contiguous frontal matrix: a dense factorization of the front columns, a triangular solve, and a
+symmetric update, each a single large BLAS-3 call at near peak throughput. The irregular part, the
+scatter that assembles a child into its parent, is data movement and sits *outside* the
+arithmetic. Left- and right-looking invert this. They chop the same update into many smaller
+index-mapped rectangles, each fronted by a gather, so the same flops arrive in smaller kernels with
+worse locality. Multifrontal localizes the arithmetic and pushes the sparsity out to the assembly;
+the looking traversals smear the sparsity through the arithmetic.
+
+**And the tree is a task graph.** Two kinds of parallelism live in it, and they hand off. Near the
+leaves the forest is wide, so independent subtrees run concurrently, one task each: *tree
+parallelism*, many small fronts at once. Near the root the tree has narrowed to a few supernodes
+and there is little concurrency left, but the fronts are now large, so the parallelism moves
+*inside* one front, the big dense kernels threaded or handed to an accelerator: *node
+parallelism*. The bottom of the tree parallelizes across fronts, the top within a front. MUMPS is
+the reference implementation of exactly this split, sorting fronts into three node types: type 1
+handled by a single process, which is tree parallelism; type 2, a large interior front partitioned
+by rows across a master and slaves, which is node parallelism in 1D; and type 3, the root,
+distributed 2D over a process grid.
+
+**The costs are real and worth stating plainly.** Multifrontal does slightly *more* arithmetic than
+the looking traversals, and the surplus is all in assembly. The multiplicative work that forms the
+factor is identical, but a contribution travelling from `M` to `K` through `J` is added twice,
+once into `J` and once into `K`, where left-looking would add it to each ancestor once. A
+contribution once formed is data the tree moves rather than recomputes, so no multiplication is
+repeated; it is additions that are.
+
+The larger cost is memory, and it is intrinsic. Concurrency raises the peak by itself: `N` branches
+in flight hold `N` live sets where serial execution holds one. That is the price of the wall-clock
+time, and no arrangement of storage avoids it. What softens it is that the multiplier applies where
+blocks are cheap. Tree parallelism is available near the wide leaves, where update matrices are
+small; near the root, where they are enormous, there is almost no tree parallelism left to exploit.
+The expensive blocks stay singular.
+
+### 6.5 The extra storage, and the formula that measures it
+
+Left- and right-looking hold one rectangle at a time and fold it straight into the factor. They
+never keep a standing Schur complement. Multifrontal keeps a set of update matrices alive, scratch
+that is not part of the factor, from each supernode's turn until its parent's. That difference is
+the whole memory cost of the method, and it is worth measuring rather than estimating.
+
+Let `I` and `J` range over the children of `K`, with `I < J` meaning `I` is assembled before `J`,
+and write `storage(X)` for `U(X)`, the entries one update matrix occupies. The storage a
+supernode's whole subtree needs is
+
+```
+maxStorage(K) = max( max_J [ sum_{I<J} storage(I) + maxStorage(J) ],   term 1, while J runs
+                     sum_J storage(J) + storage(K) )                   term 2, at K's assembly
+```
+
+**Term 1 is the worst moment while one of `K`'s subtrees is still running.** When `J` is running,
+two things are resident: whatever `J`'s own subtree needs at its worst instant, which is
+`maxStorage(J)` recursively, and the update matrices of its earlier siblings, which finished and
+are waiting for `K`. It is a maximum over the children, and the sum `sum_{I<J}` is the only place
+the assembly order enters the formula at all.
+
+**Term 2 is the single moment at `K` itself**, when every child has finished, none has been freed,
+and `K`'s own update matrix is allocated on top of them. It is a plain total, so no order can
+change it. A leaf has no children, so both reduce to `storage(leaf)`, which is where the recursion
+bottoms out.
+
+The recursion has optimal substructure, which matters for 6.6: `maxStorage(J)` is a single number
+summarizing everything below `J`, and `K` needs nothing else from inside `J`. In particular the
+internal arrangement of `J`'s own subtree does not change how `J` and its siblings should be
+ordered.
+
+**How large is it in practice?** Measured on our implementation, as a percentage of the factor
+itself, with the child order left as the ordering produced it:
+
+```
+                       |L|          update stack peak
+grid2D 80x80         133261         42735    ( 32.1%)
+grid3D 16x16x16      340513        357398    (105.0%)
+band n=2000 bw=20     41980          1200    (  2.9%)
+```
+
+On banded problems it is negligible. On two-dimensional grids it is a third of the factor. On
+three-dimensional grids it *exceeds* the factor, so peak working memory is roughly double what
+`|L|` alone suggests, and the half that is pure scratch is the half a technique might reduce.
+
+**Dynamic pivoting does not change any of this**, which is not obvious and is worth stating. An
+update matrix is `|update(K)|` squared, and `update(K)` is fixed by the symbolic factorization.
+Delaying a column moves it between the front and the delayed columns; it never touches the update
+size. So the stack peak is identical for a dynamically pivoted factorization and a static one on
+the same forest, and it can be predicted before any value is known.
+
+### 6.6 Choosing the assembly order
+
+Term 2 is fixed. Term 1 is not: it depends on the order in which `K`'s children are assembled,
+through `sum_{I<J}`. A child that finishes early leaves its update matrix occupying space for as
+long as its later siblings take to run, so the question is which children should pay that wait.
+
+A priori this ranges over all orderings of the children. An exchange argument collapses it to a
+sort. Take two adjacent children `X` and `Y`, and let `S` be the storage of everything assembled
+before them. Their two positions contribute
+
+```
+P1  (X first) = max( maxStorage(X),  storage(X) + maxStorage(Y) )
+P2  (Y first) = max( maxStorage(Y),  storage(Y) + maxStorage(X) )
+```
+
+with `S` dropped, since it appears in both, and everything after the pair untouched, since the
+running sum grows by `storage(X) + storage(Y)` either way. Now suppose
+
+```
+maxStorage(X) - storage(X)  >=  maxStorage(Y) - storage(Y)
+```
+
+and write `T = storage(Y) + maxStorage(X)`, the second argument of `P2`, so that `P2 >= T`. Then
+`maxStorage(X) <= T`, because `storage(Y) >= 0`, and `storage(X) + maxStorage(Y) <= T`, which is
+the supposition rearranged. Both arguments of `P1` are at most `T`, so `P1 <= T <= P2`, and putting
+`X` first is never worse.
+
+Any out-of-order adjacent pair can therefore be swapped without loss, so the key induces a total
+order and sorting by it is optimal with no search. This is Liu's rule (1986): **assemble the
+children in decreasing order of `maxStorage(J) - storage(J)`.** The intuition reads off the key. A
+child whose subtree needs a great deal and leaves little behind should run while little is waiting;
+a child that needs little but leaves a bulky update matrix should run last, so that its leftover
+waits as briefly as possible.
+
+The cost is `O(m log m)` for a supernode with `m` children, and since the child counts sum to the
+supernode count, `O(snodeSize log m)` for the forest, with `m` small in practice. It runs once,
+during the symbolic phase, and it is structural, so it is reused by every numeric factorization
+sharing the pattern. The `maxStorage` values it needs come free in the same upward pass, because
+supernodes are visited in an order that reaches every child before its parent.
+
+**The formula measures an order; it does not choose one.** That distinction is worth keeping,
+because the two are separate operations in any implementation: a sort that picks the order and an
+evaluation that computes `maxStorage(K)` under the order picked. Ours are
+`sortForOptimalMultifrontal` and the loop at its end, run in that sequence.
+
+### 6.7 A worked example: what the ordering buys
+
+Take a root `K` with two children:
+
+```
+snode   maxStorage   storage      key = maxStorage - storage
+  A        210          10                  200
+  B        150         100                   50
+  K          0           0                    0
+```
+
+`A` heads a deep subtree that needs 210 at its worst but leaves only 10 behind. `B` needs less, 150,
+but leaves 100. Evaluating the formula both ways:
+
+```
+                     term 1                                      term 2      maxStorage(K)
+A first    max( 210, 10 + 150 )  = 210            10 + 100 + 0 = 110              210
+B first    max( 150, 100 + 210 ) = 310            100 + 10 + 0 = 110              310
+```
+
+Term 2 is identical, as it must be. The whole difference is term 1, and it is 100 entries, a third
+of the worse arrangement. Liu's key ranks `A` at 200 and `B` at 50, so decreasing key puts `A`
+first, which is the better column. The mechanism is visible in the arithmetic: putting `A` first
+means only `A`'s small leftover of 10 is waiting while `B` runs, whereas putting `B` first leaves
+`B`'s bulky 100 waiting through the whole of `A`'s expensive subtree.
+
+**A parent all of whose children are leaves has no decision to make.** A leaf's `maxStorage` is its
+own `storage`, so every key is zero, every order ties, and the arithmetic agrees: term 1 collapses
+to `sum_J storage(J)`, which is order-invariant, and term 2 is that plus `storage(K)`. The ordering
+does work only where children are themselves internal nodes with depth beneath them. This is why
+banded matrices, whose forests are essentially paths, gain nothing from it while grids gain a
+third.
+
+### 6.8 The labels have to carry the order
+
+There is a second requirement, easy to miss, and without it the sort of 6.6 is inert.
+
+A supernode numbering is constrained to be **topological**: `parent(K) > K`, which holds
+automatically because a parent is the first index below the diagonal in a column of the factor.
+That is all correctness needs, and every traversal is happy with it.
+
+It is not all the storage analysis needs. The formula of 6.5 describes a tree traversal, in which a
+subtree runs to completion before its siblings begin. An implementation that loops over supernodes
+in index order realizes that traversal only if each subtree occupies a **contiguous** run of
+indices, which topological order does not imply. The smallest counterexample is four nodes:
+
+```
+parent(0) = 2,  parent(1) = 3,  parent(2) = 3,  parent(3) = NIL
+
+        3
+       / \
+      1   2
+          |
+          0
+```
+
+Every parent exceeds its child, so the numbering is topological and any traversal by index is
+legitimate. But the subtree rooted at `2` is `{0, 2}`, and index `1` lies between them while
+belonging to the other branch. Walking indices visits `0`, then leaves the branch for `1`, then
+returns to `2`. The lifetimes tell the same story: `0`'s update matrix is live over `[0, 2]` and
+`1`'s over `[1, 3]`, and those two intervals **overlap without nesting**. A block is held alive
+across a branch it has nothing to do with, which is both more storage than the formula predicts and
+the exact configuration no stack can hold.
+
+The repair is a **postorder relabeling**: renumber the supernodes by a depth-first walk of the
+forest, so that each subtree becomes a contiguous run ending at its own root. On the example this
+exchanges the labels of `0` and `1`, after which the subtree at `2` is `{1, 2}` and every interval
+nests. Note what does *not* move: the factor, the permutation, the columns. Only which label refers
+to which supernode changes, so the relabeling is a pure permutation of the numbering.
+
+**The relabeling does two jobs, and they are separable.** It makes the peak match the formula at
+all, which matters even when no sort has been run, because a non-contiguous numbering costs storage
+on its own. And it makes the sort's choice reachable, because a depth-first walk that follows the
+sorted child links produces labels in that order, whereas the links alone are never read by a
+driver that loops over indices.
+
+Measured on our implementation, with the two steps run as a pair and compared against the same
+forest without them:
+
+```
+                        without         with        saving
+grid2D 80x80             42735         26425         38%
+grid3D 16x16x16         357398        255433         28%
+band n=2000 bw=20         1200          1200          0%
+```
+
+The three-dimensional case falls from above `|L|` to three quarters of it. Bands do not move,
+having no sibling choice to make. And the sort alone, without the relabeling, moves nothing at all
+while appearing to work: the links carry the chosen order and the traversal never reads them. This
+is why the two belong together, and why our `ElmForestEngine` runs them as one operation,
+`orderForMultifrontal`, rather than exposing either half.
+
 ## References
 
 The material above is standard sparse-matrix theory; the grouping below points to the
@@ -5700,6 +6089,27 @@ primary sources for each, in the order Section 5 builds them.
 - E. Anderson et al., *LAPACK Users' Guide*, 3rd ed., SIAM, 1999. `potrf` (Cholesky) and `sytrf`
   (Bunch-Kaufman). Note there is **no unpivoted LDL in LAPACK**, which is why a static LDL kernel
   has to be written by hand.
+
+**Multifrontal (Section 6).**
+
+- B. M. Irons, "A frontal solution program for finite element analysis", *Internat. J. Numer.
+  Methods Engrg.* 2(1):5-32, 1970. The frontal method: one active front in core, the rest
+  streamed, which is the out-of-core origin of 6.3.
+- I. S. Duff and J. K. Reid, "The multifrontal solution of indefinite sparse symmetric linear
+  equations", *ACM Trans. Math. Software* 9(3):302-325, 1983. The generalization from one front
+  to many over the elimination tree.
+- J. W. H. Liu, "The multifrontal method for sparse matrix solution: theory and practice",
+  *SIAM Review* 34(1):82-109, 1992. The standard survey, and the source for the frontal and
+  update matrix vocabulary of 6.1.
+- J. W. H. Liu, "On the storage requirement in the out-of-core multifrontal method for sparse
+  factorization", *ACM Trans. Math. Software* 12(3):249-264, 1986. The storage formula of 6.5 and
+  the child-ordering rule of 6.6, including the exchange argument.
+- P. R. Amestoy, I. S. Duff, J.-Y. L'Excellent, and J. Koster, "A fully asynchronous multifrontal
+  solver using distributed dynamic scheduling", *SIAM J. Matrix Anal. Appl.* 23(1):15-41, 2001.
+  MUMPS, and the type 1, 2 and 3 node classification of 6.4.
+- J.-Y. L'Excellent and W. M. Sid-Lakhdar, "A study of shared-memory parallelism in a multifrontal
+  solver", *Parallel Computing* 40(3-4):34-46, 2014. The tree-against-node parallelism tradeoff
+  of 6.4, and where the boundary between them is placed.
 
 **On the framing.** Two presentational choices here are expository, not lifted from a
 single source: casting the forest as the *transitive reduction of the update DAG* (2.6)

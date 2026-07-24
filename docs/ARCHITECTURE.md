@@ -489,6 +489,26 @@ Multifrontal's classical motivation was out-of-core factorization: the stack spi
 contiguous arena is what makes that spill cheap. That is not the motivation here. Today the case for
 it is parallelism, and the paragraphs below build to that.
 
+**Choosing multifrontal carries one obligation the other two do not, and a caller driving the engines
+by hand owns it.** How large that stack grows depends on the order in which a supernode's children
+are assembled, and `ElmForestEngine::setOptimizeMultifrontal` is what chooses the order that
+minimizes it, sorting the children and then relabeling the supernodes into a matching postorder. It
+is off by default. The awkwardness is that the forest is built long before a traversal is picked, so
+`ElmForestEngine` cannot know multifrontal is coming and cannot decide for itself.
+
+`DirectSolver` closes that: it holds both facts, passes `traversal() == Multifrontal` to the forest
+engine's constructor, and invalidates a completed analysis when the traversal crosses the
+multifrontal boundary, since the forest itself would differ. A caller running `OrderEngine`,
+`ElmForestEngine` and `SymFactorEngine` themselves gets no such help and must set the option when
+they intend multifrontal.
+
+Forgetting it fails quietly. The factorization is correct and the residual unchanged; only the
+update stack's peak is larger, measured at 16 to 38 percent on grids and nothing on banded matrices.
+No assertion catches it, which is why it is written here and beside the option itself. TODO carries
+the measurements and the reason the option is not simply on by default: it reorders the delayed
+columns of dynamic LDL, giving a different and equally valid factorization with different pivot
+counts.
+
 **Multifrontal costs more working memory in core, and that is the first thing to be honest about.**
 Left- and right-looking hold one update block at a time and assemble it straight into L; they never keep
 a standing Schur complement. Multifrontal keeps a stack of contribution blocks, scratch that is not

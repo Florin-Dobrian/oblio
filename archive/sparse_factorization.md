@@ -139,8 +139,7 @@ forward_row(L, b) -> y:
             y[i] = y[i] - L[i][j] * y[j]
 ```
 
-Column-oriented (scatter), each `y[j]` pushed into the later equations as soon as it is
-known:
+Column-oriented (scatter), each `y[j]` pushed into the later equations as soon as it is known:
 
 ```
 forward_col(L, b) -> y:
@@ -1120,8 +1119,7 @@ child's own entry. This is the recurrence symbolic factorization runs, the
 **Proof.** Write `Acol(j) = { i > j : A[i][j] != 0 }` for the original below-diagonal
 entries of column `j`, and let `RHS = Acol(j) union ( over children c of j: Struct(c) \
 {j} )` be the whole right-hand side of the recurrence. The claim is `Struct(j) = RHS`;
-prove the two inclusions `RHS is a subset of Struct(j)` and `Struct(j) is a subset of
-RHS`.
+prove the two inclusions `RHS is a subset of Struct(j)` and `Struct(j) is a subset of RHS`.
 
 *`RHS is a subset of Struct(j)`.* Each original nonzero is a nonzero of `L`, so
 `Acol(j)` is a subset of `Struct(j)`. For a child `c` of `j`, `parent(c) = j`, so the
@@ -1710,8 +1708,7 @@ k=9: earlier neighbor j=8, climb 8->9, reaches k=9, skip
 
 The trace has one line per off-diagonal nonzero of a single triangle, each edge seen once
 at its higher endpoint `k`, plus one line per column with no earlier neighbor. Those
-columns are exactly the forest leaves, so the length is (edges) + (leaves): here 12 + 2 =
-14.
+columns are exactly the forest leaves, so the length is (edges) + (leaves): here 12 + 2 = 14.
 
 The `skip` lines are the guard `if r != k` of 2.4 firing. Once one earlier neighbor of
 `k` has attached its subtree under `k`, the remaining earlier neighbors of `k` already sit
@@ -2262,8 +2259,7 @@ compress(forest, Struct) -> supernode: # fundamental supernodes
         if j != NIL # k has a child at all
                and j == lastChild[k] # condition 1: and only the one, j
                and |Struct(k)| == |Struct(j)| - 1: # condition 2: sharing one pattern
-            supernode[k] = supernode[j] # k continues j's supernode
-        else:
+            supernode[k] = supernode[j] # k continues j's supernode else:
             S = S + 1
             supernode[k] = S # k starts a new supernode
 ```
@@ -2289,8 +2285,7 @@ rebuild(forest, supernode) -> supernodal forest:
         front(S) = front(S) + 1 # every column of S adds to its front size
         if not done[S]: # k is the topmost column of S
             if parent(k) != NIL:
-                supParent(S) = supernode[parent(k)]
-            else:
+                supParent(S) = supernode[parent(k)] else:
                 supParent(S) = NIL # S is a root
             update(S) = |Struct(k)| # the rows below k are the rows below S
             done[S] = true
@@ -2316,8 +2311,7 @@ reasons, but the algorithms above do not depend on it.)
 ### 4.4 Worked example: the grid
 
 Take the grid of 2.7 again, with `parent = [2, 3, 7, 5, 6, 7, 8, 9, NIL]` and the patterns
-computed in 3.2. Tabulate what the test needs, the only child (if any) and the pattern
-sizes:
+computed in 3.2. Tabulate what the test needs, the only child (if any) and the pattern sizes:
 
 ```
 col k:        1     2     3     4     5     6     7     8     9
@@ -2351,8 +2345,7 @@ update:      2    3    3    2    3    3    0
 The one non-trivial supernode is exactly the **separator**. That is not a coincidence, it
 is nested dissection working as designed: the separator is eliminated last, by then it is
 completely filled in, and a completely filled-in block is precisely a set of columns with
-one shared pattern. Its index set is `{7,8,9}` with no update rows, a dense 3x3 trailing
-block.
+one shared pattern. Its index set is `{7,8,9}` with no update rows, a dense 3x3 trailing block.
 
 The left and right blocks do not compress at all, and the trace shows why. Column 2's
 pattern is `{3,7,8}` while its child column 1 has `{2,7}`: dropping the 2 leaves `{7}`,
@@ -2553,6 +2546,35 @@ is just one whose supernodes are all trivial. In practice one runs it *after* fu
 compression: fundamental does the free, canonical work cheaply, and amalgamation then does the
 tie-broken and the paid work on a smaller forest. Running it directly on a nodal forest at
 threshold zero reaches the same fill (none) but by a longer route.
+
+**The same widening happens again later, for a different reason.** Dynamic LDL cannot always
+pivot a column where the symbolic factorization placed it: a candidate pivot too small relative
+to its column is **delayed** (7.6), leaving its supernode's front and joining its parent's. That
+migration is mechanically what a merge is. The column leaves `J`, becomes one of `K`'s front
+columns, and must now span `indexSet(K)` below it where before it spanned only what `J`'s index
+set gave it. The count of new positions has the shape of the merge formula, and they arrive as
+**zeros**, since the widened block is allocated zeroed and the migration copies in only the
+values the column already had.
+
+So both are the same operation seen twice: a child's columns moving into a parent's front, and
+paying for it in explicitly stored zeros. What differs is everything around it.
+
+Amalgamation is **symbolic and chosen**. It happens before any value exists, under a threshold we
+set, and its zeros are *known* zeros of `L`: merging supernodes does not change `L`'s pattern, so
+those entries are zero at the end of the factorization as surely as at the start. That is the
+whole bargain, storage and flops spent on zeros we can name, bought back in block size.
+
+Delay is **numeric and forced**. It happens while the arithmetic runs, no threshold makes it
+optional, and its zeros are not known zeros: the column is now eliminated at `K`, so its pattern
+has genuinely changed, and the symbolic factorization did not predict the result. Some of those
+positions may fill during `K`'s own elimination. Nothing is bought; the cost is what stability
+costs.
+
+Two smaller asymmetries follow the same line. A merge takes **all** of `J`'s columns and removes
+`J` from the forest; a delay takes only the columns that could not be pivoted and leaves `J` in
+place, narrower than it was. And a merge is decided once, for a whole forest, before the numbers
+arrive; a delay is decided per column, per factorization, and the same matrix with different
+values delays differently.
 
 ### 4.6 What changes downstream
 
@@ -4541,8 +4563,7 @@ free by construction: a merged vertex creates no fill when eliminated next, so p
 of whatever the degree would otherwise have chosen cannot cost anything. Nor is the promotion
 forced. Measured at the moment of each merge, the merged vertex would have been the global
 minimum-degree choice only about seventy percent of the time; in the other thirty the ordering is
-genuinely different from what plain minimum degree would produce, and the fill is identical
-anyway.
+genuinely different from what plain minimum degree would produce, and the fill is identical anyway.
 
 It follows that making 5.5 agree with 5.3 is easy and pointless. One would recognize
 indistinguishability, use it to skip the degree recomputation, and still leave the vertex in its
@@ -4751,8 +4772,7 @@ if (pv != 0 && pv != (-maxint)) {
     int nx = fwd[rn];
     if (nx > 0) bwd[nx] = pv;
     if (pv > 0) fwd[pv] = nx;
-    if (pv < 0) head[-pv] = nx;      /* rn leaves its bucket */
-}
+    if (pv < 0) head[-pv] = nx;      /* rn leaves its bucket */ }
 ```
 
 That is the doubly linked removal of 5.9, and here is what it is for. Because every vertex the
@@ -4767,15 +4787,11 @@ one refreshing:
 ```c
 while (1) {
     while (head[mdeg] <= 0) mdeg++;
-    int mdlmt = mdeg + delta, ehead = 0;
-n500:
-    ...
+    int mdlmt = mdeg + delta, ehead = 0; n500: ...
     mmdelm(mn, ...);                 /* eliminate; refresh nothing */
     list[mn] = ehead; ehead = mn;    /* remember it for the batch refresh */
-    if (delta >= 0) goto n500;       /* another pivot, degrees still stale */
-n900:
-    mmdupd(ehead, ...);              /* ONE refresh for the whole batch */
-}
+    if (delta >= 0) goto n500;       /* another pivot, degrees still stale */ n900:
+    mmdupd(ehead, ...);              /* ONE refresh for the whole batch */ }
 ```
 
 **What the batch buys and what it costs.** Measured against the same code with the batch limited
@@ -4918,8 +4934,7 @@ and the second is a diagnostic.
 
 The state is 5.10's, reduced to the degrees and buckets, with the round structure made visible.
 Two fields are new and carry the whole idea: `evicted` lists the vertices a pivot pulled out of
-the buckets, and `batch` lists what the round managed to take before the buckets at `mdeg` ran
-dry.
+the buckets, and `batch` lists what the round managed to take before the buckets at `mdeg` ran dry.
 
 **graph1.** The 4-cycle is the smallest graph that shows batching at all, and it shows it
 immediately.
@@ -5507,8 +5522,7 @@ The divergence is at the third elimination. After `6` goes, vertex `5` is credit
 
 ```
   bounds  = {0: 4, 1: 4, 2: -, 3: 4, 4: -, 5: 4, 6: -, 7: 3}
-  exact   = {0: 4, 1: 4, 2: -, 3: 4, 4: -, 5: 3, 6: -, 7: 3}
-                                          ^
+  exact   = {0: 4, 1: 4, 2: -, 3: 4, 4: -, 5: 3, 6: -, 7: 3} ^
 ```
 
 Vertex `5` sits in two elements by then, and they share a vertex outside the element just formed.
@@ -5911,8 +5925,7 @@ means only `A`'s small leftover of 10 is waiting while `B` runs, whereas putting
 own `storage`, so every key is zero, every order ties, and the arithmetic agrees: term 1 collapses
 to `sum_J storage(J)`, which is order-invariant, and term 2 is that plus `storage(K)`. The ordering
 does work only where children are themselves internal nodes with depth beneath them. This is why
-banded matrices, whose forests are essentially paths, gain nothing from it while grids gain a
-third.
+banded matrices, whose forests are essentially paths, gain nothing from it while grids gain a third.
 
 ### 6.8 The labels have to carry the order
 
@@ -5973,6 +5986,992 @@ while appearing to work: the links carry the chosen order and the traversal neve
 is why the two belong together, and why our `ElmForestEngine` runs them as one operation,
 `orderForMultifrontal`, rather than exposing either half.
 
+## 7. Pivoting
+
+Every section so far has assumed the pivot sequence is settled before any value is read. Cholesky
+earns that assumption, static LDL asserts it, and dynamic LDL gives it up. This section is about
+what the third one does instead: why a symmetric factorization cannot pivot the way LU does, what
+the dense theory offers, what a sparse solver has to give back, and what our
+`factorDynamicSupernode` actually implements, which is not quite what the literature it is usually
+named after describes.
+
+The one idea under all of it is that symmetry is a stability constraint, and everything in this
+section is the response to it. Symmetry is a bargain: `A = L D L^H` factors and stores one triangle,
+so the arithmetic and the storage are half of LU's. What it takes in exchange is the free parameter
+LU leans on for stability. LU permutes rows independently of columns, `P A = L U`, so it can pull
+the largest entry in a column straight to the pivot, and partial pivoting is cheap and never fails
+because a row is free to move on its own. Symmetry ties the two sides together, `P A P^H`, so a row
+swap is forced to be the same column swap, and only a diagonal entry can become a `1 x 1` pivot
+(7.1); the off-diagonal one might have wanted is unreachable by any symmetric permutation. So LU
+spends more arithmetic to buy easy stability, and LDL^H spends more pivoting machinery to buy back
+the stability that symmetry took while keeping the arithmetic saving. The `2 x 2` blocks, the
+Bunch-Parlett and Bunch-Kaufman search, the thresholds, and the delays are all that price. Sparse
+tightens the same screw once more (7.4): the symmetric search cannot even run in full, only over the
+fully summed part of the front, which is why delay had to be added on top. Oblio sits at the strict
+end, symmetric and sparse at once, and the subsections below are the full accounting of what those
+two constraints cost and how each is paid.
+
+### 7.1 The diagonal is the only place to look
+
+LU with partial pivoting swaps rows and leaves columns alone, computing `P A = L U`. Nothing
+constrains the two sides of the matrix to agree, because a general `A` has no symmetry to lose.
+
+A symmetric factorization does have one. `A = L D L^H` says the two triangles carry the same
+information, which is why only one is stored and why the arithmetic is half of LU's. Keeping that
+means applying the permutation on both sides, `P A P^H`, and a two-sided permutation maps diagonal
+entries to diagonal positions and off-diagonal entries to off-diagonal positions. **A `1 x 1` pivot
+therefore has to be a diagonal entry.** There is no symmetric permutation that brings an
+off-diagonal entry to the pivot position, so the entire search happens along the diagonal.
+
+For a positive definite `A` that costs nothing at all. Every diagonal entry of every Schur
+complement is positive, by 1.6, and the largest entry in magnitude of a positive definite matrix
+lies on its diagonal, since `|a_jk| < sqrt(a_jj * a_kk)`. The entry we would have wanted to pivot on
+is already where it is needed. Cholesky therefore pivots for stability not at all, which is why
+Sections 1 through 6 could pass over the subject in silence. The permuting those sections do care
+about, the ordering of Section 5, is chosen for fill before any value is seen and is a different
+question entirely.
+
+Drop definiteness and the guarantee goes with it. Consider
+
+```
+A = [ 0  1 ]
+    [ 1  0 ]
+```
+
+which is nonsingular, perfectly conditioned, and has no nonzero diagonal entry anywhere. No
+symmetric permutation creates one, since such a permutation only reorders the diagonal it already
+has. There is no sequence of `1 x 1` symmetric pivots that factors this matrix, and the obstruction
+is structural rather than a matter of accuracy: it is not that the pivots would be small, it is that
+they do not exist.
+
+The repair is to let the pivot block itself be `2 x 2`, and to take the whole of `A` above as one
+such block. Then `D` is block diagonal with `1 x 1` and `2 x 2` blocks and `L` is unit
+block-lower-triangular, which is exactly the shape 0.9 and 0.10 set up, and the reason those
+sections carry a `2 x 2` `D11` case rather than a scalar division. The inertia comes out correctly
+along with it, by Sylvester's law: a `2 x 2` block with negative determinant contributes one
+positive and one negative eigenvalue, and counting blocks is how such a factorization reports the
+inertia of `A`. That is what Bunch and Kaufman's title is about.
+
+**A catalog of the `2 x 2` cases.** Every question this section asks can be put to a symmetric
+`2 x 2`, which is small enough to answer completely. Seven are worth keeping in mind, and the names
+below are used only here.
+
+```
+identity                  negative identity         signed diagonal
+[ 1  0 ]                  [ -1   0 ]                [ 1   0 ]
+[ 0  1 ]                  [  0  -1 ]                [ 0  -1 ]
+
+zero diagonal             zero diagonal, flipped    small diagonal, 0 < eps << 1
+[ 0  1 ]                  [  0  -1 ]                [ eps  1 ]
+[ 1  0 ]                  [ -1   0 ]                [  1   0 ]
+
+rank one
+[ 1  1 ]
+[ 1  1 ]
+```
+
+Their spectra, with the inertia written `(positive, negative, zero)`:
+
+```
+                        eigenvalues       eigenvectors           eigenspaces   inertia
+identity                +1, +1            every nonzero vector   one, dim 2    (2, 0, 0)
+negative identity       -1, -1            every nonzero vector   one, dim 2    (0, 2, 0)
+signed diagonal         +1, -1            (1,0) and (0,1)        two lines     (1, 1, 0)
+zero diagonal           +1, -1            (1,1) and (1,-1)       two lines     (1, 1, 0)
+zero diagonal, flipped  +1, -1            (1,-1) and (1,1)       two lines     (1, 1, 0)
+small diagonal          see below         (lambda, 1) for each   two lines     (1, 1, 0)
+rank one                2, 0              (1,1) and (1,-1)       two lines     (1, 0, 1)
+```
+
+The small-diagonal case has `trace = eps` and `det = -1`, so its eigenvalues are
+`(eps +- sqrt(eps^2 + 4)) / 2`, which for small `eps` are `1 + eps/2` and `-1 + eps/2` to first
+order. Its eigenvectors are `(lambda, 1)` for each `lambda`, so they sit near `(1,1)` and `(-1,1)`.
+The two definite cases are the only ones with a repeated eigenvalue, and a repeated eigenvalue on a
+symmetric matrix means a genuine plane of eigenvectors rather than a defective one: every nonzero
+vector qualifies, and no basis is preferred.
+
+What each case does to a pivot search is the part that matters here:
+
+```
+                        a 1x1 pivot on the diagonal?    what the case shows
+identity                yes, either column              the easy case, accepted at any threshold
+negative identity       yes, either column              LDL ignores the sign, Cholesky cannot
+signed diagonal         yes, either column              indefinite does not imply a 2x2 is needed
+zero diagonal           none exists                     why D carries 2x2 blocks at all
+zero diagonal, flipped  none exists                     the sign of an off-diagonal reaches no test
+small diagonal          yes, and it is a trap           what the threshold is for (7.5)
+rank one                none, here or anywhere          a real singularity, caught at a root (7.6)
+```
+
+Three things follow, and they are the reason the catalog is worth having.
+
+**Definiteness decides, not conditioning.** The first five all have condition number 1, as
+well conditioned as a matrix can be, and their behavior runs the whole range from trivial to
+impossible. Conditioning bounds how much an error already made can be amplified; it says nothing
+about whether a pivot exists.
+
+**Indefinite is necessary but nowhere near sufficient.** The signed diagonal and the zero diagonal
+have the same inertia and opposite fates: one pivots twice with no search, the other cannot pivot at
+all. The implication runs one way only. If `a_kk = 0` and some `a_ik` in its column is nonzero, the
+principal `2 x 2` on `k` and `i` has determinant `-|a_ik|^2 < 0`, so it has one eigenvalue of each
+sign, and interlacing forces the whole matrix to be indefinite. A zero on the diagonal beside a
+nonzero off it therefore forces indefiniteness; indefiniteness forces nothing about the diagonal.
+
+**The flipped pair is one matrix.** With the signature matrix `S = diag(1, -1)`, which is symmetric,
+orthogonal and its own inverse, `S X S` carries the zero diagonal to its flipped twin. That single
+identity is at once a similarity `S X S^-1`, which preserves eigenvalues, and a congruence
+`S X S^T`, which preserves inertia by Sylvester's law, so both invariants are pinned by the same
+equation and only the eigenvectors trade places. Our kernel reaches the same conclusion by a shorter
+route: every quantity the acceptance tests read is a magnitude or a determinant, and the
+off-diagonal enters the determinant squared, so its sign cannot reach any comparison.
+
+That last observation generalizes into the classification the `2 x 2` acceptance test of 7.5 is
+built on. For a symmetric `2 x 2` the trace is the sum of the eigenvalues and the determinant their
+product, so two numbers settle everything:
+
+```
+det < 0                 indefinite,          inertia (1, 1, 0)
+det > 0, trace > 0      positive definite,           (2, 0, 0)
+det > 0, trace < 0      negative definite,           (0, 2, 0)
+det = 0                 singular
+```
+
+which is why `readPivotBlock2x2` computes a determinant and the test compares against it. It also
+settles what a `2 x 2` pivot contributes to the inertia: a block selected because its diagonal is
+weak has both `|a|` and `|c|` below `|b|`, hence `|ac| < b^2` and `det < 0`, hence exactly one
+eigenvalue of each sign. Counting the blocks is therefore counting the inertia.
+
+**Why counting them is legitimate, and why it costs nothing.** The inertia of a symmetric `A` is
+the triple `(n+, n-, n0)`, its counts of positive, negative and zero eigenvalues with multiplicity,
+so the three sum to `n`. It carries a name because of **Sylvester's law of inertia**: the triple is
+invariant under congruence, so that for every nonsingular `S`,
+
+```
+inertia( S A S^H )  =  inertia( A )
+```
+
+The eigenvalues themselves move freely under congruence; only how many lie on each side of zero is
+pinned. And the law is sharp in both directions, since two real symmetric matrices are congruent
+exactly when their inertias agree, which makes inertia a complete invariant of congruence rather
+than merely a preserved one.
+
+An `LDL^H` factorization is itself a congruence, with `S = L^-1`, so `inertia(A) = inertia(D)`, and
+`D` is block diagonal with blocks small enough to classify by the rule just given:
+
+```
+1 x 1, positive                     (1, 0, 0)
+1 x 1, negative                     (0, 1, 0)
+1 x 1, zero                         (0, 0, 1)
+2 x 2, det < 0                      (1, 1, 0)
+2 x 2, det > 0, trace > 0 or < 0    (2, 0, 0) or (0, 2, 0)
+```
+
+Summing over the blocks gives the inertia of `A` exactly, with no arithmetic beyond the
+factorization we wanted anyway and without going anywhere near an eigenvalue solver. The last line
+does not arise in practice, for the reason given just above: a `2 x 2` block is selected only when
+the diagonal is too weak to pivot on, and that is what drives its determinant negative.
+
+This is why Bunch and Kaufman's title leads with the calculation of inertia rather than with the
+factorization. For the problems that motivated it the inertia was the answer wanted and `LDL^H` was
+the means, and the same holds wherever a count of negative eigenvalues is the question: confirming
+that a stationary point is a minimum rather than a saddle, checking that a KKT system has the
+inertia an interior point step requires, or counting a pencil's eigenvalues below a shift by
+factoring `A - sigma B` and reading `n-` off the result.
+
+`n0` is the weak entry of the three, and its weakness is numerical rather than mathematical. Exactly
+zero is not a decidable property of a computed pivot, so a rank-deficient matrix does not announce
+itself as a clean zero block. It appears instead as a column that cannot be accepted at any
+threshold, which is the root failure of 7.6.
+
+**We do not compute it.** Nothing in Oblio reports an inertia today, though both ingredients are
+already in hand: `NumFactorDynamic::pivotType()` is public and says which columns open a `2 x 2`,
+and the diagonal itself carries the signs. A count over the supernodes would be a short read-only
+pass over a finished factor. It is recorded here as an observation about what the factorization
+already knows, not as a plan.
+
+**One boundary case, a single character away and entirely outside this framework.** Flip only the
+lower off-diagonal of the zero-diagonal matrix and the result is skew-symmetric rather than
+symmetric:
+
+```
+[ 0  -1 ]      eigenvalues +i and -i, no real eigenvectors, no inertia
+[ 1   0 ]
+```
+
+Real symmetric matrices always have real eigenvalues and an orthogonal eigenbasis; the moment the
+two off-diagonal entries disagree in sign rather than agreeing, that guarantee is gone. Nothing in
+this section applies, and Oblio rejects such a matrix at input validation as structurally
+unsymmetric.
+
+### 7.2 Bunch-Parlett and Bunch-Kaufman
+
+Two questions remain: which diagonal entry, or which pair, and how much work is spent deciding.
+
+Bunch and Parlett (1971) answered the first well and the second badly. Their strategy searches the
+entire trailing submatrix at every step, comparing the largest diagonal entry against the largest
+off-diagonal entry and taking a `1 x 1` or a `2 x 2` accordingly. The growth bound is of the same
+character as complete pivoting for LU, polynomial in `n` rather than exponential. The search costs
+`O((n-k)^2)` comparisons at step `k` and so `O(n^3)` over the run, which is the order of the
+arithmetic itself. For a factorization that costs `O(n^3/3)` multiplications, a search of that order
+is not something anyone can afford.
+
+Bunch and Kaufman (1977) answered the second. Their strategy examines **at most two columns** per
+step, so `O(n)` comparisons at each and `O(n^2)` over the run, negligible beside the arithmetic. The
+price is a weaker guarantee, and 7.3 is about which one.
+
+The constant that makes it work is
+
+```
+alpha = (1 + sqrt(17)) / 8 = 0.6403882...
+```
+
+and it is not arbitrary. It is chosen so that the worst-case element growth of two consecutive
+`1 x 1` steps equals that of one `2 x 2` step, which is what makes the two branches comparably safe
+and what fixes the bound quoted at the end of this section.
+
+With `k` the column being produced, the trailing submatrix `A(k:n, k:n)`, and `r` the candidate row:
+
+```
+bunch_kaufman(A, k) -> pivot size and swap:
+
+    omega1 = max |A(i,k)|  over i = k+1 .. n          # largest subdiagonal entry of column k
+    r      = the i attaining it
+
+    if omega1 == 0:                                   # column already eliminated below the diagonal
+        return 1x1 at k, no swap                      #   A(k,k) may still be zero: singular
+
+    if |A(k,k)| >= alpha * omega1:                    # case 1: the diagonal stands on its own
+        return 1x1 at k, no swap
+
+    omegar = max |A(i,r)|  over i = k .. n, i != r    # largest off-diagonal entry of column r
+
+    if |A(k,k)| * omegar >= alpha * omega1 * omega1:  # case 2: column r is no better, so keeping
+        return 1x1 at k, no swap                      #   A(k,k) is bounded after all
+
+    if |A(r,r)| >= alpha * omegar:                    # case 3: A(r,r) is a good pivot, bring it up
+        return 1x1 at k, swap k <-> r
+
+    return 2x2 at k, k+1, swap k+1 <-> r              # case 4: no acceptable 1x1 anywhere here
+```
+
+Every swap is symmetric, rows and columns together, so the factorization stays symmetric throughout.
+Case 4 does not move column `k` at all: it stays as the first column of the block, and `r` comes
+down to `k+1`.
+
+Case 2 is the one that reads as arbitrary and is not. It says that `A(k,k)` failed the direct test
+against its own column, but that column `r` is itself so large that switching to it would buy
+nothing, so the growth from keeping `A(k,k)` is bounded anyway. Without it the algorithm would take
+a `2 x 2` block every time the diagonal happened to be modest, which is both slower and, since a
+`2 x 2` block consumes two columns, structurally different.
+
+The elimination is the block algebra of 0.9 with the pivot block at one of its two sizes. For a
+`1 x 1` pivot `d = A(k,k)`:
+
+```
+D(k)   = d
+L(i,k) = A(i,k) / d                             for i = k+1 .. n
+A(i,j) = A(i,j) - L(i,k) * d * L(j,k)           for i >= j > k
+```
+
+For a `2 x 2` pivot, write the block and its inverse:
+
+```
+E = [ a  b ]     det = a*c - b*b      E^-1 = (1/det) [  c  -b ]
+    [ b  c ]                                         [ -b   a ]
+```
+
+and then
+
+```
+L(i, k:k+1) = A(i, k:k+1) * E^-1                for i = k+2 .. n
+A(i,j)      = A(i,j) - L(i, k:k+1) * E * L(j, k:k+1)^H
+```
+
+The trailing update is a symmetric rank-2 update rather than rank-1, and it carries `E` in the
+middle. That is the same `A22 - L21 D11 L21^H` shape 0.9 described, with the same consequence: no
+BLAS routine computes it, which is why `formUpper` and `gemmLower` exist.
+
+The growth bound that follows is roughly `(1 + 1/alpha)^(n-1)`, about `2.57^(n-1)`, against
+`2^(n-1)` for partial pivoting on a general matrix. Worse in the bound, comparable in practice, and
+the point is that a bound exists at all while symmetry is preserved.
+
+### 7.3 What Bunch-Kaufman does not bound
+
+Element growth in the trailing submatrix is bounded. **The entries of `L` are not.** They can be
+arbitrarily large, and this is the known weakness of the method.
+
+It matters because the backward error of a symmetric indefinite factorization is governed not by
+`|A|` but by `|L| |D| |L^H|`, which a large multiplier can make much larger. A factorization can
+therefore be the exact factorization of a matrix far from the one we handed it, while every
+individual step looked acceptable. Growth in the trailing submatrix is bounded and the factor is
+still poor.
+
+Bounded Bunch-Kaufman, usually called **rook pivoting**, repairs it by continuing the search:
+alternate along a row and then a column until an entry is found that is maximal in both, and accept
+only then. The resulting multipliers are bounded, and in practice the extra searching is slight,
+though in the worst case it grows to the order of the arithmetic and the cost advantage of 7.2 is
+given back.
+
+Ashcraft, Grimes and Lewis (1998) is the paper that made this concrete for solvers of the kind we
+are building. Their point for our purposes is that a sparse factorization has *less* freedom to
+recover than a dense one, because, as 7.4 is about to say, it cannot even search the whole trailing
+submatrix, so a strategy that relies on a good candidate always being somewhere below is relying on
+a set it is not allowed to look at.
+
+### 7.4 What a sparse factorization takes away
+
+Everything in 7.2 assumes the whole trailing submatrix is available to search. In a supernodal or
+multifrontal factorization it is not, and the reason is the one 6.1 gave from the other side.
+
+When supernode `K` is reached, only its front is **fully summed**. The rows below the front,
+`update(K)`, are still owed contributions from other branches of the forest, which is exactly what
+the update matrices of 6.1 are carrying around. Their values are partial sums. Pivoting on one would
+mean dividing by a number that has not finished being computed, and the result would be wrong rather
+than merely inaccurate.
+
+So the candidate set is the front, not the trailing submatrix. In our pass 2 this is visible as one
+loop bound: the scan that chooses a `2 x 2` partner stops at the end of the front, while the scan
+that measures how large the pivot has to be runs the full column height, update rows included.
+**The test uses everything available, the choice uses only what is fully summed.** That asymmetry is
+the whole of the sparse adaptation, and it is worth carrying as a principle rather than as a detail
+of one loop.
+
+Named at the level of Bunch-Kaufman's own machinery, this is the cleanest single reason pure BK
+cannot run at a supernode with update rows. BK cases 3 and 4 both turn on `r`, the row carrying the
+largest off-diagonal in column `k`: case 3 promotes `A(r,r)` to the pivot by swapping `r` up, case 4
+pairs `k` with `r` as a `2 x 2`. Both *use `r` as a pivot column*, and BK is free to pick `r`
+anywhere in the trailing submatrix. But at a supernode with update rows, `r` can land on an update
+row, which is not fully summed, so using it as a pivot column computes with an unfinished value: the
+result is wrong, not merely inaccurate. The supernode is therefore not entitled to `r` even though
+BK's search would select it. This is why the partner scan must stop at the front, and why what runs
+is not BK but BK *confined to the front*. A confined search can come up empty, which the full search
+never does. (It is also why the roots are the exception of 7.7: with no update rows, `r` is always a
+front column, "confined to the front" and "the whole block" coincide, and full BK becomes available
+again.)
+
+It also breaks Bunch-Kaufman's case ladder. Case 4 in 7.2 is unconditional: once cases 1 through 3
+have failed the `2 x 2` is taken, no test is applied to it, and the choice of `alpha` is precisely
+what makes taking it provably safe. The ladder terminates because there is always somewhere to go.
+Restrict the partner to the front and case 4 can fail, since the only acceptable partner may be an
+update row, and the algorithm then runs out of cases with no pivot chosen. A strategy built on a
+fixed constant and an unconditional fallback has nothing to offer at that point.
+
+Two things are needed instead: a test that is allowed to refuse a `2 x 2`, and somewhere for a
+refused column to go.
+
+### 7.5 Threshold pivoting
+
+The test came from Duff and Reid (1983), in the same paper as the multifrontal method, and it is
+what MA27, its successor MA57, and MUMPS all use. Instead of a fixed constant chosen to make a
+fallback safe, it takes a parameter `u`, the **threshold**, and asks of each candidate whether
+accepting it would keep the factor bounded.
+
+A `1 x 1` pivot `a_kk` is accepted when
+
+```
+|a_kk| >= u * max_{i != k} |a_ik|
+```
+
+and a `2 x 2` block `E` on rows and columns `k` and `r` is accepted when
+
+```
+| E^-1 | * [ max_{i != k,r} |a_ik| ]   <=   [ 1/u ]
+           [ max_{i != k,r} |a_ir| ]        [ 1/u ]
+```
+
+componentwise, where `|E^-1|` is the matrix of magnitudes. Writing `E` and `E^-1` as in 7.2 and
+calling the two maxima `max1` and `max2`, that pair of conditions expands into a pair of scalar
+inequalities on `|det|`, and taking whichever binds gives the form our kernel evaluates directly:
+
+```
+maxmax = max( |c| * max1 + |b| * max2 ,  |a| * max2 + |b| * max1 )
+accept when |det| >= u * maxmax
+```
+
+**What this buys is exactly what Bunch-Kaufman does not give.** The two conditions bound the entries
+of `L` by `1/u`, by construction, because they are nothing other than the statement that the
+multipliers `A21 E^-1` are bounded. Bunch-Kaufman bounds growth in the trailing submatrix and leaves
+`L` free; threshold pivoting bounds `L` and lets growth follow. Each bounds the quantity its setting
+cares about, and neither is a weaker version of the other.
+
+The parameter is a genuine knob rather than a constant. Raising `u` accepts fewer pivots, which
+costs work and fill and buys accuracy; lowering it does the reverse. At `u = 0` everything is
+accepted and there is no pivoting left, and `0.5` is the practical ceiling, above which so little is
+acceptable that the factorization struggles to progress. MA57 and MUMPS both default to `0.01`.
+
+**One vocabulary trap, and it is worth naming, because it is the source of the confusion this
+section exists to clear up.** The Duff literature calls its threshold `alpha` about as often as `u`,
+and writes the `1 x 1` condition as `|a_kk| >= alpha * max |a_ik|`. Bunch-Kaufman's case 1 is
+`|A(k,k)| >= alpha * omega1`. The same letter, in the same position, in the same inequality, naming
+two entirely different objects: a tunable parameter around `0.01` in one, the fixed constant
+`0.6403882...` in the other. Read either with the other in mind and threshold pivoting looks like
+Bunch-Kaufman with most of its cases missing, which is how our own comments came to say that it was.
+
+### 7.6 Delayed columns
+
+A test that can refuse needs somewhere for the refusal to lead. It leads up the forest.
+
+When no acceptable pivot is found among `K`'s remaining front columns, those columns are
+**delayed**: `K`'s front contracts by that count, the columns are handed to `parent(K)`, and they
+are tried again there. Containment is what permits this, the same property 6.1 needed: a delayed
+column's rows lie inside the parent's index set, so the parent is able to hold it. And the parent is
+a better place to ask, because more of the matrix has been summed there and the fully summed block
+is larger, so the candidate set the column now faces is bigger than the one that rejected it. A
+column may be delayed repeatedly, riding up one level at a time in the way a contribution does.
+
+At a root there is no next hop. A column that cannot be pivoted there is a real failure, and it is
+how the factorization detects that `A` is numerically singular.
+
+Three consequences run through the rest of the implementation.
+
+**The front grows.** A parent absorbs its children's delayed columns, so its front is larger than
+the symbolic factorization predicted. This is why dynamic pivoting requires dynamic storage, one
+vector per supernode, where a static factorization is content with flat buffers whose sizes were
+known in advance. The two senses of *dynamic* meet here, and this is the connection between them.
+4.5 sets the same widening beside amalgamation, which reaches it by a different road and pays for
+it in the same explicitly stored zeros.
+
+**Fill exceeds the prediction.** The structure of `L` is no longer settled before the values are
+seen, so `nnz(L)`, the delay count and the counts of `1 x 1` and `2 x 2` pivots are properties of
+the numbers rather than of the pattern. Nothing about them can be asserted from the symbolic phase.
+
+**The update size is untouched.** Delaying moves a column between the front and the delayed set and
+never changes `update(K)`, which is fixed by the symbolic factorization. This is the invariant that
+the height `frontSize + delaySize + updateSize` is preserved, and it is what let 6.5 say that the
+multifrontal stack peak is identical for a dynamically pivoted factorization and a static one on the
+same forest.
+
+The threshold governs how much of all this happens, which is the same knob of 7.5 seen from the
+other end: a stricter threshold delays more columns, which grows fronts, which adds fill and work.
+
+### 7.7 What Oblio does
+
+`factorDynamicSupernode` implements threshold pivoting in the sense of 7.5. It runs two passes,
+split on whether the supernode has update rows, which is to say on whether there is anywhere to
+delay a column to at all. Both hold a list of candidate front columns and rotate through it: a
+column that fails is moved to the back and the next is tried, with no elimination in between, so a
+later candidate sees exactly the values an earlier one saw. A round in which nothing is accepted
+ends the pass.
+
+**Pass 1, the dense front.** `update(K)` is empty, so no ancestor is waiting and a column that
+cannot pivot has nowhere to go. The pass therefore accepts the last remaining candidate whatever it
+looks like. Its `2 x 2` acceptance is `max1 == max2`, the two candidates' largest off-diagonal
+magnitudes coinciding, decided on the magnitudes alone without ever reading the block's own values.
+
+**Pass 2, the general case.** An ancestor exists, so nothing is forced. The `2 x 2` partner is
+chosen by a scan bounded at the front, per 7.4, and the block is accepted on the threshold test of
+7.5, with the symmetric-maximum case kept as a separate disjunct. Whatever a round does not accept
+is delayed.
+
+```
+                    pass 1                        pass 2
+forced 1x1          yes, the last candidate       no
+2x2 partner         anywhere in the column        front columns only
+2x2 acceptance      max1 == max2                  |det| >= u * maxmax
+on failure          cannot happen                 delay to the parent
+```
+
+**This is not Bunch-Kaufman, and our own comments have said for some time that it is.** The `1 x 1`
+condition is Duff's rather than Bunch-Kaufman's case 1, differing in that `u` is tunable where
+`alpha` is fixed. The `2 x 2` condition is Duff's determinant test, and Bunch-Kaufman has no `2 x 2`
+test at all, its case 4 being unconditional by construction. Cases 2 and 3 of 7.2 have no
+counterpart here. The two strategies are certainly related, both choosing between `1 x 1` and
+`2 x 2` blocks by comparing a diagonal against off-diagonal maxima, and they descend from the same
+pair of papers, but they are different algorithms with different guarantees, and the difference is
+the one 7.5 named: Bunch-Kaufman bounds growth, this bounds `L`.
+
+The one place a Bunch-Kaufman comparison is genuinely instructive is case 3, which tests the
+*partner's* diagonal, `|A(r,r)| >= alpha * omegar`, and promotes `r` by an immediate swap. We have
+no such test. But the rotation reaches the same candidates anyway: `r` is a front column, so it
+comes up as its own candidate later in the same round and is tested by the `1 x 1` condition, which
+measures the same quantity, over values nothing has changed in the meantime. What differs is the
+order in which pivots are accepted, not which columns are eligible to be.
+
+**The threshold defaults to `0.1`**, in `NumFactorEngine` and in `DirectSolver` alike, an order of
+magnitude stricter than the `0.01` of MA57 and MUMPS. Oblio therefore accepts fewer pivots and
+delays more columns than those codes would on the same matrix, buying accuracy with fill and work.
+That is a defensible setting, and it is the value the reference implementation shipped, but nothing
+in the test suite exercises any other value, so whether the extra strictness earns its cost on our
+matrices is unmeasured. A sweep reporting delays, `2 x 2` counts, `nnz(L)` and residual against `u`
+would answer it, and it needs no change to the kernel.
+
+### 7.8 Zero pivots, and an open question about singularity
+
+A `1 x 1` pivot can be exactly zero. This section is about when that happens, what it means, and
+the one place where what it means is not yet settled.
+
+**In dense Bunch-Kaufman the story is complete.** Read the four cases of 7.2 against the possibility
+that the accepted pivot is `0`. Case 1 accepts on `|A(k,k)| >= alpha * omega1` past the
+`omega1 == 0` guard, so the bar is strictly positive and the pivot is nonzero. Case 2 needs
+`|A(k,k)| * omegar >= alpha * omega1^2`, a strictly positive right side, which a zero `A(k,k)`
+cannot meet. Case 3 accepts `A(r,r)` against `alpha * omegar` with `omegar >= omega1 > 0`, again a
+positive bar. Case 4 forms a `2 x 2` whose determinant is `A(k,k) A(r,r) - omega1^2`, which is
+`-omega1^2 < 0` even when both diagonals vanish, so the block is nonsingular, not a zero pivot.
+Every
+proper case guards against a zero by comparing a magnitude against a strictly positive threshold.
+
+The only way through is the short-circuit: `omega1 == 0`, the whole subdiagonal of column `k` zero,
+which by symmetry means row `k` is zero too, and if `A(k,k)` is also zero the entire row and column
+are zero. That is the door, and it leads to a clean theorem. A zero subdiagonal and a zero diagonal
+make a zero column; a matrix with a zero column is singular; so **a zero `1 x 1` pivot in
+Bunch-Kaufman implies the matrix is singular.** The contrapositive is the useful direction: a
+factorization that completes with every pivot nonzero certifies nonsingularity, which is why
+LAPACK's
+`sytrf` reports the first zero pivot in `INFO` rather than treating it as a numerical nuisance. And
+it propagates, by the dynamic reading of Sylvester's law from 7.1: eliminating a nonsingular pivot
+block is a congruence, so a nonsingular `A` has nonsingular trailing submatrices throughout, no
+trailing row ever becomes zero, and the door never opens at any step.
+
+The converse holds more tightly than one might expect, and getting it right matters for what
+follows. One might guess that singular does not force a zero `1 x 1`, that a singular `A` could
+instead surface as a `2 x 2` with `det = A(k,k) A(r,r) - omega1^2` happening to vanish. In dense
+Bunch-Kaufman that cannot happen: **a case-4 `2 x 2` is always nonsingular, in fact strictly
+indefinite.** Case 4 is reached only after case 1 fails (`|A(k,k)| < alpha * omega1`) and case 3
+fails (`|A(r,r)| < alpha * omegar`), so both diagonals are small against the off-diagonal, and the
+standard analysis sharpens this to `|A(k,k) A(r,r)| < omega1^2`, which makes
+`det = A(k,k) A(r,r) - omega1^2` strictly negative. A negative determinant is one positive and one
+negative eigenvalue, so the block is nonsingular by construction, and the constant `alpha` is
+exactly what buys that: BK's `2 x 2` needs no determinant test because case 4 cannot form a singular
+one. So in Bunch-Kaufman the rank deficiency of a singular `A` has nowhere to hide but a zero
+`1 x 1`, reached through the `omega1 == 0` short-circuit and only there. The theorem is therefore an
+iff after all: **a zero `1 x 1` pivot in Bunch-Kaufman if and only if `A` is singular**, with the
+`2 x 2` structurally excluded as a carrier. (This is the dense luxury 7.5 contrasts against: a
+threshold code has to *test* for `2 x 2` safety, where BK gets it free from `alpha`.)
+
+**In Oblio the same question is open on both pivot sizes, because neither forcing path has the
+shape Bunch-Kaufman's argument needs.** Take the `1 x 1` first. Pass 2's acceptance tests are
+magnitude-against-threshold, `|d11| >= u * max1` and `|det| >= u * maxmax`, so by the Bunch-Kaufman
+argument above neither can accept a zero: whatever pass 2 admits is nonzero. That half transfers
+cleanly. What does not transfer is the forcing path. Bunch-Kaufman's zero door is an empty column,
+`omega1 == 0`, and the singularity theorem rests on that predicate: empty column plus zero diagonal
+equals zero row of `A`. Pass 1's forcing path (7.7) is different. It forces on **threshold
+exhaustion**: the candidate rotation cycles the whole front, nothing clears `u`, and the last
+remaining column is accepted whatever its diagonal, because a root has no update rows and so nowhere
+to delay. "No candidate cleared the threshold" is not the statement "a row is identically zero", and
+the linear-algebra step that turned Bunch-Kaufman's door into a singularity certificate does not
+obviously apply to this one.
+
+The `2 x 2` is where Oblio departs from Bunch-Kaufman, and not in its favor. A zero column never
+reaches a `2 x 2`: the `max1 == 0` guard in both passes routes an empty column to a `1 x 1` before
+any partner is considered, so a formed block always has nonzero off-diagonals and its `a11` (the
+larger first-column entry, after the row swap) is nonzero. So far so safe. But pass 1 accepts a
+`2 x 2` on `max1 == max2`, the off-diagonal magnitudes alone, **without reading the block's
+determinant** (7.7). This is precisely the guarantee BK case 4 has and pass 1 lacks: BK tests the
+*diagonals* against the off-diagonal, which forces `det < 0`, while `max1 == max2` compares the two
+columns' off-diagonal maxima and says nothing about the diagonals, hence nothing about the
+determinant. So a singular block with equal off-diagonals, `[[d, d], [d, d]]` with `d` nonzero,
+passes pass 1's test, is formed, and reaches the diagonal solve where `u22 = det / a11 = 0` and the
+block solve divides by zero. What BK structurally excludes, pass 1 can construct. Pass 2 does not
+have the problem, because its `2 x 2` acceptance is the determinant test `|det| >= u * maxmax`,
+which bounds `det` away from zero exactly as BK's `alpha` does, only by an explicit test rather than
+a fixed constant. So the three routes to `2 x 2` safety line up: BK case 4 forces it with a
+constant, Oblio pass 2 forces it with a threshold, and Oblio pass 1 does neither. Pass 1 is the one
+that runs at a dense root, which is exactly where singularity concentrates.
+
+So the honest state is a conjecture with one part proved and two parts open, one per pivot size:
+
+- **Proved.** Pass 2 cannot accept a zero pivot of either size, by the same
+  threshold-against-positive-bar argument as Bunch-Kaufman cases 1 through 4.
+- **Conjectured, `1 x 1`.** A forced pass-1 `1 x 1` acceptance carries an exactly zero diagonal only
+  when the fully summed root block is singular, hence only when `A` is singular. Plausible, because
+  a root block that rejects every candidate ordering at every threshold comparison behaves like a
+  rank-deficient block, but the implication has not been shown, and "behaving like" is precisely the
+  phrase the port discipline says to convert into a proof or a measurement before it is asserted.
+  One piece of evidence stronger than "plausible", though short of a proof: 0.9 already *counts*
+  this event as a rank loss. Its `factorDynamicLDL_` keeps a `rank_` initialized to `n` and
+  decrements it at exactly this site, a forced or isolated `1 x 1` accepted with a zero diagonal, so
+  the original
+  author treated "forced zero `1 x 1`" and "rank dropped by one" as the same thing. That is a design
+  belief embedded in code, not a theorem, but it is the same claim this bullet conjectures, held by
+  the person who wrote the algorithm. (The port had dropped this counter and now restores it; see
+  the ledger.)
+- **Open, `2 x 2`.** A pass-1 `2 x 2` accepted on `max1 == max2` can in principle have a zero
+  determinant (the `[[d, d], [d, d]]` shape), which divides by zero in the solve. Whether this is
+  reachable by any real matrix is unverified: `d == d` exactly is measure-zero in floating point, so
+  a random matrix will not produce it, but a structured one (a repeated KKT block, an assembled
+  duplicate) might. If it is reachable, the fix is a determinant test on pass 1's `2 x 2` in the
+  factor kernel, matching pass 2's, not a guard in the solve.
+
+Two ways to settle the conjecture, cheapest first. **Measure it.** Build singular indefinite
+matrices with a known null vector, factor them dynamically, and check whether a forced pass-1
+acceptance with a zero (or near-zero) diagonal occurs, and occurs only there. Then the half that
+actually matters for the claim: factor a batch of nonsingular indefinite matrices, including ones
+constructed to delay heavily, and confirm that no zero pivot ever appears. The second batch is the
+empirical stand-in for the theorem, and it is the natural shape of an `experiments/pivoting` study
+or a targeted case in the numeric-factorization suite with matrices built to force delay to a root.
+The
+`2 x 2` question wants its own probe in the same study: a matrix engineered to present pass 1 with a
+`max1 == max2`, zero-determinant block, to find whether the accept path can be driven there at all.
+**Or prove it.** Show that at a root, with no update rows, every candidate failing the threshold
+against the fully summed block implies that block is singular, and that the forced acceptance lands
+a zero on the diagonal exactly when the root block is rank deficient. That is a small theorem about
+pass 1 specifically, not a transcription of Bunch-Kaufman, and it belongs here once it is shown.
+
+One caveat runs under all of the above, and it is the same one that ends 7.5. This is exact
+arithmetic. In floating point an exact zero almost never appears; a nearly singular `A` produces a
+tiny pivot rather than a zero one, which divides to a huge multiplier rather than to `inf`. The
+clean
+iff is a statement about the exact algorithm, and the practical failure mode is smallness, a matter
+of conditioning, not the exact zero this section is about. The zero pivot is the mathematically
+sharp
+case; the threshold of 7.5 exists precisely because the interesting real-arithmetic cases sit just
+to
+one side of it.
+
+The consequence in the solve is recorded where it happens, in `diagonalDynamic`: a zero `1 x 1`
+skips
+its divide rather than dividing by zero, leaving that component of the solution to the value the
+forward sweep produced. Whether that is a valid free choice (the system consistent, the null
+component genuinely free) or a silently accepted contradiction (the system inconsistent) is not
+distinguished there, for the reason that the honest test is the post-solve residual and not a
+per-pivot comparison against a value the sweep has already modified. That is 0.9's abandoned
+`InconsistentSystem` check, and the reasoning for leaving it abandoned is the same reasoning given
+here.
+
+
+### 7.9 Complete and partial pivoting, and the axes the words name
+
+"Partial" and "complete" are worth pinning down, because they mean one thing in the general LU
+world and the symmetric-indefinite world borrows the words and shifts them, and because a third
+property Oblio actually turns on, the threshold, is often smeared into the same phrase while being
+a different axis entirely.
+
+**The general (LU, nonsymmetric) meaning is about how much of the matrix is searched** for the
+pivot at step `k`.
+
+- *Partial pivoting* searches one column, the current column below the diagonal, takes the
+  largest-magnitude entry, and swaps its row up. `O(n)` comparisons per step, `O(n^2)` over the
+  run. It is the standard, what `getrf` does, and it permutes rows only: `P A = L U`.
+- *Complete pivoting* searches the whole trailing submatrix, all `(n-k)^2` entries, takes the
+  global largest, and swaps both its row and its column into place. `O(n^2)` per step, `O(n^3)`
+  total. It permutes on both sides, `P A Q = L U`, gives a stronger growth bound, and is rarely
+  worth the cost.
+- *Rook pivoting* sits between, searching alternately along a row and a column until an entry is
+  maximal in both. Usually cheap, `O(n^3)` in the worst case.
+
+So the LU axis is search extent: one column, a row-and-column zigzag, or everything.
+
+**The symmetric-indefinite meaning keeps the axis but renames its endpoints after people.**
+Symmetry forces the two-sided permutation `P A P^H` to preserve it (7.1), so "search a column and
+swap only its row" is not even available, since a one-sided swap breaks symmetry. The Bunch family
+fills the two ends:
+
+- *Bunch-Parlett* (7.2) is the complete method: it searches the whole trailing submatrix each step
+  for its `1 x 1`-or-`2 x 2` choice, at `O(n^3)` search cost. It is the symmetric analogue of
+  complete pivoting.
+- *Bunch-Kaufman* (7.2) is the partial method: at most two columns examined per step, `O(n)`
+  search, `O(n^2)` total. It is called partial by direct analogy to LU partial pivoting, bounded
+  cheap search rather than exhaustive.
+- *Bounded Bunch-Kaufman* is the symmetric rook, the in-between (7.3).
+
+Same axis, search extent; the endpoints are now complete = Bunch-Parlett, partial = Bunch-Kaufman.
+
+**The axis Oblio actually turns on is a different one, and this is the trap.** Oblio pivots by
+*threshold* (Duff-Reid, 7.5), and threshold is orthogonal to partial-versus-complete. Partial and
+complete answer *how far is the search*; the threshold answers *what must a candidate pass to be
+accepted*. The two are independent: one can pair a threshold acceptance test with a partial search
+(MA57, MUMPS, and Oblio) or in principle with a complete one. So "threshold-partial pivoting", the
+phrase 0.9 uses, is two choices at once: a partial *search* (bounded, Bunch-Kaufman-shaped) and a
+*threshold acceptance* (`|pivot| >= u * max`) in place of Bunch-Kaufman's fixed-`alpha` test.
+
+Oblio narrows the search axis one notch further than "partial", because a sparse supernode cannot
+run even a full partial search: it may look only at its fully summed columns (7.4), delaying the
+rest to a parent (7.6). So the search is partial *and* front-restricted, which is why the case
+ladder can run out of candidates and why delay exists at all.
+
+Laid against each other, the axes are:
+
+```
+axis               Oblio's choice              the alternatives
+search extent      partial, front-restricted   complete (Bunch-Parlett); rook (bounded BK)
+acceptance test    threshold u                 fixed constant (Bunch-Kaufman alpha)
+permutation        two-sided (P A P^H)         one-sided is unavailable under symmetry
+on failure         delay to the parent         dense methods cannot delay
+```
+
+The one-line name is **threshold-partial pivoting**, but the phrase is worth unpacking exactly
+because "threshold" and "partial" answer different questions, and conflating them hides where a
+design choice actually lives. The full-Bunch-Kaufman-at-the-roots proposal (recorded in TODO) is a
+change to the *acceptance* axis alone, swapping the threshold `u` for the fixed `alpha` at the
+fronts where delay is impossible, while leaving the *search* axis partial. That proposal is only
+stateable once the two axes are held apart: it is not "more complete pivoting", it is a different
+acceptance test at the same search extent.
+
+### 7.10 The LU pseudocode, and why complete pivoting is almost never used
+
+7.9 named the search-extent axis in the abstract. This subsection makes it concrete in the general
+(nonsymmetric) LU setting, where it originates, then asks the question that decides which end of
+the axis anyone actually uses: is the quality difference worth the cost. The answer, partial almost
+always, complete essentially never for solving, is the same judgment the symmetric world reaches in
+7.2 when it standardizes on Bunch-Kaufman over Bunch-Parlett, and it is worth seeing why in the
+simpler LU case first.
+
+Both fragments below are dense LU, 1-indexed, `A` overwritten in place by `L` (unit, below the
+diagonal) and `U` (on and above). `k` is the current step.
+
+**Partial pivoting.** Search the current column below the diagonal, swap one row.
+
+```
+for k = 1 .. n-1:
+    p = argmax over i in k..n of |A(i,k)|      # largest magnitude in column k, rows k..n
+
+    if A(p,k) == 0:
+        continue                               # column already zero: singular here, skip
+
+    swap rows k and p of A                     # row interchange only
+    record p in the pivot vector
+
+    for i = k+1 .. n:                          # eliminate below the pivot
+        A(i,k) = A(i,k) / A(k,k)               # multiplier, stored in L
+        for j = k+1 .. n:
+            A(i,j) = A(i,j) - A(i,k) * A(k,j)
+```
+
+Search cost `O(n-k)` at step `k`, so `O(n^2)` over the run. Produces `P A = L U`, one permutation,
+applied to rows.
+
+**Complete pivoting.** Search the entire trailing submatrix, swap one row and one column.
+
+```
+for k = 1 .. n-1:
+    (p, q) = argmax over i,j in k..n of |A(i,j)|   # largest anywhere in the trailing block
+
+    if A(p,q) == 0:
+        break                                  # whole trailing block zero: rank deficient, done
+
+    swap rows    k and p of A                  # row interchange
+    swap columns k and q of A                  # column interchange
+    record p in the row-pivot vector
+    record q in the column-pivot vector
+
+    for i = k+1 .. n:
+        A(i,k) = A(i,k) / A(k,k)
+        for j = k+1 .. n:
+            A(i,j) = A(i,j) - A(i,k) * A(k,j)
+```
+
+Search cost `O((n-k)^2)` at step `k`, so `O(n^3)` over the run, the same order as the elimination
+itself. Produces `P A Q = L U`, two permutations, one on each side.
+
+**The elimination body is byte-identical between them.** The divide and the rank-1 update are the
+same; only the search and the swap differ.
+
+```
+                partial                     complete
+search          one column, k..n            whole block, (k..n) x (k..n)
+                O(n-k)                       O((n-k)^2)
+swap            rows only                    rows and columns
+factorization   P A = L U                    P A Q = L U
+growth bound    2^(n-1) worst case          polynomial in n (much tighter)
+```
+
+The singular handling differs in a small telling way. Partial pivoting meets a zero *column* and
+can `continue`, that column is finished, move on. Complete pivoting meets a zero *entire trailing
+block* and can `break`, everything left is zero and the factorization is done at rank `k-1`.
+Complete pivoting therefore reveals rank as a side effect: the step at which the running maximum
+reaches zero is the numerical rank. Hold onto that, it is the one job complete pivoting keeps.
+
+**The quality gap in theory is enormous.** Element growth, how large trailing entries get relative
+to the original matrix, is what bounds the backward error. Partial pivoting's worst case is
+`2^(n-1)`, exponential. Complete pivoting's is Wilkinson's bound, a slowly growing sub-polynomial
+function that is small for any realistic `n`. Read only the bounds and one would always pick
+complete.
+
+**But the theory almost never bites.** The `2^(n-1)` partial bound is achievable only by
+specifically adversarial matrices (the classic is a `-1/+1` triangular-plus-spike construction); on
+matrices that actually arise, growth is small, empirically `O(n^{2/3})` or better, often a small
+constant. Partial pivoting essentially never fails in practice, its instability is real but, in the
+standard phrasing, spectacularly rare. So for the overwhelming majority of real problems the
+practical quality difference between partial and complete is nil: both are backward stable, and the
+complete search is `O(n^3)` spent defending against a failure that does not occur.
+
+**And the cost always bites.** Complete pivoting's whole-block search is the order of the whole
+factorization, so it roughly doubles the flop count, and worse, it destroys the memory-access and
+blocking structure that makes dense linear algebra fast. Partial pivoting searches one column,
+which is cheap, cache-friendly, and foldable into blocked BLAS-3 panel factorizations (what
+LAPACK's `getrf` does). Complete pivoting's search cannot be blocked the same way, so the
+real-hardware slowdown is worse than the flop count alone suggests. This is why LAPACK ships no
+complete-pivoting `LU` at all: partial pivoting is the default and effectively the only choice for
+general dense solve.
+
+**Where the complete-pivoting instinct survives is rank, not stability.** Bringing the largest
+remaining entry to the pivot orders the pivots by decreasing magnitude, so the step where the pivot
+falls to near-zero is the numerical rank, and partial pivoting cannot do this reliably. When the
+question is rank or the null space, that behavior is wanted, but even then complete-pivoting *LU*
+is rarely the tool. QR with column pivoting (`geqp3`) is the workhorse rank-revealing
+factorization: it permutes columns only, cheaper than full complete pivoting, and orders the
+diagonal by magnitude, so it reveals rank at close to ordinary-QR cost. The SVD is the definitive
+answer, more expensive still. So complete-pivoting LU as a *solver* is a museum piece, its
+stability edge defends against nothing that happens; complete pivoting as an *idea*, largest
+element to the pivot to reveal rank, lives on in QR-with-column-pivoting and the SVD.
+
+**The tie back to Oblio.** The symmetric-indefinite field made the identical call for the identical
+reason. Bunch-Parlett (7.2) is the complete-pivoting analogue, the whole-block search;
+Bunch-Kaufman (7.2) is the partial analogue; and the field standardized on Bunch-Kaufman because
+the complete search costs `O(n^3)` and defends against growth that, with the `2 x 2` blocks
+handling the genuinely dangerous cases, essentially never materializes. Oblio inherits that
+judgment. And the one place the complete-pivoting instinct resurfaces, revealing rank, is exactly
+the `rank_` counter and the singularity questions of 7.8: that is Oblio caring about rank at the
+roots, the one spot where "is this actually deficient" is the real question rather than "is this
+stable". The same partial-beats-complete-except-for-rank story plays out one level down, in the
+symmetric setting, for the same reasons.
+
+### 7.11 Bunch-Parlett, and the growth bounds of the symmetric methods
+
+7.10 gave the LU pseudocode and its partial-versus-complete growth story. This subsection does the
+same for the symmetric pair, Bunch-Kaufman (partial) against Bunch-Parlett (complete), with the one
+extra concern that the symmetric setting has and the LU setting does not. Bunch-Kaufman's own
+pseudocode is in 7.2; the missing piece is Bunch-Parlett, given first.
+
+**Bunch-Parlett** is the complete method: it searches the whole trailing submatrix each step for its
+`1 x 1`-or-`2 x 2` choice, the symmetric analogue of complete-pivoting LU. As in 7.2, `alpha =
+(1 + sqrt(17)) / 8`. Symmetric, 1-indexed, factoring `P A P^H = L D L^H`, working on the trailing
+block `A(k:n, k:n)`.
+
+```
+bunch_parlett_step(A, k):
+    # mu0 = largest magnitude on the diagonal; mu1 = largest magnitude off it
+    mu0 = max over i in k..n of |A(i,i)|,     at diagonal position p
+    mu1 = max over i > j in k..n of |A(i,j)|, at position (r, s)   # r > s
+
+    if mu0 == 0 and mu1 == 0:
+        return done                       # trailing block is entirely zero: rank exhausted
+
+    if mu0 >= alpha * mu1:
+        # a diagonal entry dominates: take it as a 1x1 pivot
+        swap rows/cols k and p            # symmetric swap, both sides
+        return 1x1 at k
+
+    else:
+        # no diagonal entry is large enough: take the symmetric 2x2 spanning r and s
+        swap rows/cols k   and s          # bring the pair to (k, k+1)
+        swap rows/cols k+1 and r
+        return 2x2 at k, k+1
+```
+
+The elimination that follows each choice is the same block algebra as 7.2, a `1 x 1` scalar step or
+a `2 x 2` block step; only the *selection* above differs from Bunch-Kaufman. And the difference is
+exactly the search extent of 7.9: Bunch-Kaufman finds its candidate by scanning at most two columns,
+while Bunch-Parlett scans the whole trailing block for `mu0` and `mu1`. That whole-block scan is the
+`O((n-k)^2)` per step, `O(n^3)` total, that makes it complete and makes it expensive.
+
+**The growth bounds line up with the LU case, partial exponential and complete polynomial.**
+
+```
+                          growth, worst case            LU analogue
+LU partial pivoting       2^(n-1)          exponential  --- BK
+LU complete pivoting      polynomial in n               --- BP
+
+Bunch-Kaufman  (partial)  ~ 2.57^(n-1)     exponential
+Bunch-Parlett  (complete) polynomial in n
+```
+
+Bunch-Kaufman's `(1 + 1/alpha)^(n-1)` is about `2.57^(n-1)`, from 7.2. It is *worse* than LU
+partial's `2^(n-1)`, and the reason is the `2 x 2` blocks: a `2 x 2` step can amplify slightly more
+than a `1 x 1`, and `alpha` is chosen to equalize the two, landing the base at 2.57 rather than 2.
+Bunch-Parlett's bound is Wilkinson-style, the same slowly growing polynomial character as
+complete-pivoting LU. So the headline is identical to 7.10: partial (BK) is exponential worst-case,
+complete (BP) is polynomial, and BP is the safe-but-expensive one that is essentially never used for
+the same reason complete-pivoting LU is not.
+
+**The twist unique to the symmetric case: growth is not the whole story.** In LU, bounding growth
+bounds the backward error, because partial pivoting makes every multiplier in `L` at most 1 in
+magnitude automatically (each multiplier is a column entry divided by the largest entry in that
+column). Growth is the only failure mode. In the symmetric case growth and the multipliers come
+apart, which is the 7.3 point: Bunch-Kaufman bounds *growth* but leaves the entries of `L`
+*unbounded*, and a large `L` entry inflates the backward error `|L| |D| |L^H|` even when growth is
+controlled. So Bunch-Kaufman has two separate worst-case concerns where LU partial has one, and the
+growth bound alone does not capture its stability.
+
+```
+              growth, worst      L entries bounded?     verdict
+LU partial    2^(n-1)            yes (automatic, <= 1)  good in practice
+LU complete   polynomial         yes                    safe, expensive
+Bunch-Kaufman ~ 2.57^(n-1)       NO                     good in practice, but L can blow up
+Bunch-Parlett polynomial         yes                    safe, expensive
+rook (bBK)    close to BK        yes                    the practical fix for BK's L
+```
+
+That extra column, whether the multipliers are bounded, is why **rook pivoting (bounded
+Bunch-Kaufman) exists in the symmetric world as a distinct third option with no clean LU analogue.**
+Rook keeps Bunch-Kaufman's cheap partial search but adds enough extra searching, alternating along a
+row then a column until an entry is maximal in both, to bound `L`, plugging exactly the hole the
+growth bound leaves open. In LU no "rook" was ever needed because partial pivoting bounds the
+multipliers for free; in the symmetric case it is needed because Bunch-Kaufman does not.
+
+**In practice the verdict is the same as LU partial.** Despite the uglier `2.57^(n-1)` bound and the
+unbounded `L`, Bunch-Kaufman essentially never blows up on real matrices: the exponential growth
+needs an adversarial construction, and the unbounded-`L` case, while more real than LU's growth
+problem, is rare enough that Bunch-Kaufman with `2 x 2` blocks is the standard and Bunch-Parlett is
+the museum piece. Threshold pivoting (7.5) is the further practical answer a sparse solver reaches
+for: rather than Bunch-Kaufman's fixed `alpha`, it tunes `u` to bound `L` *directly*, which is what
+a sparse solver actually wants, since a large `L` entry is a fill problem there and not only an
+accuracy one.
+
+This is what fixes the ladder of the root proposals (the two TODO entries). If a root front is
+numerically nasty, what has gone wrong is almost certainly Bunch-Kaufman's *unbounded `L`*, not its
+growth. Rook fixes exactly that at roughly `O(k^2)` search cost, while Bunch-Parlett spends `O(k^3)`
+to bound a growth that was probably fine. The extra column of the table is precisely why rook, not
+Bunch-Parlett, is the natural next rung above plain Bunch-Kaufman at a hard root.
+
+### 7.12 The reference codes: MA27, MA57, MUMPS, and where Oblio sits
+
+The pivoting of Section 7 is not Oblio's invention; it is the Duff-Reid family, and three codes in
+that family are the ones the literature and this document keep naming. They are worth
+distinguishing, because they are the same algorithm at three generations and on three classes of
+hardware, and Oblio sits at a definite point among them.
+
+All three are multifrontal symmetric-indefinite solvers doing `L D L^H` with `1 x 1` and `2 x 2`
+threshold pivoting and delayed columns, exactly the algorithm the rest of Section 7 describes. What
+separates them is generation and target machine, not method.
+
+**MA27** (Duff and Reid, early 1980s, Fortran 77) is the original. It is the first multifrontal
+solver, and it established the whole approach Oblio descends from: the analyze phase picks a pivot
+order from the sparsity pattern alone, and factorization adjusts it numerically through threshold
+pivoting and delayed columns. It used minimum degree ordering. Its phases are vectorized but not
+parallel, and it predates the widespread use of the Level-2 and Level-3 BLAS, so its dense front
+work is hand-written rather than handed to `GEMM`.
+
+**MA57** (Duff, early 2000s, Fortran 77 with a Fortran 90 interface layer) is MA27 modernized for a
+single core. Same algorithm, restructured so the dense front factorizations go through Level-3
+BLAS, which is the single biggest speed difference from MA27. It moved to approximate minimum
+degree (AMD), the ordering Oblio also vendors, and added a large feature set MA27 lacked: multiple
+right-hand sides, iterative refinement and error analysis, matrix modification, partial solves,
+restart, static pivoting, and the ability to identify and change pivots. It is still a serial code,
+still actively maintained. Its threshold default is `u = 0.01`, the value 7.5 and 7.7 compare
+Oblio's `0.1` against.
+
+**MUMPS** (Amestoy et al., late 1990s onward, Fortran 90 with C, MPI for parallelism) is the same
+method taken to distributed-memory machines. It is designed primarily for distributed computation
+under MPI, with shared-memory parallelism through multithreaded BLAS and OpenMP and out-of-core
+support, and it uses BLAS and ScaLAPACK for the dense kernels. Two things follow from the
+distribution that matter for Section 7. First, MUMPS is more general than the other two: it handles
+unsymmetric matrices as well, not only symmetric. Second, distribution is what forces its pivoting
+to differ, because a pivot candidate may live on another process and so be unreachable by the same
+threshold search a serial code runs; this is exactly why the Duff-Pralet work on pivoting for the
+sequential *and parallel* case (in the references) exists, and it is the parallel analogue of the
+front restriction of 7.4, the candidate set narrowed one step further, now by process boundary
+rather than by fully-summed-ness.
+
+```
+code    era      language                parallelism        role
+MA27    1980s    Fortran 77              vectorized, serial  the original multifrontal
+MA57    2000s    Fortran 77 (+ F90 API)  serial, BLAS-3      MA27 modernized: speed + features
+MUMPS   1990s+   Fortran 90, C           distributed (MPI)   the method for parallel machines
+```
+
+**Where Oblio sits.** Algorithmically Oblio is MA27/MA57: serial, symmetric, threshold-partial
+pivoting with `1 x 1` and `2 x 2` blocks and delayed columns, AMD ordering, dense fronts handed to
+the Level-3 BLAS. It is not MUMPS, it does not distribute, and it is symmetric-only. It is written
+in C++17 rather than any Fortran, which buys the storage-agnostic templating and the read-public
+write-private accessor discipline that the Fortran codes express differently or not at all. The
+threshold default of `0.1` is stricter than MA57's `0.01` (7.7), which is a deliberate inheritance
+from the reference implementation rather than a match to the HSL default. The forest-parallelism
+work noted elsewhere is the first step in the direction MA57's shared-memory successors (HSL_MA77
+out-of-core, HSL_MA97 shared-memory and bit-compatible) and MUMPS took, but it is a step not yet
+taken. So Oblio is a modern-C++ serial member of the MA27/MA57 branch of the family, with the
+parallel and distributed branches as future territory rather than current ground.
+
 ## References
 
 The material above is standard sparse-matrix theory; the grouping below points to the
@@ -6010,8 +7009,7 @@ knowledge and are worth a spot-check against the originals.
 - J. R. Gilbert, E. G. Ng and B. W. Peyton, "An efficient algorithm to compute row and
   column counts for sparse Cholesky factorization", *SIAM J. Matrix Anal. Appl.*
   15(4):1075-1091, 1994. Column counts in nearly linear time in `nnz(A)`, using the skeleton
-  matrix and least common ancestors, rather than the `O(nnz(L))` pruned-row-subtree walk of
-  2.5.
+  matrix and least common ancestors, rather than the `O(nnz(L))` pruned-row-subtree walk of 2.5.
 
 **Symbolic factorization, ordering, sparse direct methods (Section 3; general).**
 
@@ -6023,8 +7021,7 @@ knowledge and are worth a spot-check against the originals.
 - T. A. Davis, *Direct Methods for Sparse Linear Systems*, SIAM, 2006. A modern,
   code-level reference for the entire order / symbolic / numeric pipeline. Its CSparse
   `cs_etree` computes the tree from the upper triangle of each column, the standard route
-  used by Oblio (2.4); single-triangle storage in the other orientation is transposed
-  first.
+  used by Oblio (2.4); single-triangle storage in the other orientation is transposed first.
 
 **Ordering (Section 5).** The two orderings we vendor, MMD and AMD, come from this lineage; the
 primary sources for each, in the order Section 5 builds them.
@@ -6070,17 +7067,6 @@ primary sources for each, in the order Section 5 builds them.
 - I. S. Duff and J. K. Reid, "The multifrontal solution of indefinite sparse symmetric linear
   systems", *ACM Trans. Math. Software* 9(3):302-325, 1983. The method, and its update stack.
 
-**Indefinite factorization and pivoting (what dynamic LDL needs).**
-
-- J. R. Bunch and L. Kaufman, "Some stable methods for calculating inertia and solving symmetric
-  linear systems", *Math. Comp.* 31(137):163-179, 1977. The 1x1/2x2 pivot selection strategy.
-- C. Ashcraft, R. G. Grimes, and J. G. Lewis, "Accurate symmetric indefinite linear equation
-  solvers", *SIAM J. Matrix Anal. Appl.* 20(2):513-561, 1998. Delayed pivoting in a sparse
-  factorization, which is why dynamic LDL grows a front at runtime.
-- N. J. Higham, *Accuracy and Stability of Numerical Algorithms*, 2nd ed., SIAM, 2002. For the
-  perturbation of a small pivot in a *static* factorization, which cannot pivot and so has no
-  other recourse.
-
 **Dense kernels.**
 
 - J. J. Dongarra, J. Du Croz, S. Hammarling, and I. Duff, "A set of level 3 basic linear algebra
@@ -6110,6 +7096,42 @@ primary sources for each, in the order Section 5 builds them.
 - J.-Y. L'Excellent and W. M. Sid-Lakhdar, "A study of shared-memory parallelism in a multifrontal
   solver", *Parallel Computing* 40(3-4):34-46, 2014. The tree-against-node parallelism tradeoff
   of 6.4, and where the boundary between them is placed.
+
+**Pivoting (Section 7).**
+
+- J. R. Bunch and B. N. Parlett, "Direct methods for solving symmetric indefinite systems of
+  linear equations", *SIAM J. Numer. Anal.* 8(4):639-655, 1971. Complete pivoting for the
+  symmetric indefinite case: the strong bound, and the `O(n^3)` search that made a cheaper
+  strategy necessary.
+- J. R. Bunch and L. Kaufman, "Some stable methods for calculating inertia and solving symmetric
+  linear systems", *Math. Comp.* 31(137):163-179, 1977. The `1 x 1` / `2 x 2` selection of 7.2,
+  its four cases, and the constant `(1 + sqrt(17)) / 8`.
+- I. S. Duff and J. K. Reid, "The multifrontal solution of indefinite sparse symmetric linear
+  equations", *ACM Trans. Math. Software* 9(3):302-325, 1983. Listed above for the multifrontal
+  method; it is also where the threshold conditions of 7.5 and the delayed columns of 7.6 come
+  from, the two arriving together and for the same reason.
+- I. S. Duff, "MA57: a code for the solution of sparse symmetric definite and indefinite systems",
+  *ACM Trans. Math. Software* 30(2):118-144, 2004. The successor to MA27, and where the threshold
+  conditions are stated in the form 7.5 uses, with the default `u = 0.01`.
+- C. Ashcraft, R. G. Grimes, and J. G. Lewis, "Accurate symmetric indefinite linear equation
+  solvers", *SIAM J. Matrix Anal. Appl.* 20(2):513-561, 1998. Why Bunch-Kaufman's unbounded `L`
+  matters (7.3), bounded Bunch-Kaufman (rook pivoting), and delayed pivoting in a sparse
+  factorization, which is why dynamic LDL grows a front at runtime.
+- I. S. Duff and S. Pralet, "Strategies for scaling and pivoting for sparse symmetric indefinite
+  problems", *SIAM J. Matrix Anal. Appl.* 27(2):313-340, 2005. The pivoting strategies MUMPS
+  uses, and the scaling that precedes them.
+- I. S. Duff and S. Pralet, "Towards stable mixed pivoting strategies for the sequential and
+  parallel solution of sparse symmetric indefinite systems", *SIAM J. Matrix Anal. Appl.*
+  29(3):1007-1024, 2007. What changes when the candidate set is restricted further still by
+  distribution across processes, which is 7.4's restriction taken a step past ours.
+- I. S. Duff, J. Hogg, and F. Lopez, "A new sparse LDL^T solver using a posteriori threshold
+  pivoting", *SIAM J. Sci. Comput.* 42(2):C23-C42, 2020. A modern alternative to all of the
+  above: factor optimistically and check afterwards, rather than testing each candidate before
+  accepting it.
+- N. J. Higham, *Accuracy and Stability of Numerical Algorithms*, 2nd ed., SIAM, 2002, chapter 11.
+  The growth bounds quoted in 7.2 and the error analysis behind 7.3. Also, for the *static* path,
+  the perturbation of a small pivot in a factorization that cannot pivot and so has no other
+  recourse.
 
 **On the framing.** Two presentational choices here are expository, not lifted from a
 single source: casting the forest as the *transitive reduction of the update DAG* (2.6)

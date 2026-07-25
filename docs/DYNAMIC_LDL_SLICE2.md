@@ -167,7 +167,7 @@ owed.
 Two of its predictions were wrong and are worth keeping visible, since the same guesses are
 available to make again. Pass 2 is **not** pass 1 with different loop bounds: the arithmetic bodies
 are character-identical and the whole difference is in the selection (no forced 1x1, a 2x2 partner
-restricted to front columns, and a Bunch-Kaufman determinant test in place of `max1 == max2`). And
+restricted to front columns, and a threshold determinant test in place of `max1 == max2`). And
 the solve needed all three passes rewritten, not just the diagonal, because the leading dimension
 changes as well as the pivot handling.
 

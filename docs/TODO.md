@@ -100,6 +100,114 @@ already instantiate for dynamic storage, so wiring this is likely a one-line dis
 test; the reason to leave it for now is that nothing needs a statically pivoted factor in
 delayed-column storage. Trigger: if a caller ever wants one factor object that can hold either.
 
+### Fixed-alpha Bunch-Kaufman at the roots (pass 1), replacing forced acceptance
+
+A design change, not a port: neither 0.9 nor 10.12 does this, so it is a deliberate divergence to
+be built, not behavior to recover. This is the cheap, near-certain half of the root story; the
+richer-search half is the separate entry that follows, and the two must not be conflated.
+
+**This is a change on the acceptance axis, not the search axis** (7.9, 7.10 of
+`sparse_factorization.md`). The search stays partial: BK examines at most two columns per step, the
+same `O(k)`-per-step bound the root already pays. What changes is the *test* a candidate must pass,
+from the forced-accept / `max1 == max2` of today to BK's fixed constant `alpha`. Widening the search
+(rook, Bunch-Parlett) is a different proposal with a different cost, split out below. Keeping the
+two apart matters because the licensing argument here, delay is impossible so gentleness protects
+nothing, tightens the acceptance test and says nothing about widening the search.
+
+The setup. `factorDynamicSupernode` splits on `updateSize == 0` (pass 1) versus `> 0` (pass 2);
+see the head comment there and 7.7 of `sparse_factorization.md`. **`updateSize == 0` is exactly
+"this supernode is a root."** The update rows are the parent edges: `ElmForestEngine` accumulates
+`updateSize[r]` by walking the parent chain over the same nonzeros that set `parent[r]`, so a later
+column reaches into `r` if and only if `r` has update rows if and only if `r` has a parent. No
+update rows means no later column connects upward, which is what "root" means. (A forest has several
+roots; each is a pass-1 supernode. There is no interior supernode with an empty update set, since
+that would be a node with a parent but no edge to it.) So pass 1 is the roots, and a root is
+precisely the place where a rejected column has nowhere to be delayed to, because there is no
+ancestor above it. The two descriptions, "root" and "no delay possible", are the same condition.
+
+Why threshold pivoting is deliberately gentler than Bunch-Kaufman in the first place: delays are a
+fill-control compromise, not a stability gain. Each delayed column widens a parent front (7.6), so
+a sparse solver keeps the threshold modest to keep delays rare, trading some of BK's pivoting
+freedom for structural predictability. BK, being dense, has no fill to protect and pivots as
+aggressively as it likes. That trade is correct at an interior supernode, where a delay has
+somewhere to go and a cost to pay.
+
+At a root the trade has nothing to buy. There is no parent to widen, so the reason for restraint is
+void, yet pass 1 today is *weaker* than BK rather than as strong: it forces acceptance of the last
+candidate whatever it is, and accepts a 2x2 on `max1 == max2` without a determinant test. That is
+the source of both pass-1 hazards documented in 7.8 (the possibly-singular forced 1x1, the
+zero-determinant 2x2 that divides by zero). The proposal is to run **fixed-alpha Bunch-Kaufman** at
+the roots instead: search diagonals against off-diagonals with `alpha`, form the
+provably-nonsingular 2x2 (case 4 forces `det < 0`) when the diagonals are weak, and accept a zero
+1x1 only on a genuinely
+empty column. It is precisely the roots that want this, because a root is where delay is impossible
+and so where the reason for staying gentle does not apply.
+
+What it buys, both closing an open item in 7.8:
+
+- The pass-1 2x2 zero-determinant divide cannot occur, because BK case 4 never forms a singular
+  block.
+- The pass-1 zero-1x1 conjecture becomes a theorem, because BK's clean result (a zero 1x1 iff the
+  matrix is singular) holds on a front that pivots by full BK. The roots turn from the weak spot
+  into the one place carrying a hard singularity certificate.
+
+The test is two-sided, and the second half is the "make sure it fails" point:
+
+- **Completeness.** A nonsingular indefinite matrix, including ones constructed to drive heavy
+  delay and a dense root front, factors with no zero pivot and no zero-determinant 2x2. Under
+  full BK this is a theorem; the test confirms the implementation matches it.
+- **Detection.** A genuinely singular matrix must *fail at the root, detectably*: a
+  reported zero pivot, not a silent wrong answer, a NaN, or a merely poor residual. This is the
+  honest place to raise "singular" once, at the pivot, which is what LAPACK's `sytrf` does through
+  `INFO` and what 0.9's commented-out `InconsistentSystem` gestured at. It connects to the
+  input-validation item and supersedes the residual-only diagnostic for the singular case.
+
+Sequencing. The existing verification item under Testing is the measurement precursor: it
+establishes whether the pass-1 hazards are reachable at all, which decides whether this change is
+merely a tidiness or actually necessary. Prototype first in `experiments/pivoting` (the same study
+that keeps being proposed), then port the kernel change into pass 1. Not urgent while we build our
+own inputs; it becomes real when an outside caller can hand the solver a singular or
+ill-conditioned matrix.
+
+### Richer search at the roots (rook, or Bunch-Parlett), only if the root front proves hard
+
+Separate from the fixed-alpha entry above, gated on evidence, and probably not worth it. The
+previous entry tightens the *acceptance* test at the roots and costs essentially nothing, because BK
+keeps the partial `O(k)`-per-step search. This entry is about *widening the search* at the roots,
+and it is a different trade with a different cost, recorded so the two are never merged into a vague
+"do better pivoting at roots".
+
+The tempting intuition, "roots are few, so a richer search is affordable there", is false on the
+axis that matters. Roots are few in *count* but largest in *size*: under a fill-reducing ordering
+the root is the top separator, the biggest dense front in the whole factorization, `O(n^{1/2})`
+wide in 2D and `O(n^{2/3})` in 3D. A search that is superlinear in the front width `k` is
+therefore *most* expensive at the roots, not least. Bunch-Parlett's complete `O(k^3)` search lands
+as `O(n^{3/2})` in 2D or `O(n^2)` in 3D, on the one front that cannot be skipped. So "even BP at the
+roots" is not a free splurge; it is potentially the single most expensive pivoting decision in the
+solve.
+
+What could justify paying it: the root front is a dense symmetric indefinite block, and it is
+exactly the kind of small-but-nasty block where BK's unbounded-`L` weakness (7.3) is most likely
+to bite, with no delay left to rescue it. Unlike the general dense case (7.10), where partial
+beats complete nearly unconditionally, the root front is where the complete-pivoting growth bound
+could plausibly earn its cost. But even then the ladder is plain BK -> rook (bounded BK) -> BP,
+climbed only as far as the evidence forces:
+
+- **Rook (bounded BK)** fixes the unbounded-`L` weakness at typically `O(k^2)`-ish cost, stays a
+  partial method, and respects symmetry. This is the first step up if plain fixed-alpha BK proves
+  insufficient at a root, and almost certainly the last one needed.
+- **Bunch-Parlett** is the complete-search last resort, `O(k^3)` on the largest front, justified
+  only if rook is somehow not enough, which would be surprising. It is the symmetric analogue of
+  complete pivoting and carries all of 7.10's cost objections, concentrated on the worst-case
+  front.
+
+So this is not a default and not a near-certain win like the fixed-alpha entry. It is conditional:
+measure whether real root fronts actually exhibit BK's weakness (the `experiments/pivoting` study is
+the place, with deliberately hard indefinite root blocks), and climb the ladder only if they do,
+stopping at rook unless forced higher. Recorded now so that when someone reads "BK or even BP at the
+roots" they see it is two proposals, one cheap and near-certain (acceptance), one expensive and
+conditional (search), and does not treat the second as licensed by the first's argument.
+
 ### Multiple right-hand sides### Multiple right-hand sides
 
 `Vector<Val>` carries one right-hand side and the solve is scalar, which is the right call for one
@@ -112,12 +220,14 @@ needed yet.
 ### The update stack is not a true LIFO, and may never need to be
 
 Our multifrontal update stack is a `std::vector<UpdateMatrix>` indexed by supernode, with
-arbitrary-slot allocate and discard, not the classical push/pop arena moved by a single stack pointer.
+arbitrary-slot allocate and discard, not the classical push/pop arena moved by a single stack
+pointer.
 DESIGN_DECISIONS (2026-07-22) records the full reasoning. This entry began as a note tracking that
 departure as a debt to be repaid; the posture below is weaker than that, and deliberately so.
 
 **The arrangement we have is already the pure-parallelism design.** One slot per supernode, filled
-when the supernode is reached and freed when its parent assembles it, is disjoint by construction: no
+when the supernode is reached and freed when its parent assembles it, is disjoint by construction:
+no
 shared stack pointer, no arena to size, no per-thread bookkeeping, and concurrent branches touching
 memory that cannot overlap. Nothing about it needs changing to run branches in parallel. So if the
 storage the update matrices occupy is not a binding constraint, this item is closed rather than
@@ -776,7 +886,7 @@ under 147 passing assertions throughout.
 
 The non-goal held: **the selection loops stayed separate.** They are two algorithms rather than one
 with flags, differing in three ways, no forced 1x1 in pass 2, a partner scan bounded by the front,
-and a Bunch-Kaufman determinant test in place of `max1 == max2`. Merging those behind parameters
+and a threshold determinant test in place of `max1 == max2`. Merging those behind parameters
 would save lines and cost the reader the ability to see what each pass does. That remains the
 recommendation if anyone revisits it.
 
@@ -1003,6 +1113,86 @@ right thing was done.
 Worth pairing with a note in the specification that a poor residual from a static factorization on
 an indefinite matrix is expected behavior rather than a defect. That confusion has now cost time
 twice in one session.
+
+### Verify or disprove: a forced pass-1 pivot divides by zero only for singular A
+
+Section 7.8 of `sparse_factorization.md` proves one part of a claim and leaves two open, one per
+pivot size. Proved: pass 2 cannot accept a zero pivot of either size, because its acceptance tests
+compare a magnitude against a strictly positive threshold, the same argument that closes dense
+Bunch-Kaufman's four cases. The two open parts are both about pass 1, the dense-front case with no
+update rows, which runs exactly where singularity concentrates, at a root.
+
+**The 1x1.** A forced pass-1 acceptance (the rotation exhausts the front, nothing clears `u`, the
+last candidate is taken whatever its diagonal) is conjectured to land an exactly zero diagonal only
+when the fully summed root block is singular, hence only when `A` is singular. The gap is real:
+Bunch-Kaufman's singularity result rests on an empty-column forcing path (empty column plus zero
+diagonal is a zero row of `A`), while pass 1 forces on threshold exhaustion, a different predicate.
+`diagonalDynamic` guards this divide (`if (val != 0)`), so a zero here is skipped, not a crash; the
+open question is only whether a zero here truly certifies singularity.
+
+**The 2x2, which is the sharper one because its divide is unguarded.** Pass 1 accepts a 2x2 on
+`max1 == max2`, the off-diagonal magnitudes alone, without reading the determinant. A zero column
+cannot reach a 2x2 (the `max1 == 0` guard routes it to a 1x1 first), so `a11 != 0` always holds. But
+`max1 == max2` does not bound the determinant, so a singular block with equal off-diagonals,
+`[[d, d], [d, d]]` with `d` nonzero, is accepted, formed, and reaches the solve where
+`u22 = det / a11 = 0` and the block solve divides by zero, unguarded. This is a divergence from
+Bunch-Kaufman rather than an inheritance of it: BK's case-4 `2 x 2` forces `det < 0` via its `alpha`
+constant and so is structurally nonsingular, meaning BK never forms this block and singularity there
+surfaces only as a zero 1x1. Pass 1's `max1 == max2` has no such guarantee, so it can construct what
+BK cannot. Whether any real matrix can drive the accept path there is unverified: `d == d` exactly
+is measure-zero in floating point, so a random matrix will not, but a structured one (a repeated KKT
+block, an assembled duplicate) might. If it is reachable, the fix is a determinant test on pass 1's
+2x2 in the factor kernel, matching pass 2's, not a guard in the solve.
+
+Two ways to settle both, cheapest first, and the measurement is the house style. Measure: build
+singular indefinite matrices with a known null vector, factor them dynamically, and check whether a
+forced pass-1 1x1 with a zero or near-zero diagonal occurs and occurs only there; separately,
+engineer a matrix that presents pass 1 with a `max1 == max2`, zero-determinant 2x2 to find whether
+the accept path can be driven there at all; then, the half that matters for the nonsingular
+guarantee, factor a batch of nonsingular indefinite matrices constructed to delay heavily and
+confirm no zero pivot of either size ever appears. That batch is the empirical stand-in for the
+theorem.
+A natural `experiments/pivoting` study, or targeted cases in the numeric-factorization suite with
+matrices built to force delay to a root. Or prove it: show that at a root with no update rows, every
+candidate failing the threshold implies the fully summed block is singular, and that a forced
+acceptance produces a zero pivot (1x1 diagonal, or 2x2 determinant) exactly when the root block is
+rank deficient. A small theorem about pass 1, not a transcription of Bunch-Kaufman.
+
+Not urgent: nothing today feeds the solver a singular matrix, since we build our own inputs. It
+becomes worth doing alongside input validation, since the same "someone else calls the solver" event
+that motivates that item is when a singular `A` first arrives. Same time the residual-based
+inconsistency question in the `diagonalDynamic` comment wants revisiting; all of these are the
+caller-side face of the same boundary.
+
+### Understand 0.9's per-engine root-pivoting variations before trusting the unified kernel
+
+Background, not a defect. Pivoting is a property of the fully summed block, so it must be
+identical across left-looking, right-looking and multifrontal; a traversal is only a schedule for
+carrying updates, not a different factorization. The port enforces this by construction: all three
+dynamic drivers call the one `factorDynamicSupernode`, so they cannot pivot differently. That is
+the intended end state and it is correct.
+
+But 0.9's three engines do *not* agree at the root, and the difference should be understood rather
+than assumed harmless before the pass-1 verification above is trusted. In 0.9's left- and
+right-looking `factorDynamicLDL_`, the forced 1x1 at a root (`pivotList` down to one, `updateSize
+== 0`) is accepted unconditionally, zero diagonal and all, with `rank_--` on the zero. In 0.9's
+*multifrontal* engine the same point is guarded `(pivotList.getSize() == 0) && (jjUpdateSize ==
+0)` and does **not** force: a zero diagonal there is re-queued (`addLast`), the pass exits with
+the column unaccepted, and it falls through to the delay tail, so the column is left as a delayed
+column at a root with no parent to take it. That is a genuinely different treatment of a singular
+column, refuse and leave it undelayable, versus accept and count the rank drop.
+
+The port unified onto the left/right-looking behavior (forced accept, `rank_--`), which is a
+defensible reading of "all traversals pivot alike" and is almost certainly right. What is not
+known is *why* 0.9 diverged: whether the multifrontal refuse-and-delay was a deliberate
+improvement that we should adopt everywhere instead, or an abandoned experiment that the
+left/right path superseded. The author's recollection is that the variations were experimental.
+This task is to confirm that, recover the intent if any survives, and decide which behavior is the
+right one for all three, rather than defaulting to the one the port happened to pick. It bears
+directly on the pass-1 zero-pivot question: the multifrontal variant is closer to *refusing* a
+singular pivot than accepting it, which is the direction the full-BK-at-the-roots item (under
+Capability) also points. Read-only until then; no engine should be changed to reintroduce a
+per-traversal difference.
 
 ### A specification the suite can be regenerated from
 

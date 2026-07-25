@@ -60,6 +60,13 @@ public:
     // when it lands, delays an unstable pivot instead of replacing it, and leaves this zero.
     std::size_t numPerturbations() const { return mNumPerturbations; }
 
+    // Numerical rank, tracked as 0.9's rank_ is: it starts at the factor's size and each 1x1 pivot
+    // accepted with an exactly zero diagonal drops it by one, so after factorization it is the
+    // matrix dimension minus the count of zero pivots. Only dynamic LDL touches it (only dynamic
+    // pivoting can accept a zero 1x1); the value is meaningful there and stays at full size on a
+    // factorization that never hits one.
+    std::size_t rank() const { return mRank; }
+
     // Node to supernode: the whole map, and the supernode a single node belongs to. Indexed by a
     // *node*, unlike frontSize and its kin, which are indexed by a supernode.
     const std::vector<std::int32_t>& nodeToSnode()                  const { return mNodeToSnode; }
@@ -121,6 +128,10 @@ private:
     // Also the write path: the engine accumulates the perturbation count through this reference
     // (factorStaticSupernode increments it). The const read overload above is public.
     std::size_t& numPerturbations() { return mNumPerturbations; }
+
+    // The write path for rank, mirroring numPerturbations: the engine decrements this reference at a
+    // zero-diagonal 1x1. The const read overload above is public.
+    std::size_t& rank() { return mRank; }
 
     // The expansion and contraction verbs, the engine's alone, exercised as dynamic LDL delays
     // and pivots. Like the other engine-internal steps (factorStaticSupernode, assembleFromA)
@@ -279,6 +290,7 @@ private:
     std::vector<std::vector<Val>>          mVal;
 
     std::size_t mNumPerturbations = 0;
+    std::size_t mRank             = 0;   // set to size at setup, decremented per zero 1x1 pivot
 
     friend class NumFactorEngine;
 };

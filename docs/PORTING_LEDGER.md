@@ -97,6 +97,23 @@ obviated by lambdas).
 
 ### Numeric factorization
 
+- **0.9's `rank_` was dropped in the port, and is now restored (2026-07-24).** 0.9's
+  `factorDynamicLDL_` keeps a rank counter: `rank_ = a.getSize()` at the start, then `rank_--` at
+  each `1 x 1` pivot accepted with an exactly zero diagonal, at three sites (the forced `1 x 1`
+  when the candidate list empties, and the isolated-column accept `max1 == 0` in each of the two
+  passes). The end value is the numerical rank, `n` minus the count of zero pivots. Real and
+  complex 0.9 are identical here, three drops each. The port had transcribed the pass split but
+  not the counter, so a singular matrix factored without any record that a rank was lost. Restored
+  faithfully: `NumFactorDynamic::rank()` (read and write overloads, mirroring `numPerturbations`),
+  initialized to the factor size in `initNumFactor`, decremented at the same three zero-guarded
+  sites; the templated kernel covers both scalar types from one set of edits. This was found while
+  checking whether the pass-1 zero-pivot comment matched 0.9, and it matters beyond bookkeeping:
+  0.9 counting rank at exactly the forced-`1 x 1`-with-zero-diagonal site is the original author
+  already treating that event as a rank loss, which is direct evidence for the pass-1 singularity
+  conjecture in Section 7.8 of `sparse_factorization.md` and connects to the detection half of the
+  full-BK-at-the-roots item in TODO. Not yet asserted in a test; that belongs with the pass-1
+  verification work.
+
 - **The input is not checked for Hermitian symmetry, and this is a correctness hole.** Moved to
   docs/TODO.md, under "Validate the input matrix", where it joins the two other unchecked
   preconditions found since (a structurally present diagonal, and the absence of duplicate

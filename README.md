@@ -7,7 +7,7 @@ traversal strategies.
 ## Features
 
 - **Three factorization types**: Cholesky, Static LDL^T (with diagonal perturbation),
-  Dynamic LDL^T (Bunch-Kaufman pivoting with 1×1 and 2×2 pivots)
+  Dynamic LDL^T (threshold pivoting with 1×1 and 2×2 pivots)
 - **Three traversal algorithms**: Left-looking, Right-looking, Multifrontal
 - **Ordering**: Natural (identity), MMD (Multiple Minimum Degree), AMD (Approximate Minimum Degree, Davis/Amestoy/Duff)
 - **Single and multiple RHS**: `Vector<Val>` for one RHS, `DenseMatrix<Val>` for
@@ -163,7 +163,7 @@ Done:
 
 Not yet:
 
-- [x] Dynamic LDL, Bunch-Kaufman 1x1 / 2x2 pivots: both traversals, delayed columns and all, at
+- [x] Dynamic LDL, threshold 1x1 / 2x2 pivots: both traversals, delayed columns and all, at
       machine precision
 - [x] **All five factorizations, real and complex, in both implemented traversals.** Complex
       LDL^H with dynamic pivoting is an extension rather than a port: 0.9's complex LDL is

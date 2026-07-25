@@ -67,6 +67,51 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-07-24, The 2x2 pivot is trivial in the triangular sweeps and the whole cost of the diagonal pass
+
+**Splitting `D` into its own solve pass looked like a small tidiness and turned out to be what keeps
+the sweeps simple.** A dynamic LDL factor has 1x1 and 2x2 pivots, and the solve applies three
+operators to the right-hand side in turn: `L`, then `D^-1`, then `L^H`. The question is where the
+2x2 block makes trouble, and the answer is not where the block is, it is where the block is a
+*coupled* object.
+
+**In the forward and backward sweeps it is not coupled, because `L` is unit.** A 2x2 pivot does not
+change that `L` is unit triangular; it only parks one number, `D`'s off-diagonal, in the storage
+slot below the first column's diagonal, the slot that would otherwise hold an `L` entry. So the only
+thing the sweep must know is that a column opening a 2x2 has its true `L` entries start one row
+lower, because the row between holds a piece of `D`. That is one ternary, `pivotType[lj] != 2 ?
+j + 1 : j + 2`, and nothing else. The second column of the block is an ordinary unit-`L` column and
+needs no special case at all: a column of `L` is a column of `L` whether or not it sits inside a
+block. `forwardDynamic` and `backwardDynamic` differ from their static twins by exactly that
+ternary.
+
+**In the diagonal pass the block is genuinely a block.** `D^-1` against a 1x1 is a scalar divide;
+against a 2x2 it is a coupled 2x2 solve, and it has to be stable, so `diagonalDynamic` carries a
+full 2x2 with *its own* partial pivoting, the `abs(a11) >= abs(a21)` row swap and the small LU
+beneath it. Every consequence of the block structure is quarantined here, which is why the
+conceptually trivial pass, a diagonal scaling, is the one with the real pivot logic in it, and the
+substantial passes, the triangular sweeps, are the ones a 2x2 barely perturbs. The irony is worth
+stating plainly: the *shorter* operator carries the *harder* code.
+
+**Two independent layers of pivoting meet in the same 2x2, at different phases and for different
+reasons.** The factorization pivoted once, at the threshold test (Section 7 of
+`sparse_factorization.md`), to *decide* the block should be 2x2 at all, because the diagonal was too
+weak to eliminate on: that is about growth and fill during elimination. The solve pivots again,
+inside `diagonalDynamic`, to *invert* that now-frozen block against the right-hand side without
+dividing by its smaller entry: that is just stable inversion of a fixed 2x2. Neither layer knows
+about the other, and they must not be conflated, since they are answering different questions about
+the same four numbers.
+
+**So the decision is: keep `D` as a separate pass, do not fold it into the sweeps.** Cholesky folds
+its scalar divide into the sweep and loses nothing, which is the tempting precedent. A 2x2 `D`
+cannot be folded the same way without the coupling leaking into the sweep loop and turning that one
+ternary into a block solve inside the hot triangular path. Pulling `D` out is what lets `L` and
+`L^H` stay unit-triangular sweeps that treat a 2x2 as a one-row offset. The pass split pays for
+itself not in the diagonal pass, which it complicates, but in the two sweeps, which it keeps
+trivial.
+
+---
+
 ## 2026-07-22, Forest parallelism, when we build it: portable threading first, architecture-targeted second
 
 ARCHITECTURE records that Oblio gets node parallelism for free through Accelerate but that tree

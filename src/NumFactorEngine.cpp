@@ -48,7 +48,7 @@ PivotBlock2x2<Val> readPivotBlock2x2(const Val* val, std::ptrdiff_t ld,
     }
 
     // Hermitian: d11 * d22 is real and d12 * d21 is |d21|^2, so the determinant is real, as the
-    // Bunch-Kaufman test downstream assumes when it compares magnitudes against it.
+    // threshold test downstream assumes when it compares magnitudes against it.
     d.det = d.d11 * d.d22 - d.d12 * d.d21;
     return d;
 }
@@ -146,6 +146,9 @@ void NumFactorEngine::initNumFactor(const SymFactor& sf, NumFactorDynamic<Val>& 
     // static factorization run into this storage does, and a reused factor must not carry a previous
     // run's count.
     nf.mNumPerturbations = 0;
+
+    // Rank starts at full and drops per zero pivot, as 0.9's rank_ = a.getSize() then rank_--.
+    nf.mRank = nf.mSize;
 
     // The structure, copied, exactly as for the static factor.
     nf.mNodeToSnode = sf.nodeToSnode();
@@ -840,6 +843,21 @@ void NumFactorEngine::applyPivot2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, 
 }
 
 
+// **The strategy here is threshold pivoting, not Bunch-Kaufman, and the two are easy to confuse.**
+// Both select between 1x1 and 2x2 pivots by comparing a diagonal against off-diagonal maxima, and
+// both descend from Bunch and Parlett (1971) and Bunch and Kaufman (1977), but the tests differ and
+// so do their guarantees. Bunch-Kaufman turns on a fixed constant, `(1 + sqrt(17)) / 8`, chosen so
+// that its 2x2 case needs no test at all, and it bounds element growth while leaving the entries of
+// `L` free. What runs below is Duff and Reid's (1983), used by MA27, MA57 and MUMPS: a tunable
+// `threshold`, a 2x2 determinant condition that is allowed to *refuse*, and a bound on `L` rather
+// than on growth. The refusal is the part a sparse solver cannot do without, because the partner
+// scan is confined to fully summed columns and so can come up empty, where Bunch-Kaufman's
+// unconditional fallback assumes the whole trailing submatrix is available. A refused column is
+// delayed to an ancestor instead.
+//
+// The confusion is worth guarding against because the Duff literature writes its threshold as
+// `alpha` too, in the same position of the same inequality, where it means roughly 0.01 and not
+// 0.64. See Section 7 of archive/sparse_factorization.md for both algorithms side by side.
 template<class Val>
 bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int32_t jj,
                                        std::vector<std::int32_t>& gblToLcl) const {
@@ -863,9 +881,15 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
 
     std::int32_t j_ = 0;
 
-    // Two passes, and 0.9 splits them on whether the supernode has update rows. Pass 1 is the
-    // dense-front case, where a column that cannot pivot has nowhere to go; pass 2 is the general
-    // one, where an ancestor is waiting. The bodies below say how they differ.
+    // Two passes, and 0.9 splits them on whether the supernode has update rows. **The names are
+    // labels, not an order: a supernode runs pass 1 XOR pass 2, never both and never in sequence.**
+    // The selector is updateSize alone (the `if` below). updateSize == 0 means the supernode is a
+    // root: the update rows are the parent edges (ElmForestEngine builds updateSize and parent from
+    // the same nonzeros), so no update rows means no later column reaches it, hence no parent. A
+    // root has no ancestor waiting, so a column it cannot pivot has nowhere to be delayed to; that
+    // is pass 1. updateSize > 0 means a parent exists to take a delayed column; that is pass 2. So
+    // "which pass" is exactly "is this a root", equivalently "is there anywhere to delay to", and
+    // every difference below follows from that one fact.
     //
     // **What remains below is selection only.** The eliminations themselves are applyPivot1x1 and
     // applyPivot2x2, shared by both passes, because once a pivot is accepted the arithmetic is
@@ -873,13 +897,13 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
     // The three real differences are the ones this loop and the next make visible:
     //
     //   No forced 1x1.  Pass 1 accepts the last remaining candidate whatever it looks like, since
-    //                   a dense front has nowhere to delay it to. Pass 2 never does.
+    //                   a dense front has nowhere to delay it to. Pass 2 never does: it delays.
     //   Front partners. Pass 2's 2x2 partner scan stops at jjFrontSize, so a partner is always a
     //                   front column and never an update row.
     //   A real test.    Pass 1 accepts a 2x2 on max1 == max2, on the magnitudes alone, without ever
-    //                   reading the 2x2 val. Pass 2 applies the Bunch-Kaufman test to its
+    //                   reading the 2x2 val. Pass 2 applies the threshold test to its
     //                   determinant against the growth bound.
-    if (nf.mUpdateSize[jj] == 0) {
+    if (nf.mUpdateSize[jj] == 0) {              // pass 1: a root, no parent, nowhere to delay
         while (!pivotList.empty()) {
             bool         pivotFound = false;
             std::int32_t trials     = static_cast<std::int32_t>(pivotList.size());
@@ -890,6 +914,7 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
 
                 if (pivotList.empty()) {                    // only candidate left: a forced 1x1
                     pivotFound = true;
+                    if (std::abs(val[at(k1_, k1_)]) == 0) --nf.rank();   // 0.9: zero pivot, rank--
                     nf.mPivotType[k1] = 1;
                     ++j_;
                     break;
@@ -910,6 +935,7 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
                 if (max1 == 0) {                            // isolated column: 1x1, nothing to eliminate
                     pivotFound = true;
                     if (j_ != k1_) nf.swap(jj, j_, k1_, gblToLcl);
+                    if (std::abs(diagonal1) == 0) --nf.rank();   // 0.9: zero pivot drops rank
                     nf.mPivotType[k1] = 1;
                     ++j_;
                     break;
@@ -953,7 +979,7 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
             if (!pivotFound)
                 break;
         }
-    } else {
+    } else {   // pass 2: a non-root, a parent exists, so a rejected column can be delayed to it
         // Pass 2: the supernode has update rows, so an ancestor exists to take a column this front
         // cannot pivot. Ported from 0.9 factorDynamicLDL_, the jjUpdateSize != 0 branch.
         //
@@ -969,9 +995,9 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
         //                   jjFrontSize, so a 2x2 partner is always a front column and never an
         //                   update row. Hence max <= max1, and max == max1 says the largest entry
         //                   in k1's line is a front column after all.
-        //   A real test.    Pass 1 accepts a 2x2 on max1 == max2. Here the test is the
-        //                   Bunch-Kaufman one on the 2x2 determinant against the growth bound
-        //                   maxmax, with the symmetric-maximum case kept as a separate disjunct.
+        //   A real test.    Pass 1 accepts a 2x2 on max1 == max2. Here the test is the threshold
+        //                   one on the 2x2 determinant against the growth bound maxmax, with the
+        //                   symmetric-maximum case kept as a separate disjunct.
         while (!pivotList.empty()) {
             bool         pivotFound = false;
             std::int32_t trials     = static_cast<std::int32_t>(pivotList.size());
@@ -994,6 +1020,7 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
                 if (max1 == 0) {                            // isolated column: 1x1, nothing to eliminate
                     pivotFound = true;
                     if (j_ != k1_) nf.swap(jj, j_, k1_, gblToLcl);
+                    if (std::abs(diagonal1) == 0) --nf.rank();   // 0.9: zero pivot drops rank
                     nf.mPivotType[k1] = 1;
                     ++j_;
                     break;
@@ -1760,7 +1787,7 @@ bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, 
     // **Complex `LDL^H` is the one cell still missing, and it is an extension, not a port.** 0.9's
     // complex LDL is symmetric only, so there is nothing to transcribe. `factorDynamicSupernode`
     // writes `diagonal12 = diagonal21`, which is exactly the complex-symmetric assumption; the
-    // Hermitian form needs the conjugate there and a Bunch-Kaufman test that knows the 2x2's
+    // Hermitian form needs the conjugate there and a threshold test that knows the 2x2's
     // diagonal is real. Refused here rather than silently computing the symmetric factorization
     // under a Hermitian name. See docs/TODO.md.
     //

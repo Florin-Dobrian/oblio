@@ -34,26 +34,26 @@ void SolveEngine::forwardStatic(const Factor& nf, Vector<Val>& y) const {
     // Ascending supernode order is a topological order, so a supernode's columns are finished
     // before any supernode below it needs them.
     for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(nf.snodeSize()); ++jj) {
-        const std::size_t   frontSize  = nf.frontSize(jj);
-        const std::size_t   numNodeIdx = frontSize + nf.updateSize(jj);
-        const std::int32_t* nodeIdx    = nf.nodeIdx(jj);
-        const Val*          val        = nf.val(jj);
+        const std::size_t   jjFrontSize  = nf.frontSize(jj);
+        const std::size_t   jjNumNodeIdx = jjFrontSize + nf.updateSize(jj);
+        const std::int32_t* jjNodeIdx    = nf.nodeIdx(jj);
+        const Val*          jjVal        = nf.val(jj);
 
-        for (std::int32_t j = 0; j < static_cast<std::int32_t>(frontSize); ++j) {
-            const std::int32_t lj = nodeIdx[j];   // the global column
-            const std::size_t  cp = j * numNodeIdx;
+        for (std::int32_t j = 0; j < static_cast<std::int32_t>(jjFrontSize); ++j) {
+            const std::int32_t lj = jjNodeIdx[j];   // the global column
+            const std::size_t  cp = j * jjNumNodeIdx;
 
             // Divide by the diagonal, unless L is unit (LDL), where the diagonal holds D and is
             // dealt with in its own pass.
             if (!withSeparateDiagonal)
-                y.mVal[lj] /= val[cp + j];
+                y.mVal[lj] /= jjVal[cp + j];
 
             // Scatter the column's contribution down. Note the rows run to the *end of the index
             // set*, not the end of the front: a supernode's update rows are exactly the rows of L
             // below its own columns, and they belong to supernodes not yet reached.
             const Val yjVal = y.mVal[lj];
-            for (std::int32_t i = j + 1; i < static_cast<std::int32_t>(numNodeIdx); ++i)
-                y.mVal[nodeIdx[i]] -= val[cp + i] * yjVal;
+            for (std::int32_t i = j + 1; i < static_cast<std::int32_t>(jjNumNodeIdx); ++i)
+                y.mVal[jjNodeIdx[i]] -= jjVal[cp + i] * yjVal;
         }
     }
 }
@@ -63,13 +63,13 @@ void SolveEngine::diagonalStatic(const Factor& nf, Vector<Val>& y) const {
     // D z = y. LDL only, and every pivot here is 1x1 by construction: a static factorization does
     // not pivot, so it never forms a 2x2 block. That is diagonalDynamic's business.
     for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(nf.snodeSize()); ++jj) {
-        const std::size_t   frontSize  = nf.frontSize(jj);
-        const std::size_t   numNodeIdx = frontSize + nf.updateSize(jj);
-        const std::int32_t* nodeIdx    = nf.nodeIdx(jj);
-        const Val*          val        = nf.val(jj);
+        const std::size_t   jjFrontSize  = nf.frontSize(jj);
+        const std::size_t   jjNumNodeIdx = jjFrontSize + nf.updateSize(jj);
+        const std::int32_t* jjNodeIdx    = nf.nodeIdx(jj);
+        const Val*          jjVal        = nf.val(jj);
 
-        for (std::int32_t j = 0; j < static_cast<std::int32_t>(frontSize); ++j)
-            y.mVal[nodeIdx[j]] /= val[j * numNodeIdx + j];
+        for (std::int32_t j = 0; j < static_cast<std::int32_t>(jjFrontSize); ++j)
+            y.mVal[jjNodeIdx[j]] /= jjVal[j * jjNumNodeIdx + j];
     }
 }
 
@@ -81,27 +81,27 @@ void SolveEngine::backwardStatic(const Factor& nf, Vector<Val>& y) const {
     // Descending, the mirror of the forward pass: a supernode's columns are solved only once
     // everything below them is known.
     for (std::int32_t jj = static_cast<std::int32_t>(nf.snodeSize()) - 1; jj >= 0; --jj) {
-        const std::size_t   frontSize  = nf.frontSize(jj);
-        const std::size_t   numNodeIdx = frontSize + nf.updateSize(jj);
-        const std::int32_t* nodeIdx    = nf.nodeIdx(jj);
-        const Val*          val        = nf.val(jj);
+        const std::size_t   jjFrontSize  = nf.frontSize(jj);
+        const std::size_t   jjNumNodeIdx = jjFrontSize + nf.updateSize(jj);
+        const std::int32_t* jjNodeIdx    = nf.nodeIdx(jj);
+        const Val*          jjVal        = nf.val(jj);
 
-        for (std::int32_t j = static_cast<std::int32_t>(frontSize) - 1; j >= 0; --j) {
-            const std::int32_t lj = nodeIdx[j];
-            const std::size_t  cp = j * numNodeIdx;
+        for (std::int32_t j = static_cast<std::int32_t>(jjFrontSize) - 1; j >= 0; --j) {
+            const std::int32_t lj = jjNodeIdx[j];
+            const std::size_t  cp = j * jjNumNodeIdx;
 
             // Gather the contributions from below. **The conjugate is the point.** This pass
             // applies L^H, not L^T, whenever the factorization is Hermitian (Cholesky, LDLH), and
             // L^T when it is not (LDLT). 10.12 omits it, which is right for its complex-symmetric
             // LDL and wrong for its Cholesky, and nothing at the call site reveals that.
             Val acc = y.mVal[lj];
-            for (std::int32_t i = j + 1; i < static_cast<std::int32_t>(numNodeIdx); ++i)
-                acc -= maybeConjugate(val[cp + i], withHermitian) * y.mVal[nodeIdx[i]];
+            for (std::int32_t i = j + 1; i < static_cast<std::int32_t>(jjNumNodeIdx); ++i)
+                acc -= maybeConjugate(jjVal[cp + i], withHermitian) * y.mVal[jjNodeIdx[i]];
 
             // And divide, unless L is unit, in which case D was dealt with already. The divide
             // branch is Cholesky-only, so the diagonal is real and C^H's conjugation is the
             // identity: no maybeConjugate here, unlike the off-diagonal above.
-            y.mVal[lj] = withSeparateDiagonal ? acc : acc / val[cp + j];
+            y.mVal[lj] = withSeparateDiagonal ? acc : acc / jjVal[cp + j];
         }
     }
 }
@@ -111,19 +111,19 @@ void SolveEngine::backwardStatic(const Factor& nf, Vector<Val>& y) const {
 // The dynamic three. Same three solves, against a factor whose fronts moved while it was computed.
 //
 // A delayed column left its row behind: contractVal reclaimed its column and kept every row, so the
-// leading dimension is frontSize + delaySize + updateSize while the columns to solve
-// are only the frontSize of them. And a 2x2 pivot puts D's off-diagonal in the slot immediately
+// leading dimension is jjFrontSize + delaySize + updateSize while the columns to solve
+// are only the jjFrontSize of them. And a 2x2 pivot puts D's off-diagonal in the slot immediately
 // below a diagonal, where L's first sub-diagonal entry would otherwise be, so the triangular passes
 // step over it and the diagonal pass takes the pair together.
 //
 // Three conservation facts make these solves need no knowledge of what delayed where. The supernode
 // count is fixed: delaying moves columns between fronts, never creates or destroys a supernode, so
 // the loop runs over the same snodeSize it always would. Each front's row count is conserved
-// (frontSize + delaySize + updateSize, the height note in NumFactorEngine). And the total column
+// (jjFrontSize + delaySize + updateSize, the height note in NumFactorEngine). And the total column
 // count is conserved: every original column ends up as a surviving front column of exactly one
-// supernode, the one where it finally pivoted, so summing frontSize over all supernodes is still n.
+// supernode, the one where it finally pivoted, so summing jjFrontSize over all supernodes is still n.
 // The delay history is therefore invisible here. The solve walks every supernode's *final* front,
-// bounded by its settled frontSize, and those finals partition the same n columns the symbolic
+// bounded by its settled jjFrontSize, and those finals partition the same n columns the symbolic
 // fronts did. A supernode that gained columns does more work, one emptied by delay does none (its
 // column loop runs zero times), and the sum is unchanged.
 //
@@ -136,20 +136,20 @@ void SolveEngine::forwardDynamic(const NumFactorDynamic<Val>& nf, Vector<Val>& y
     const std::vector<std::int32_t>& pivotType = nf.pivotType();
 
     for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(nf.snodeSize()); ++jj) {
-        const std::size_t   frontSize  = nf.frontSize(jj);
-        const std::size_t   numNodeIdx = frontSize + nf.delaySize(jj) + nf.updateSize(jj);
-        const std::int32_t* nodeIdx    = nf.nodeIdx(jj);
-        const Val*          val        = nf.val(jj);
+        const std::size_t   jjFrontSize  = nf.frontSize(jj);
+        const std::size_t   jjNumNodeIdx = jjFrontSize + nf.delaySize(jj) + nf.updateSize(jj);
+        const std::int32_t* jjNodeIdx    = nf.nodeIdx(jj);
+        const Val*          jjVal        = nf.val(jj);
 
-        for (std::int32_t j = 0; j < static_cast<std::int32_t>(frontSize); ++j) {
-            const std::int32_t  lj = nodeIdx[j];
-            const std::size_t   cp = j * numNodeIdx;
+        for (std::int32_t j = 0; j < static_cast<std::int32_t>(jjFrontSize); ++j) {
+            const std::int32_t  lj = jjNodeIdx[j];
+            const std::size_t   cp = j * jjNumNodeIdx;
 
             // L is unit, so no division. Scatter down, starting one row lower where this column
             // opens a 2x2: that row holds D's off-diagonal, not an entry of L.
             const Val yjVal = y.mVal[lj];
-            for (std::int32_t i = (pivotType[lj] != 2 ? j + 1 : j + 2); i < static_cast<std::int32_t>(numNodeIdx); ++i)
-                y.mVal[nodeIdx[i]] -= val[cp + i] * yjVal;
+            for (std::int32_t i = (pivotType[lj] != 2 ? j + 1 : j + 2); i < static_cast<std::int32_t>(jjNumNodeIdx); ++i)
+                y.mVal[jjNodeIdx[i]] -= jjVal[cp + i] * yjVal;
         }
     }
 }
@@ -159,17 +159,17 @@ void SolveEngine::diagonalDynamic(const NumFactorDynamic<Val>& nf, Vector<Val>& 
     const std::vector<std::int32_t>& pivotType = nf.pivotType();
 
     for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(nf.snodeSize()); ++jj) {
-        const std::size_t   frontSize  = nf.frontSize(jj);
-        const std::size_t   numNodeIdx = frontSize + nf.delaySize(jj) + nf.updateSize(jj);
-        const std::int32_t* nodeIdx    = nf.nodeIdx(jj);
-        const Val*          val        = nf.val(jj);
+        const std::size_t   jjFrontSize  = nf.frontSize(jj);
+        const std::size_t   jjNumNodeIdx = jjFrontSize + nf.delaySize(jj) + nf.updateSize(jj);
+        const std::int32_t* jjNodeIdx    = nf.nodeIdx(jj);
+        const Val*          jjVal        = nf.val(jj);
 
-        const auto at = [numNodeIdx](std::int32_t r, std::int32_t c) {
-            return c * numNodeIdx + r;
+        const auto at = [jjNumNodeIdx](std::int32_t r, std::int32_t c) {
+            return c * jjNumNodeIdx + r;
         };
 
-        for (std::int32_t j = 0; j < static_cast<std::int32_t>(frontSize); ) {
-            const std::int32_t lj = nodeIdx[j];
+        for (std::int32_t j = 0; j < static_cast<std::int32_t>(jjFrontSize); ) {
+            const std::int32_t lj = jjNodeIdx[j];
 
             if (pivotType[lj] == 1) {
                 // A zero pivot is left alone rather than treated as a failure. It reaches a 1x1
@@ -195,8 +195,8 @@ void SolveEngine::diagonalDynamic(const NumFactorDynamic<Val>& nf, Vector<Val>& 
                 // The honest diagnostic is the post-solve residual ||Ax - b|| / ||b||, which the
                 // pipeline already computes; a flag here, if ever wanted, belongs there, not in
                 // this per-pivot branch.
-                if (val[at(j, j)] != Val(0))
-                    y.mVal[lj] /= val[at(j, j)];
+                if (jjVal[at(j, j)] != Val(0))
+                    y.mVal[lj] /= jjVal[at(j, j)];
                 ++j;
                 continue;
             }
@@ -236,16 +236,16 @@ void SolveEngine::diagonalDynamic(const NumFactorDynamic<Val>& nf, Vector<Val>& 
             //   pass-1 zero-pivot question, which is the same
             //   boundary seen from the 1x1 side.
             const std::int32_t j1 = lj;
-            const std::int32_t j2 = nodeIdx[j + 1];
+            const std::int32_t j2 = jjNodeIdx[j + 1];
 
             Val a11, a12, a21, a22, b1, b2;
-            if (std::abs(val[at(j, j)]) >= std::abs(val[at(j + 1, j)])) {
-                a11 = val[at(j, j)];         a12 = val[at(j, j + 1)];
-                a21 = val[at(j + 1, j)];     a22 = val[at(j + 1, j + 1)];
+            if (std::abs(jjVal[at(j, j)]) >= std::abs(jjVal[at(j + 1, j)])) {
+                a11 = jjVal[at(j, j)];         a12 = jjVal[at(j, j + 1)];
+                a21 = jjVal[at(j + 1, j)];     a22 = jjVal[at(j + 1, j + 1)];
                 b1  = y.mVal[j1];            b2  = y.mVal[j2];
             } else {                          // pivot the rows: the second is the larger
-                a11 = val[at(j + 1, j)];     a12 = val[at(j + 1, j + 1)];
-                a21 = val[at(j, j)];         a22 = val[at(j, j + 1)];
+                a11 = jjVal[at(j + 1, j)];     a12 = jjVal[at(j + 1, j + 1)];
+                a21 = jjVal[at(j, j)];         a22 = jjVal[at(j, j + 1)];
                 b1  = y.mVal[j2];            b2  = y.mVal[j1];
             }
 
@@ -275,22 +275,22 @@ void SolveEngine::backwardDynamic(const NumFactorDynamic<Val>& nf, Vector<Val>& 
     const std::vector<std::int32_t>& pivotType = nf.pivotType();
 
     for (std::int32_t jj = static_cast<std::int32_t>(nf.snodeSize()) - 1; jj >= 0; --jj) {
-        const std::size_t   frontSize  = nf.frontSize(jj);
-        const std::size_t   numNodeIdx = frontSize + nf.delaySize(jj) + nf.updateSize(jj);
-        const std::int32_t* nodeIdx    = nf.nodeIdx(jj);
-        const Val*          val        = nf.val(jj);
+        const std::size_t   jjFrontSize  = nf.frontSize(jj);
+        const std::size_t   jjNumNodeIdx = jjFrontSize + nf.delaySize(jj) + nf.updateSize(jj);
+        const std::int32_t* jjNodeIdx    = nf.nodeIdx(jj);
+        const Val*          jjVal        = nf.val(jj);
 
-        for (std::int32_t i = static_cast<std::int32_t>(frontSize) - 1; i >= 0; --i) {
-            const std::int32_t li = nodeIdx[i];
-            const std::size_t  cp = i * numNodeIdx;
+        for (std::int32_t i = static_cast<std::int32_t>(jjFrontSize) - 1; i >= 0; --i) {
+            const std::int32_t li = jjNodeIdx[i];
+            const std::size_t  cp = i * jjNumNodeIdx;
 
             // Gather from below, skipping the 2x2's own off-diagonal exactly as forwardDynamic
             // does. The conjugate is the same rule as in backwardStatic: L^H where the
             // factorization is Hermitian, L^T where it is not. Identity for DynamicLDLT, which is
             // all that runs today, and correct in advance for DynamicLDLH.
             Val acc = y.mVal[li];
-            for (std::int32_t j = (pivotType[li] != 2 ? i + 1 : i + 2); j < static_cast<std::int32_t>(numNodeIdx); ++j)
-                acc -= maybeConjugate(val[cp + j], withHermitian) * y.mVal[nodeIdx[j]];
+            for (std::int32_t j = (pivotType[li] != 2 ? i + 1 : i + 2); j < static_cast<std::int32_t>(jjNumNodeIdx); ++j)
+                acc -= maybeConjugate(jjVal[cp + j], withHermitian) * y.mVal[jjNodeIdx[j]];
 
             y.mVal[li] = acc;   // L is unit: no division, D was dealt with in its own pass
         }

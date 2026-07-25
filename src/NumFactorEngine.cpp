@@ -312,18 +312,18 @@ void NumFactorEngine::assembleUpdateMatrix(const UpdateMatrix<Val>& jjUpdateMatr
 
 template<class Val, class Factor>
 bool NumFactorEngine::factorStaticSupernode(Factor& nf, std::int32_t jj) const {
-    const std::size_t frontSize   = nf.frontSize(jj);
-    const std::size_t numNodeIdx  = frontSize + nf.updateSize(jj);
-    Val*              val         = nf.val(jj);
+    const std::size_t jjFrontSize  = nf.frontSize(jj);
+    const std::size_t jjNumNodeIdx = jjFrontSize + nf.updateSize(jj);
+    Val*              jjVal        = nf.val(jj);
 
-    const int f  = static_cast<int>(frontSize);
-    const int u  = static_cast<int>(numNodeIdx - frontSize);
-    const int ld = static_cast<int>(numNodeIdx);
+    const int f  = static_cast<int>(jjFrontSize);
+    const int u  = static_cast<int>(jjNumNodeIdx - jjFrontSize);
+    const int ld = static_cast<int>(jjNumNodeIdx);
 
     if (mFactorization == Factorization::Cholesky) {
         // The front, which is the diagonal val: A11 = L11 L11^H.
         int info = 0;
-        potrf('L', f, val, ld, &info);
+        potrf('L', f, jjVal, ld, &info);
         if (info > 0)
             return false;   // not positive definite: the leading minor of order `info` failed
 
@@ -333,7 +333,7 @@ bool NumFactorEngine::factorStaticSupernode(Factor& nf, std::int32_t jj) const {
         // scalar type decides here. 0.9 writes 'T' unconditionally, which is wrong for a complex
         // Hermitian factor, and there is nothing at its call site to reveal that.
         if (u > 0)
-            trsm('R', 'L', Blas<Val>::conjTrans, 'N', u, f, Val(1), val, ld, val + f, ld);
+            trsm('R', 'L', Blas<Val>::conjTrans, 'N', u, f, Val(1), jjVal, ld, jjVal + f, ld);
 
         return true;
     }
@@ -342,14 +342,14 @@ bool NumFactorEngine::factorStaticSupernode(Factor& nf, std::int32_t jj) const {
     // what a *static* factorization refuses to do). It cannot fail, because there is no positive
     // definiteness to violate; a pivot too small to divide by is perturbed and counted.
     int numPert = 0;
-    ldl(f, val, ld, mPerturbation, &numPert, hermitian(mFactorization));
+    ldl(f, jjVal, ld, mPerturbation, &numPert, hermitian(mFactorization));
     nf.numPerturbations() += static_cast<std::size_t>(numPert);
 
     // The update rows: L21 = A21 U11^-1, where U11 = D11 L11^H sits in the front's *upper*
     // triangle. So the solve is against the upper, untransposed, which is exactly what storing U
     // buys: Cholesky would have to transpose, and does.
     if (u > 0)
-        trsm('R', 'U', 'N', 'N', u, f, Val(1), val, ld, val + f, ld);
+        trsm('R', 'U', 'N', 'N', u, f, Val(1), jjVal, ld, jjVal + f, ld);
 
     return true;
 }
@@ -861,13 +861,12 @@ void NumFactorEngine::applyPivot2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, 
 template<class Val>
 bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int32_t jj,
                                        std::vector<std::int32_t>& gblToLcl) const {
-    Val*          val = nf.val(jj);
-    std::int32_t* idx = nf.nodeIdx(jj);
-
-    const std::int32_t   jjFrontSize = static_cast<std::int32_t>(nf.mFrontSize[jj]);
-    const std::int32_t   rows        = jjFrontSize + static_cast<std::int32_t>(nf.mUpdateSize[jj]);
-    const std::ptrdiff_t ld          = rows;
-    const double         threshold   = mPivotThreshold;
+    const std::int32_t   jjPreFactorFrontSize = static_cast<std::int32_t>(nf.mFrontSize[jj]);
+    const std::int32_t   jjNumNodeIdx         = jjPreFactorFrontSize + static_cast<std::int32_t>(nf.mUpdateSize[jj]);
+    std::int32_t*        jjNodeIdx            = nf.nodeIdx(jj);
+    Val*                 jjVal                = nf.val(jj);
+    const std::ptrdiff_t ld                   = jjNumNodeIdx;
+    const double         threshold            = mPivotThreshold;
 
     // Column-major position of (row r, column c), in ptrdiff_t to avoid overflow.
     const auto at = [ld](std::int32_t r, std::int32_t c) {
@@ -876,8 +875,8 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
 
     // The candidate pivot columns, by global index, in front order.
     std::list<std::int32_t> pivotList;
-    for (std::int32_t j_ = 0; j_ < jjFrontSize; ++j_)
-        pivotList.push_back(idx[j_]);
+    for (std::int32_t j_ = 0; j_ < jjPreFactorFrontSize; ++j_)
+        pivotList.push_back(jjNodeIdx[j_]);
 
     std::int32_t j_ = 0;
 
@@ -898,7 +897,7 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
     //
     //   No forced 1x1.  Pass 1 accepts the last remaining candidate whatever it looks like, since
     //                   a dense front has nowhere to delay it to. Pass 2 never does: it delays.
-    //   Front partners. Pass 2's 2x2 partner scan stops at jjFrontSize, so a partner is always a
+    //   Front partners. Pass 2's 2x2 partner scan stops at jjPreFactorFrontSize, so a partner is always a
     //                   front column and never an update row.
     //   A real test.    Pass 1 accepts a 2x2 on max1 == max2, on the magnitudes alone, without ever
     //                   reading the 2x2 val. Pass 2 applies the threshold test to its
@@ -909,52 +908,52 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
             std::int32_t trials     = static_cast<std::int32_t>(pivotList.size());
 
             while (trials > 0) {
-                const std::int32_t k1  = pivotList.front(); pivotList.pop_front();
-                const std::int32_t k1_ = gblToLcl[k1];
+                const std::int32_t lk1 = pivotList.front(); pivotList.pop_front();
+                const std::int32_t k1_ = gblToLcl[lk1];
 
                 if (pivotList.empty()) {                    // only candidate left: a forced 1x1
                     pivotFound = true;
-                    if (std::abs(val[at(k1_, k1_)]) == 0) --nf.rank();   // 0.9: zero pivot, rank--
-                    nf.mPivotType[k1] = 1;
+                    if (std::abs(jjVal[at(k1_, k1_)]) == 0) --nf.rank();   // 0.9: zero pivot, rank--
+                    nf.mPivotType[lk1] = 1;
                     ++j_;
                     break;
                 }
 
-                // max1 = k1's largest off-diagonal magnitude (its row on the left, its column
+                // max1 = lk1's largest off-diagonal magnitude (its row on the left, its column
                 // below);
                 // k2_ the local row where it occurs.
                 std::int32_t k2_  = -1;
                 double       max1 = -1;
                 for (std::int32_t i_ = j_; i_ < k1_; ++i_)
-                    if (max1 < std::abs(val[at(k1_, i_)])) { k2_ = i_; max1 = std::abs(val[at(k1_, i_)]); }
-                for (std::int32_t i_ = k1_ + 1; i_ < rows; ++i_)
-                    if (max1 < std::abs(val[at(i_, k1_)])) { k2_ = i_; max1 = std::abs(val[at(i_, k1_)]); }
+                    if (max1 < std::abs(jjVal[at(k1_, i_)])) { k2_ = i_; max1 = std::abs(jjVal[at(k1_, i_)]); }
+                for (std::int32_t i_ = k1_ + 1; i_ < jjNumNodeIdx; ++i_)
+                    if (max1 < std::abs(jjVal[at(i_, k1_)])) { k2_ = i_; max1 = std::abs(jjVal[at(i_, k1_)]); }
 
-                const Val diagonal1 = val[at(k1_, k1_)];
+                const Val diagonal1 = jjVal[at(k1_, k1_)];
 
                 if (max1 == 0) {                            // isolated column: 1x1, nothing to eliminate
                     pivotFound = true;
                     if (j_ != k1_) nf.swap(jj, j_, k1_, gblToLcl);
                     if (std::abs(diagonal1) == 0) --nf.rank();   // 0.9: zero pivot drops rank
-                    nf.mPivotType[k1] = 1;
+                    nf.mPivotType[lk1] = 1;
                     ++j_;
                     break;
                 }
 
                 if (std::abs(diagonal1) > 0 && std::abs(diagonal1) >= threshold * max1) {   // accept 1x1
                     pivotFound = true;
-                    applyPivot1x1(nf, jj, j_, k1_, k1, jjFrontSize, rows, gblToLcl);
+                    applyPivot1x1(nf, jj, j_, k1_, lk1, jjPreFactorFrontSize, jjNumNodeIdx, gblToLcl);
                     ++j_;
                     break;
                 }
-                else {                                      // try a 2x2 with k1 and its max partner k2
-                    const std::int32_t k2 = idx[k2_];
+                else {                                      // try a 2x2 with lk1 and its max partner lk2
+                    const std::int32_t lk2 = jjNodeIdx[k2_];
 
                     double max2 = -1;
                     for (std::int32_t i_ = j_; i_ < k2_; ++i_)
-                        if (max2 < std::abs(val[at(k2_, i_)])) max2 = std::abs(val[at(k2_, i_)]);
-                    for (std::int32_t i_ = k2_ + 1; i_ < rows; ++i_)
-                        if (max2 < std::abs(val[at(i_, k2_)])) max2 = std::abs(val[at(i_, k2_)]);
+                        if (max2 < std::abs(jjVal[at(k2_, i_)])) max2 = std::abs(jjVal[at(k2_, i_)]);
+                    for (std::int32_t i_ = k2_ + 1; i_ < jjNumNodeIdx; ++i_)
+                        if (max2 < std::abs(jjVal[at(i_, k2_)])) max2 = std::abs(jjVal[at(i_, k2_)]);
 
                     // Note what is *not* read here. Pass 1 decides on the magnitudes alone and
                     // never examines the 2x2 val itself; pass 2 tests its determinant. That
@@ -962,14 +961,14 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
                     // the elimination.
                     if (max1 == max2) {                     // accept 2x2
                         pivotFound = true;
-                        pivotList.remove(k2);
+                        pivotList.remove(lk2);
 
-                        applyPivot2x2(nf, jj, j_, k1_, k2_, k1, k2, jjFrontSize, rows, gblToLcl);
+                        applyPivot2x2(nf, jj, j_, k1_, k2_, lk1, lk2, jjPreFactorFrontSize, jjNumNodeIdx, gblToLcl);
                         j_ += 2;
                         break;
                     }
-                    else {                                  // neither k1 nor the 2x2 acceptable: delay k1
-                        pivotList.push_back(k1);
+                    else {                                  // neither lk1 nor the 2x2 acceptable: delay lk1
+                        pivotList.push_back(lk1);
                     }
                 }
 
@@ -990,11 +989,11 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
         //   No forced 1x1.  Pass 1 accepts the last remaining candidate whatever it looks like,
         //                   because there is nowhere to delay it to. Here there is, so the last
         //                   candidate falls through and is delayed like any other.
-        //   Two scans.      max1 measures k1's largest off-diagonal over the whole column height,
+        //   Two scans.      max1 measures lk1's largest off-diagonal over the whole column height,
         //                   update rows included. The partner scan `max` repeats it stopping at
-        //                   jjFrontSize, so a 2x2 partner is always a front column and never an
+        //                   jjPreFactorFrontSize, so a 2x2 partner is always a front column and never an
         //                   update row. Hence max <= max1, and max == max1 says the largest entry
-        //                   in k1's line is a front column after all.
+        //                   in lk1's line is a front column after all.
         //   A real test.    Pass 1 accepts a 2x2 on max1 == max2. Here the test is the threshold
         //                   one on the 2x2 determinant against the growth bound maxmax, with the
         //                   symmetric-maximum case kept as a separate disjunct.
@@ -1003,55 +1002,55 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
             std::int32_t trials     = static_cast<std::int32_t>(pivotList.size());
 
             while (trials > 0) {
-                const std::int32_t k1  = pivotList.front(); pivotList.pop_front();
-                const std::int32_t k1_ = gblToLcl[k1];
+                const std::int32_t lk1 = pivotList.front(); pivotList.pop_front();
+                const std::int32_t k1_ = gblToLcl[lk1];
 
-                // k1's largest off-diagonal magnitude: its row on the left, its column below, all
+                // lk1's largest off-diagonal magnitude: its row on the left, its column below, all
                 // the way down through the update rows. No argmax here, unlike pass 1; the partner
                 // is chosen by the narrower scan further down.
                 double max1 = -1;
                 for (std::int32_t i_ = j_; i_ < k1_; ++i_)
-                    if (max1 < std::abs(val[at(k1_, i_)])) max1 = std::abs(val[at(k1_, i_)]);
-                for (std::int32_t i_ = k1_ + 1; i_ < rows; ++i_)
-                    if (max1 < std::abs(val[at(i_, k1_)])) max1 = std::abs(val[at(i_, k1_)]);
+                    if (max1 < std::abs(jjVal[at(k1_, i_)])) max1 = std::abs(jjVal[at(k1_, i_)]);
+                for (std::int32_t i_ = k1_ + 1; i_ < jjNumNodeIdx; ++i_)
+                    if (max1 < std::abs(jjVal[at(i_, k1_)])) max1 = std::abs(jjVal[at(i_, k1_)]);
 
-                const Val diagonal1 = val[at(k1_, k1_)];
+                const Val diagonal1 = jjVal[at(k1_, k1_)];
 
                 if (max1 == 0) {                            // isolated column: 1x1, nothing to eliminate
                     pivotFound = true;
                     if (j_ != k1_) nf.swap(jj, j_, k1_, gblToLcl);
                     if (std::abs(diagonal1) == 0) --nf.rank();   // 0.9: zero pivot drops rank
-                    nf.mPivotType[k1] = 1;
+                    nf.mPivotType[lk1] = 1;
                     ++j_;
                     break;
                 }
 
                 if (std::abs(diagonal1) > 0 && std::abs(diagonal1) >= threshold * max1) {   // accept 1x1
                     pivotFound = true;
-                    applyPivot1x1(nf, jj, j_, k1_, k1, jjFrontSize, rows, gblToLcl);
+                    applyPivot1x1(nf, jj, j_, k1_, lk1, jjPreFactorFrontSize, jjNumNodeIdx, gblToLcl);
                     ++j_;
                     break;
                 }
-                else if (!pivotList.empty()) {              // try a 2x2 with k1 and a front partner
+                else if (!pivotList.empty()) {              // try a 2x2 with lk1 and a front partner
                     // The same scan as max1's, stopped at the end of the front. k2_ is where the
                     // largest such entry sits, and it is a front column by construction.
                     std::int32_t k2_ = -1;
                     double       max = -1;
                     for (std::int32_t i_ = j_; i_ < k1_; ++i_)
-                        if (max < std::abs(val[at(k1_, i_)])) { k2_ = i_; max = std::abs(val[at(k1_, i_)]); }
-                    for (std::int32_t i_ = k1_ + 1; i_ < jjFrontSize; ++i_)
-                        if (max < std::abs(val[at(i_, k1_)])) { k2_ = i_; max = std::abs(val[at(i_, k1_)]); }
+                        if (max < std::abs(jjVal[at(k1_, i_)])) { k2_ = i_; max = std::abs(jjVal[at(k1_, i_)]); }
+                    for (std::int32_t i_ = k1_ + 1; i_ < jjPreFactorFrontSize; ++i_)
+                        if (max < std::abs(jjVal[at(i_, k1_)])) { k2_ = i_; max = std::abs(jjVal[at(i_, k1_)]); }
 
-                    const std::int32_t k2 = idx[k2_];
+                    const std::int32_t lk2 = jjNodeIdx[k2_];
 
                     double max2 = -1;
                     for (std::int32_t i_ = j_; i_ < k2_; ++i_)
-                        if (max2 < std::abs(val[at(k2_, i_)])) max2 = std::abs(val[at(k2_, i_)]);
-                    for (std::int32_t i_ = k2_ + 1; i_ < rows; ++i_)
-                        if (max2 < std::abs(val[at(i_, k2_)])) max2 = std::abs(val[at(i_, k2_)]);
+                        if (max2 < std::abs(jjVal[at(k2_, i_)])) max2 = std::abs(jjVal[at(k2_, i_)]);
+                    for (std::int32_t i_ = k2_ + 1; i_ < jjNumNodeIdx; ++i_)
+                        if (max2 < std::abs(jjVal[at(i_, k2_)])) max2 = std::abs(jjVal[at(i_, k2_)]);
 
                     const PivotBlock2x2<Val> d =
-                        readPivotBlock2x2(val, ld, k1_, k2_, hermitian(nf.factorization()));
+                        readPivotBlock2x2(jjVal, ld, k1_, k2_, hermitian(nf.factorization()));
 
                     // The growth bound the 2x2 determinant is tested against: the larger of the two
                     // ways of pairing each diagonal with the other column's maximum.
@@ -1061,18 +1060,18 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
                     if ((max == max1 && max == max2 && max != 0)
                         || (std::abs(d.det) > 0 && std::abs(d.det) >= threshold * maxmax)) {   // accept 2x2
                         pivotFound = true;
-                        pivotList.remove(k2);
+                        pivotList.remove(lk2);
 
-                        applyPivot2x2(nf, jj, j_, k1_, k2_, k1, k2, jjFrontSize, rows, gblToLcl);
+                        applyPivot2x2(nf, jj, j_, k1_, k2_, lk1, lk2, jjPreFactorFrontSize, jjNumNodeIdx, gblToLcl);
                         j_ += 2;
                         break;
                     }
-                    else {                                  // neither k1 nor the 2x2 acceptable: delay k1
-                        pivotList.push_back(k1);
+                    else {                                  // neither lk1 nor the 2x2 acceptable: delay lk1
+                        pivotList.push_back(lk1);
                     }
                 }
-                else {                                      // no partner available: delay k1
-                    pivotList.push_back(k1);
+                else {                                      // no partner available: delay lk1
+                    pivotList.push_back(lk1);
                 }
 
                 --trials;

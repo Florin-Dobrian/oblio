@@ -6962,7 +6962,10 @@ MUMPS   1990s+   Fortran 90, C           distributed (MPI)   the method for para
 
 **Where Oblio sits.** Algorithmically Oblio is MA27/MA57: serial, symmetric, threshold-partial
 pivoting with `1 x 1` and `2 x 2` blocks and delayed columns, AMD ordering, dense fronts handed to
-the Level-3 BLAS. It is not MUMPS, it does not distribute, and it is symmetric-only. It is written
+the Level-3 BLAS. The pivot test it runs is the later componentwise member of the Duff-Reid fork
+specifically (7.13), not the early normwise version and not either trap of 3.4, its search is the
+MA27-refined standard ordering, and its blocks are `1 x 1` and `2 x 2` only, not AGL's larger blocks.
+It is not MUMPS, it does not distribute, and it is symmetric-only. It is written
 in C++17 rather than any Fortran, which buys the storage-agnostic templating and the read-public
 write-private accessor discipline that the Fortran codes express differently or not at all. The
 threshold default of `0.1` is stricter than MA57's `0.01` (7.7), which is a deliberate inheritance
@@ -6971,6 +6974,721 @@ work noted elsewhere is the first step in the direction MA57's shared-memory suc
 out-of-core, HSL_MA97 shared-memory and bit-compatible) and MUMPS took, but it is a step not yet
 taken. So Oblio is a modern-C++ serial member of the MA27/MA57 branch of the family, with the
 parallel and distributed branches as future territory rather than current ground.
+
+**What the resemblance claims, and what is actually checked.** The family placement is solid, and the
+AGL reading made it specific: "Oblio implements Duff-Reid" is right, and it is the middle rung of the
+Duff-Reid fork, the later componentwise test, with the MA27-refined search and delayed columns, not
+Duff-Reid in general. But the "subject to verification" that phrase invites hides two different
+verifications, and only one of them is done.
+
+The read-level check, does the code realize the later Duff-Reid test, is essentially complete:
+`factorDynamicSupernode`'s `2 x 2` test is term-for-term AGL Figure 3.3, which AGL themselves identify
+as the later Duff-Reid test, and its search is Figure 3.4, which they call a refinement of MA27's. That
+is the match 7.13 establishes by reading. The run-level check, does Oblio's *output* agree with an
+actual Duff-Reid code such as MA27 or MA57, is not done, and it is confounded, so it would not be a
+clean check even if run: before any two outputs could agree, three things would have to be matched
+first, the threshold (Oblio defaults to `0.1`, MA57 and MUMPS to `0.01`), the ordering (Oblio and MA57
+use AMD, MA27 uses minimum degree, and a different order means different fronts and a different
+everything downstream), and the root handling. Oblio *is* verified numerically, but against its own 0.9
+oracle at a residual near `3e-16`, not against the HSL codes.
+
+Three departures keep Oblio from being identical even to MA27 and MA57, and naming them keeps the
+resemblance honest. The root handling is the one real algorithmic departure: pass 1's forced-last
+`1 x 1` and its `max1 == max2` `2 x 2` accepted without a determinant test are weaker than the bounding
+test Duff-Reid and AGL would apply, and they are the subject of 7.8 and 7.13's pass-1 block. The `0.1`
+threshold default against `0.01` is the same algorithm at a different operating point, so it delays more
+columns and fills more on the same matrix. And the Cramer-rule `L21` formation in `applyPivot2x2` is a
+place where Duff-Reid prescribe a stable block solve, so MA27 and MA57 presumably form the multipliers
+accordingly, and Oblio's explicit inverse may be doing less carefully what they do carefully (7.13's
+pitfall block).
+
+The three reference codes do not sit at equal distance. For MA27 and MA57 the resemblance is tight: the
+same core method, the same later Duff-Reid test, `1 x 1` and `2 x 2` blocks only, delayed columns, and
+AMD with MA57. For MUMPS it is looser: MUMPS shares the method, but its pivoting genuinely diverges,
+because distribution restricts the candidate set further still, a pivot may live on another process,
+the parallel analogue of the front restriction of 7.4 noted above. So Oblio is the serial branch, and
+grouping MUMPS with MA27 and MA57 overstates the resemblance. The accurate one-line summary is that
+Oblio is a serial Duff-Reid-family solver of the MA27/MA57 class, running the later componentwise test
+with the MA27-refined search and delayed columns, differing in the root handling, the `0.1` default,
+and the Cramer `L21` formation; and that "almost the same" is a claim about the algorithm family,
+established by reading and by the 0.9 oracle, not an output-equivalence claim against the HSL codes,
+which is a separate and confounded experiment.
+
+### 7.13 Ashcraft, Grimes, and Lewis, and the source of Oblio's pivoting
+
+7.7 recorded what `factorDynamicSupernode` does and left its provenance open, placing it only in
+"the Duff-Reid family" without a specific source. The source is the paper of Cleve Ashcraft, Roger
+Grimes, and John Lewis (1998), and the match is close enough to settle the question outright: one of
+the two tests our kernel runs is identical to theirs, term for term. This subsection records the
+paper and lays Oblio beside it, so that the mindset the code was written in sits on the page next to
+the code.
+
+**What the paper is.** It has a dense half and a sparse half. The dense half presents two close
+cousins of Bunch-Kaufman, bounded Bunch-Kaufman (the rook pivoting of 7.3) and a fast Bunch-Parlett,
+both of which fix the unbounded-`L` defect of 7.3 by taking as the `2 x 2` off-diagonal an entry
+that is a local maximum in its column. The sparse half is the one that reaches us. Its conclusion is
+that Bunch-Kaufman cannot be rescued in the sparse case, because the local-maximum off-diagonal a
+bounded `2 x 2` wants may lie in the part of the front not yet assembled and so unavailable as a
+pivot (the `A22` of 7.4), and that bounding `L` instead leads to one particular version of the
+Duff-Reid algorithm. They then extend Duff-Reid in two directions: a more effective search for pivot
+blocks, and blocks larger than `2 x 2`. So the paper both recommends the Duff-Reid bounding-`L` test
+and supplies its stability proof from the bounding-`L` side. This is why 7.5 crediting Duff and Reid
+and this subsection crediting Ashcraft, Grimes, and Lewis are both correct: theirs is the paper where
+the test is written in the form our kernel uses and shown to bound `L`, and they themselves note
+(their section 3.4) that this same test is identical to the later Duff-Reid `|D^-1|` magnitude test.
+The three coincide.
+
+**Same test, opposite motivation, and why Liu is the foil.** The coincidence just noted is not an
+accident of two groups landing on the same inequality; it is one test reached from two directions, and
+the paper is explicit about which direction is theirs. Duff and Reid motivated the `2 x 2` test by
+bounding growth in the reduced matrix, the trailing Schur complement as elimination proceeds: their
+stated requirement is `|delta_ij| <= max|a_uv| / u`, a bound on the modification each elimination makes
+to a reduced-matrix entry. AGL bound a different object, the entries of `L` itself, the multipliers
+`A21 E^-1`, keeping `|L| <= 1/u`. The one `2 x 2` inequality secures both, which is why the two land on
+the same test, but each side's target is the other's byproduct. AGL put it as means and end: for Duff
+and Reid, bounding `L` was the *means* to the *end* of bounding reduced-matrix growth; for AGL, bounding
+`L` is the end and the growth bound follows, because a bounded `L` together with a backward stable
+`2 x 2` solve is exactly what proves backward stability of the whole factorization. Same inequality, the
+goal and the byproduct swapped. Their own summary is that their
+acceptance test is the same as the later Duff-Reid one but their motivation differs, and that the
+bounding-`L` perspective "provides a proof of stability for the Duff-Reid algorithm." So the
+contribution of Section 3 is not a new test. It is a new justification for an existing one, offered as
+the stability proof Duff-Reid's growth-motivated derivation never made explicit, a theory result in an
+algorithm's clothing.
+
+The Liu thread is the other half, and it is the writeup of a regression the authors shipped. Their
+Section 3 opening tells the story plainly: they had a working Duff-Reid multifrontal code, then, drawn
+by Liu's better reported sparsity and by the popularity of dense Bunch-Kaufman, they replaced the
+Duff-Reid pivot selection with Liu's sparse Bunch-Kaufman variant, and it was the failure of that
+variant that sent them back to reconsider Bunch-Kaufman in general. So Section 3 is not a neutral
+survey. Liu is the foil because Liu is the thing they tried in place of Duff-Reid and it broke, failing
+to bound `L`; Duff-Reid is the thing they returned to, now with a proof in hand for why it was right.
+The "different direction" is thus both genuine theory, the `L`-bound derivation, and the path a burned
+implementer actually walked.
+
+**The strategies the paper weighs, and what each bounds.** The argument runs across a whole family of
+pivot rules, dense and sparse, and the single axis that sorts them is whether they bound `L`, since
+that is the property Bunch-Kaufman lacks and the one AGL are chasing. Every rule below also bounds
+growth in the reduced matrix; `L` is the discriminator, so it is the only bound column.
+
+```
++----------------------------+---------+--------+------------------------------------------+--------------------+
+| strategy                   | scope   | bounds | AGL's role / verdict                     | where              |
+|                            |         | L?     |                                          |                    |
++============================+=========+========+==========================================+====================+
+| Bunch-Kaufman              | dense   | no     | the standard; unbounded L can degrade    | 2.1, 2.2           |
+|                            |         |        | accuracy, and LAPACK's blocked form can  |                    |
+|                            |         |        | be unstable                              |                    |
++----------------------------+---------+--------+------------------------------------------+--------------------+
+| Bunch-Parlett              | dense   | yes    | complete pivoting, the accuracy          | 2.3                |
+|                            |         |        | standard; O(n^3) search, too costly      |                    |
++----------------------------+---------+--------+------------------------------------------+--------------------+
+| bounded BK (rook)          | dense   | yes    | AGL's new dense algorithm 1; replaces    | 2.4                |
+|                            |         |        | blocked LAPACK BK                        |                    |
++----------------------------+---------+--------+------------------------------------------+--------------------+
+| fast Bunch-Parlett         | dense   | yes    | AGL's new dense algorithm 2; replaces    | 2.5                |
+|                            |         |        | LINPACK-like unblocked                   |                    |
++----------------------------+---------+--------+------------------------------------------+--------------------+
+| Liu sparse threshold BK    | sparse  | no     | the one AGL adopted and that failed;     | 3.1, 3.2, Fig 3.1  |
+|                            |         |        | case 2's L entry can be gq/g1 times 1/u  |                    |
++----------------------------+---------+--------+------------------------------------------+--------------------+
+| Duff-Reid early, normwise  | sparse  | yes    | bounds L in the infinity norm; AGL call  | 3.4 (DR 1983)      |
+|                            |         |        | it unnecessarily severe                  |                    |
++----------------------------+---------+--------+------------------------------------------+--------------------+
+| Duff-Reid later,           | sparse  | yes    | the recommended test; = AGL Fig 3.3, re- | 3.3, 3.4, Fig 3.3  |
+| componentwise              |         |        | derived from the L side; Oblio's         |                    |
++----------------------------+---------+--------+------------------------------------------+--------------------+
+| explicit-BK componentwise  | sparse  | no     | trap: one refinement step past DR-later, | 3.4                |
+|                            |         |        | collapses to explicit BK                 |                    |
++----------------------------+---------+--------+------------------------------------------+--------------------+
+| Liu two-parameter DR       | sparse  | weak   | trap: only a 1/(2u^2) bound on L; AGL    | 3.4 (Liu)          |
+| variant                    |         |        | call it a mistake                        |                    |
++----------------------------+---------+--------+------------------------------------------+--------------------+
+| larger blocks, s <= 5      | sparse  | yes    | AGL's extension of the bounding-L test   | 3.6                |
+|                            |         |        | to s-by-s blocks                         |                    |
++----------------------------+---------+--------+------------------------------------------+--------------------+
+```
+
+Two groupings are worth reading off the table. Among the sparse rules there is one Liu strategy that is
+central, the sparse threshold Bunch-Kaufman of Figure 3.1, which does not bound `L` and is the one whose
+failure drove the paper; a second Liu entry, the two-parameter Duff-Reid variant, appears only as a
+named mistake. And there is a Duff-Reid fork of two, or three if the trap is counted: the early normwise
+test, the later componentwise test, and, one refinement step away from the later one, the
+explicit-Bunch-Kaufman componentwise test that looks almost identical but bounds only growth. The three
+Duff-Reid-family tests differ by a norm or by a single step, and they give three different guarantees,
+which is why AGL spend Section 3.4 pulling them apart rather than treating "the Duff-Reid test" as one
+thing. The rule Oblio and AGL both use is the middle one, the later componentwise test, explicitly not
+the early normwise one and explicitly not either trap. AGL list three pitfalls in 3.4: the two above are
+selection traps, and the third is Cramer's rule for the `2 x 2` solve, a solve method rather than a
+selection rule, which is the subject of the pitfall block below.
+
+Two things the table leaves out on purpose. The search orderings, Figure 3.4's standard MA27 baseline
+and Figure 3.6's exhaustive order, are not here because they bound nothing: they order the candidates,
+they do not decide acceptance, and they sit on the driver axis of the split below, not the predicate
+axis. And the dense rows are context, the ladder the sparse argument climbs down from: bounded
+Bunch-Kaufman and fast Bunch-Parlett are the dense algorithms that bound `L` by taking a
+mutual-local-max off-diagonal, the move 7.4 shows is unavailable in the sparse front, which is what
+forces the sparse side onto the threshold test instead. The two rows worth marking for later are the
+Duff-Reid early normwise and the explicit-BK componentwise: they are precisely the neighboring tests
+the 7.14 catalog names as the designed A/B against Oblio's current test, and AGL have already told us
+which way each should come out, the normwise stricter, the explicit-BK trap unbounded in `L`.
+
+**The identity.** Their Figure 3.3, the explicit bounding sparse pivot strategy, accepts a `2 x 2`
+block on columns `1` and `q` when
+
+```
+max{ |aqq| * g1 + |aq1| * gq ,  |a11| * gq + |aq1| * g1 }  <=  |a11 * aqq - aq1^2| / ahat
+```
+
+where `g1` and `gq` are the two columns' largest off-diagonal magnitudes, `aq1` is the coupling, and
+`ahat` is the threshold. Their symbols map onto 7.5's block `E = [[a, b], [b, c]]` and onto the
+names the kernel actually uses as follows:
+
+```
+AGL 1998         7.5 / kernel     meaning
+ahat             u                the threshold
+g1               max1             column 1's largest off-diagonal magnitude
+gq               max2             column q's largest off-diagonal magnitude
+aq1              b = m            the coupling, the front-restricted partner entry
+a11              a = d11          column 1's diagonal, the current candidate
+aqq              c = d22          column q's diagonal, the chosen partner
+a11 aqq - aq1^2  det              the block determinant
+```
+
+Under that identification their inequality is
+
+```
+max( |c| * max1 + |b| * max2 ,  |a| * max2 + |b| * max1 )  <=  |det| / u
+```
+
+which is 7.5's `maxmax`, cleared of the division, character for character. It is not a restatement of
+their test in our terms; it is their test. `readPivotBlock2x2` fills `a`, `b`, `c`, `det`, and the
+kernel evaluates exactly this.
+
+**Figure 3.3 is the test, Figure 3.4 is the driver.** The paper gives two figures that are easy to
+run together, and they are not one figure at two levels of detail; they are two different components
+on two different axes, and they compose. Figure 3.3 (in their section 3.3) is an acceptance predicate,
+answering *when do we accept this column or pair*. Figure 3.4 (in their section 3.5, where it is the
+standard-ordering baseline that the exhaustive Figure 3.6 then improves on) is a search driver,
+answering *which column next, and what on failure*. This is the same split 7.14 calls the seam,
+predicate against driver, seen here in the paper's own two figures.
+
+Figure 3.3 takes one column, its `a11` and largest off-diagonal magnitude `g1`, together with its
+largest partner in `A11`, `aqq` with magnitude `gq` and coupling `aq1`, and returns one of four
+verdicts: a `1 x 1` on `a11`, a `1 x 1` on `aqq`, the `2 x 2` block, or none. It states the `2 x 2`
+test concretely, as the L-bounding inequality above. It says nothing about search order: its last
+line, "no pivot found, repeat search using next column," hands off to an outer loop it does not
+describe.
+
+Figure 3.4 is that outer loop made concrete: the queue, the rotation (pop the front, and on failure
+add to the rear), and the two-level termination (inner, until a pivot is found or every column has
+been tested since the last success; outer, until the queue empties or nothing is found). It calls an
+acceptance test at each column but does not fix which one. Its `2 x 2` branch is written abstractly,
+"`Dj,qj` is acceptable as a `2 x 2` pivot," an open slot, and in their section 3.5 text they say
+plainly that the slot takes "either of the Duff-Reid tests or Liu's condition." It is deliberately
+test-agnostic.
+
+So there is one narrow sense in which 3.4 implements 3.3: the outer loop 3.3 only gestures at is
+exactly what 3.4 supplies. But 3.4 does not reproduce 3.3's per-column test, and there are two real
+differences.
+
+The first is that 3.4's `2 x 2` test is a slot and 3.3 is one filling of it. Drop 3.3's inequality
+into the slot and the two compose; but the slot could equally hold the Duff-Reid-early test or Liu's,
+which is why the whole Tier-0 catalog of 7.14 fits behind this one branch.
+
+The second is that 3.3 tests the partner's `1 x 1` inline and 3.4 does not. The per-column bodies,
+side by side:
+
+```
++--------------------------------------------+--------------------------------------------+
+| Figure 3.3, the predicate (column +        | Figure 3.4, the driver's per-column body   |
+| partner)                                   |                                            |
++============================================+============================================+
+| g1 == 0  ->  nothing                       | gj == 0  ->  nothing                       |
++--------------------------------------------+--------------------------------------------+
+| |a11| >= u*g1  ->  1x1 on a11 (current)    | |ajj| >= u*gj  ->  1x1 on ajj (current)    |
++--------------------------------------------+--------------------------------------------+
+| |aqq| >= u*gq  ->  1x1 on aqq (partner)    | no partner-1x1 branch; aqq is reached only |
+|                                            | when it rotates to the front later         |
++--------------------------------------------+--------------------------------------------+
+| the L-bounding inequality  ->  2x2 block   | "Dj,qj is acceptable as a 2x2 pivot"  ->   |
+|                                            | 2x2 block, with the test left unspecified  |
++--------------------------------------------+--------------------------------------------+
+| else  ->  repeat with the next column      | else  ->  add j to the rear of the queue   |
+|                                            | (delay)                                    |
++--------------------------------------------+--------------------------------------------+
+```
+
+Figure 3.3 checks three candidates for the column, the current `1 x 1`, the partner `1 x 1`, and the
+`2 x 2`; Figure 3.4 checks two, the current `1 x 1` and the `2 x 2`, then delays. The partner's
+`1 x 1` chance in 3.4 arrives later, when `qj` itself rotates to the front of the queue. The same
+columns are eligible under both; what differs is the order and the timing in which pivots are
+accepted, not which columns can be. Figure 3.4 also wraps this body in the queue and the two-level
+loop, machinery Figure 3.3 has none of.
+
+**Of the two figures, Oblio takes 3.4's shape and 3.3's test.** `factorDynamicSupernode` is 3.4's
+search machinery, the queue, the rotation, and the delay, with 3.3's concrete `2 x 2` inequality
+dropped into 3.4's abstract slot, and it follows 3.4's leaner per-column body: one current-column
+`1 x 1`, with the partner `1 x 1` reached by rotation rather than tested inline, not 3.3's double
+`1 x 1`. The symmetric-maximum fast-accept it adds on top is the bounded-Bunch-Kaufman idea of 2.4
+and 2.5. This is why the comparison below cites Figure 3.3 for the `2 x 2`-accept row and Figure 3.4
+for the queue, rotation, and delay rows: each row names whichever figure owns that piece. And it is
+why the partner `1 x 1`, the one place 3.3 and 3.4 differ in eligibility timing, is a separate and
+smaller knob that sits with the driver, not with the test.
+
+**A shift, not a refinement.** It is worth being exact about the *kind* of gap between the two figures,
+because the natural expectation is the other kind. A textbook move from a mathematical algorithm to an
+implementation, an `A[i][j]` matvec down to the `colPtr` / `rowIdx` / `val` loop, is a refinement: it
+is output-equivalent on every input, and there is a structure-preserving map between the two, one
+operation to one operation, with only the addressing changed. No decision differs; `A[i][j]` and
+`val[k]` name the same number, and the two versions make the same choices in the same order. The move
+from 3.3 to 3.4 is not that. It fails both tests, and the failure is the point.
+
+The cleanest witness is the partner-`1 x 1` difference already noted, followed to its consequence.
+Take a focus column whose own `1 x 1` fails, and suppose both its partner's `1 x 1` and the pair's
+`2 x 2` would pass. 3.3, in branch order, reaches the partner's `1 x 1` before the `2 x 2`, so it
+eliminates the partner as a `1 x 1` and leaves the focus. 3.4 has no partner-`1 x 1` branch, so it
+reaches the `2 x 2` and eliminates the pair. Same matrix, same values, a `1 x 1` against a `2 x 2`:
+different pivots, and so a different `D`, a different reduced matrix, and different fill. Two
+algorithms that select different pivots on one input are not a refinement pair.
+
+Underneath that witness are three shifts, none of them an addressing change.
+
+**The unit of work is redefined.** 3.3's step is "given a focus column and its best partner, choose
+the best pivot among three candidates: focus-`1 x 1`, partner-`1 x 1`, the pair." 3.4's step is "visit
+one column; accept it, or accept its pair, else defer it." These are different notions of what a step
+is, not one step seen at two resolutions.
+
+**A prioritized move is dropped.** 3.3 can promote the partner as a standalone `1 x 1`, and ranks that
+above the `2 x 2`. 3.4 can promote no column other than the one it is visiting, except as the mate of
+a `2 x 2`. This is exactly why one cannot plug 3.3's body into 3.4's loop unchanged: 3.4's bookkeeping
+is `remove j`, and on a `2 x 2` also `remove qj`, and it has no case for "accept a third thing, the
+partner alone, while visiting j." The shapes do not mate, and that missing case is algorithmic
+content, not a data-structure detail.
+
+**A capability is added.** 3.4 can delay: a column leaves the front, the front shrinks, and the column
+is postponed to the parent (7.6). 3.3's only non-accept outcome is "try the next column." Delay lives
+only at 3.4's level, and there is nothing in 3.3 for it to refine from.
+
+The rotation is what papers over the dropped move, and it does so only data-dependently. Within one
+round no elimination happens between visits, so if the partner is the next acceptable candidate it is
+promoted on the same values and the two coincide; but if some other column accepts first, its
+elimination has updated the partner's diagonal, and the partner's later `1 x 1` is now a test on
+numbers 3.3 never saw, or that other column simply becomes the pivot instead. Data-dependent
+equivalence is the opposite of a refinement, which is equivalent by construction.
+
+So the refinement the matvec model expects does exist in this code, just between a different pair. It
+is Oblio's kernel against 3.4 with 3.3's `2 x 2` test dropped into the slot: same loop, same choices,
+same output, with only the addressing changed, `gblToLcl`, `val[at(i_, k_)]`, and the flat or dynamic
+storage underneath (the seam of 7.14). That pair is the `A[i][j]`-to-CSR relationship, and
+it holds cleanly. The gap we sensed is that `(3.3, 3.4)` is not that relationship; `(kernel, 3.4 with
+3.3's test)` is.
+
+**On the authors' intent.** The two figures sit in two different sections doing two different jobs, and
+that placement is the best evidence of why the move is a shift. Figure 3.3 is in their section 3.3,
+"Pivoting to bound L," where its job is to establish the acceptance test the L-bound justifies. Figure
+3.4 is in their section 3.5, "An exhaustive pivoting strategy," where its job is to be the standard
+search baseline, their MA27 refinement, that the exhaustive Figure 3.6 then improves on. So the move
+from 3.3 to 3.4 is not a refinement within one algorithm; it is a change of subject, from the
+acceptance criterion to the search ordering, and 3.4's abstract test slot ("either of the Duff-Reid
+tests or Liu's condition") is the sign that the search was meant to be independent of the test. One
+mechanical reading of the single real omission, the partner-`1 x 1`, is that 3.4's queue reaches it by
+another route: every column is tested for its own `1 x 1` when it is visited as a focus, so the dropped
+branch removes only the option to promote a partner *early*, which the authors evidently did not judge
+worth a special case. Whether that is the whole of their intent, or whether the early promotion was
+given up for a reason the paper does not state, is the thing still worth zooming in on.
+
+**Oblio beside the paper.**
+
+```
++------------------------------------+--------------------------------------------+----------------------------+
+| Oblio, factorDynamicSupernode      | Ashcraft, Grimes, Lewis (1998)             | relationship               |
++====================================+============================================+============================+
+| pass-2 2x2 test |det| >= u *       | Figure 3.3, the explicit-bounding test     | term-for-term identical    |
+| maxmax                             |                                            |                            |
++------------------------------------+--------------------------------------------+----------------------------+
+| candidate list: pop the front,     | Figure 3.4, "standard ordering" (their     | same                       |
+| test the current column's 1x1 then | refinement of MA27's search)               |                            |
+| one 2x2 with its largest front     |                                            |                            |
+| partner, else push to the rear     |                                            |                            |
++------------------------------------+--------------------------------------------+----------------------------+
+| outer/inner loop: rotate until a   | Figure 3.4: "until pivot found or all      | same control structure     |
+| pivot is found or every column has | columns tested since last successful       |                            |
+| been tested since the last         | pivot", "until queue empty or no pivot"    |                            |
+| success, then stop                 |                                            |                            |
++------------------------------------+--------------------------------------------+----------------------------+
+| leftover columns delayed,          | postponing columns from A11 into the       | same, and for the same     |
+| frontSize -= delaySize             | enlarged A22                               | reason (A22 unavailable,   |
+|                                    |                                            | not fully assembled)       |
++------------------------------------+--------------------------------------------+----------------------------+
+| partner scan confined to [j,       | the "potential second pivot column must be | same, their 7.4 in one     |
+| frontSize)                         | taken from the first block column",        | sentence                   |
+|                                    | entries in A22 unavailable                 |                            |
++------------------------------------+--------------------------------------------+----------------------------+
+| mutual-max fast-accept m == max1   | bounded BK / fast BP: a 2x2 whose off-     | same idea                  |
+| && m == max2 (both passes)         | diagonal is a local maximum in both        |                            |
+|                                    | columns bounds L for free (2.4, 2.5, and   |                            |
+|                                    | the opening of 3.3)                        |                            |
++------------------------------------+--------------------------------------------+----------------------------+
+```
+
+The `1 x 1` test is theirs too: our `|d11| >= u * max1` is their `|ajj| >= ahat * gj` of Figure 3.4,
+so both of the two acceptance conditions the kernel evaluates are identical to theirs, not only the
+harder one.
+
+The candidate list of 7.7 is their queue, popped from the front with failures sent to the rear; the
+barren-pass stop is their "all columns in the queue tested since the last successful pivot"; the
+front-only partner scan of 7.4 is their rule that the second pivot column must come from the fully
+assembled block; and the delay of 7.6 is their postponement of a column into an enlarged `A22`. The
+symmetric-maximum disjunct 7.7 named, accepting a `2 x 2` on `m == max1 == max2` without the
+determinant test, is the bounded-Bunch-Kaufman idea from their dense half carried into the sparse
+one: when the coupling is the largest off-diagonal in both columns, the block bounds `L` for free and
+needs no threshold.
+
+**What Oblio did not take, and it is their two headline extensions.** Their more effective search is
+Figure 3.6: a bias toward `2 x 2` pivots that reuses each column maximum and tests all pairwise
+`2 x 2` blocks among the leading `m2x2` columns (they recommend `m2x2 = 5`) before accepting any
+`1 x 1`. We use the simpler standard ordering of Figure 3.4 instead, one `2 x 2` per column against
+its largest front partner. Their second extension is blocks larger than `2 x 2` (their section 3.6),
+each solved through a QR factorization of the block; we do `1 x 1` and `2 x 2` only. So Oblio took
+the core, the bounding-`L` test and the MA27-refined search, and neither extension. If a future pass
+wants more `2 x 2` pivots for kernel speed, Figure 3.6 is the recipe, and it changes only the search
+order, not the acceptance test.
+
+**Where pass 1 departs from them.** Their framework assumes a refused column can be postponed into
+`A22`. At a root there is no `A22`, and they prescribe no forced acceptance there: an unfactorable
+final front is singularity, the reading 7.8 reaches from the other side. Pass 1's `max1 == max2`-only
+`2 x 2` and its forced last `1 x 1` are our own root handling, and they are strictly weaker than the
+bounding test of Figure 3.3, which bounds `L` at a root as anywhere else. This is the same gap the
+fixed-`alpha` root proposal and the 7.8 conjecture circle. One option those notes do not yet name is
+to run Figure 3.3's test at the root as well, since it is valid there, and force only the genuinely
+last column that no test can accept.
+
+**The three pitfalls, and where Oblio stands.** AGL name exactly three pitfalls in their section 3.4,
+and frame them with one theme: all three are traps that focusing only on bounding reduced-matrix growth
+leads to, which is to say traps you avoid by bounding `L` instead (the means-and-end point above). Two
+concern the acceptance test, one the block solve.
+
+1. **The block solve: Cramer's rule or explicit inversion.** Solving the `2 x 2` systems by explicit
+inverse rather than by a normwise backward stable scheme. This is a *solve-method* trap, not a test
+one, and it is the one 7.15 works out in full. AGL's fix is a stable solve everywhere `E` is inverted,
+their own choice being Gaussian elimination with complete pivoting.
+
+2. **The over-refined test: an explicit Bunch-Kaufman in disguise.** Refining the acceptance test one
+step past Duff-Reid to a componentwise magnitude bound yields a test that is nothing more than an
+explicit version of the Bunch-Kaufman test: it bounds growth but gives no useful bound on `L`, so it
+does not suffice for backward stability. A *selection-test* trap that looks like a sharpening and
+silently drops the `L` bound. It is the explicit-BK componentwise row of the catalog above.
+
+3. **The relaxed test: the Bunch-Parlett square.** Taking the `2 x 2` growth bound to be the square of
+the `1 x 1` bound, a weaker condition that admits `L` entries as large as `1/(2u^2)`, around `1e6` for
+the small `u` a sparse code uses. Liu's two-parameter Duff-Reid variant uses exactly this, and AGL call
+it in hindsight a mistake. The other *selection-test* trap, this one by relaxing rather than
+over-refining, the Liu two-parameter row of the catalog above.
+
+**Where Oblio stands: clear of 2 and 3, in 1 only, and only on the factor side.** Oblio runs the later
+Duff-Reid, AGL Figure 3.3 test, which is exactly the `L`-bounding test that pitfalls 2 and 3 trade
+away, so it is clear of both by construction: it is not the explicit-Bunch-Kaufman bound of 2, and not
+Liu's weaker bound of 3. It walks into pitfall 1 alone, and there only in the factor: `applyPivot2x2`
+forms the multipliers by Cramer, while the solve's `diagonalDynamic` already uses a pivoted LU. So the
+planned repair, LU everywhere with partial or complete pivoting, kept as selectable variants, closes
+the one pitfall Oblio is in and leaves the acceptance test where it already correctly sits.
+
+**One pitfall we walk into.** They note (their section 3.3, restated in 3.4) that the test bounds
+`|L|` but not the condition number of the `2 x 2` block, so the `2 x 2` systems must be solved by a
+normwise backward stable scheme, their own code by Gaussian elimination with complete pivoting, and
+they name Cramer's rule and explicit inversion as the trap.
+`applyPivot2x2` forms the multiplier columns as `(t1 * d22 - t2 * d21) / det`, which is exactly that
+explicit inverse. The `diagonalDynamic` solve (DESIGN_DECISIONS, 2026-07-24) carries a `2 x 2` with
+its own partial pivoting, so the solve side is already off this path; it is the factor's formation of
+`L` that remains on it. The acceptance test has bounded `|L21|` by `1/u` before we arrive here, so it
+is likely harmless in practice, but it is precisely the case they predict can lose accuracy, a
+`2 x 2` block that is ill-conditioned yet passed the magnitude test, and it is worth a measurement
+rather than an assumption.
+
+**The block solve, where symmetry is deliberately dropped.** The pitfall above is the factor's half of
+applying `D^-1`; the solve's half is its constructive counterpart, and it is where the symmetric
+discipline of the whole factorization is set aside on purpose. Once dynamic pivoting has chosen a
+`2 x 2` block, that block is a tiny dense object, and `diagonalDynamic` solves the `D z = y` step
+against it by an explicit LU with partial pivoting, the `abs(a11) >= abs(a21)` row swap and the small
+LU beneath it. It does not exploit the block's symmetry, and that is the point.
+
+The non-symmetric solve is not a liberty taken because it is cheap; for the blocks this factorization
+produces it is required. A diagonal entry becomes a `2 x 2` pivot precisely because it was too small or
+too zero to be a stable `1 x 1`, so the `2 x 2` blocks dynamic pivoting emits are exactly the ones with
+a problematic diagonal. The archetype is the exchange block `[[0, 1], [1, 0]]`: perfectly symmetric,
+and a symmetric solve would pivot on its zero diagonal and divide by zero. Partial pivoting swaps the
+nonzero off-diagonal into the pivot position and the divide is safe. Solving such a block
+"symmetrically" would reintroduce the division-by-zero that going to a `2 x 2` was meant to avoid, so
+the asymmetry is the safety, not a shortcut. (This is the zero-*diagonal* case, which partial pivoting
+handles cleanly; it is a separate matter from the zero-*determinant* block of 7.8, which pass 1 can
+construct and which no local solve method can rescue.)
+
+Why this is fully contained, and leaves the overall symmetry untouched, is worth stating exactly. The
+outer factorization `P A P^H = L D L^H` is fixed before the solve runs. The block step computes
+`z_k = D_k^-1 y_k`, and the mathematical value of `D_k^-1 y_k` does not depend on how `D_k` is
+factored; only its accuracy does. So symmetry is a property of the outer factorization, which nothing
+here touches, and the block solve is an inner dense problem where the method is a pure accuracy choice.
+This is the two independent layers of pivoting the design notes name (DESIGN_DECISIONS, 2026-07-24):
+the factor pivots symmetrically to *choose* the block, about growth and fill during elimination, and
+the solve pivots non-symmetrically to *invert* the frozen block, about the stable inversion of four
+fixed numbers, and neither layer knows the other exists. Both of the reasons symmetry is worth keeping
+at scale are absent at the block level: there is no sparsity in a `2 x 2` to preserve, and the
+arithmetic saving from symmetry on so small a block is nil, so the only property left to serve is
+stability, which is what favors dropping symmetry.
+
+This containment is also what makes larger pivots possible, which is where the `2 x 2` story
+generalizes. AGL's `s <= 5` blocks (their 3.6) work because each block is a self-contained dense solve,
+so the block may grow to any size the search can afford and the outer sparse-symmetric structure stays
+indifferent to it. They factor those larger blocks with a QR of the block and solve the `2 x 2` by
+Gaussian elimination with complete pivoting; both are non-symmetric stable dense factorizations, the
+same move. And it is their stated design principle: the acceptance test bounds `|L|` but not the
+condition number of the block (their 3.3), so the block must be solved by a normwise backward stable
+scheme, never Cramer's rule. Oblio's partial-pivoted LU is the `2 x 2` instance of that prescription.
+Oblio is `1 x 1` and `2 x 2` only today; `k x k` is AGL's extension and a future direction, but the
+containment described here is exactly why it would be a clean one.
+
+The two halves of `D^-1` are worth holding together. The same block inverse is applied in two phases
+and two ways: the solve applies it stably, by the partial-pivoted LU above, and the factor applies it
+by explicit inverse, `L21 = A21 D^-1` formed as `(t1*d22 - t2*d21)/det`, the Cramer's-rule pitfall of
+the block just above. Both are the same four numbers inverted; only the solve half currently inverts
+them stably. So "symmetry deliberately dropped, and done stably" describes the solve; the factor's
+formation of `L21` drops symmetry too, but by the method AGL warn against.
+
+**Provenance.** Unlike 7.5 through 7.7, which were written from the code with the source uncertain,
+this subsection is written from the paper itself, read in full. It closes the question 7.7 left open,
+and 7.7's "this is not Bunch-Kaufman" stands unchanged: what is added here is the positive
+identification of what the pivoting *is*, not a correction of what it is not.
+
+### 7.14 Multiple pivoting strategies, and the seam that makes them cheap
+
+Pivoting is the crux of dynamic LDL, and it is not one strategy but a family: 7.2, 7.3, 7.5, and 7.13
+each named a different rule for the same decision, and we want to be able to experiment with all of
+them. Oblio can hold more than one `factorDynamicSupernode`, each a different strategy, but the ease
+of that is real only for part of the family, and it is worth setting down which part, because that is
+what tells us where the cheap experiments are and where the expensive ones hide.
+
+**The seam.** The whole strategy lives at one point: given the current front state and the cursor `j`,
+decide the next accepted pivot, a column for a `1 x 1` or a pair for a `2 x 2`, or report none-found.
+Everything downstream of that decision is shared and does not vary between strategies: `applyPivot1x1`
+and `applyPivot2x2`, the swap, the rank-1 and rank-2 trailing updates, `readPivotBlock2x2`, the
+candidate-list rotation, the delay tail, and the height invariant `frontSize + delaySize + updateSize`
+of 7.6. A strategy is therefore a decision policy bolted into an otherwise fixed driver. That is what
+makes "more than one kernel" true, but only for the strategies that vary the predicate. Some vary the
+control flow instead, and those cost more. Four tiers, cheapest first.
+
+**Tier 0, swap the predicate, same driver.** Only the accept tests change, the `|d11| >= u * max1`
+and the `|det| >= u * maxmax` at the accept site. Every threshold-family variant is here, and these
+are a few lines each. The catalog below is the Tier-0 menu.
+
+**Tier 1, same elimination, different search order.** The candidate enumeration changes but the accept
+test and the elimination do not. AGL's exhaustive `2 x 2`-biased order (Figure 3.6, and 7.13) is the
+case: a window of the leading `m2x2` columns, each column maximum reused, all pairwise `2 x 2` blocks
+tried before any `1 x 1`.
+
+**Tier 2, different block size.** A new elimination path and a new numeric solve. AGL's larger blocks
+(their 3.6), `s <= 5`, a principal-minor descent to find an acceptable block, a QR of the block to
+apply it.
+
+**Tier 3, different shape entirely.** A posteriori pivoting: factor optimistically on the symbolic
+pivots, check the computed factor afterward, delay only what failed. This is Duff, Hogg and Lopez
+(2020, in the references), the one strategy we name that we have not yet opened.
+
+The Tier-0 menu, which is where the variety is and where each entry guarantees something different:
+
+```
++----------------------------+------------------------+----------------------+------------------------------------+
+| acceptance test            | what it guarantees     | source               | Oblio relation / note              |
++============================+========================+======================+====================================+
+| bounding-L threshold,      | bounds |L| by 1/u      | Duff-Reid late, AGL  | current Oblio (7.5, 7.7)           |
+| |det| >= u * maxmax        |                        | Fig 3.3              |                                    |
++----------------------------+------------------------+----------------------+------------------------------------+
+| Duff-Reid early, normwise  | bounds L, infinity     | AGL section 3.4      | AGL call it unnecessarily severe:  |
+|                            | norm                   |                      | rejects blocks the magnitude test  |
+|                            |                        |                      | accepts; a clean A/B against the   |
+|                            |                        |                      | current test                       |
++----------------------------+------------------------+----------------------+------------------------------------+
+| Liu sparse threshold       | does not bound L       | AGL Fig 3.1          | the ahat/tau four-case sparse BK   |
+| Bunch-Kaufman              |                        |                      | our comments wrongly claimed we    |
+|                            |                        |                      | ran; extra case 2, tau tied to     |
+|                            |                        |                      | ahat by a cubic                    |
++----------------------------+------------------------+----------------------+------------------------------------+
+| explicit-BK componentwise  | bounds growth, not L   | AGL 3.4, pitfall #2  | a named trap; worth having to show |
+|                            |                        |                      | the trap on our own matrices       |
++----------------------------+------------------------+----------------------+------------------------------------+
+| bounded BK / rook          | bounds L via a mutual  | AGL 2.4 (7.3)        | our m == max1 == max2 disjunct is  |
+|                            | local-max off-diagonal |                      | this, restricted to the front      |
++----------------------------+------------------------+----------------------+------------------------------------+
+| fast Bunch-Parlett         | bounds L via a mutual  | AGL 2.5              | dense cousin of rook; same front   |
+|                            | local-max off-diagonal |                      | difficulty in the sparse case      |
++----------------------------+------------------------+----------------------+------------------------------------+
+| Bunch-Parlett complete     | the strongest bound    | Bunch-Parlett 1971   | O(n^3) whole-submatrix search; an  |
+|                            |                        | (7.2)                | accuracy oracle, not a production  |
+|                            |                        |                      | path                               |
++----------------------------+------------------------+----------------------+------------------------------------+
+```
+
+Three axes are orthogonal to the choice of test and combine with any of them. **Root handling:** the
+current forced-last plus `max1 == max2` (7.7), the Figure 3.3 bounding test applied at the root as
+7.13 proposes, or a fixed-`alpha` Bunch-Kaufman at the root as the fixed-`alpha` proposal has it; this
+is the 7.8 territory. **The threshold value** `u` itself, the sweep 7.5 and 7.7 both call for,
+reporting delays, `2 x 2` counts, `nnz(L)`, and residual against `u`. **The `2 x 2` numeric solve,**
+Cramer's rule in `applyPivot2x2` against AGL's Gaussian elimination with complete pivoting against the
+partial-pivoted solve already in `diagonalDynamic` (7.13); this last is a correctness axis rather than
+a strategy, but it rides along with any `2 x 2` policy.
+
+Two cautions, so the seam is not oversold. The two-pass split on `updateSize` (7.7) is itself part of
+some strategies and absent from others, so it may have to move behind the seam rather than stay in the
+driver. And the accept tests currently read fields the driver computed, `max1`, `max2`, `m`, and the
+block from `readPivotBlock2x2`, so the seam is really "the driver hands the policy a small view of the
+front, and the policy returns a decision"; that view is worth defining once, so that every Tier-0
+variant shares it.
+
+**The cheapest first move that teaches the most** is a Tier-0 pair: keep the current bounding-L test
+as the baseline and stand up the Duff-Reid-early normwise test beside it. Both bound L and differ only
+in the norm, so any divergence in delays, `2 x 2` counts, `nnz(L)`, and residual is a pure measurement
+of componentwise against normwise with nothing else moving, and it forces the seam to be cut cleanly
+on an easy case before the harder tiers lean on it. The method is the one the ordering family used:
+prototype twins in an `experiments/pivoting` folder against the compiled 0.9 oracle, with whole-output
+comparison, before anything enters the main kernel.
+
+**This subsection is a plan, not a record of built code.** Nothing here is implemented yet; it is the
+map of what could be, written while the AGL reading of 7.13 is fresh, so the experiments can be picked
+up in any order later.
+
+### 7.15 Cramer's rule for the 2x2, and why it is the pitfall
+
+The pitfall block of 7.13 and the block-solve block both name Cramer's rule as the factor's unstable
+way of handling a `2 x 2` block, against the LU the solve uses. This subsection writes both out on one
+example, because seeing the arithmetic is what shows where the accuracy goes.
+
+Cramer's rule solves a linear system by writing each unknown as a ratio of determinants. For the
+`2 x 2` case, take
+
+```
+E z = y,   E = [ a  b ]   y = [ y1 ]   z = [ z1 ]
+               [ c  d ]       [ y2 ]       [ z2 ]
+```
+
+with `det(E) = a*d - b*c`. Cramer's rule gives
+
+```
+     y1*d - b*y2               a*y2 - c*y1
+z1 = -----------,       z2 = -----------
+      a*d - b*c                a*d - b*c
+```
+
+Each numerator is the determinant of `E` with the matching column overwritten by `y`: `z1`'s numerator
+is `E` with its first column replaced by `y`, and `z2`'s is `E` with its second.
+
+**The two solutions, on one example.** Take `E = [[2, 1], [1, 3]]` and `y = [5, 10]`. Both methods
+return `z = [1, 3]`; they differ only in what they divide by.
+
+Cramer, dividing by `det`:
+
+```
+det = 2*3 - 1*1 = 5
+z1 = (5*3 - 1*10)/5 = 5/5  = 1
+z2 = (2*10 - 1*5)/5 = 15/5 = 3
+```
+
+LU with partial pivoting, dividing by matrix entries:
+
+```
+Column 1: |2| >= |1|, so 2 is already the pivot, no row swap.
+
+Eliminate row 2:   l21 = 1/2 = 0.5          <- divide by a11 = 2
+   row2 - 0.5*row1:  a22 -> 3 - 0.5*1 = 2.5
+                     y2  -> 10 - 0.5*5 = 7.5
+
+(the a22 update is the factorization, the y2 update is the forward solve; they are
+ interleaved here, done in one pass over row 2)
+
+Now  [ 2   1 ] [z1]   [ 5  ]
+     [ 0  2.5] [z2] = [7.5]
+
+Back-substitute:
+   z2 = 7.5 / 2.5 = 3               <- divide by u22 = 2.5
+   z1 = (5 - 1*3) / 2 = 2/2 = 1     <- divide by a11 = 2
+
+btw, above we have the following LU factorization:
+
+E = L U:   [ 2  1 ]   [  1    0 ] [ 2   1  ]
+           [ 1  3 ] = [ 0.5   1 ] [ 0  2.5 ]
+```
+
+Cramer makes one division, by `det`. LU divides only by matrix entries, `2` and `2.5`, and partial
+pivoting arranges that the entry divided by is the larger of the column.
+
+**Cost: LU against the determinant way, and why it does not decide.** The `2 x 2` here is the small
+case of a `k x k` block (AGL's `k <= 5`, 7.13's block-solve block), and at block scale the two methods
+cost the same order, so cost is not what chooses between them. It helps to separate the two kinds of
+cost, arithmetic and search, because only one of them can differ in order and it is not the one the
+determinant way is blamed for.
+
+*Arithmetic.* Both are `O(k^3)` for the block, the same leading order. Solving `k x k` is about
+`k^3/3` either way: LU factors then substitutes, and the determinant way done sanely is that same
+elimination expressed as an explicit inverse, `O(k^3)` to build `E^-1` and `O(k^2)` per right-hand
+side to apply it. The difference is a constant factor, not an order. The one trap is Cramer taken
+*literally*, a fresh determinant per unknown by cofactor expansion, which is factorial and which
+nobody means: the real determinant way is elimination with a shared denominator, exactly the `2 x 2`
+code's one `det` and adjugate over it, and that is the same order as LU.
+
+*Search.* This is the only place a genuine order difference can enter, and it is LU's cost, not the
+determinant way's. Pivot selection adds comparisons: partial pivoting scans a column, `O(k)` per step
+and `O(k^2)` over the block; complete pivoting scans the whole trailing block, `O(k^2)` per step and
+`O(k^3)` over the block, the order of the arithmetic itself. So partial-pivot search is a lower order
+than the flops and disappears into the constant, while complete-pivot search is the same order as the
+flops, can roughly double the constant, and worse on real hardware breaks the blocking. The
+determinant way has no search at all, which is exactly why it is cheaper to write and why it was
+tempting.
+
+At these block sizes even the constant factor is beside the point. For `k = 2`, or AGL's `k <= 5`,
+`k^3` is a rounding error against the sparse factorization around it, so neither the flop constant nor
+the partial-pivot search term is measurable in the total. What separates the two methods is therefore
+not cost but stability: same order, same ballpark constant, and Cramer exposed on an ill-conditioned
+block where pivoted LU is not. The honest summary is that there is no order difference, a
+constant-factor arithmetic difference, and a search term that is sub-leading for partial pivoting and
+leading for complete, none of it large at `k <= 5`, which leaves stability as the only axis that
+actually decides.
+
+Two refinements bear on the sparse setting specifically. In the *solve* the block inverse is applied
+once per pivot block, to the right-hand side; in the *factor* it is applied to every trailing row, as
+`A21 E^-1`, so the apply cost there is `O(k^2)` times the number of update rows rather than `O(k^2)`
+once, though still sub-leading against the rank-`k` trailing update it feeds. And complete pivoting
+inside the block would buy the block a better growth bound, but the block is `k <= 5` and its
+acceptance test already bounds what matters, so it defends against almost nothing, the same
+museum-piece verdict as 7.10 at `k = 5` instead of `k = n`. Partial pivoting in the block is the right
+level of care; complete would be the same over-insurance, one level down.
+
+Why this is the pitfall. The `det` sits in every denominator, and it is computed as `a*d - b*c`, a
+subtraction of two products. When `a*d` and `b*c` are both large and nearly equal, that subtraction
+loses relative accuracy to cancellation, and nothing in the formula arrests it, unlike a pivoted LU,
+which reorders to divide by the larger entry. AGL's specific objection (their 3.3) is that the
+acceptance test bounds `|L|` but not the condition number of the block, so `E` is allowed to be
+ill-conditioned, and for an ill-conditioned block a normwise backward stable solve, their Gaussian
+elimination with complete pivoting, keeps the computed answer solving a nearby system, while Cramer's
+rule and explicit inversion carry no such guarantee. Concretely, a near-singular block
+`E = [[1, 1], [1, 1.0000001]]` has `det = 1e-7` formed by subtracting two numbers equal to seven or
+eight digits, so the denominator arrives with most of its significant figures already gone, and
+everything divided by it inherits that.
+
+**Which path each phase takes.** The solve is on the LU path: `diagonalDynamic` factors each `2 x 2` by
+the LU with partial pivoting above. The factor is on the Cramer path: when `applyPivot2x2` eliminates a
+trailing row against the pivot, it forms that row's two multipliers by the explicit-inverse formula
+`(t1*d22 - t2*d21)/det` and `(t2*d11 - t1*d12)/det`, with `t1, t2` the row's two entries in the pivot
+columns, dividing by `det`. That is Cramer row by row, so the factor is the half still on the pitfall
+while the solve is off it. One note on symbols, since it is easy to trip on: the `l21 = 0.5` in the LU
+above is the `(2,1)` entry inside the LU of the `2 x 2` block itself, a single number; the multipliers
+just named are entries of the *outer* factor `L` below the pivot, a different object at a different
+level, despite the shared digits.
+
+One distinction is worth keeping, because it separates this from the block solve of 7.13. The Cramer
+danger is a small `det`, not a zero diagonal. The exchange block `[[0, 1], [1, 0]]` has `det = -1`, so
+Cramer handles it cleanly, `z = [y2, y1]`; it is a *symmetric* solve that breaks there, dividing by the
+zero diagonal. The two failure modes are different: pivoted LU in the solve covers both, while the
+factor's Cramer form covers neither hard case by design, which is why it is the one still sitting on
+the pitfall.
 
 ## References
 
@@ -7116,7 +7834,9 @@ primary sources for each, in the order Section 5 builds them.
 - C. Ashcraft, R. G. Grimes, and J. G. Lewis, "Accurate symmetric indefinite linear equation
   solvers", *SIAM J. Matrix Anal. Appl.* 20(2):513-561, 1998. Why Bunch-Kaufman's unbounded `L`
   matters (7.3), bounded Bunch-Kaufman (rook pivoting), and delayed pivoting in a sparse
-  factorization, which is why dynamic LDL grows a front at runtime.
+  factorization, which is why dynamic LDL grows a front at runtime. It is also the source of Oblio's
+  own pivoting (7.13): their Figure 3.3 is the `2 x 2` acceptance test `factorDynamicSupernode`
+  evaluates, and their Figure 3.4 is its search procedure.
 - I. S. Duff and S. Pralet, "Strategies for scaling and pivoting for sparse symmetric indefinite
   problems", *SIAM J. Matrix Anal. Appl.* 27(2):313-340, 2005. The pivoting strategies MUMPS
   uses, and the scaling that precedes them.

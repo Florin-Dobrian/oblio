@@ -14,6 +14,60 @@ priority, but nothing here is scheduled.
 
 ## Robustness
 
+### The symmetric-maximum disjunct at non-roots admits an unbounded L: DONE, 2026-07-26
+
+`acceptPivot2x2` accepts a `2 x 2` on either of two clauses, and the first is not in AGL Figure 3.3:
+
+```
+return (frontGammaJ == gammaJ && frontGammaJ == gammaQ && frontGammaJ != 0)
+       || (std::abs(d.det) > 0 && std::abs(d.det) >= mPivotThreshold * maxmax);
+```
+
+The first clause is reaching for the Bunch-Parlett condition of AGL section 2.3, which has two
+conjuncts: the off-diagonal is a local maximum in both columns, *and* both diagonals are at most
+`alpha` times it. Only half the second conjunct is available where this clause sits. Reaching it
+means `|A(j,j)| < mPivotThreshold * gammaJ`, so the candidate's diagonal is small, but `A(q,q)` is
+never tested and nothing bounds it. The bound `|l| <= 1/(1-alpha)` does not survive that omission.
+
+This is the same defect that was fixed at roots on 2026-07-26. There the identical predicate is
+guarded by control flow rather than by a conjunct: the chase reaches its `2 x 2` only after the
+partner's own `1 x 1` test has failed in the branch immediately above, so both diagonals are known
+small and the bound holds. The non-root path reaches the same text with only half of it.
+
+Demonstrated at block level: with `d11 = 0`, `d22 = 1e6`, off-diagonal `1` and one update row
+holding `1` in the candidate column and `0` in the partner, all three maxima are `1`, so the clause
+fires; Figure 3.3's test computes `|det| = 1` against `0.1 * (1e6 + 1)` and rejects; the resulting
+factor entry is `-1e6` against a guarantee of `1/alpha = 10`.
+
+Reachable, and easily. Sweeping small banded matrices with zero diagonals and a wide magnitude
+spread hit the configuration on the first pass. The witness now in `test_pipeline` is six by six,
+with a zero diagonal beside one of 5.5e5: the clause fired once, at a non-root front, on a block the
+growth bound rejects, `L` took an entry of 1.98e5 and the residual came out at 1.17e-11 against a
+tolerance of 1e-12. With the clause gone the column is delayed instead, `max|L|` is 2.76 and the
+residual is 4.8e-16. The regression case fails against the pre-fix code on both the residual and the
+delay count.
+
+Worth recording as a lesson about sequencing rather than about pivoting. This was written first as a
+deferred item, on the grounds that the fix moved pivot counts and so wanted its own step and its own
+test, and that no matrix had yet been driven into the state. Both were true and neither was a reason
+to wait: needing a separate step is not the same as needing a later one, and the missing witness was
+unexplored rather than unknown, one sweep away. Deferring a known correctness fix converts it into
+documentation, which is worth strictly less than its absence. The entry took longer to write than
+the fix took to make.
+
+The fix was a deletion, not a repair. Adding the missing conjunct makes the clause redundant: under
+both diagonal conditions the worst case is `|det| >= m^2 (1 - alpha^2)` against
+`alpha * maxmax <= alpha * m^2 (1 + alpha)`, so the determinant test already accepts it whenever
+`1 - alpha >= alpha`, that is for any threshold at or below one half. Deleting the clause leaves
+Figure 3.3's fourth branch with nothing added. Verified analytically at the worst case and over
+400,000 random guarded blocks.
+
+What it cost. No pinned count in the suite moved at all, which is the redundancy claim confirmed
+empirically: the clause had never fired on any matrix the tests already contained. `frontGammaJ`
+survives, still read by `maxmax`, so no signature changed. And it unblocks the MA27 early-out in the
+entry on the acceptance test's cost, which was gated on exactly this clause, since `gammaQ` is now
+read only by the growth bound.
+
 ### Validate the input matrix
 
 Nothing checks that `A` is a well-formed input, and three distinct properties are assumed silently.
@@ -81,7 +135,7 @@ entry whose symmetry made it a no-op for every case the reference ever ran.
 Recorded as done rather than deleted, because it was the last and hardest traversal, the one where
 delayed columns meet the update stack, and 0.9 needed three attempts at its factor kernel before the
 live one settled. The port needed none of that drama: the multifrontal factor kernel turned out to be
-the same computation as our `factorDynamicSupernode`, reused unchanged. The driver is the left-looking
+the same computation as our dynamic pivot kernels, reused unchanged. The driver is the left-looking
 dynamic skeleton with the `std::vector<UpdateMatrix>` stack in place of the pull queue; assembling a
 child does both halves of the assembly (`assembleDelay` for its delayed columns, `assembleUpdateMatrix`
 for its contribution block), and the block is formed by the new `updateDynamicUpdateMatrix`
@@ -100,7 +154,7 @@ already instantiate for dynamic storage, so wiring this is likely a one-line dis
 test; the reason to leave it for now is that nothing needs a statically pivoted factor in
 delayed-column storage. Trigger: if a caller ever wants one factor object that can hold either.
 
-### Fixed-alpha Bunch-Kaufman at the roots (pass 1), replacing forced acceptance
+### Fixed-alpha Bunch-Kaufman at the roots, replacing forced acceptance: DONE, 2026-07-26
 
 A design change, not a port: neither 0.9 nor 10.12 does this, so it is a deliberate divergence to
 be built, not behavior to recover. This is the cheap, near-certain half of the root story; the
@@ -114,8 +168,10 @@ from the forced-accept / `max1 == max2` of today to BK's fixed constant `alpha`.
 two apart matters because the licensing argument here, delay is impossible so gentleness protects
 nothing, tightens the acceptance test and says nothing about widening the search.
 
-The setup. `factorDynamicSupernode` splits on `updateSize == 0` (pass 1) versus `> 0` (pass 2);
-see the head comment there and 7.7 of `sparse_factorization.md`. **`updateSize == 0` is exactly
+The setup, as it stood when this was written. `factorDynamicSupernode` split on `updateSize == 0`
+(pass 1) versus `> 0` (pass 2); it is now two functions, `factorDynamicRootSupernode` and
+`factorDynamicNonRootSupernode`, chosen by the caller on `parent[jj] == NIL`. See the head comment
+there and 7.7 of `sparse_factorization.md`. **`updateSize == 0` is exactly
 "this supernode is a root."** The update rows are the parent edges: `ElmForestEngine` accumulates
 `updateSize[r]` by walking the parent chain over the same nonzeros that set `parent[r]`, so a later
 column reaches into `r` if and only if `r` has update rows if and only if `r` has a parent. No
@@ -207,6 +263,48 @@ the place, with deliberately hard indefinite root blocks), and climb the ladder 
 stopping at rook unless forced higher. Recorded now so that when someone reads "BK or even BP at the
 roots" they see it is two proposals, one cheap and near-certain (acceptance), one expensive and
 conditional (search), and does not treat the second as licensed by the first's argument.
+
+### The 2x2 acceptance scans a column, so a refused sweep is quadratic
+
+Write `m` for `jjPreFactorFrontSize` and `h` for `jjNumNodeIdx`, the front's width and its block
+height. A single candidate in `factorDynamicNonRootSupernode` costs `O(h)` for its own `gammaJ`
+scan and
+another `O(h)` for the partner's `max2` scan inside the acceptance test, so one test is `O(h)` and a
+sweep in which every candidate is refused is `O(m h)`. AGL count the same thing in the same place,
+`2m - 1` candidates per failed sweep with every column maximum found at least once and used on
+average twice, the factor of two being the partner scan redoing what a candidate scan already did
+or will do.
+
+The yardstick that makes this tolerable is the elimination. One accepted `1 x 1` pivot updates
+`O(m h)` entries and there are `m` of them, so in the typical case, where the first candidate is
+accepted, the search is a factor of `m` cheaper than the arithmetic it precedes. In the worst case,
+where the acceptable pivot is always last in the queue, the search reaches `O(m^2 h)` and matches
+the arithmetic in order. Never dominant, then, but not negligible once delays are common, and `h`
+is the term that hurts, since a sparse front is usually far taller than it is wide.
+
+Two remedies, both real and both deferred. The first is to memoize `gamma` per sweep: nothing in the
+front changes during a sweep, because any acceptance breaks out of the inner loop immediately, so
+every column maximum computed during a sweep stays valid for the rest of it and a small map
+discarded on acceptance removes exactly the duplicate AGL describe. That is the factor of two, not
+an order. The second is the MA27 refinement of the paper's footnote 8: evaluate the `2 x 2` test
+first with `gamma(q) = 0` and compute the real `gamma(q)` only if that partial test passes. It is
+valid because the growth bound is nondecreasing in `gamma(q)`, so a failure at zero is a failure at
+any value, and it is the larger saving of the two, since it removes the partner scan entirely on
+most rejections rather than merely sharing it.
+
+Both were blocked by the symmetric-maximum disjunct, which read `max2` unconditionally. That clause
+was removed on 2026-07-26, so `gammaQ` is now read only by the growth bound and both remedies are
+available.
+
+Not to be conflated with Figure 3.6. The exhaustive search is a different claim: once the maxima are
+paid for, testing the remaining pairs costs `m(m-1)/2` extra scalar operations in total, so it buys
+more accepted pivots and less fill for almost no extra scanning. It does not make any individual
+test cheaper, and it is tracked separately.
+
+None of this belongs in the structural realignment of the pivot loop drafted in
+`archive/pivoting.md`, which is behavior-preserving on purpose: the pinned tier-1 delay and pivot
+counts are what verify the reshaping was faithful, and folding an optimization into the same change
+would spend that check.
 
 ### Multiple right-hand sides### Multiple right-hand sides
 
@@ -483,7 +581,8 @@ and never written afterwards: `mUpdateSize` is read-only throughout `NumFactorEn
 only lengthens the index array while the new entries become *front* columns, and `resetVal` sizes a
 block as `frontSize * (frontSize + updateSize)` with `updateSize` read. The invariant recorded
 elsewhere, that block height `frontSize + delaySize + updateSize` is preserved because
-`factorDynamicSupernode` decrements `frontSize` by exactly what it sets `delaySize` to, is the same
+`factorDynamicNonRootSupernode` decrements `frontSize` by exactly what it sets `delaySize` to, is
+the same
 fact seen from the other side. **Delayed columns move between `frontSize` and `delaySize` and never
 touch `updateSize`.**
 
@@ -873,7 +972,8 @@ be picked up cold. Both are refactors of working, tested code: 143 assertions co
 including tier 1 and tier 2 matrices that exercise both pivot selections and both traversals, so
 either can be done with a real safety net rather than by eye.
 
-Measured 2026-07-19, code lines with comments stripped: `factorDynamicSupernode` 230 against 0.9's
+Measured 2026-07-19, code lines with comments stripped: `factorDynamicSupernode`, since split in
+two, 230 against 0.9's
 313, `updateDynamicUpdateBlock` 49 against 61. The port is already about a quarter shorter than the
 reference, almost all of it from dropping the error-macro scaffolding and the raw-pointer preamble
 rather than from restructuring. What follows is the restructuring that has not been done.
@@ -928,7 +1028,7 @@ Lower risk and smaller than the pivot merge, and independent of it. Either can b
 
 ### The max1 == 0 swap branch: leave duplicated, do not extract
 
-`factorDynamicSupernode` has the same five-line `max1 == 0` branch in both pivot passes (mark pivot
+The two pivot kernels have the same five-line isolated-column branch (mark pivot
 found, `swap` if `j_ != k1_`, set `mPivotType` to 1, advance `j_`, break). It reads as a candidate
 for extraction alongside the front expansion, but it is not one, and this note records the decision
 so it is not re-proposed. The five lines are welded to two different scan structures: pass 1 does a
@@ -1169,7 +1269,7 @@ caller-side face of the same boundary.
 Background, not a defect. Pivoting is a property of the fully summed block, so it must be
 identical across left-looking, right-looking and multifrontal; a traversal is only a schedule for
 carrying updates, not a different factorization. The port enforces this by construction: all three
-dynamic drivers call the one `factorDynamicSupernode`, so they cannot pivot differently. That is
+dynamic drivers call the same pair of pivot kernels, so they cannot pivot differently. That is
 the intended end state and it is correct.
 
 But 0.9's three engines do *not* agree at the root, and the difference should be understood rather

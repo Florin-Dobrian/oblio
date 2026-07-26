@@ -139,8 +139,8 @@ parent as an update *as well as* handing them over as delays, and the parent wou
 them silently.
 
 **Where a delayed column gets its values.** `factorStaticSupernode` pivots every front column, so
-nothing is left behind. `factorDynamicSupernode` pivots only the columns it accepts, its *post-factor*
-front, but eliminating those pivots applies the Schur update across the whole trailing block, and the
+nothing is left behind. `factorDynamicNonRootSupernode` pivots only the columns it accepts, its
+*post-factor* front, but eliminating those pivots applies the Schur update across the whole trailing block, and the
 delay region sits in that block. So a delayed column is brought fully current during the factor call;
 it is simply not used as a pivot there. The update kernel never touches it: `updateDynamicUpdateBlock`
 reads only past `frontSize + delaySize`, so it carries the update area to ancestors and leaves the
@@ -520,7 +520,7 @@ a tie.
 **What the memory buys is where the arithmetic happens.** Multifrontal concentrates each supernode's
 numeric work into one dense, contiguous frontal matrix, and the split is visible in the code:
 `assembleUpdateMatrix` is the irregular part, the `gblToLcl` scatter, and it is cheap data movement;
-`factorDynamicSupernode` and `updateDynamicUpdateMatrix` are the expensive part, and they run as a
+the dynamic pivot kernels and `updateDynamicUpdateMatrix` are the expensive part, and they run as a
 dense factor, a triangular solve and a symmetric update over one column-major block, a large BLAS-3
 call apiece near peak flops. The index chasing sits *outside* the arithmetic, confined to assembly.
 The looking traversals invert this: `updateDynamicUpdateBlock` re-forms each descendant's contribution

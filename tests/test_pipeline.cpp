@@ -473,8 +473,61 @@ int main() {
                                   Traversal::LeftLooking);
 
         ck(o.solved && o.residual < tol, with("tier 1 band n=24  : residual", o.residual));
-        ck(o.ran && o.delayed == 3 && o.snodesDelaying == 3 && o.pivots2x2 == 3,
-           counts("tier 1 band n=24  : 3 delayed in 3 snodes, 3 2x2", o));
+        ck(o.ran && o.delayed == 3 && o.snodesDelaying == 3 && o.pivots2x2 == 4,
+           counts("tier 1 band n=24  : 3 delayed in 3 snodes, 4 2x2", o));
+    }
+    {
+        // Roots pivot by bounded Bunch-Kaufman, and this is the family that separates it from what
+        // 0.9 did there. The whole matrix is one root front. Column 0 has a zero diagonal, and its
+        // largest off-diagonal is mutually maximal with column 1's, so the old acceptance test,
+        // `max1 == max2` on the magnitudes alone, took a 2x2 whose partner diagonal is 1e6. The
+        // determinant is then tiny beside the entries that divide by it, and L picks up an entry of
+        // 1e6 against a matrix whose largest entry is 1e6 and whose smallest is 0.
+        //
+        // The chase cannot make that choice: it reaches a 2x2 only after both diagonals have failed
+        // their own tests, and 1e6 passes, so it is taken as a 1x1 instead. max|L| is 1e-6 rather
+        // than 1e6, and the residual moves from 1.45e-11 to 9.7e-17. The residual alone separates
+        // them at this tolerance, which is why no factor-norm plumbing is needed to pin it.
+        const SparseMatrix<double> A = toSparse({{0.0, 1.0, 1.0},
+                                                 {1.0, 1.0e6, 0.0},
+                                                 {1.0, 0.0, 0.0}});
+        const Outcome o = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+                                  Traversal::LeftLooking);
+
+        ck(o.solved && o.residual < tol,
+           with("root pivoting     : zero diagonal beside a huge one, residual", o.residual));
+        ck(o.ran && o.delayed == 0 && o.pivots1x1 == 1 && o.pivots2x2 == 1,
+           counts("root pivoting     : no delay at a root, 1 1x1 and 1 2x2", o));
+    }
+    {
+        // The non-root counterpart, and the reason the symmetric-maximum clause was deleted from
+        // acceptPivot2x2 rather than repaired. Found by sweeping small banded matrices with zero
+        // diagonals and a wide magnitude spread, which is what lets one diagonal be huge while its
+        // neighbour is zero. The clause fires exactly once here, at a non-root front, on a block
+        // the growth-bound test rejects: it took the 2x2, L picked up an entry of 1.98e5, and the
+        // residual came out at 1.17e-11. With the clause gone the column is delayed instead,
+        // max|L| is 2.76 and the residual is 4.8e-16.
+        //
+        // As with the root case the residual alone separates the two at this tolerance, so the
+        // assertion needs no factor-norm plumbing. The delay count is pinned as well, since that is
+        // where the refused block goes.
+        const double h = 547866.5096, a = -0.3620555447, b = 0.9559790324, c = 0.07699174341;
+        const double d = -0.8265131298, e = 0.05552958231, f = 0.7376029119;
+        const double g = -0.8681273111, p1 = -0.001664438805, p2 = -0.00933406837;
+        const double p3 = 0.002869110033;
+        const SparseMatrix<double> A = toSparse({{0.0, 1.0, a,   0.0, 0.0, 0.0},
+                                                 {1.0, h,   b,   c,   0.0, 0.0},
+                                                 {a,   b,   0.0, d,   1.0, 0.0},
+                                                 {0.0, c,   d,   p1,  e,   f  },
+                                                 {0.0, 0.0, 1.0, e,   p2,  g  },
+                                                 {0.0, 0.0, 0.0, f,   g,   p3 }});
+        const Outcome o = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+                                  Traversal::LeftLooking);
+
+        ck(o.solved && o.residual < tol,
+           with("non-root pivoting : zero diagonal beside a huge one, residual", o.residual));
+        ck(o.ran && o.delayed == 2 && o.pivots1x1 == 2 && o.pivots2x2 == 2,
+           counts("non-root pivoting : 2 delayed, 2 1x1 and 2 2x2", o));
     }
 
     // =============================================================================================

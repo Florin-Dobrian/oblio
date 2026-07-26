@@ -5992,8 +5992,8 @@ Every section so far has assumed the pivot sequence is settled before any value 
 earns that assumption, static LDL asserts it, and dynamic LDL gives it up. This section is about
 what the third one does instead: why a symmetric factorization cannot pivot the way LU does, what
 the dense theory offers, what a sparse solver has to give back, and what our
-`factorDynamicSupernode` actually implements, which is not quite what the literature it is usually
-named after describes.
+`factorDynamicNonRootSupernode` actually implements, which is not quite what the literature it
+is usually named after describes.
 
 The one idea under all of it is that symmetry is a stability constraint, and everything in this
 section is the response to it. Symmetry is a bargain: `A = L D L^H` factors and stores one triangle,
@@ -6329,7 +6329,8 @@ the update matrices of 6.1 are carrying around. Their values are partial sums. P
 mean dividing by a number that has not finished being computed, and the result would be wrong rather
 than merely inaccurate.
 
-So the candidate set is the front, not the trailing submatrix. In our pass 2 this is visible as one
+So the candidate set is the front, not the trailing submatrix. In our non-root kernel this is
+visible as one
 loop bound: the scan that chooses a `2 x 2` partner stops at the end of the front, while the scan
 that measures how large the pivot has to be runs the full column height, update rows included.
 **The test uses everything available, the choice uses only what is fully summed.** That asymmetry is
@@ -6446,30 +6447,49 @@ other end: a stricter threshold delays more columns, which grows fronts, which a
 
 ### 7.7 What Oblio does
 
-`factorDynamicSupernode` implements threshold pivoting in the sense of 7.5. It runs two passes,
-split on whether the supernode has update rows, which is to say on whether there is anywhere to
-delay a column to at all. Both hold a list of candidate front columns and rotate through it: a
-column that fails is moved to the back and the next is tried, with no elimination in between, so a
-later candidate sees exactly the values an earlier one saw. A round in which nothing is accepted
-ends the pass.
+**Rewritten 2026-07-26.** What follows describes the code as it now stands. Where later parts of
+Section 7 still discuss "pass 1" and "pass 2" of a single `factorDynamicSupernode`, they are
+describing the state before that date; the changes are listed at the end of this subsection.
 
-**Pass 1, the dense front.** `update(K)` is empty, so no ancestor is waiting and a column that
-cannot pivot has nowhere to go. The pass therefore accepts the last remaining candidate whatever it
-looks like. Its `2 x 2` acceptance is `max1 == max2`, the two candidates' largest off-diagonal
-magnitudes coinciding, decided on the magnitudes alone without ever reading the block's own values.
+Two kernels, `factorDynamicRootSupernode` and `factorDynamicNonRootSupernode`, chosen by the caller
+on `parent[jj] == NIL`. That predicate is the same fact as "the supernode has no update rows", read
+off the forest rather than off the storage, and it is the same split 0.9 made inside one function.
+What it distinguishes is whether there is anywhere to delay a column to at all, and the two kernels
+are now different algorithms rather than two settings of one.
 
-**Pass 2, the general case.** An ancestor exists, so nothing is forced. The `2 x 2` partner is
-chosen by a scan bounded at the front, per 7.4, and the block is accepted on the threshold test of
-7.5, with the symmetric-maximum case kept as a separate disjunct. Whatever a round does not accept
-is delayed.
+**Non-root, threshold pivoting.** An ancestor exists, so nothing is forced. It holds a list of
+candidate front columns and rotates through it: a column that fails is moved to the back and the
+next is tried, with no elimination in between, so a later candidate sees exactly the values an
+earlier one saw, and a round in which nothing is accepted ends the sweep and delays the remainder.
+The `2 x 2` partner is chosen by a scan bounded at the front, per 7.4, and the block is accepted on
+the threshold test of 7.5, which is AGL Figure 3.3's fourth branch and nothing else. The loop shape
+is AGL Figure 3.4.
+
+**Root, bounded Bunch-Kaufman.** `update(K)` is empty, so the front is dense and no ancestor is
+waiting. Rather than force an acceptance, this kernel runs the chase of AGL Figure 2.4: take the
+next unfactored column, follow its largest off-diagonal to the column holding it, and repeat until
+either a diagonal passes its own `1 x 1` test or the maximum becomes mutual, at which point the
+`2 x 2` is taken. There is no queue and no failing branch. The threshold here is the dense
+`alpha = (1 + sqrt(17)) / 8`, not the tunable `u`, since a root front is dense and stays dense under
+any symmetric permutation, so a stricter threshold costs comparisons and never fill.
 
 ```
-                    pass 1                        pass 2
-forced 1x1          yes, the last candidate       no
-2x2 partner         anywhere in the column        front columns only
-2x2 acceptance      max1 == max2                  |det| >= u * maxmax
-on failure          cannot happen                 delay to the parent
+                    root                          non-root
+algorithm           AGL Figure 2.4                AGL Figures 3.4 and 3.3
+forced 1x1          no                            no
+2x2 partner         the chase's mutual maximum    front columns only
+2x2 acceptance      max1 == max2, both diagonals  |det| >= u * maxmax
+                      already failed their tests
+on failure          cannot arise                  delay to the parent
+threshold           (1 + sqrt(17)) / 8, fixed     u, tunable
 ```
+
+**What changed on 2026-07-26, against what the rest of Section 7 describes.** The root kernel used
+to be a weakened copy of the non-root one: it forced the last remaining candidate as a `1 x 1`
+whatever it looked like, and accepted a `2 x 2` on `max1 == max2` alone, without reading the block's
+determinant. Both are gone. The non-root kernel used to accept a `2 x 2` on that same
+symmetric-maximum condition as an extra disjunct beside the threshold test; that clause is gone
+too, having admitted blocks whose factor entries are unbounded (see the end of 7.8).
 
 **This is not Bunch-Kaufman, and our own comments have said for some time that it is.** The `1 x 1`
 condition is Duff's rather than Bunch-Kaufman's case 1, differing in that `u` is tunable where
@@ -6541,7 +6561,8 @@ threshold code has to *test* for `2 x 2` safety, where BK gets it free from `alp
 **In Oblio the same question is open on both pivot sizes, because neither forcing path has the
 shape Bunch-Kaufman's argument needs.** Take the `1 x 1` first. Pass 2's acceptance tests are
 magnitude-against-threshold, `|d11| >= u * max1` and `|det| >= u * maxmax`, so by the Bunch-Kaufman
-argument above neither can accept a zero: whatever pass 2 admits is nonzero. That half transfers
+argument above neither can accept a zero: whatever the non-root kernel admits is nonzero. That half
+transfers
 cleanly. What does not transfer is the forcing path. Bunch-Kaufman's zero door is an empty column,
 `omega1 == 0`, and the singularity theorem rests on that predicate: empty column plus zero diagonal
 equals zero row of `A`. Pass 1's forcing path (7.7) is different. It forces on **threshold
@@ -6554,18 +6575,22 @@ obviously apply to this one.
 The `2 x 2` is where Oblio departs from Bunch-Kaufman, and not in its favor. A zero column never
 reaches a `2 x 2`: the `max1 == 0` guard in both passes routes an empty column to a `1 x 1` before
 any partner is considered, so a formed block always has nonzero off-diagonals and its `a11` (the
-larger first-column entry, after the row swap) is nonzero. So far so safe. But pass 1 accepts a
+larger first-column entry, after the row swap) is nonzero. So far so safe. But the root kernel used
+to accept a
 `2 x 2` on `max1 == max2`, the off-diagonal magnitudes alone, **without reading the block's
-determinant** (7.7). This is precisely the guarantee BK case 4 has and pass 1 lacks: BK tests the
+determinant** (7.7). This was precisely the guarantee BK case 4 has and that root acceptance
+lacked: BK tests the
 *diagonals* against the off-diagonal, which forces `det < 0`, while `max1 == max2` compares the two
 columns' off-diagonal maxima and says nothing about the diagonals, hence nothing about the
 determinant. So a singular block with equal off-diagonals, `[[d, d], [d, d]]` with `d` nonzero,
-passes pass 1's test, is formed, and reaches the diagonal solve where `u22 = det / a11 = 0` and the
-block solve divides by zero. What BK structurally excludes, pass 1 can construct. Pass 2 does not
+passed that test, was formed, and reached the diagonal solve where `u22 = det / a11 = 0` and the
+block solve divided by zero. What BK structurally excludes, that acceptance could construct. The
+non-root kernel does not
 have the problem, because its `2 x 2` acceptance is the determinant test `|det| >= u * maxmax`,
 which bounds `det` away from zero exactly as BK's `alpha` does, only by an explicit test rather than
 a fixed constant. So the three routes to `2 x 2` safety line up: BK case 4 forces it with a
-constant, Oblio pass 2 forces it with a threshold, and Oblio pass 1 does neither. Pass 1 is the one
+constant, Oblio's non-root kernel forces it with a threshold, and Oblio's old root pass did
+neither. That root pass was the one
 that runs at a dense root, which is exactly where singularity concentrates.
 
 So the honest state is a conjecture with one part proved and two parts open, one per pivot size:
@@ -6585,27 +6610,32 @@ So the honest state is a conjecture with one part proved and two parts open, one
   belief embedded in code, not a theorem, but it is the same claim this bullet conjectures, held by
   the person who wrote the algorithm. (The port had dropped this counter and now restores it; see
   the ledger.)
-- **Open, `2 x 2`.** A pass-1 `2 x 2` accepted on `max1 == max2` can in principle have a zero
-  determinant (the `[[d, d], [d, d]]` shape), which divides by zero in the solve. Whether this is
-  reachable by any real matrix is unverified: `d == d` exactly is measure-zero in floating point, so
-  a random matrix will not produce it, but a structured one (a repeated KKT block, an assembled
-  duplicate) might. If it is reachable, the fix is a determinant test on pass 1's `2 x 2` in the
-  factor kernel, matching pass 2's, not a guard in the solve.
+- **Closed, `2 x 2`, on 2026-07-26.** This asked whether a root `2 x 2` accepted on `max1 == max2`
+  could have a zero determinant, the `[[d, d], [d, d]]` shape, and divide by zero in the solve. The
+  question no longer arises. The root kernel is now the chase of AGL Figure 2.4, which reaches its
+  `2 x 2` only after both diagonals have failed their own `1 x 1` tests, so with the shared
+  off-diagonal magnitude `m` it holds that `|det| > m^2 (1 - alpha^2)`, bounded away from zero by
+  construction. The `[[d, d], [d, d]]` block fails the first diagonal test and is never offered.
 
-Two ways to settle the conjecture, cheapest first. **Measure it.** Build singular indefinite
-matrices with a known null vector, factor them dynamically, and check whether a forced pass-1
-acceptance with a zero (or near-zero) diagonal occurs, and occurs only there. Then the half that
+The `1 x 1` conjecture above is likewise narrower than it was. Since 2026-07-26 there is no forced
+acceptance at a root at all, so the only path to a zero `1 x 1` is the isolated-column branch, a
+column whose off-diagonals are all zero, which is a zero row of the permuted matrix and therefore
+singular outright. That is the same predicate dense Bunch-Kaufman forces on, so the gap the
+conjecture was reaching across has closed and the reading is no longer conjectural for roots. It
+remains open for a delayed column that arrives at a root and is accepted there by the ordinary
+tests.
+
+Two ways to settle what remains, cheapest first. **Measure it.** Build singular indefinite
+matrices with a known null vector, factor them dynamically, and check whether an isolated-column
+acceptance with a zero diagonal occurs, and occurs only there. Then the half that
 actually matters for the claim: factor a batch of nonsingular indefinite matrices, including ones
 constructed to delay heavily, and confirm that no zero pivot ever appears. The second batch is the
 empirical stand-in for the theorem, and it is the natural shape of an `experiments/pivoting` study
 or a targeted case in the numeric-factorization suite with matrices built to force delay to a root.
-The
-`2 x 2` question wants its own probe in the same study: a matrix engineered to present pass 1 with a
-`max1 == max2`, zero-determinant block, to find whether the accept path can be driven there at all.
-**Or prove it.** Show that at a root, with no update rows, every candidate failing the threshold
-against the fully summed block implies that block is singular, and that the forced acceptance lands
-a zero on the diagonal exactly when the root block is rank deficient. That is a small theorem about
-pass 1 specifically, not a transcription of Bunch-Kaufman, and it belongs here once it is shown.
+**Or prove it.** Show that at a root, with no update rows, a column whose off-diagonals all vanish
+and whose diagonal vanishes occurs exactly when the root block is rank deficient. That is now a
+small theorem about the isolated-column branch rather than about forced acceptance, the latter
+having been removed.
 
 One caveat runs under all of the above, and it is the same one that ends 7.5. This is exact
 arithmetic. In floating point an exact zero almost never appears; a nearly singular `A` produces a
@@ -6982,8 +7012,9 @@ Duff-Reid in general. But the "subject to verification" that phrase invites hide
 verifications, and only one of them is done.
 
 The read-level check, does the code realize the later Duff-Reid test, is essentially complete:
-`factorDynamicSupernode`'s `2 x 2` test is term-for-term AGL Figure 3.3, which AGL themselves identify
-as the later Duff-Reid test, and its search is Figure 3.4, which they call a refinement of MA27's. That
+`factorDynamicNonRootSupernode`'s `2 x 2` test is term-for-term AGL Figure 3.3, which AGL themselves
+identify as the later Duff-Reid test, and its search is Figure 3.4, which they call a refinement of
+MA27's. That
 is the match 7.13 establishes by reading. The run-level check, does Oblio's *output* agree with an
 actual Duff-Reid code such as MA27 or MA57, is not done, and it is confounded, so it would not be a
 clean check even if run: before any two outputs could agree, three things would have to be matched
@@ -6993,7 +7024,8 @@ everything downstream), and the root handling. Oblio *is* verified numerically, 
 oracle at a residual near `3e-16`, not against the HSL codes.
 
 Three departures keep Oblio from being identical even to MA27 and MA57, and naming them keeps the
-resemblance honest. The root handling is the one real algorithmic departure: pass 1's forced-last
+resemblance honest. The root handling was the one real algorithmic departure, until 2026-07-26: its
+forced-last
 `1 x 1` and its `max1 == max2` `2 x 2` accepted without a determinant test are weaker than the bounding
 test Duff-Reid and AGL would apply, and they are the subject of 7.8 and 7.13's pass-1 block. The `0.1`
 threshold default against `0.01` is the same algorithm at a different operating point, so it delays more
@@ -7016,7 +7048,7 @@ which is a separate and confounded experiment.
 
 ### 7.13 Ashcraft, Grimes, and Lewis, and the source of Oblio's pivoting
 
-7.7 recorded what `factorDynamicSupernode` does and left its provenance open, placing it only in
+7.7 recorded what the dynamic kernels do and left their provenance open, placing it only in
 "the Duff-Reid family" without a specific source. The source is the paper of Cleve Ashcraft, Roger
 Grimes, and John Lewis (1998), and the match is close enough to settle the question outright: one of
 the two tests our kernel runs is identical to theirs, term for term. This subsection records the
@@ -7225,9 +7257,9 @@ Figure 3.3 checks three candidates for the column, the current `1 x 1`, the part
 columns are eligible under both; what differs is the order and the timing in which pivots are
 accepted, not which columns can be. Figure 3.4 also wraps this body in the queue and the two-level
 loop, machinery Figure 3.3 has none of.
-
-**Of the two figures, Oblio takes 3.4's shape and 3.3's test.** `factorDynamicSupernode` is 3.4's
-search machinery, the queue, the rotation, and the delay, with 3.3's concrete `2 x 2` inequality
+**Of the two figures, Oblio takes 3.4's shape and 3.3's test.** `factorDynamicNonRootSupernode` is
+3.4's search machinery, the queue, the rotation, and the delay, with 3.3's concrete `2 x 2`
+inequality
 dropped into 3.4's abstract slot, and it follows 3.4's leaner per-column body: one current-column
 `1 x 1`, with the partner `1 x 1` reached by rotation rather than tested inline, not 3.3's double
 `1 x 1`. The symmetric-maximum fast-accept it adds on top is the bounded-Bunch-Kaufman idea of 2.4
@@ -7302,10 +7334,9 @@ given up for a reason the paper does not state, is the thing still worth zooming
 
 ```
 +------------------------------------+--------------------------------------------+----------------------------+
-| Oblio, factorDynamicSupernode      | Ashcraft, Grimes, Lewis (1998)             | relationship               |
+| Oblio, non-root kernel             | Ashcraft, Grimes, Lewis (1998)             | relationship               |
 +====================================+============================================+============================+
-| pass-2 2x2 test |det| >= u *       | Figure 3.3, the explicit-bounding test     | term-for-term identical    |
-| maxmax                             |                                            |                            |
+| the 2x2 test |det| >= u * maxmax   | Figure 3.3, the explicit-bounding test     | term-for-term identical    |
 +------------------------------------+--------------------------------------------+----------------------------+
 | candidate list: pop the front,     | Figure 3.4, "standard ordering" (their     | same                       |
 | test the current column's 1x1 then | refinement of MA27's search)               |                            |
@@ -7355,7 +7386,8 @@ the core, the bounding-`L` test and the MA27-refined search, and neither extensi
 wants more `2 x 2` pivots for kernel speed, Figure 3.6 is the recipe, and it changes only the search
 order, not the acceptance test.
 
-**Where pass 1 departs from them.** Their framework assumes a refused column can be postponed into
+**Where the old root pass departed from them.** Their framework assumes a refused column can be
+postponed into
 `A22`. At a root there is no `A22`, and they prescribe no forced acceptance there: an unfactorable
 final front is singularity, the reading 7.8 reaches from the other side. Pass 1's `max1 == max2`-only
 `2 x 2` and its forced last `1 x 1` are our own root handling, and they are strictly weaker than the
@@ -7421,7 +7453,8 @@ and a symmetric solve would pivot on its zero diagonal and divide by zero. Parti
 nonzero off-diagonal into the pivot position and the divide is safe. Solving such a block
 "symmetrically" would reintroduce the division-by-zero that going to a `2 x 2` was meant to avoid, so
 the asymmetry is the safety, not a shortcut. (This is the zero-*diagonal* case, which partial pivoting
-handles cleanly; it is a separate matter from the zero-*determinant* block of 7.8, which pass 1 can
+handles cleanly; it is a separate matter from the zero-*determinant* block of 7.8, which the old
+root pass could
 construct and which no local solve method can rescue.)
 
 Why this is fully contained, and leaves the overall symmetry untouched, is worth stating exactly. The
@@ -7464,7 +7497,7 @@ identification of what the pivoting *is*, not a correction of what it is not.
 
 Pivoting is the crux of dynamic LDL, and it is not one strategy but a family: 7.2, 7.3, 7.5, and 7.13
 each named a different rule for the same decision, and we want to be able to experiment with all of
-them. Oblio can hold more than one `factorDynamicSupernode`, each a different strategy, but the ease
+them. Oblio can hold more than one acceptance test, each a different strategy, but the ease
 of that is real only for part of the family, and it is worth setting down which part, because that is
 what tells us where the cheap experiments are and where the expensive ones hide.
 
@@ -7835,7 +7868,7 @@ primary sources for each, in the order Section 5 builds them.
   solvers", *SIAM J. Matrix Anal. Appl.* 20(2):513-561, 1998. Why Bunch-Kaufman's unbounded `L`
   matters (7.3), bounded Bunch-Kaufman (rook pivoting), and delayed pivoting in a sparse
   factorization, which is why dynamic LDL grows a front at runtime. It is also the source of Oblio's
-  own pivoting (7.13): their Figure 3.3 is the `2 x 2` acceptance test `factorDynamicSupernode`
+  own pivoting (7.13): their Figure 3.3 is the `2 x 2` acceptance test the non-root kernel
   evaluates, and their Figure 3.4 is its search procedure.
 - I. S. Duff and S. Pralet, "Strategies for scaling and pivoting for sparse symmetric indefinite
   problems", *SIAM J. Matrix Anal. Appl.* 27(2):313-340, 2005. The pivoting strategies MUMPS

@@ -190,17 +190,17 @@ private:
                                Val(0));
         const std::vector<Val>& old = mVal[jj];
 
-        for (std::int32_t j_ = 0; j_ < oldFront; ++j_)
-            for (std::int32_t i_ = j_; i_ < oldRows; ++i_)
-                expanded[static_cast<std::size_t>(j_ + nInt) * static_cast<std::size_t>(newRows)
-                      + static_cast<std::size_t>(i_ + nInt)]
-                    = old[static_cast<std::size_t>(j_) * static_cast<std::size_t>(oldRows)
-                          + static_cast<std::size_t>(i_)];
+        for (std::int32_t j = 0; j < oldFront; ++j)
+            for (std::int32_t i = j; i < oldRows; ++i)
+                expanded[static_cast<std::size_t>(j + nInt) * static_cast<std::size_t>(newRows)
+                      + static_cast<std::size_t>(i + nInt)]
+                    = old[static_cast<std::size_t>(j) * static_cast<std::size_t>(oldRows)
+                          + static_cast<std::size_t>(i)];
 
         mVal[jj] = std::move(expanded);
     }
 
-    // Swap columns j_ and k_ of supernode jj, symmetrically. The block is a symmetric matrix stored
+    // Swap columns j and k of supernode jj, symmetrically. The block is a symmetric matrix stored
     // column-major with leading dimension the index size, so exchanging two pivot columns exchanges
     // the matching rows too. Also swaps the two node indices and repairs the global-to-local map.
     // Ported from 0.9 swap_.
@@ -211,9 +211,9 @@ private:
     // other two loops move entries between columns or between rows without crossing, and the
     // diagonal entries are real, so this is the only place it arises. For `double` conj is the
     // identity and all three loops are plain swaps again.
-    void swap(std::int32_t jj, std::int32_t j_, std::int32_t k_, std::vector<std::int32_t>& gblToLcl) {
-        if (k_ < j_)
-            std::swap(j_, k_);
+    void swap(std::int32_t jj, std::int32_t j, std::int32_t k, std::vector<std::int32_t>& gblToLcl) {
+        if (k < j)
+            std::swap(j, k);
 
         const bool withHermitian = hermitian(mFactorization);
 
@@ -226,20 +226,20 @@ private:
             return static_cast<std::size_t>(c) * static_cast<std::size_t>(ld) + static_cast<std::size_t>(r);
         };
 
-        for (std::int32_t i_ = 0; i_ < j_; ++i_)            // rows j_ and k_, in the columns left of j_
-            std::swap(block[at(j_, i_)], block[at(k_, i_)]);
+        for (std::int32_t i = 0; i < j; ++i)                // rows j and k, in the columns left of j
+            std::swap(block[at(j, i)], block[at(k, i)]);
 
-        for (std::int32_t i_ = j_ + 1; i_ < k_; ++i_) {     // column j_ against row k_, between j_ and k_
-            const Val a = block[at(i_, j_)];                // A(i, j)
-            const Val b = block[at(k_, i_)];                // A(k, i)
-            block[at(i_, j_)] = maybeConjugate(b, withHermitian);   // becomes A(i, k)
-            block[at(k_, i_)] = maybeConjugate(a, withHermitian);   // becomes A(j, i)
+        for (std::int32_t i = j + 1; i < k; ++i) {          // column j against row k, between j and k
+            const Val a = block[at(i, j)];                  // A(i, j)
+            const Val b = block[at(k, i)];                  // A(k, i)
+            block[at(i, j)] = maybeConjugate(b, withHermitian);     // becomes A(i, k)
+            block[at(k, i)] = maybeConjugate(a, withHermitian);     // becomes A(j, i)
         }
 
-        for (std::int32_t i_ = k_ + 1; i_ < ld; ++i_)       // columns j_ and k_, in the rows below k_
-            std::swap(block[at(i_, j_)], block[at(i_, k_)]);
+        for (std::int32_t i = k + 1; i < ld; ++i)           // columns j and k, in the rows below k
+            std::swap(block[at(i, j)], block[at(i, k)]);
 
-        std::swap(block[at(j_, j_)], block[at(k_, k_)]);    // the two diagonal entries
+        std::swap(block[at(j, j)], block[at(k, k)]);        // the two diagonal entries
 
         // **The entry between the two swapped positions is its own reflection**, and so is touched
         // by none of the loops above: under the permutation A(k, j) becomes A(j, k), which is the
@@ -247,11 +247,11 @@ private:
         // which is why 0.9 leaves it alone. For a Hermitian one they are conjugates, so it has to
         // be conjugated in place. Leaving it out produces a factor that reconstructs the conjugate
         // of the matrix in the affected rows, with no other symptom.
-        block[at(k_, j_)] = maybeConjugate(block[at(k_, j_)], withHermitian);
+        block[at(k, j)] = maybeConjugate(block[at(k, j)], withHermitian);
 
-        std::swap(idx[j_], idx[k_]);                        // the node indices and the global-to-local map
-        gblToLcl[idx[j_]] = j_;
-        gblToLcl[idx[k_]] = k_;
+        std::swap(idx[j], idx[k]);                          // the node indices and the global-to-local map
+        gblToLcl[idx[j]] = j;
+        gblToLcl[idx[k]] = k;
     }
 
     // Drop the n delayed columns from supernode jj's block, reclaiming their column storage. Called

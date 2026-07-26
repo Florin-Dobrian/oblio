@@ -3,6 +3,13 @@
 2026-07-18. Written at the end of the slice 1 session, so the next session can start
 without re-deriving the model. Slice 1 is committed and green (119/119).
 
+**Historical, and left as written.** On 2026-07-26 `factorDynamicSupernode` was split into
+`factorDynamicRootSupernode` and `factorDynamicNonRootSupernode`, chosen by the caller on
+`parent[jj] == NIL`, and the root one was rewritten to bounded Bunch-Kaufman. The name used
+throughout below is therefore the one the code carried at the time, and statements about the two
+passes describe a single function that no longer exists. `archive/pivoting.md` has the current
+shape.
+
 ## Where we are
 
 Slice 1 ported the pivot core in isolation: `factorDynamicSupernode` (0.9's `updateSize == 0`

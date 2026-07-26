@@ -71,7 +71,8 @@ its children's delayed columns with `expandNodeIdx` + `resetVal`, assemble A pas
 may delay again) with the stack in place of the pull queue: assembling a child does both halves of the
 assembly, its delayed columns become front columns (`assembleDelay`) and its contribution block
 adds in (`assembleUpdateMatrix`), then it is contracted (`contractVal`) and freed. The factor reuses
-`factorDynamicSupernode` unchanged, since the block layout at factor time matches left/right-looking,
+the two dynamic pivot kernels unchanged, since the block layout at factor time matches
+left/right-looking,
 and the contribution block is formed by the new `updateDynamicUpdateMatrix` (`formDynamicUpper` +
 `gemmLower`, block-diagonal D). Verified by residual at all three tiers, real and complex, symmetric
 and Hermitian; tier 1 matches left-looking's delay and pivot counts exactly, heavier tiers match to
@@ -148,7 +149,7 @@ obviated by lambdas).
   perturbation, which is the honest statement of what perturbing means: we factored a slightly
   different matrix and said so. What has changed is that the matrix no longer has to be invented.
 
-- **The two pivot bodies in `factorDynamicSupernode` were duplicated, and the debt is now paid.**
+- **The two pivot bodies in the dynamic kernel were duplicated, and the debt is now paid.**
   0.9 splits `factorDynamicLDL_` on whether the supernode has update rows and writes both bodies
   out; the port followed it, deliberately, because those lines were 0.9's and merging them before
   they had ever run would have put their first execution in a shape the oracle never had.

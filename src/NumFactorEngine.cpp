@@ -10,7 +10,7 @@ namespace Oblio {
 
 namespace {
 
-// The 2x2 pivot val D, read out of a front at local columns k1_ and k2_.
+// The 2x2 pivot val D, read out of a front at local columns k1 and k2.
 //
 // **This is the one place the symmetry of D is decided, and that is the point of it existing.**
 // `d12 = d21` is the symmetric statement, and it is what `LDL^T` means over the reals and over the
@@ -23,27 +23,69 @@ struct PivotBlock2x2 {
     Val det;
 };
 
+// The dense pivot threshold, (1 + sqrt(17)) / 8, from AGL section 2.1, where it is chosen to
+// equalize the worst-case growth of one 2x2 step with that of two consecutive 1x1 steps. Unlike
+// mPivotThreshold it is a constant and not a setting, because the trade a setting would express
+// does not exist at a root: the front is dense, stays dense under any symmetric permutation, and no
+// column can be delayed, so a larger threshold costs comparisons and never fill.
+constexpr double alphaRoot = 0.64038820320220757;
+
+// One column's two maxima and the partner they select. `gamma` is the candidate column's largest
+// off-diagonal magnitude over the full block height, update rows included, which is what bounds the
+// entries of L. `frontGamma` is the same maximum stopped at the end of the front, and `q` is where
+// it sits, so a 2x2 partner is always a column this front can eliminate. `q` is NIL when the front
+// holds no partner at all, which happens only for the last unfactored column.
+struct PivotColumnScan {
+    double       gamma;
+    double       frontGamma;
+    std::int32_t q;
+};
+
+// The scan behind those three, in one pass over the column. `frontGamma` is a prefix of `gamma`, so
+// the third loop continues from it rather than starting over, and the same loop simply stops
+// tracking `q`: that omission is the whole of the rule that a partner must be a front column.
+template<class Val>
+PivotColumnScan scanPivotColumn(const Val* val, std::ptrdiff_t ld, std::int32_t nextPivot,
+                                std::int32_t j, std::int32_t frontSize, std::int32_t numNodeIdx) {
+    const auto at = [ld](std::int32_t r, std::int32_t c) {
+        return static_cast<std::ptrdiff_t>(c) * ld + static_cast<std::ptrdiff_t>(r);
+    };
+
+    PivotColumnScan s{-1, -1, NIL};
+
+    for (std::int32_t i = nextPivot; i < j; ++i)            // j's row, to the left
+        if (s.frontGamma < std::abs(val[at(j, i)])) { s.q = i; s.frontGamma = std::abs(val[at(j, i)]); }
+    for (std::int32_t i = j + 1; i < frontSize; ++i)        // its column, front part
+        if (s.frontGamma < std::abs(val[at(i, j)])) { s.q = i; s.frontGamma = std::abs(val[at(i, j)]); }
+
+    s.gamma = s.frontGamma;
+    for (std::int32_t i = frontSize; i < numNodeIdx; ++i)   // its column, update rows
+        if (s.gamma < std::abs(val[at(i, j)])) s.gamma = std::abs(val[at(i, j)]);
+
+    return s;
+}
+
 template<class Val>
 PivotBlock2x2<Val> readPivotBlock2x2(const Val* val, std::ptrdiff_t ld,
-                                     std::int32_t k1_, std::int32_t k2_, bool withHermitian) {
+                                     std::int32_t k1, std::int32_t k2, bool withHermitian) {
     const auto at = [ld](std::int32_t r, std::int32_t c) {
         return static_cast<std::ptrdiff_t>(c) * ld + static_cast<std::ptrdiff_t>(r);
     };
 
     PivotBlock2x2<Val> d;
-    d.d11 = forceReal(val[at(k1_, k1_)], withHermitian);
-    d.d22 = forceReal(val[at(k2_, k2_)], withHermitian);
+    d.d11 = forceReal(val[at(k1, k1)], withHermitian);
+    d.d22 = forceReal(val[at(k2, k2)], withHermitian);
 
     // Only the lower triangle is occupied before the front is factored, so exactly one of the two
     // off-diagonal positions is stored, and **which one it is depends on the order of k1 and k2**.
     // That distinction is invisible in the symmetric case, where the two are equal, and matters
     // here: the stored entry is d21 when k2 sits below k1 and d12 when it sits above, and the other
     // is its conjugate.
-    if (k2_ > k1_) {
-        d.d21 = val[at(k2_, k1_)];
+    if (k2 > k1) {
+        d.d21 = val[at(k2, k1)];
         d.d12 = maybeConjugate(d.d21, withHermitian);
     } else {
-        d.d12 = val[at(k1_, k2_)];
+        d.d12 = val[at(k1, k2)];
         d.d21 = maybeConjugate(d.d12, withHermitian);
     }
 
@@ -736,13 +778,61 @@ bool NumFactorEngine::factorStaticMultifrontal(const SparseMatrix<Val>& A, const
 // ability to see what each pass actually does.
 // =================================================================================================
 
+// The 2x2 acceptance test: AGL Figure 3.3's fourth branch, restated with the candidate as j and its
+// partner as q. That restatement is the paper's own; Figure 3.6 carries the same test with generic
+// indices when it embeds it in a search.
+//
+// Read-only by construction: judging a block and eliminating it are different jobs, so this takes
+// the factor by const reference where applyPivot2x2 takes it by non-const.
+//
+// 0.9 also accepted on a symmetric-maximum clause, `max == max1 && max == max2 && max != 0`, which
+// is not in Figure 3.3 and was removed on 2026-07-26. It reached for the Bunch-Parlett condition of
+// AGL section 2.3, which needs the off-diagonal to be a local maximum in both columns *and* both
+// diagonals to be at most alpha times it. Only the candidate's diagonal is known small here, from
+// the 1x1 test that failed to get us this far; the partner's was never tested, and without it the
+// bound on L does not hold. Adding the missing conjunct would have made the clause redundant rather
+// than correct, since under both conditions the determinant test below already accepts the block
+// for any threshold at or below one half, so the clause was deleted rather than repaired. The root
+// kernel keeps the same predicate, where the chase supplies the missing conjunct by control flow.
 template<class Val>
-void NumFactorEngine::applyPivot1x1(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j_,
-                                    std::int32_t k1_, std::int32_t k1, std::int32_t jjFrontSize,
-                                    std::int32_t rows,
+bool NumFactorEngine::acceptPivot2x2(const NumFactorDynamic<Val>& nf, std::int32_t jj,
+                                     std::int32_t nextPivot, std::int32_t j, std::int32_t q,
+                                     double gammaJ, double frontGammaJ) const {
+    const std::size_t    jjPreFactorFrontSize = nf.mFrontSize[jj];
+    const std::size_t    jjNumNodeIdx         = jjPreFactorFrontSize + nf.mUpdateSize[jj];
+    const Val*           jjVal                = nf.val(jj);
+    const std::ptrdiff_t ld                   = static_cast<std::ptrdiff_t>(jjNumNodeIdx);
+
+    const auto at = [ld](std::int32_t r, std::int32_t c) {
+        return static_cast<std::ptrdiff_t>(c) * ld + static_cast<std::ptrdiff_t>(r);
+    };
+
+    // The partner column's largest off-diagonal magnitude, over the full block height. Read here
+    // rather than in the caller because this test is the only thing that wants it.
+    double gammaQ = -1;
+    for (std::int32_t i = nextPivot; i < q; ++i)
+        if (gammaQ < std::abs(jjVal[at(q, i)])) gammaQ = std::abs(jjVal[at(q, i)]);
+    for (std::int32_t i = q + 1; i < static_cast<std::int32_t>(jjNumNodeIdx); ++i)
+        if (gammaQ < std::abs(jjVal[at(i, q)])) gammaQ = std::abs(jjVal[at(i, q)]);
+
+    const PivotBlock2x2<Val> d =
+        readPivotBlock2x2(jjVal, ld, j, q, hermitian(nf.factorization()));
+
+    // The growth bound the determinant is tested against: the larger of the two ways of pairing
+    // each diagonal with the other column's maximum.
+    const double maxmax = std::max(std::abs(d.d22) * gammaJ + frontGammaJ * gammaQ,
+                                   std::abs(d.d11) * gammaQ + frontGammaJ * gammaJ);
+
+    return std::abs(d.det) > 0 && std::abs(d.det) >= mPivotThreshold * maxmax;
+}
+
+template<class Val>
+void NumFactorEngine::applyPivot1x1(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j,
+                                    std::int32_t k1, std::int32_t lk1,
+                                    std::size_t jjPreFactorFrontSize, std::size_t jjNumNodeIdx,
                                     std::vector<std::int32_t>& gblToLcl) const {
     Val*                 val = nf.val(jj);
-    const std::ptrdiff_t ld  = rows;
+    const std::ptrdiff_t ld  = static_cast<std::ptrdiff_t>(jjNumNodeIdx);
 
     const auto at = [ld](std::int32_t r, std::int32_t c) {
         return static_cast<std::ptrdiff_t>(c) * ld + static_cast<std::ptrdiff_t>(r);
@@ -750,35 +840,39 @@ void NumFactorEngine::applyPivot1x1(NumFactorDynamic<Val>& nf, std::int32_t jj, 
 
     const bool withHermitian = hermitian(nf.factorization());
 
-    // Read before the swap, which is why it is not simply val[at(j_, j_)]: the swap is what puts
+    // Read before the swap, which is why it is not simply val[at(j, j)]: the swap is what puts
     // the pivot there. Forced real for a Hermitian factorization, and written back so the solve
     // divides by the same value the elimination used.
-    const Val diagonal1 = forceReal(val[at(k1_, k1_)], withHermitian);
+    const Val diagonal1 = forceReal(val[at(k1, k1)], withHermitian);
 
-    if (j_ != k1_) nf.swap(jj, j_, k1_, gblToLcl);
+    if (j != k1) nf.swap(jj, j, k1, gblToLcl);
 
-    val[at(j_, j_)] = diagonal1;
+    val[at(j, j)] = diagonal1;
 
-    for (std::int32_t i_ = j_ + 1; i_ < rows; ++i_)               // L column: divide by the pivot
-        val[at(i_, j_)] /= diagonal1;
+    // L column: divide by the pivot
+    for (std::int32_t i = j + 1; i < static_cast<std::int32_t>(jjNumNodeIdx); ++i)
+        val[at(i, j)] /= diagonal1;
 
-    for (std::int32_t k_ = j_ + 1; k_ < jjFrontSize; ++k_)        // D L^H row, in the upper part
-        val[at(j_, k_)] = diagonal1 * maybeConjugate(val[at(k_, j_)], withHermitian);
+    // D L^H row, in the upper part
+    for (std::int32_t k = j + 1; k < static_cast<std::int32_t>(jjPreFactorFrontSize); ++k)
+        val[at(j, k)] = diagonal1 * maybeConjugate(val[at(k, j)], withHermitian);
 
-    for (std::int32_t k_ = j_ + 1; k_ < jjFrontSize; ++k_)        // rank-1 trailing update
-        for (std::int32_t i_ = k_; i_ < rows; ++i_)
-            val[at(i_, k_)] -= val[at(i_, j_)] * val[at(j_, k_)];
+    // rank-1 trailing update
+    for (std::int32_t k = j + 1; k < static_cast<std::int32_t>(jjPreFactorFrontSize); ++k)
+        for (std::int32_t i = k; i < static_cast<std::int32_t>(jjNumNodeIdx); ++i)
+            val[at(i, k)] -= val[at(i, j)] * val[at(j, k)];
 
-    nf.mPivotType[k1] = 1;
+    nf.mPivotType[lk1] = 1;
 }
 
 template<class Val>
-void NumFactorEngine::applyPivot2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j_,
-                                    std::int32_t k1_, std::int32_t k2_, std::int32_t k1,
-                                    std::int32_t k2, std::int32_t jjFrontSize, std::int32_t rows,
+void NumFactorEngine::applyPivot2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j,
+                                    std::int32_t k1, std::int32_t k2, std::int32_t lk1,
+                                    std::int32_t lk2, std::size_t jjPreFactorFrontSize,
+                                    std::size_t jjNumNodeIdx,
                                     std::vector<std::int32_t>& gblToLcl) const {
     Val*                 val = nf.val(jj);
-    const std::ptrdiff_t ld  = rows;
+    const std::ptrdiff_t ld  = static_cast<std::ptrdiff_t>(jjNumNodeIdx);
 
     const auto at = [ld](std::int32_t r, std::int32_t c) {
         return static_cast<std::ptrdiff_t>(c) * ld + static_cast<std::ptrdiff_t>(r);
@@ -788,24 +882,24 @@ void NumFactorEngine::applyPivot2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, 
 
     // Read before the swaps, as above. The caller read the same val to decide on it; nothing
     // touches the front in between.
-    const PivotBlock2x2<Val> d = readPivotBlock2x2(val, ld, k1_, k2_, withHermitian);
+    const PivotBlock2x2<Val> d = readPivotBlock2x2(val, ld, k1, k2, withHermitian);
 
-    const std::int32_t j1_ = j_;
-    const std::int32_t j2_ = j_ + 1;
+    const std::int32_t j1 = j;
+    const std::int32_t j2 = j + 1;
 
-    // Bring k1 and k2 to the front's next two columns. Which swaps are needed depends on where they
-    // already are relative to each other, and doing them in the wrong order would undo one.
-    if (k1_ < k2_) {
-        if (!(j1_ == k1_ && j2_ == k2_)) {
-            if (j1_ != k1_) nf.swap(jj, j1_, k1_, gblToLcl);
-            nf.swap(jj, j2_, k2_, gblToLcl);
+    // Bring lk1 and lk2 to the front's next two columns. Which swaps are needed depends on where
+    // they already are relative to each other, and doing them in the wrong order would undo one.
+    if (k1 < k2) {
+        if (!(j1 == k1 && j2 == k2)) {
+            if (j1 != k1) nf.swap(jj, j1, k1, gblToLcl);
+            nf.swap(jj, j2, k2, gblToLcl);
         }
     } else {
-        if (j1_ == k2_ && j2_ == k1_) {
-            nf.swap(jj, j1_, j2_, gblToLcl);
+        if (j1 == k2 && j2 == k1) {
+            nf.swap(jj, j1, j2, gblToLcl);
         } else {
-            if (j2_ != k2_) nf.swap(jj, j2_, k2_, gblToLcl);
-            nf.swap(jj, j1_, k1_, gblToLcl);
+            if (j2 != k2) nf.swap(jj, j2, k2, gblToLcl);
+            nf.swap(jj, j1, k1, gblToLcl);
         }
     }
 
@@ -813,33 +907,36 @@ void NumFactorEngine::applyPivot2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, 
     // in place, the swaps having carried them (conjugating on the way, for Hermitian); the diagonal
     // pair is rewritten because forceReal may have changed them, and the upper off-diagonal has no
     // other home.
-    val[at(j1_, j1_)] = d.d11;
-    val[at(j2_, j2_)] = d.d22;
-    val[at(j1_, j2_)] = d.d12;
+    val[at(j1, j1)] = d.d11;
+    val[at(j2, j2)] = d.d22;
+    val[at(j1, j2)] = d.d12;
 
-    for (std::int32_t i_ = j1_ + 2; i_ < rows; ++i_) {        // L columns: solve against D
-        const Val t1 = val[at(i_, j1_)];
-        const Val t2 = val[at(i_, j2_)];
-        val[at(i_, j1_)] = (t1 * d.d22 - t2 * d.d21) / d.det;
-        val[at(i_, j2_)] = (t2 * d.d11 - t1 * d.d12) / d.det;
+    // L columns: solve against D
+    for (std::int32_t i = j1 + 2; i < static_cast<std::int32_t>(jjNumNodeIdx); ++i) {
+        const Val t1 = val[at(i, j1)];
+        const Val t2 = val[at(i, j2)];
+        val[at(i, j1)] = (t1 * d.d22 - t2 * d.d21) / d.det;
+        val[at(i, j2)] = (t2 * d.d11 - t1 * d.d12) / d.det;
     }
 
-    for (std::int32_t k_ = j1_ + 2; k_ < jjFrontSize; ++k_) { // D L^H rows, in the upper part
-        const Val l1 = maybeConjugate(val[at(k_, j1_)], withHermitian);
-        const Val l2 = maybeConjugate(val[at(k_, j2_)], withHermitian);
-        val[at(j1_, k_)] = d.d11 * l1 + d.d12 * l2;
-        val[at(j2_, k_)] = d.d21 * l1 + d.d22 * l2;
+    // D L^H rows, in the upper part
+    for (std::int32_t k = j1 + 2; k < static_cast<std::int32_t>(jjPreFactorFrontSize); ++k) {
+        const Val l1 = maybeConjugate(val[at(k, j1)], withHermitian);
+        const Val l2 = maybeConjugate(val[at(k, j2)], withHermitian);
+        val[at(j1, k)] = d.d11 * l1 + d.d12 * l2;
+        val[at(j2, k)] = d.d21 * l1 + d.d22 * l2;
     }
 
-    for (std::int32_t k_ = j1_ + 2; k_ < jjFrontSize; ++k_)   // rank-2 trailing update
-        for (std::int32_t i_ = k_; i_ < rows; ++i_)
-            val[at(i_, k_)] -= val[at(i_, j1_)] * val[at(j1_, k_)];
-    for (std::int32_t k_ = j2_ + 1; k_ < jjFrontSize; ++k_)
-        for (std::int32_t i_ = k_; i_ < rows; ++i_)
-            val[at(i_, k_)] -= val[at(i_, j2_)] * val[at(j2_, k_)];
+    // rank-2 trailing update
+    for (std::int32_t k = j1 + 2; k < static_cast<std::int32_t>(jjPreFactorFrontSize); ++k)
+        for (std::int32_t i = k; i < static_cast<std::int32_t>(jjNumNodeIdx); ++i)
+            val[at(i, k)] -= val[at(i, j1)] * val[at(j1, k)];
+    for (std::int32_t k = j2 + 1; k < static_cast<std::int32_t>(jjPreFactorFrontSize); ++k)
+        for (std::int32_t i = k; i < static_cast<std::int32_t>(jjNumNodeIdx); ++i)
+            val[at(i, k)] -= val[at(i, j2)] * val[at(j2, k)];
 
-    nf.mPivotType[k1] = 2;
-    nf.mPivotType[k2] = 3;
+    nf.mPivotType[lk1] = 2;
+    nf.mPivotType[lk2] = 3;
 }
 
 
@@ -858,14 +955,107 @@ void NumFactorEngine::applyPivot2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, 
 // The confusion is worth guarding against because the Duff literature writes its threshold as
 // `alpha` too, in the same position of the same inequality, where it means roughly 0.01 and not
 // 0.64. See Section 7 of archive/sparse_factorization.md for both algorithms side by side.
+
+// 0.9's factorDynamicLDL_ is one function with two passes selected by jjUpdateSize. The selector is
+// exactly "is this a root": the update rows are the parent edges (ElmForestEngine builds updateSize
+// and parent from the same nonzeros), so no update rows means no later column reaches this
+// supernode, hence no parent. A root has no ancestor waiting, so a column it cannot pivot has
+// nowhere to be delayed to.
+//
+// The two passes are therefore two algorithms and not two settings, so they are two functions here,
+// with the distinction made by the callers. That costs the callers nothing: all three traversals
+// already bind `parent` from the symbolic factor, and `parent[jj] == NIL` is the same fact as
+// `mUpdateSize[jj] == 0` read off the forest instead of off the storage.
+//
+// **Both are selection only.** The eliminations are applyPivot1x1 and applyPivot2x2, shared,
+// because once a pivot is accepted the arithmetic is identical and 0.9's two copies of it were an
+// artifact of writing the passes out separately. The three real differences are in selection:
+//
+//   No forced 1x1.  The root kernel accepts the last remaining candidate whatever it looks like,
+//                   since it has nowhere to delay it to. The non-root kernel never does: it delays.
+//   Front partners. The non-root 2x2 partner scan stops at jjPreFactorFrontSize, so a partner is
+//                   always a front column and never an update row.
+//   A real test.    The root kernel accepts a 2x2 on max1 == max2, on the magnitudes alone, without
+//                   ever reading the 2x2 val. The non-root kernel applies the threshold test to its
+//                   determinant against the growth bound.
+
 template<class Val>
-bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int32_t jj,
-                                       std::vector<std::int32_t>& gblToLcl) const {
-    const std::int32_t   jjPreFactorFrontSize = static_cast<std::int32_t>(nf.mFrontSize[jj]);
-    const std::int32_t   jjNumNodeIdx         = jjPreFactorFrontSize + static_cast<std::int32_t>(nf.mUpdateSize[jj]);
+void NumFactorEngine::factorDynamicRootSupernode(NumFactorDynamic<Val>& nf, std::int32_t jj,
+                                                 std::vector<std::int32_t>& gblToLcl) const {
+    const std::size_t    jjPreFactorFrontSize = nf.mFrontSize[jj];
+    const std::size_t    jjNumNodeIdx         = jjPreFactorFrontSize + nf.mUpdateSize[jj];
     std::int32_t*        jjNodeIdx            = nf.nodeIdx(jj);
     Val*                 jjVal                = nf.val(jj);
-    const std::ptrdiff_t ld                   = jjNumNodeIdx;
+    const std::ptrdiff_t ld                   = static_cast<std::ptrdiff_t>(jjNumNodeIdx);
+
+    // Column-major position of (row r, column c), in ptrdiff_t to avoid overflow.
+    const auto at = [ld](std::int32_t r, std::int32_t c) {
+        return static_cast<std::ptrdiff_t>(c) * ld + static_cast<std::ptrdiff_t>(r);
+    };
+
+    const std::int32_t frontSize  = static_cast<std::int32_t>(jjPreFactorFrontSize);
+    const std::int32_t numNodeIdx = static_cast<std::int32_t>(jjNumNodeIdx);
+
+    for (std::int32_t nextPivot = 0; nextPivot < frontSize; ) {
+        std::int32_t          j    = nextPivot;
+        const PivotColumnScan scan =
+            scanPivotColumn(jjVal, ld, nextPivot, j, frontSize, numNodeIdx);
+        double                gammaJ = scan.gamma;
+        std::int32_t          q      = scan.q;
+
+        if (gammaJ == 0) {                          // isolated column: 1x1, nothing to eliminate
+            if (std::abs(jjVal[at(j, j)]) == 0) --nf.rank();   // 0.9: zero pivot drops rank
+            nf.mPivotType[jjNodeIdx[j]] = 1;
+            ++nextPivot;
+            continue;
+        }
+
+        if (std::abs(jjVal[at(j, j)]) >= alphaRoot * gammaJ) {   // 1x1 on this column's diagonal
+            applyPivot1x1(nf, jj, nextPivot, j, jjNodeIdx[j], jjPreFactorFrontSize, jjNumNodeIdx,
+                          gblToLcl);
+            ++nextPivot;
+            continue;
+        }
+
+        // The chase. gammaQ >= gammaJ always, because q holds j's largest off-diagonal and that
+        // same entry lies in column q, so it is a lower bound on column q's maximum. Equality is
+        // the stopping case; otherwise the maximum strictly increases and no column is visited
+        // twice, which is why this always reaches a pivot and a root never delays.
+        for (;;) {
+            const PivotColumnScan qScan =
+                scanPivotColumn(jjVal, ld, nextPivot, q, frontSize, numNodeIdx);
+            const double gammaQ = qScan.gamma;
+
+            if (std::abs(jjVal[at(q, q)]) >= alphaRoot * gammaQ) {   // 1x1 on the column reached
+                applyPivot1x1(nf, jj, nextPivot, q, jjNodeIdx[q], jjPreFactorFrontSize,
+                              jjNumNodeIdx, gblToLcl);
+                ++nextPivot;
+                break;
+            }
+
+            if (gammaJ == gammaQ) {                 // the maximum is mutual: accept the 2x2
+                applyPivot2x2(nf, jj, nextPivot, j, q, jjNodeIdx[j], jjNodeIdx[q],
+                              jjPreFactorFrontSize, jjNumNodeIdx, gblToLcl);
+                nextPivot += 2;
+                break;
+            }
+
+            j = q;  gammaJ = gammaQ;  q = qScan.q;
+        }
+    }
+
+    // A root cannot delay: every path out of the chase accepts a pivot.
+    nf.mDelaySize[jj] = 0;
+}
+
+template<class Val>
+void NumFactorEngine::factorDynamicNonRootSupernode(NumFactorDynamic<Val>& nf, std::int32_t jj,
+                                                    std::vector<std::int32_t>& gblToLcl) const {
+    const std::size_t    jjPreFactorFrontSize = nf.mFrontSize[jj];
+    const std::size_t    jjNumNodeIdx         = jjPreFactorFrontSize + nf.mUpdateSize[jj];
+    std::int32_t*        jjNodeIdx            = nf.nodeIdx(jj);
+    Val*                 jjVal                = nf.val(jj);
+    const std::ptrdiff_t ld                   = static_cast<std::ptrdiff_t>(jjNumNodeIdx);
     const double         threshold            = mPivotThreshold;
 
     // Column-major position of (row r, column c), in ptrdiff_t to avoid overflow.
@@ -875,211 +1065,71 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
 
     // The candidate pivot columns, by global index, in front order.
     std::list<std::int32_t> pivotList;
-    for (std::int32_t j_ = 0; j_ < jjPreFactorFrontSize; ++j_)
-        pivotList.push_back(jjNodeIdx[j_]);
+    for (std::int32_t j = 0; j < static_cast<std::int32_t>(jjPreFactorFrontSize); ++j)
+        pivotList.push_back(jjNodeIdx[j]);
 
-    std::int32_t j_ = 0;
+    std::int32_t nextPivot = 0;
 
-    // Two passes, and 0.9 splits them on whether the supernode has update rows. **The names are
-    // labels, not an order: a supernode runs pass 1 XOR pass 2, never both and never in sequence.**
-    // The selector is updateSize alone (the `if` below). updateSize == 0 means the supernode is a
-    // root: the update rows are the parent edges (ElmForestEngine builds updateSize and parent from
-    // the same nonzeros), so no update rows means no later column reaches it, hence no parent. A
-    // root has no ancestor waiting, so a column it cannot pivot has nowhere to be delayed to; that
-    // is pass 1. updateSize > 0 means a parent exists to take a delayed column; that is pass 2. So
-    // "which pass" is exactly "is this a root", equivalently "is there anywhere to delay to", and
-    // every difference below follows from that one fact.
-    //
-    // **What remains below is selection only.** The eliminations themselves are applyPivot1x1 and
-    // applyPivot2x2, shared by both passes, because once a pivot is accepted the arithmetic is
-    // identical and 0.9's two copies of it were an artifact of writing the passes out separately.
-    // The three real differences are the ones this loop and the next make visible:
-    //
-    //   No forced 1x1.  Pass 1 accepts the last remaining candidate whatever it looks like, since
-    //                   a dense front has nowhere to delay it to. Pass 2 never does: it delays.
-    //   Front partners. Pass 2's 2x2 partner scan stops at jjPreFactorFrontSize, so a partner is always a
-    //                   front column and never an update row.
-    //   A real test.    Pass 1 accepts a 2x2 on max1 == max2, on the magnitudes alone, without ever
-    //                   reading the 2x2 val. Pass 2 applies the threshold test to its
-    //                   determinant against the growth bound.
-    if (nf.mUpdateSize[jj] == 0) {              // pass 1: a root, no parent, nowhere to delay
-        while (!pivotList.empty()) {
-            bool         pivotFound = false;
-            std::int32_t trials     = static_cast<std::int32_t>(pivotList.size());
 
-            while (trials > 0) {
-                const std::int32_t lk1 = pivotList.front(); pivotList.pop_front();
-                const std::int32_t k1_ = gblToLcl[lk1];
+    // A non-root has update rows, so an ancestor exists to take a column this front cannot pivot.
+    // Ported from 0.9 factorDynamicLDL_, the jjUpdateSize != 0 branch, and reshaped to AGL Figure
+    // 3.4: pop a candidate, choose its partner in the same breath, then one chain of four outcomes,
+    // 1x1 on an isolated column, 1x1 on the threshold test, 2x2 on the acceptance test, or delay.
+    // The test itself is behind acceptPivot2x2, which is the hook the figure leaves open.
+    while (!pivotList.empty()) {
+        bool         pivotFound = false;
+        std::int32_t trials     = static_cast<std::int32_t>(pivotList.size());
 
-                if (pivotList.empty()) {                    // only candidate left: a forced 1x1
-                    pivotFound = true;
-                    if (std::abs(jjVal[at(k1_, k1_)]) == 0) --nf.rank();   // 0.9: zero pivot, rank--
-                    nf.mPivotType[lk1] = 1;
-                    ++j_;
-                    break;
-                }
+        while (trials > 0) {
+            const std::int32_t lj = pivotList.front(); pivotList.pop_front();
+            const std::int32_t j  = gblToLcl[lj];
 
-                // max1 = lk1's largest off-diagonal magnitude (its row on the left, its column
-                // below);
-                // k2_ the local row where it occurs.
-                std::int32_t k2_  = -1;
-                double       max1 = -1;
-                for (std::int32_t i_ = j_; i_ < k1_; ++i_)
-                    if (max1 < std::abs(jjVal[at(k1_, i_)])) { k2_ = i_; max1 = std::abs(jjVal[at(k1_, i_)]); }
-                for (std::int32_t i_ = k1_ + 1; i_ < jjNumNodeIdx; ++i_)
-                    if (max1 < std::abs(jjVal[at(i_, k1_)])) { k2_ = i_; max1 = std::abs(jjVal[at(i_, k1_)]); }
+            const PivotColumnScan scan =
+                scanPivotColumn(jjVal, ld, nextPivot, j,
+                                static_cast<std::int32_t>(jjPreFactorFrontSize),
+                                static_cast<std::int32_t>(jjNumNodeIdx));
+            const double       gammaJ      = scan.gamma;
+            const double       frontGammaJ = scan.frontGamma;
+            const std::int32_t q           = scan.q;
 
-                const Val diagonal1 = jjVal[at(k1_, k1_)];
+            const Val diagonalJ = jjVal[at(j, j)];
 
-                if (max1 == 0) {                            // isolated column: 1x1, nothing to eliminate
-                    pivotFound = true;
-                    if (j_ != k1_) nf.swap(jj, j_, k1_, gblToLcl);
-                    if (std::abs(diagonal1) == 0) --nf.rank();   // 0.9: zero pivot drops rank
-                    nf.mPivotType[lk1] = 1;
-                    ++j_;
-                    break;
-                }
-
-                if (std::abs(diagonal1) > 0 && std::abs(diagonal1) >= threshold * max1) {   // accept 1x1
-                    pivotFound = true;
-                    applyPivot1x1(nf, jj, j_, k1_, lk1, jjPreFactorFrontSize, jjNumNodeIdx, gblToLcl);
-                    ++j_;
-                    break;
-                }
-                else {                                      // try a 2x2 with lk1 and its max partner lk2
-                    const std::int32_t lk2 = jjNodeIdx[k2_];
-
-                    double max2 = -1;
-                    for (std::int32_t i_ = j_; i_ < k2_; ++i_)
-                        if (max2 < std::abs(jjVal[at(k2_, i_)])) max2 = std::abs(jjVal[at(k2_, i_)]);
-                    for (std::int32_t i_ = k2_ + 1; i_ < jjNumNodeIdx; ++i_)
-                        if (max2 < std::abs(jjVal[at(i_, k2_)])) max2 = std::abs(jjVal[at(i_, k2_)]);
-
-                    // Note what is *not* read here. Pass 1 decides on the magnitudes alone and
-                    // never examines the 2x2 val itself; pass 2 tests its determinant. That
-                    // difference was invisible while the two passes each carried their own copy of
-                    // the elimination.
-                    if (max1 == max2) {                     // accept 2x2
-                        pivotFound = true;
-                        pivotList.remove(lk2);
-
-                        applyPivot2x2(nf, jj, j_, k1_, k2_, lk1, lk2, jjPreFactorFrontSize, jjNumNodeIdx, gblToLcl);
-                        j_ += 2;
-                        break;
-                    }
-                    else {                                  // neither lk1 nor the 2x2 acceptable: delay lk1
-                        pivotList.push_back(lk1);
-                    }
-                }
-
-                --trials;
+            if (gammaJ == 0) {                      // isolated column: 1x1, nothing to eliminate
+                pivotFound = true;
+                if (nextPivot != j) nf.swap(jj, nextPivot, j, gblToLcl);
+                if (std::abs(diagonalJ) == 0) --nf.rank();   // 0.9: zero pivot drops rank
+                nf.mPivotType[lj] = 1;
+                ++nextPivot;
+                break;
             }
 
-            if (!pivotFound)
+            if (std::abs(diagonalJ) > 0 && std::abs(diagonalJ) >= threshold * gammaJ) {   // 1x1
+                pivotFound = true;
+                applyPivot1x1(nf, jj, nextPivot, j, lj, jjPreFactorFrontSize, jjNumNodeIdx,
+                              gblToLcl);
+                ++nextPivot;
                 break;
-        }
-    } else {   // pass 2: a non-root, a parent exists, so a rejected column can be delayed to it
-        // Pass 2: the supernode has update rows, so an ancestor exists to take a column this front
-        // cannot pivot. Ported from 0.9 factorDynamicLDL_, the jjUpdateSize != 0 branch.
-        //
-        // **Not pass 1 with different bounds**, which is the guess worth naming so nobody makes it
-        // twice. The two arithmetic bodies below, 1x1 and 2x2, are identical to pass 1's, character
-        // for character. Everything that differs is in the *selection*:
-        //
-        //   No forced 1x1.  Pass 1 accepts the last remaining candidate whatever it looks like,
-        //                   because there is nowhere to delay it to. Here there is, so the last
-        //                   candidate falls through and is delayed like any other.
-        //   Two scans.      max1 measures lk1's largest off-diagonal over the whole column height,
-        //                   update rows included. The partner scan `max` repeats it stopping at
-        //                   jjPreFactorFrontSize, so a 2x2 partner is always a front column and never an
-        //                   update row. Hence max <= max1, and max == max1 says the largest entry
-        //                   in lk1's line is a front column after all.
-        //   A real test.    Pass 1 accepts a 2x2 on max1 == max2. Here the test is the threshold
-        //                   one on the 2x2 determinant against the growth bound maxmax, with the
-        //                   symmetric-maximum case kept as a separate disjunct.
-        while (!pivotList.empty()) {
-            bool         pivotFound = false;
-            std::int32_t trials     = static_cast<std::int32_t>(pivotList.size());
-
-            while (trials > 0) {
-                const std::int32_t lk1 = pivotList.front(); pivotList.pop_front();
-                const std::int32_t k1_ = gblToLcl[lk1];
-
-                // lk1's largest off-diagonal magnitude: its row on the left, its column below, all
-                // the way down through the update rows. No argmax here, unlike pass 1; the partner
-                // is chosen by the narrower scan further down.
-                double max1 = -1;
-                for (std::int32_t i_ = j_; i_ < k1_; ++i_)
-                    if (max1 < std::abs(jjVal[at(k1_, i_)])) max1 = std::abs(jjVal[at(k1_, i_)]);
-                for (std::int32_t i_ = k1_ + 1; i_ < jjNumNodeIdx; ++i_)
-                    if (max1 < std::abs(jjVal[at(i_, k1_)])) max1 = std::abs(jjVal[at(i_, k1_)]);
-
-                const Val diagonal1 = jjVal[at(k1_, k1_)];
-
-                if (max1 == 0) {                            // isolated column: 1x1, nothing to eliminate
-                    pivotFound = true;
-                    if (j_ != k1_) nf.swap(jj, j_, k1_, gblToLcl);
-                    if (std::abs(diagonal1) == 0) --nf.rank();   // 0.9: zero pivot drops rank
-                    nf.mPivotType[lk1] = 1;
-                    ++j_;
-                    break;
-                }
-
-                if (std::abs(diagonal1) > 0 && std::abs(diagonal1) >= threshold * max1) {   // accept 1x1
-                    pivotFound = true;
-                    applyPivot1x1(nf, jj, j_, k1_, lk1, jjPreFactorFrontSize, jjNumNodeIdx, gblToLcl);
-                    ++j_;
-                    break;
-                }
-                else if (!pivotList.empty()) {              // try a 2x2 with lk1 and a front partner
-                    // The same scan as max1's, stopped at the end of the front. k2_ is where the
-                    // largest such entry sits, and it is a front column by construction.
-                    std::int32_t k2_ = -1;
-                    double       max = -1;
-                    for (std::int32_t i_ = j_; i_ < k1_; ++i_)
-                        if (max < std::abs(jjVal[at(k1_, i_)])) { k2_ = i_; max = std::abs(jjVal[at(k1_, i_)]); }
-                    for (std::int32_t i_ = k1_ + 1; i_ < jjPreFactorFrontSize; ++i_)
-                        if (max < std::abs(jjVal[at(i_, k1_)])) { k2_ = i_; max = std::abs(jjVal[at(i_, k1_)]); }
-
-                    const std::int32_t lk2 = jjNodeIdx[k2_];
-
-                    double max2 = -1;
-                    for (std::int32_t i_ = j_; i_ < k2_; ++i_)
-                        if (max2 < std::abs(jjVal[at(k2_, i_)])) max2 = std::abs(jjVal[at(k2_, i_)]);
-                    for (std::int32_t i_ = k2_ + 1; i_ < jjNumNodeIdx; ++i_)
-                        if (max2 < std::abs(jjVal[at(i_, k2_)])) max2 = std::abs(jjVal[at(i_, k2_)]);
-
-                    const PivotBlock2x2<Val> d =
-                        readPivotBlock2x2(jjVal, ld, k1_, k2_, hermitian(nf.factorization()));
-
-                    // The growth bound the 2x2 determinant is tested against: the larger of the two
-                    // ways of pairing each diagonal with the other column's maximum.
-                    const double maxmax = std::max(std::abs(d.d22) * max1 + max * max2,
-                                                   std::abs(d.d11) * max2 + max * max1);
-
-                    if ((max == max1 && max == max2 && max != 0)
-                        || (std::abs(d.det) > 0 && std::abs(d.det) >= threshold * maxmax)) {   // accept 2x2
-                        pivotFound = true;
-                        pivotList.remove(lk2);
-
-                        applyPivot2x2(nf, jj, j_, k1_, k2_, lk1, lk2, jjPreFactorFrontSize, jjNumNodeIdx, gblToLcl);
-                        j_ += 2;
-                        break;
-                    }
-                    else {                                  // neither lk1 nor the 2x2 acceptable: delay lk1
-                        pivotList.push_back(lk1);
-                    }
-                }
-                else {                                      // no partner available: delay lk1
-                    pivotList.push_back(lk1);
-                }
-
-                --trials;
             }
 
-            if (!pivotFound)
+            // q == NIL means the front holds no partner, which happens only when lj is the last
+            // unfactored column. That is the same condition as pivotList being empty after the pop,
+            // asked of the scan rather than of the queue.
+            if (q != NIL && acceptPivot2x2(nf, jj, nextPivot, j, q, gammaJ, frontGammaJ)) {   // 2x2
+                pivotFound = true;
+                const std::int32_t lq = jjNodeIdx[q];
+                pivotList.remove(lq);
+                applyPivot2x2(nf, jj, nextPivot, j, q, lj, lq, jjPreFactorFrontSize, jjNumNodeIdx,
+                              gblToLcl);
+                nextPivot += 2;
                 break;
+            }
+
+            pivotList.push_back(lj);                    // nothing acceptable: delay lj
+            --trials;
         }
+
+        if (!pivotFound)
+            break;
     }
 
     // Whatever is left could not be pivoted here; delay it to an ancestor. frontSize contracts by
@@ -1087,8 +1137,6 @@ bool NumFactorEngine::factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int
     const std::size_t delaySize = pivotList.size();
     nf.mDelaySize[jj]  = delaySize;
     nf.mFrontSize[jj] -= delaySize;
-
-    return true;
 }
 
 template<class Val>
@@ -1112,7 +1160,8 @@ void NumFactorEngine::updateDynamicUpdateBlock(const NumFactorDynamic<Val>& nf, 
     //
     // The update's rank is `f`, jj's *post-factor* front, the pivots actually eliminated here. A
     // delayed column is not among them, so it never updates an ancestor from jj: its row was updated
-    // in place by those pivots back inside factorDynamicSupernode, and it then migrates to the parent
+    // in place by those pivots back inside factorDynamicNonRootSupernode, and it then migrates to the
+    // parent
     // as a delayed column (assembleDelay, contractVal) to be pivoted there. So this kernel touches
     // only the update area; the delay area was finished in the factor step and leaves by the delay
     // path.
@@ -1395,10 +1444,11 @@ bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const
                 descendantUpdateQueue[nf.nodeToSnode(jjNodeIdx[nextUpdateSp[jj]])].push_back(jj);
         }
 
-        if (!factorDynamicSupernode(nf, kk, gblToLcl)) {
-            clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
-            return false;
-        }
+        // A root has no parent to delay a column to, and the two kernels differ throughout on
+        // that one fact, so the choice is made here rather than inside.
+        const bool kkIsRoot = parent[kk] == NIL;
+        if (kkIsRoot) factorDynamicRootSupernode(nf, kk, gblToLcl);
+        else               factorDynamicNonRootSupernode(nf, kk, gblToLcl);
 
         // kk now has updates of its own to deliver. **The advance is over the front and the delayed columns
         // together**, not the front alone: both are kk's own rows, neither updates an ancestor, and
@@ -1552,10 +1602,11 @@ bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, cons
                 }
             }
 
-        if (!factorDynamicSupernode(nf, jj, gblToLcl)) {
-            clearGlobalToLocal(jjNumNodeIdx, jjNodeIdx, gblToLcl);
-            return false;
-        }
+        // A root has no parent to delay a column to, and the two kernels differ throughout on
+        // that one fact, so the choice is made here rather than inside.
+        const bool jjIsRoot = parent[jj] == NIL;
+        if (jjIsRoot) factorDynamicRootSupernode(nf, jj, gblToLcl);
+        else               factorDynamicNonRootSupernode(nf, jj, gblToLcl);
 
         clearGlobalToLocal(jjNumNodeIdx, jjNodeIdx, gblToLcl);
 
@@ -1710,10 +1761,11 @@ bool NumFactorEngine::factorDynamicMultifrontal(const SparseMatrix<Val>& A, cons
         }
 
         // Factor kk's pivots (dynamic threshold pivoting; may delay columns to kk's parent).
-        if (!factorDynamicSupernode(nf, kk, gblToLcl)) {
-            clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
-            return false;
-        }
+        // A root has no parent to delay a column to, and the two kernels differ throughout on
+        // that one fact, so the choice is made here rather than inside.
+        const bool kkIsRoot = parent[kk] == NIL;
+        if (kkIsRoot) factorDynamicRootSupernode(nf, kk, gblToLcl);
+        else               factorDynamicNonRootSupernode(nf, kk, gblToLcl);
 
         // Form kk's contribution block from the factored pivots and leave it for kk's parent.
         updateDynamicUpdateMatrix(nf, kk, updateMatrix[kk]);
@@ -1773,8 +1825,8 @@ bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, 
     if (A.size() != p.size() || A.size() != sf.size())
         return false;
 
-    // Dynamic LDL is the reason this storage exists. Everything runs except complex `LDL^H`;
-    // multifrontal is unported for all of them. The static factorizations run unchanged, below.
+    // Dynamic LDL is the reason this storage exists. Everything runs except complex `LDL^H`. The
+    // static factorizations run unchanged, below.
     //
     // **The kernels needed nothing to become complex.** 0.9's complex `factorDynamicLDL_` differs
     // from its real one in six lines, all the same edit: the pivot *magnitudes* (`max1`, `max2`,
@@ -1784,11 +1836,10 @@ bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, 
     // means modulus for complex and is the right comparison either way.
     //
     // **Complex `LDL^H` is the one cell still missing, and it is an extension, not a port.** 0.9's
-    // complex LDL is symmetric only, so there is nothing to transcribe. `factorDynamicSupernode`
-    // writes `diagonal12 = diagonal21`, which is exactly the complex-symmetric assumption; the
-    // Hermitian form needs the conjugate there and a threshold test that knows the 2x2's
-    // diagonal is real. Refused here rather than silently computing the symmetric factorization
-    // under a Hermitian name. See docs/TODO.md.
+    // complex LDL is symmetric only, so there is nothing to transcribe. The Hermitian form needs a
+    // threshold test that knows the 2x2 block's diagonal is real; `readPivotBlock2x2` already takes
+    // the conjugate on the off-diagonal, so that half is in place. Refused here rather than silently
+    // computing the symmetric factorization under a Hermitian name. See docs/TODO.md.
     //
     // Over the reals the question does not arise: the two transposes are the same computation, and
     // `test_pipeline` asserts they agree bit for bit.

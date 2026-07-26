@@ -107,8 +107,8 @@ under it; `^T` is reserved for the complex-symmetric path, where it is load-bear
 two different axes, and the noun they qualify says which one is meant, so nothing has to be spelled
 out. On an algorithm object, static and dynamic are about *pivoting*:
 `NumFactorEngine::factorStaticLeftLooking` runs the factorizations whose pivots are fixed by the
-symbolic structure (Cholesky, static LDL), and `factorDynamicSupernode` runs the one that chooses
-pivots while the arithmetic runs. On a data object they are about *storage*: `NumFactorStatic` holds
+symbolic structure (Cholesky, static LDL), and `factorDynamicNonRootSupernode` runs the one that
+chooses pivots while the arithmetic runs. On a data object they are about *storage*: `NumFactorStatic` holds
 flat buffers that cannot grow, `NumFactorDynamic` holds one vector per supernode so that a front
 can. A field describing a storage choice says so in its own name (`mUsesDynamicStorage`).
 

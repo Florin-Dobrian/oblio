@@ -236,26 +236,39 @@ private:
     // kernel's two passes, which differ only in *selection*: once a pivot is accepted the
     // arithmetic
     // is the same, so it lives in one place. See the note above their definitions.
+    // Whether the 2x2 block on columns j and q may be used as a pivot. Const: judging a block and
+    // eliminating it are different jobs.
     template<class Val>
-    void applyPivot1x1(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j_,
-                       std::int32_t k1_, std::int32_t k1, std::int32_t jjFrontSize,
-                       std::int32_t rows, std::vector<std::int32_t>& gblToLcl) const;
+    bool acceptPivot2x2(const NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t nextPivot,
+                        std::int32_t j, std::int32_t q, double gammaJ, double frontGammaJ) const;
 
     template<class Val>
-    void applyPivot2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j_,
-                       std::int32_t k1_, std::int32_t k2_, std::int32_t k1, std::int32_t k2,
-                       std::int32_t jjFrontSize, std::int32_t rows,
+    void applyPivot1x1(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j,
+                       std::int32_t k1, std::int32_t lk1, std::size_t jjPreFactorFrontSize,
+                       std::size_t jjNumNodeIdx, std::vector<std::int32_t>& gblToLcl) const;
+
+    template<class Val>
+    void applyPivot2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j,
+                       std::int32_t k1, std::int32_t k2, std::int32_t lk1, std::int32_t lk2,
+                       std::size_t jjPreFactorFrontSize, std::size_t jjNumNodeIdx,
                        std::vector<std::int32_t>& gblToLcl) const;
 
     // Factor one supernode's dense front in place with threshold pivoting, delaying the columns it
     // cannot pivot to an ancestor. Records pivotType (1 / 2,3), delaySize, and reduces
     // frontSize by the number delayed. The dynamic counterpart of factorStaticSupernode, and
-    // unlike it this one takes the factor rather than a raw block: pivoting swaps columns and
-    // records their kind, so it cannot be storage-blind. Ported from 0.9 factorDynamicLDL_
-    // (updateSize == 0 pass).
+    // unlike it these take the factor rather than a raw block: pivoting swaps columns and
+    // records their kind, so they cannot be storage-blind. Ported from 0.9 factorDynamicLDL_,
+    // whose two passes these two functions are. The caller chooses on `parent[jj] == NIL`.
+    // The root kernel has no failure path: it cannot delay, so there is nothing to report.
     template<class Val>
-    bool factorDynamicSupernode(NumFactorDynamic<Val>& nf, std::int32_t jj,
-                                std::vector<std::int32_t>& gblToLcl) const;
+    void factorDynamicRootSupernode(NumFactorDynamic<Val>& nf, std::int32_t jj,
+                                    std::vector<std::int32_t>& gblToLcl) const;
+
+    // Neither kernel has a failure path: a non-root delays what it cannot pivot, which is an
+    // outcome and not an error, and a root has nothing to delay.
+    template<class Val>
+    void factorDynamicNonRootSupernode(NumFactorDynamic<Val>& nf, std::int32_t jj,
+                                       std::vector<std::int32_t>& gblToLcl) const;
 
     // Form the update supernode jj owes one ancestor, taking jj's rows from `jjKkUpdateSp` down. The
     // dynamic counterpart of updateStaticUpdateBlock, and it differs from it in exactly two places.
@@ -286,7 +299,7 @@ private:
     // descendant's update both land in a block the symbolic factorization predicted, while these
     // columns are the part it did not.
     //
-    // jj's block still carries them at this point. factorDynamicSupernode has decremented
+    // jj's block still carries them at this point. factorDynamicNonRootSupernode has decremented
     // frontSize[jj] and set delaySize[jj], so the columns are the run just past the
     // new front, and contractVal has not yet reclaimed them. Which fixes the order: assemble, then
     // contract.
@@ -321,7 +334,7 @@ private:
     // per-supernode update matrices in place of the pull queue. Assembling a child does both halves of
     // assembly: its delayed columns become kk front columns (assembleDelay), and its contribution
     // block adds into kk's frontal (assembleUpdateMatrix); then it is contracted and freed. The
-    // factor reuses factorDynamicSupernode, and the contribution block is formed by
+    // factor reuses the two dynamic pivot kernels, and the contribution block is formed by
     // updateDynamicUpdateMatrix. Dynamic storage only.
     template<class Val>
     bool factorDynamicMultifrontal(const SparseMatrix<Val>& A, const Permutation& p,

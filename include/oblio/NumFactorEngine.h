@@ -239,19 +239,20 @@ private:
     // Whether the 2x2 block on columns j and q may be used as a pivot. Const: judging a block and
     // eliminating it are different jobs.
     template<class Val>
-    bool acceptPivot2x2(const NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t nextPivot,
-                        std::int32_t j, std::int32_t q, double gammaJ, double frontGammaJ) const;
+    bool acceptPivot2x2(const Val* jjVal, std::int32_t jjNumNodeIdx, std::int32_t nextPivot,
+                        std::int32_t j, std::int32_t q, double jGamma, double jFrontGamma,
+                        bool withHermitian) const;
 
     template<class Val>
-    void applyPivot1x1(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j,
-                       std::int32_t k1, std::int32_t lk1, std::size_t jjPreFactorFrontSize,
-                       std::size_t jjNumNodeIdx, std::vector<std::int32_t>& gblToLcl) const;
+    void factor1x1(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j,
+                   std::int32_t k1, std::int32_t lk1, std::size_t jjPreFactorFrontSize,
+                   std::size_t jjNumNodeIdx, std::vector<std::int32_t>& gblToLcl) const;
 
     template<class Val>
-    void applyPivot2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j,
-                       std::int32_t k1, std::int32_t k2, std::int32_t lk1, std::int32_t lk2,
-                       std::size_t jjPreFactorFrontSize, std::size_t jjNumNodeIdx,
-                       std::vector<std::int32_t>& gblToLcl) const;
+    void factor2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j,
+                   std::int32_t k1, std::int32_t k2, std::int32_t lk1, std::int32_t lk2,
+                   std::size_t jjPreFactorFrontSize, std::size_t jjNumNodeIdx,
+                   std::vector<std::int32_t>& gblToLcl) const;
 
     // Factor one supernode's dense front in place with threshold pivoting, delaying the columns it
     // cannot pivot to an ancestor. Records pivotType (1 / 2,3), delaySize, and reduces

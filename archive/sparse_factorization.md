@@ -7029,7 +7029,7 @@ forced-last
 `1 x 1` and its `max1 == max2` `2 x 2` accepted without a determinant test are weaker than the bounding
 test Duff-Reid and AGL would apply, and they are the subject of 7.8 and 7.13's pass-1 block. The `0.1`
 threshold default against `0.01` is the same algorithm at a different operating point, so it delays more
-columns and fills more on the same matrix. And the Cramer-rule `L21` formation in `applyPivot2x2` is a
+columns and fills more on the same matrix. And the Cramer-rule `L21` formation in `factor2x2` is a
 place where Duff-Reid prescribe a stable block solve, so MA27 and MA57 presumably form the multipliers
 accordingly, and Oblio's explicit inverse may be doing less carefully what they do carefully (7.13's
 pitfall block).
@@ -7421,7 +7421,7 @@ over-refining, the Liu two-parameter row of the catalog above.
 **Where Oblio stands: clear of 2 and 3, in 1 only, and only on the factor side.** Oblio runs the later
 Duff-Reid, AGL Figure 3.3 test, which is exactly the `L`-bounding test that pitfalls 2 and 3 trade
 away, so it is clear of both by construction: it is not the explicit-Bunch-Kaufman bound of 2, and not
-Liu's weaker bound of 3. It walks into pitfall 1 alone, and there only in the factor: `applyPivot2x2`
+Liu's weaker bound of 3. It walks into pitfall 1 alone, and there only in the factor: `factor2x2`
 forms the multipliers by Cramer, while the solve's `diagonalDynamic` already uses a pivoted LU. So the
 planned repair, LU everywhere with partial or complete pivoting, kept as selectable variants, closes
 the one pitfall Oblio is in and leaves the acceptance test where it already correctly sits.
@@ -7430,7 +7430,7 @@ the one pitfall Oblio is in and leaves the acceptance test where it already corr
 `|L|` but not the condition number of the `2 x 2` block, so the `2 x 2` systems must be solved by a
 normwise backward stable scheme, their own code by Gaussian elimination with complete pivoting, and
 they name Cramer's rule and explicit inversion as the trap.
-`applyPivot2x2` forms the multiplier columns as `(t1 * d22 - t2 * d21) / det`, which is exactly that
+`factor2x2` forms the multiplier columns as `(t1 * d22 - t2 * d21) / det`, which is exactly that
 explicit inverse. The `diagonalDynamic` solve (DESIGN_DECISIONS, 2026-07-24) carries a `2 x 2` with
 its own partial pivoting, so the solve side is already off this path; it is the factor's formation of
 `L` that remains on it. The acceptance test has bounded `|L21|` by `1/u` before we arrive here, so it
@@ -7503,8 +7503,8 @@ what tells us where the cheap experiments are and where the expensive ones hide.
 
 **The seam.** The whole strategy lives at one point: given the current front state and the cursor `j`,
 decide the next accepted pivot, a column for a `1 x 1` or a pair for a `2 x 2`, or report none-found.
-Everything downstream of that decision is shared and does not vary between strategies: `applyPivot1x1`
-and `applyPivot2x2`, the swap, the rank-1 and rank-2 trailing updates, `readPivotBlock2x2`, the
+Everything downstream of that decision is shared and does not vary between strategies: `factor1x1`
+and `factor2x2`, the swap, the rank-1 and rank-2 trailing updates, `readPivotBlock2x2`, the
 candidate-list rotation, the delay tail, and the height invariant `frontSize + delaySize + updateSize`
 of 7.6. A strategy is therefore a decision policy bolted into an otherwise fixed driver. That is what
 makes "more than one kernel" true, but only for the strategies that vary the predicate. Some vary the
@@ -7566,7 +7566,7 @@ current forced-last plus `max1 == max2` (7.7), the Figure 3.3 bounding test appl
 7.13 proposes, or a fixed-`alpha` Bunch-Kaufman at the root as the fixed-`alpha` proposal has it; this
 is the 7.8 territory. **The threshold value** `u` itself, the sweep 7.5 and 7.7 both call for,
 reporting delays, `2 x 2` counts, `nnz(L)`, and residual against `u`. **The `2 x 2` numeric solve,**
-Cramer's rule in `applyPivot2x2` against AGL's Gaussian elimination with complete pivoting against the
+Cramer's rule in `factor2x2` against AGL's Gaussian elimination with complete pivoting against the
 partial-pivoted solve already in `diagonalDynamic` (7.13); this last is a correctness axis rather than
 a strategy, but it rides along with any `2 x 2` policy.
 
@@ -7707,7 +7707,7 @@ eight digits, so the denominator arrives with most of its significant figures al
 everything divided by it inherits that.
 
 **Which path each phase takes.** The solve is on the LU path: `diagonalDynamic` factors each `2 x 2` by
-the LU with partial pivoting above. The factor is on the Cramer path: when `applyPivot2x2` eliminates a
+the LU with partial pivoting above. The factor is on the Cramer path: when `factor2x2` eliminates a
 trailing row against the pivot, it forms that row's two multipliers by the explicit-inverse formula
 `(t1*d22 - t2*d21)/det` and `(t2*d11 - t1*d12)/det`, with `t1, t2` the row's two entries in the pivot
 columns, dividing by `det`. That is Cramer row by row, so the factor is the half still on the pitfall

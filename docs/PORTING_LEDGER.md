@@ -155,7 +155,7 @@ obviated by lambdas).
   they had ever run would have put their first execution in a shape the oracle never had.
 
   The trigger was the end-to-end residual, and once it fired the merge was done: the eliminations
-  are now `applyPivot1x1` and `applyPivot2x2`, called from both selection loops, and the 2x2 block
+  are now `factor1x1` and `factor2x2`, called from both selection loops, and the 2x2 block
   is read in one place, `readPivotBlock2x2`. 230 code lines became 204 across three functions, and
   the refactor was covered by 147 assertions throughout.
 

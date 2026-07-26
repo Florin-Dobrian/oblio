@@ -238,27 +238,36 @@ void SolveEngine::diagonalDynamic(const NumFactorDynamic<Val>& nf, Vector<Val>& 
             const std::int32_t j1 = lj;
             const std::int32_t j2 = jjNodeIdx[j + 1];
 
-            Val a11, a12, a21, a22, b1, b2;
+            // **D [x1; x2] = [b1; b2]**, a column system with one right-hand side, solved by
+            // explicit LU with partial pivoting. factor2x2 in NumFactorEngine solves the other half
+            // of this same system, [x1 x2] D = [b1 b2], a row system with one right-hand side per
+            // row below the block, and the two are written to look alike on purpose: same pivot
+            // choice, same four names for the factorization, same two-step substitution. The
+            // duplication is six lines of scalar arithmetic and is deliberate; a shared routine
+            // would have to take D in one orientation and be handed the transpose from one side,
+            // which costs more to state than these lines cost to carry.
+            Val  a11, a12, a21, a22;
+            bool swapped;
             if (std::abs(jjVal[at(j, j)]) >= std::abs(jjVal[at(j + 1, j)])) {
-                a11 = jjVal[at(j, j)];         a12 = jjVal[at(j, j + 1)];
-                a21 = jjVal[at(j + 1, j)];     a22 = jjVal[at(j + 1, j + 1)];
-                b1  = y.mVal[j1];            b2  = y.mVal[j2];
-            } else {                          // pivot the rows: the second is the larger
-                a11 = jjVal[at(j + 1, j)];     a12 = jjVal[at(j + 1, j + 1)];
-                a21 = jjVal[at(j, j)];         a22 = jjVal[at(j, j + 1)];
-                b1  = y.mVal[j2];            b2  = y.mVal[j1];
+                a11 = jjVal[at(j, j)];      a12 = jjVal[at(j, j + 1)];
+                a21 = jjVal[at(j + 1, j)];  a22 = jjVal[at(j + 1, j + 1)];  swapped = false;
+            } else {                                // pivot the rows: the second one is larger
+                a11 = jjVal[at(j + 1, j)];  a12 = jjVal[at(j + 1, j + 1)];
+                a21 = jjVal[at(j, j)];      a22 = jjVal[at(j, j + 1)];      swapped = true;
             }
-
             const Val l21 = a21 / a11;
             const Val u11 = a11;
             const Val u12 = a12;
             const Val u22 = a22 - l21 * u12;
 
-            const Val y1 = b1;
-            const Val y2 = b2 - l21 * y1;
+            const Val t1 = y.mVal[j1];
+            const Val t2 = y.mVal[j2];
+            // the swap permutes the equations, not the unknowns
+            const Val b1 = swapped ? t2 : t1;
+            const Val b2 = swapped ? t1 : t2;
 
-            const Val x2 = y2 / u22;
-            const Val x1 = (y1 - u12 * x2) / u11;
+            const Val x2 = (b2 - l21 * b1) / u22;
+            const Val x1 = (b1 - u12 * x2) / u11;
 
             y.mVal[j1] = x1;
             y.mVal[j2] = x2;

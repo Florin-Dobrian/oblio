@@ -246,6 +246,7 @@ struct Outcome {
     std::int32_t pivots1x1     = 0;
     std::int32_t pivots2x2     = 0;
     std::size_t snodeSize      = 0;
+    std::size_t rank           = 0;       // dynamic only: full order less the zero pivots taken
 };
 
 // Factor is NumFactorStatic<double> or NumFactorDynamic<double>. The pivot statistics exist only
@@ -275,6 +276,7 @@ Outcome run(const SparseMatrix<Val>& A, OrderMethod om, Factorization fz, Traver
     o.snodeSize = nf.snodeSize();
 
     if constexpr (std::is_same_v<Factor, NumFactorDynamic<Val>>) {
+        o.rank = std::as_const(nf).rank();
         for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(nf.snodeSize()); ++kk) {
             const std::int32_t d = static_cast<std::int32_t>(nf.delaySize(kk));
             o.delayed += d;
@@ -498,6 +500,23 @@ int main() {
            with("root pivoting     : zero diagonal beside a huge one, residual", o.residual));
         ck(o.ran && o.delayed == 0 && o.pivots1x1 == 1 && o.pivots2x2 == 1,
            counts("root pivoting     : no delay at a root, 1 1x1 and 1 2x2", o));
+    }
+    {
+        // rank counts the zero pivots taken, and the last column of a root front is where it is
+        // easiest to lose. That column's scan sees two empty ranges, so if the scan reported a
+        // negative sentinel rather than zero, the "nothing to eliminate" test would not fire, the
+        // column would be accepted as a 1x1 by a comparison against a negative bound, and a zero
+        // diagonal would go uncounted. Two isolated columns, one of them zero, so both supernodes
+        // are singleton roots and both take that path.
+        std::vector<std::size_t>  colPtr{0, 1, 2};
+        std::vector<std::int32_t> rowIdx{0, 1};
+        std::vector<double>       val{0.0, 1.0};
+        const SparseMatrix<double> A(2, std::move(colPtr), std::move(rowIdx), std::move(val));
+        const Outcome o = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+                                  Traversal::LeftLooking);
+
+        ck(o.ran && o.rank == 1 && o.delayed == 0 && o.pivots1x1 == 2,
+           counts("root rank         : one zero diagonal drops rank to 1", o));
     }
     {
         // The non-root counterpart, and the reason the symmetric-maximum clause was deleted from

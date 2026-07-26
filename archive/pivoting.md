@@ -257,6 +257,59 @@ the diagonal is simply there.
 So bounded Bunch-Kaufman for roots, with fast Bunch-Parlett reconsidered if a root front ever proves
 hard enough to warrant measuring.
 
+## Solving the 2 x 2 systems, and why complete pivoting is fine here
+
+A separate axis from selection, and easy to conflate with it. Once a `2 x 2` block is accepted, two
+places solve a system against it: the factorization forms the pair of `L` columns as `[l1 l2] D =
+[t1 t2]` for every row below the block, and the solve later applies `D` to the right-hand side. The
+paper is emphatic about how, and its statements look contradictory until the regimes are separated.
+
+**Unbounded `L`.** Bunch-Kaufman does not bound the entries of `L`, section 2.2 being the
+demonstration. Stability there rests on large entries of `L` always being paired with small entries
+of `D`, so that their products stay bounded, and Higham's analysis needs the `2 x 2` solve to be
+**componentwise** backward stable to preserve that pairing. The scaled Cramer's rule of LINPACK and
+LAPACK qualifies, and so does Gaussian elimination with partial pivoting. Complete pivoting and the
+SVD do not, and this is where the paper's alarming sentence comes from: "Implementations using
+complete pivoting are unstable, while partial pivoting is provably stable." Appendix A derives the
+SVD case, exhibiting a reduced matrix computed as `O(1) - O(10^t) - O(10^t)` with the cancellation
+eating the result. The complete-pivoting case is asserted alongside it rather than derived.
+
+**Bounded `L`.** Every other algorithm in the paper bounds it, and the requirement then drops to
+**normwise** backward stability, which is the hypothesis Appendix B's proof is built on. Partial
+pivoting, complete pivoting and QR all qualify. This is why AGL can write, with no contradiction,
+that their own sparse codes use Gaussian elimination with complete pivoting: their scheme bounds
+`L`, so the stronger condition is not required.
+
+So the regimes, and which algorithm sits in which:
+
+```
+                             bounds L        needs                which solves are admissible
+---------------------------  --------------  -------------------  -------------------------------
+Bunch-Kaufman                no              componentwise        scaled Cramer, partial pivoting
+bounded BK, fast BP (2.4-5)  yes             normwise             any of them
+Duff-Reid / AGL 3.3          yes             normwise             any of them
+```
+
+**Both of Oblio's paths are in the bounded row.** Non-roots bound `L` by `1 / alpha` through the
+Figure 3.3 test; roots bound it by `max{1/alpha, 1/(1-alpha)}` through bounded Bunch-Kaufman, that
+bound being the whole content of the word "bounded" in its name. Appendix A's warning therefore
+does not reach either path, and partial and complete pivoting are both valid choices for us.
+Nothing in the stability argument would decide between them.
+
+One asymmetry survives the regimes, and it concerns Cramer's rule rather than the pivoting. Cramer
+is admissible under a *bounded condition number* of `D`, which is a stronger property than a
+bounded `L` and which the two paths do not share. The chase supplies it at a root, where reaching a
+`2 x 2` means both diagonals have already failed their own tests, giving `kappa(D) < (1 + alpha)/(1
+- alpha)` by the Gerschgorin argument of section 2.4. Figure 3.3 does not supply it at a non-root,
+and page 29 says so outright: the test bounds `L` but not the conditioning, which is exactly why
+that page rules Cramer out for this family.
+
+Oblio used Cramer in `factor2x2` and partial-pivoted LU in `diagonalDynamic` until 2026-07-26,
+which is the arrangement the paper warns against, unstably formed factor and stably applied one.
+Both now use partial-pivoted LU. Partial is not required over complete; it was chosen so the two
+halves of the same system match, and because it remains valid should some later path ever admit an
+unbounded `L`.
+
 ## Oblio notation
 
 Both loops below are transcribed from `src/NumFactorEngine.cpp` in the code's own names, with no
@@ -497,28 +550,28 @@ factorDynamicSupernode(nf, jj), pass 2, proposed:
             lj = pivotList.pop_front()
             j  = gblToLcl[lj]
 
-            gammaJ, frontGammaJ, q = scanPivotColumn(jj, nextPivot, j)
-            diagonalJ              = jjVal[at(j, j)]
+            jGamma, jFrontGamma, q = scanPivotColumn(jj, nextPivot, j)
+            jDiagonal              = jjVal[at(j, j)]
 
-            if gammaJ == 0:                            # isolated column, nothing to eliminate
+            if jGamma == 0:                            # isolated column, nothing to eliminate
                 pivotFound = true
                 swap(jj, nextPivot, j) if nextPivot != j
-                rank-- if |diagonalJ| == 0
+                rank-- if |jDiagonal| == 0
                 pivotType[lj] = 1
                 nextPivot += 1
                 break
 
-            else if |diagonalJ| > 0 and |diagonalJ| >= threshold * gammaJ:
+            else if |jDiagonal| > 0 and |jDiagonal| >= threshold * jGamma:
                 pivotFound = true
-                applyPivot1x1(nf, jj, nextPivot, j, lj, ...)
+                factor1x1(nf, jj, nextPivot, j, lj, ...)
                 nextPivot += 1
                 break
 
-            else if q >= 0 and acceptPivot2x2(nf, jj, nextPivot, j, q, gammaJ, frontGammaJ):
+            else if q >= 0 and acceptPivot2x2(nf, jj, nextPivot, j, q, jGamma, jFrontGamma):
                 pivotFound = true
                 lq = jjNodeIdx[q]
                 pivotList.remove(lq)
-                applyPivot2x2(nf, jj, nextPivot, j, q, lj, lq, ...)
+                factor2x2(nf, jj, nextPivot, j, q, lj, lq, ...)
                 nextPivot += 2
                 break
 
@@ -535,35 +588,35 @@ factorDynamicSupernode(nf, jj), pass 2, proposed:
 with two helpers lifted out of the body. The scan, which walks each entry of `lj`'s line once:
 
 ```
-scanPivotColumn(jj, nextPivot, j) -> gammaJ, frontGammaJ, q:
+scanPivotColumn(jj, nextPivot, j) -> jGamma, jFrontGamma, q:
 
-    frontGammaJ = -1;  q = -1
+    jFrontGamma = -1;  q = -1
 
     for i = nextPivot .. j-1:                              # lj's row, all of it front columns
-        if frontGammaJ < |jjVal[at(j, i)]|:  q = i;  frontGammaJ = |jjVal[at(j, i)]|
+        if jFrontGamma < |jjVal[at(j, i)]|:  q = i;  jFrontGamma = |jjVal[at(j, i)]|
 
     for i = j+1 .. jjPreFactorFrontSize-1:                 # its column, front part
-        if frontGammaJ < |jjVal[at(i, j)]|:  q = i;  frontGammaJ = |jjVal[at(i, j)]|
+        if jFrontGamma < |jjVal[at(i, j)]|:  q = i;  jFrontGamma = |jjVal[at(i, j)]|
 
-    gammaJ = frontGammaJ                                   # the front maximum is a prefix of the
+    jGamma = jFrontGamma                                   # the front maximum is a prefix of the
                                                            #   full-height one, so continue from it
     for i = jjPreFactorFrontSize .. jjNumNodeIdx-1:        # its column, update rows
-        if gammaJ < |jjVal[at(i, j)]|:  gammaJ = |jjVal[at(i, j)]|
+        if jGamma < |jjVal[at(i, j)]|:  jGamma = |jjVal[at(i, j)]|
 
-    return gammaJ, frontGammaJ, q
+    return jGamma, jFrontGamma, q
 ```
 
 and the acceptance test, which is the hook Figure 3.4 leaves open:
 
 ```
-acceptPivot2x2(nf, jj, nextPivot, j, q, gammaJ, frontGammaJ) -> bool:
+acceptPivot2x2(nf, jj, nextPivot, j, q, jGamma, jFrontGamma) -> bool:
 
-    gammaQ = max of |jjVal[at(q, i)]|  over i = nextPivot .. q-1
+    qGamma = max of |jjVal[at(q, i)]|  over i = nextPivot .. q-1
                 and |jjVal[at(i, q)]|  over i = q+1 .. jjNumNodeIdx-1
 
     d      = readPivotBlock2x2(jjVal, ld, j, q)
-    maxmax = max( |d.d22| * gammaJ + frontGammaJ * gammaQ,
-                  |d.d11| * gammaQ + frontGammaJ * gammaJ )
+    maxmax = max( |d.d22| * jGamma + jFrontGamma * qGamma,
+                  |d.d11| * qGamma + jFrontGamma * jGamma )
 
     return |d.det| > 0 and |d.det| >= threshold * maxmax
 ```
@@ -581,11 +634,11 @@ path, and the three loops stay branch-free because the front part and the update
 loops rather than one loop with a test in it. Where the `1 x 1` succeeds the fused scan does track
 `q` and a second running maximum that the current code would not have computed, but over entries it
 is loading anyway, so the cost is a comparison and a store and no extra memory traffic. Nothing is
-computed earlier than it is needed except that: `gammaQ` and the `2 x 2` block are still read only
+computed earlier than it is needed except that: `qGamma` and the `2 x 2` block are still read only
 inside the test, exactly as now, and `lq` is still looked up only on acceptance.
 
-The scan also makes the relation between the two structural. `frontGammaJ` is computed first and
-`gammaJ` continues from it rather than starting over, so `frontGammaJ <= gammaJ` follows from the
+The scan also makes the relation between the two structural. `jFrontGamma` is computed first and
+`jGamma` continues from it rather than starting over, so `jFrontGamma <= jGamma` follows from the
 loop bounds rather than standing as an invariant to be argued across two separate scans.
 
 Three things in the loop have no counterpart in Figure 3.4, and all three are implementation detail
@@ -594,7 +647,7 @@ holds no partner to pair with. The isolated-column arm sets `pivotFound`, where 
 alone. And the figure's nested `else { if acceptable ... else rear }` is flattened into a fourth arm
 of the one chain.
 
-`frontGammaJ` follows `nodeIdx` and `frontNodeIdx`, and `frontSize`: the same quantity as `gammaJ`,
+`jFrontGamma` follows `nodeIdx` and `frontNodeIdx`, and `frontSize`: the same quantity as `jGamma`,
 narrowed to the front. It is the paper's `|a_qj,j|`, and the two descriptions agree because `q` is
 the argmax of the front-restricted scan, so the entry at `(q, j)` has that maximum as its magnitude
 by definition.
@@ -620,9 +673,17 @@ column, so `pivotList`, `trials`, the push to the rear and the outer sweep are a
 nothing is ever postponed, and the chase reaches a pivot from any starting column. What is left is
 take the next unfactored column, chase, accept, advance.
 
+The partner is `r`, not `q`. `q` is the sparse letter: AGL introduce it in section 3.1 for the
+partner *restricted to* `A11`, precisely because the unrestricted one may lie in `A21` and be
+unavailable. The dense figures have no such restriction and call it `r` throughout, from Figure 2.1
+onward. A root has no `A21`, so the restriction is vacuous and the letter should be the dense one;
+writing `q` here would import a distinction the algorithm does not make.
+
 `scanPivotColumn` serves unchanged. At a root `jjNumNodeIdx == jjPreFactorFrontSize`, so its third
-loop is empty and `frontGammaJ == gammaJ` identically; the root ignores the second output and uses
-the third, `q`, which is the chase's `r`. Figure 2.4's `i` and `r` are our `j` and `q`.
+loop is empty and `jFrontGamma == jGamma` identically. Its third output is the position attaining
+the front-restricted maximum, which at a root is the maximum outright, so the root binds it to `r`.
+Figure 2.4's `r` is ours; its candidate `i` is our `j`, since `i` is a row index by house
+convention.
 
 ```
 factorRootSupernode(nf, jj), proposed, bounded Bunch-Kaufman:
@@ -632,34 +693,34 @@ factorRootSupernode(nf, jj), proposed, bounded Bunch-Kaufman:
     while nextPivot < jjPreFactorFrontSize:
         j = nextPivot
         lj = jjNodeIdx[j]
-        gammaJ, _, q = scanPivotColumn(jj, nextPivot, j)
+        jGamma, _, r = scanPivotColumn(jj, nextPivot, j)
 
-        if gammaJ == 0:                                # isolated column, nothing to eliminate
+        if jGamma == 0:                                # isolated column, nothing to eliminate
             rank-- if |jjVal[at(j, j)]| == 0
             pivotType[lj] = 1
             nextPivot += 1
             continue
 
-        if |jjVal[at(j, j)]| >= alphaRoot * gammaJ:     # 1x1 on this column's own diagonal
-            applyPivot1x1(nf, jj, nextPivot, j, lj, ...)
+        if |jjVal[at(j, j)]| >= alphaRoot * jGamma:     # 1x1 on this column's own diagonal
+            factor1x1(nf, jj, nextPivot, j, lj, ...)
             nextPivot += 1
             continue
 
         repeat:                                        # the chase
-            gammaQ, _, qNext = scanPivotColumn(jj, nextPivot, q)
-            lq = jjNodeIdx[q]
+            rGamma, _, rNext = scanPivotColumn(jj, nextPivot, r)
+            lr = jjNodeIdx[r]
 
-            if |jjVal[at(q, q)]| >= alphaRoot * gammaQ: # 1x1 on the column the chase reached
-                applyPivot1x1(nf, jj, nextPivot, q, lq, ...)
+            if |jjVal[at(r, r)]| >= alphaRoot * rGamma: # 1x1 on the column the chase reached
+                factor1x1(nf, jj, nextPivot, r, lr, ...)
                 nextPivot += 1
                 break
 
-            if gammaJ == gammaQ:                       # mutual maximum: accept the 2x2
-                applyPivot2x2(nf, jj, nextPivot, j, q, lj, lq, ...)
+            if jGamma == rGamma:                       # mutual maximum: accept the 2x2
+                factor2x2(nf, jj, nextPivot, j, r, lj, lr, ...)
                 nextPivot += 2
                 break
 
-            j = q;  lj = lq;  gammaJ = gammaQ;  q = qNext
+            j = r;  lj = lr;  jGamma = rGamma;  r = rNext
 ```
 
 What the change buys, in the order the guarantees fall out.
@@ -669,10 +730,10 @@ factored completely, and it is not a probabilistic claim: `gamma` never decrease
 and strictly increases except in the case that stops it, so no column is visited twice.
 
 The `2 x 2` block is nonsingular by construction. The chase reaches its `2 x 2` only after both
-diagonal tests have failed, `|A(j,j)| < alphaRoot * gammaJ` from how it arrived and
-`|A(q,q)| < alphaRoot * gammaQ` from the branch above, while `|A(q,j)| == gammaJ == gammaQ`. So
-`|det| > gammaJ^2 (1 - alphaRoot^2)`, bounded away from zero. Those two failed tests are exactly the
-guard the current `gammaJ == gammaQ` condition lacks, and they are recovered here not as a patch but
+diagonal tests have failed, `|A(j,j)| < alphaRoot * jGamma` from how it arrived and
+`|A(r,r)| < alphaRoot * rGamma` from the branch above, while `|A(r,j)| == jGamma == rGamma`. So
+`|det| > jGamma^2 (1 - alphaRoot^2)`, bounded away from zero. Those two failed tests are exactly the
+guard the current `max1 == max2` condition lacks, and they are recovered here not as a patch but
 because the chase cannot reach the acceptance without them.
 
 The forced `1 x 1` disappears. The current loop accepts its last remaining candidate whatever it
@@ -680,7 +741,7 @@ looks like, which is where the open question about dividing by zero comes from. 
 last-candidate case, because acceptance does not depend on candidates remaining.
 
 And the block is well conditioned, `kappa(D) < (1 + alphaRoot) / (1 - alphaRoot)`, which is the
-condition under which the paper allows explicit inversion. Cramer's rule in `applyPivot2x2` is
+condition under which the paper allows explicit inversion. Cramer's rule in `factor2x2` is
 therefore sound at roots, though not at nonroots.
 
 Two things this needs that the nonroot path does not. `alphaRoot` is the dense threshold,

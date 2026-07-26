@@ -89,7 +89,24 @@ inline std::complex<double> maybeConjugate(std::complex<double> v, bool herm) {
 }
 
 // A Hermitian matrix has a real diagonal. Rounding does not know that, so the diagonal is forced
-// rather than assumed, exactly as the static kernel does when it factors one.
+// rather than assumed, exactly as the static kernel does when it factors one. Nothing is corrected
+// here and nothing is tuned: the true imaginary part is known exactly, and it is zero.
+//
+// Where the nonzero comes from is worth knowing, because it is not generic rounding but a
+// cancellation that exact arithmetic guarantees and floating point does not. The kernels form a
+// diagonal update as `l * u` with `u = d * conj(l)` materialized first, `d` real. Writing
+// `l = a + bi`, the imaginary part of that product is
+//
+//     b * fl(d*a) - a * fl(d*b) = abd(1 + e1) - abd(1 + e2) = abd(e1 - e2)
+//
+// which is zero only if the two roundings agree. Reassociating to `l * conj(l) * d` would cancel
+// bitwise, the two cross terms then being the same product with opposite signs, but that is not
+// the association the update uses: materializing `u` is what lets the multiply be a plain gemm.
+// The residues are of order epsilon apiece and accumulate over a supernode's descendants, and the
+// entry they land on is about to become a pivot that its whole column is divided by.
+//
+// Applied to pivots only, which is the whole of D: ldl's 1x1, factor1x1's, and both diagonals of a
+// 2x2 through readPivotBlock2x2. Off-diagonal entries have no such constraint to restore.
 inline double               forceReal(double v, bool)                    { return v; }
 inline std::complex<double> forceReal(std::complex<double> v, bool herm) {
     return herm ? std::complex<double>(v.real(), 0.0) : v;

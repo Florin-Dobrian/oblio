@@ -140,16 +140,16 @@ them silently.
 
 **Where a delayed column gets its values.** `factorStaticSupernode` pivots every front column, so
 nothing is left behind. `factorDynamicNonRootSupernode` pivots only the columns it accepts, its
-*post-factor* front, but eliminating those pivots applies the Schur update across the whole trailing block, and the
-delay region sits in that block. So a delayed column is brought fully current during the factor call;
-it is simply not used as a pivot there. The update kernel never touches it: `updateDynamicUpdateBlock`
-reads only past `frontSize + delaySize`, so it carries the update area to ancestors and leaves the
-delay region alone. A delayed column is therefore factored-into where it sits, migrated intact to the
-parent by `assembleDelay` and `contractVal`, and pivoted there. It is never short-changed and never
-double-updated: the factor step updates it once, the update kernel never does, and the parent pivots
-it once. This falls out rather than being arranged, since the pivot loop's trailing update does not
-care whether a trailing column is destined for delay or for update, it updates the whole tail either
-way.
+*post-factor* front, but eliminating those pivots applies the Schur update across the whole
+trailing block, and the delay region sits in that block. So a delayed column is brought fully
+current during the factor call; it is simply not used as a pivot there. The update kernel never
+touches it: `updateDynamicUpdateBlock` reads only past `frontSize + delaySize`, so it carries the
+update area to ancestors and leaves the delay region alone. A delayed column is therefore
+factored-into where it sits, migrated intact to the parent by `assembleDelay` and `contractVal`,
+and pivoted there. It is never short-changed and never double-updated: the factor step updates it
+once, the update kernel never does, and the parent pivots it once. This falls out rather than being
+arranged, since the pivot loop's trailing update does not care whether a trailing column is
+destined for delay or for update, it updates the whole tail either way.
 
 **This set has expanded.** The solve reads `delaySize(jj)` and `pivotType()` from the
 dynamic factor, the first because a delayed column leaves its row behind so the leading dimension is
@@ -189,6 +189,257 @@ over. The kernel forms only the `f`-by-`w` slice `D L21_kk^H` for this one pair,
 once per (jj, kk) the traversal visits rather than once per `jj`, and why the same function serves both
 traversals. The edge is symmetric to which end one stands at: `kk` held fixed while its descendants
 arrive (left-looking), or `jj` held fixed while its ancestors are visited (right-looking).
+
+### Which kernel runs where
+
+Three tables, one per phase of a supernode's numeric work, covering every BLAS, LAPACK and
+oblio-written kernel call in `NumFactorEngine`. Assembly is not here: `assembleFromA` and its
+siblings are index-driven scatter-gather with no kernel calls at all. Neither is the solve, which is
+a separate phase. `gemmLower`, `formStaticUpper`, `formDynamicUpper` and `ldl` are ours; `potrf`,
+`trsm`, `herk` and `gemm` are the library's.
+
+**Factoring the front, then solving the update rows against it.** `A11 = L11 D11 L11^H`, then
+`L21 = A21 U11^-1`, both in `factorStaticSupernode` for the static path.
+
+```
+                 diagonal block A11                  update rows L21
+Cholesky         potrf('L', f)                       trsm('R','L',conjTrans,'N', u, f)
+LDL static       ldl(f)                              trsm('R','U','N','N',       u, f)
+LDL dynamic      factor1x1 / factor2x2, per pivot    formed inside them, per pivot
+```
+
+The two `trsm` calls differ in more than a flag. Cholesky solves against the lower triangle
+transposed; LDL solves against the stored upper untransposed, which is the whole of what folding `D`
+into `U11 = D11 L11^H` buys, one call where otherwise a triangular solve would be followed by a
+diagonal scaling.
+
+The third row is the one carrying information the tables do not otherwise show: it is the only cell
+in any of them where the dynamic path makes no kernel call. Pivoting forces the front to be factored
+one pivot at a time and `L21` to be formed with it, rather than by a batched `trsm` afterwards,
+because every acceptance test reads its column maximum over the **full** block height, update rows
+included, and so needs those rows current before the next candidate is judged. That coupling between
+`A11` and `A21` is a property of the pivot search, not of the block arithmetic, and it is why the
+dynamic front runs at scalar speed where the static one runs at BLAS speed.
+
+**The (jj, kk) update block**, the slice `jj` owes one ancestor, in `updateStaticUpdateBlock` and
+`updateDynamicUpdateBlock`. Dimensions as above: `w` by `w` square, `(h - w)` by `w` rectangle.
+
+```
+                 symmetric square                    rectangle below
+Cholesky         herk('L','N', L21')                 gemm('N',conjTrans, L21'', L21')
+LDL static       formStaticUpper  + gemmLower        gemm('N','N',       L21'', U12)
+LDL dynamic      formDynamicUpper + gemmLower        gemm('N','N',       L21'', U12)
+```
+
+The price of the `D` is confined to the square. There the update is `L21 D L21^H`, whose two
+operands are no longer the same matrix, so `herk`'s one-operand hypothesis fails and with it the
+half-work saving; `syrk` does not help either, computing `A A^T` rather than `A B` known to be
+symmetric. Hence form `U12 = D L21^H` into scratch, then multiply with `gemmLower`, which is the
+routine BLAS does not have: two independent operands like `gemm`, one triangle like `herk`. The
+rectangle costs LDL nothing beyond having formed `U12`, and is the same call either way, with the
+conjugate transpose baked into the stored operand instead of asked for by a flag.
+
+The two LDL rows differ in one call. `formStaticUpper` walks a plain diagonal `D`;
+`formDynamicUpper` walks `pivotType` over the front so it can fold `1 x 1` and `2 x 2` blocks alike,
+which is why it also takes `mPivotType` and the index set. After that the two are identical. This is
+where `2 x 2` pivots finally reach BLAS-scale work, and they reach it only as a different traversal
+while forming `U`.
+
+**The multifrontal update matrix**, `jj`'s whole contribution at once, in `updateStaticUpdateMatrix`
+and `updateDynamicUpdateMatrix`.
+
+```
+                 whole matrix, u by u, symmetric
+Cholesky         herk('L','N', L21)
+LDL static       formStaticUpper  + gemmLower
+LDL dynamic      formDynamicUpper + gemmLower
+```
+
+One column, where the block table has two, and the reason is the pairing. Here `L21` meets its own
+conjugate transpose over the supernode's full update rows, so the product is symmetric outright and
+every entry lies in the square. The slice pairs two different index sets instead, rows reaching past
+`kk` against kk's own columns, and only its leading square is symmetric. So the rectangle is an
+artifact of slicing by ancestor, and multifrontal, which does not slice, does not have one.
+
+### The scratch upper, and why it is not stored
+
+The `form*Upper` step in those tables writes into a stack-local buffer, allocated on entry and freed
+on return, and it is worth being explicit about what that buffer is, since the vocabulary invites
+two wrong pictures. It is not the front's stored upper triangle, and it is not a region of any
+update object.
+
+There are two different `U`s in a supernode's life:
+
+```
+U11 = D11 L11^H     the front's own diagonal block           written into the factor block's upper
+                                                             triangle, consumed by trsm to solve
+                                                             for L21
+U12 = D11 L21^H     one ancestor's slice, or the whole        written into a local buffer, consumed
+                    update in the multifrontal case           by gemmLower and gemm, then gone
+```
+
+Both are the same purchase, and it is the one this section is about: fold `D` into an operand that
+is materialized once, rather than into the inner loop of whatever consumes it. They differ only in
+where the operand is put. `U11` goes into space the factor block already owns and Cholesky leaves as
+zeros, so it costs no allocation; `U12` has no such space, its dimensions matching nothing in either
+block, so it takes a buffer. What `U11` buys is one `trsm` against the stored upper untransposed,
+where the alternative is a triangular solve against `L11^H` followed by a diagonal scaling. That
+payoff is the static path's alone: dynamic LDL calls no `trsm`, forming `L21` inside `factor1x1` and
+`factor2x2` one pivot at a time, for the reason given under the first table. It writes `U11` all the
+same, because the trailing update reads it as the multiplier for the columns to the right.
+
+**`U11` costs nothing.** The factor block is a rectangle, `jjNumNodeIdx` by the front size, and the
+region above the front's diagonal is inside it either way; Cholesky proves this by leaving it as
+zeros and paying nothing for the privilege. So writing `U11` there is not a trade of storage for
+convenience, it is a use of space that would otherwise sit empty, and only `U12` is a real purchase.
+
+Recovering that region would mean storing the block as a trapezoid, and that is impractical for
+reasons worth recording, since it is the kind of idea that looks free from a distance. The leading
+dimension is what makes `at(r, c)` one multiply and one add, and it is what every BLAS call takes as
+`ld`; a packed triangle plus rectangle has no such constant, so `potrf`, `trsm`, `herk` and `gemm`
+would each need their arguments rebuilt or the block unpacked first. LAPACK's own packed formats
+exist and are slower for exactly this reason. The saving is `f(f-1)/2` against a block of `h` by
+`f`, which is smallest precisely when `h` is much larger than `f`, the sparse case. And on the
+dynamic path the front expands and contracts as delayed columns arrive and leave, through
+`expandVal` and `contractVal`, so every such change would have to repack the triangle as well.
+
+Cholesky forms neither. Its `D` is the identity, so `U = L^H`, and a transpose flag on the call
+reaches it with nothing materialized. The factor block's upper triangle is left as unused zeros and
+`herk` takes `L21` twice.
+
+**Nothing of `U` is ever written into an update block or an update matrix.** Those hold only the
+product `L21 D L21^H`, lower part, in every factorization. Their strict upper triangles are
+untouched by both paths alike, which is not a place where Cholesky and LDL differ.
+
+**A worked example.** Take `jj` owning nodes `{0,1,2}` with index set `{0,1,2,5,6,8,9}`, and `kk`
+owning `{5,6}` with index set `{5,6,8,9,12}`. Then `f = 3` pivots at `jj`, `w = 2` of jj's rows land
+in `kk`, `h = 4` rows reach `kk` and below, and node `12` is kk's alone. Three dimensions, no two
+equal, which is what the common `f == w` case hides.
+
+jj's factor block is `7` by `f`, drawn **after** jj is factored, with `l` marking `L11` below the
+diagonal and `L21` beneath it, `d` the pivots, and `u` the stored `U11`:
+
+```
+              0    1    2
+        0 [   d    u    u  ]     the front square
+        1 [   l    d    u  ]
+        2 [   l    l    d  ]
+        --------------------
+        5 [   l    l    l  ]     L21' : the band landing in kk, w = 2 rows
+        6 [   l    l    l  ]
+        8 [   l    l    l  ]     L21'': reaching past kk, h - w = 2 rows
+        9 [   l    l    l  ]
+```
+
+Every pivot here is `1 x 1`, so the diagonal carries one `d` apiece. A `2 x 2` pivot on columns `0`
+and `1` would put four `d` entries in that corner, `d21` where an `l` was and `d12` where a `u` was,
+because `L11` is the identity within a pivot block and so has no strict lower part there:
+
+```
+              0    1    2
+        0 [   d    d    u  ]
+        1 [   d    d    u  ]
+        2 [   l    l    d  ]
+```
+
+The scratch is `f` by `w`, so `3` by `2`. Its rows are jj's front columns and its columns are kk's,
+and it is filled from the band rows of `L21` alone:
+
+```
+              5    6
+        0 [   u    u  ]          u[i][j] = d_i * conj?(l[j][i])
+        1 [   u    u  ]
+        2 [   u    u  ]
+```
+
+The update block is `h` by `w`, so `4` by `2`, with `*` written and `0` never touched:
+
+```
+              5    6
+        5 [   *    0  ]          w x w square, symmetric: (2x2) -= (2x3)(3x2), gemmLower
+        6 [   *    *  ]
+        --------------------
+        8 [   *    *  ]          (h-w) x w rectangle:     (2x2) -= (2x3)(3x2), gemm('N','N')
+        9 [   *    *  ]
+```
+
+Both multiplies consume the same scratch, summing over `f = 3`, which is what "rank-`f` outer
+product" means. The single `0` is the whole of the unused upper here.
+
+The block is then scattered into kk's own factor block, which is `5` by `2`, split the same way as
+jj's: its front square on top, its update rows beneath. This one is drawn **before** kk is factored,
+which is why its upper triangle is still `0` where jj's holds `u`; that is a difference in time and
+not in kind, and kk's will hold `u` there too once kk is factored. `+` marks positions that received
+something from `jj`, `.` those that did not:
+
+```
+              5    6
+        5 [   +    0  ]          kk's front square, w = 2 wide; jj's square lands exactly on it,
+                                 and the 0 is upper triangle, not yet written
+        6 [   +    +  ]
+        --------------------
+        8 [   +    +  ]          kk's own update rows, where jj's rectangle lands
+        9 [   +    +  ]
+       12 [   .    .  ]          also kk's update rows, but no row of jj reaches node 12
+```
+
+Two things line up here that are worth reading off the picture. The `w x w` square of the update
+block lands exactly on kk's *front* square, which is the same statement as `w` being both a band of
+jj's rows and a subset of kk's columns: jj is contributing to the columns kk will pivot. And the
+rectangle lands in kk's *update* rows, the part kk will later pass on to its own ancestors.
+
+The row of dots is the subset relation the edge rests on: jj's rows cover a prefix of kk's index
+set and stop. A second descendant of `kk` with a different reach would fill row `12` and perhaps
+not rows `8` and `9`, and the two contributions would land in the same block at different offsets.
+
+**Why the scratch is not put in the update block.** Two reasons, either sufficient. The dimensions
+differ, `f` by `w` against `h` by `w`, and neither `f <= h` nor `h <= f` holds in general. And the
+update block is the multiply's accumulator, read and written by `gemmLower`, so an operand living
+inside it would be overwritten as the accumulation proceeded.
+
+**Which part of the scratch is used, and which part of `L21`.** All of the scratch, every entry. Its
+two axes index different things, rows being jj's front columns `{0,1,2}` and columns being kk's
+`{5,6}`, so those index sets are disjoint and the buffer has no diagonal for anything to be above or
+below. `form*Upper`'s loops carry no triangular bound. The `U` in its name describes what the object
+is, `D L21^H`, not the shape of this buffer.
+
+The partial use is on either side of it. `form*Upper` reads only the band rows of `L21`, `{5,6}` and
+not `{8,9}`, so it uses part of `L21`; and `gemmLower` writes only the lower triangle of the square
+it produces. So the update block is filled from the scratch together with `L21`, the band rows for
+the square and the rows below for the rectangle, and on and below the diagonal only.
+
+**The three options, for an update block.** Folding `D` in has to happen somewhere, and there are
+exactly three places for it:
+
+1. **Scratch, then multiply.** Buffer `f` by `w`, `f*w` extra multiplies to fill it, then a real
+   library `gemm` for the rectangle. What we do.
+2. **Fused, `D` hoisted per (row, column).** No buffer, arithmetic the same as option 1, but the
+   rectangle becomes ours rather than BLAS's.
+3. **Fused, `D` applied in the innermost loop.** No buffer, `h*w*f` extra multiplies, and still ours
+   rather than BLAS's. Strictly worse than option 2, so not a real candidate.
+
+So the actual trade is between 1 and 2: a small buffer and its fill cost, against losing the one
+tuned call LDL still gets in the update path. And option 2's cost is larger than it looks, because
+there are two multiplies. It would need a lower-triangle variant and a rectangle variant, both
+hand-written, both with a `pivotType` walk for the dynamic case. Option 1 confines the `D` handling
+to `form*Upper` and leaves both multiplies as ordinary products.
+
+**What changes for an update matrix.** There is no rectangle, so no `gemm`, so the one thing the
+scratch was buying disappears. What remains is `gemmLower`, which is ours either way, and a fused
+`oblioHerk` would be no worse arithmetically if it hoisted `D` per column.
+
+Two things keep it from being pure convenience there, though both are weaker than the `gemm`
+argument. The buffer is larger, `f` by `u` rather than `f` by `w`, so the whole update at once
+rather than one ancestor's slice, and allocated once per supernode instead of once per edge; if the
+scratch is ever to be eliminated anywhere, this is the path where it costs most. And `form*Upper`
+plus `gemmLower` is the same pair in all four update functions, so the block and matrix paths
+differ only in dimensions, where fusing the matrix path alone would split them, with the `D`
+handling written twice.
+
+So on the multifrontal path the scratch is a convenience purchase, and the honest reasons for it are
+uniformity with the block path and not having written `oblioHerk`. That is a fair price: storage is
+what this codebase trades away elsewhere too, and here it buys uniformity on one path and a real
+`gemm` on the other.
 
 ### The life of an update
 

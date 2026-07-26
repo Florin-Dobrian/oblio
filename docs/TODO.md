@@ -980,7 +980,7 @@ rather than from restructuring. What follows is the restructuring that has not b
 
 ### Merge the duplicated pivot bodies: DONE, 2026-07-19
 
-The eliminations are now `applyPivot1x1` and `applyPivot2x2`, shared by both selection loops, and
+The eliminations are now `factor1x1` and `factor2x2`, shared by both selection loops, and
 the 2x2 block is read once in `readPivotBlock2x2`. 230 code lines became 204 across three functions,
 under 147 passing assertions throughout.
 

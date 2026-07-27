@@ -1,173 +1,203 @@
 # %% [markdown]
-# # Minimum degree, layer 1: naive, materializing fill
+# # Minimum degree, step 2: the quotient graph
 #
-# The learning version of the ordering, in Python so we can step through it.
-# This is the NAIVE minimum degree of Section 5.1 (archive/sparse_factorization.md):
-# it materializes fill, the one thing a real code refuses to do. That is the
-# point. It is the vertex elimination game transcribed line for line, the ground
-# truth the quotient graph (layer 2) will optimize without changing the result.
+# Same ordering as md1, computed WITHOUT ever storing fill. When a vertex is
+# eliminated it becomes a CLIQUE on the vertices it would have joined. A clique is
+# fully described by its vertex list, so every edge inside it is implicit, and that
+# cuts twice:
 #
-# Scope: correct, not equivalent. It produces a valid minimum degree ordering,
-# not the vendored genmmd's exact one; matching genmmd's tie-breaks is a later,
-# separate goal. The vendored src/Mmd.cpp is the oracle for that.
+#   - the fill edges are never added, and
+#   - the edges ALREADY present between two members are now redundant, so they
+#     are pruned from the explicit adjacency.
+#
+# So an elimination adds nothing and removes something. Each A[i] only ever
+# shrinks, which is why this representation never needs more room than the
+# original graph. Section 5.3 of archive/sparse_factorization.md.
+#
+# A live variable i is stored as A[i], its remaining explicit variable neighbors,
+# and C[i], the cliques it belongs to. Its true neighborhood is the union of the
+# two, formed only when asked.
+#
+# Naming: the literature calls these objects ELEMENTS and writes E_i for C[i].
+# They are cliques; we name them for what they are.
+#
+# The order and the per-step degrees match md1 exactly: same algorithm, cheaper
+# storage. What this layer does NOT yet fix is that the degree is still a full
+# union every time it is asked; a cheap degree is a later layer.
 
 # %%
-from copy import deepcopy
+def reachable(A, C, cliques, i):
+    """The true neighbors of live variable i: its explicit neighbors A[i]
+    together with the members of every clique it belongs to, minus itself."""
+    neighbors = set(A[i])
+    for c in C[i]:
+        neighbors |= cliques[c]
+    neighbors.discard(i)
+    return neighbors
 
-# The elimination graph: one neighbor set per vertex. A set keeps each
-# neighborhood sorted-enough and duplicate-free, and reads plainly.
-Graph = list  # list[set[int]], spelled out for the reader
+
+def storage(A, cliques):
+    """What the quotient graph currently costs: explicit endpoints plus clique
+    members. Watch it fall. The naive graph's edge count only rises."""
+    return sum(len(a) for a in A) + sum(len(m) for m in cliques.values())
 
 
-def graph_from_edges(n, edges):
-    """Build an undirected graph on n vertices from a list of (u, w) edges.
+def eliminate(A, C, cliques, eliminated, pivot):
+    """Turn the pivot into a clique. Returns (neighbors, absorbed, pruned).
 
-    Pythonic input for the notebook. The real orderer takes CSC (colPtr/rowIdx);
-    we bridge to that only when we compare against the oracle, later.
+    neighbors the pivot's reachable set. Stored once as a clique instead of as
+              fill edges; in that role the doc calls it the pattern L_pivot,
+              which is also the nonzero pattern of column pivot of L.
+    absorbed  cliques the pivot belonged to, swallowed by the new one
+    pruned    explicit edges deleted because the new clique now implies them
     """
-    graph = [set() for _ in range(n)]
-    for u, w in edges:
-        if u != w:
-            graph[u].add(w)
-            graph[w].add(u)  # keep it symmetric
-    return graph
+    neighbors = reachable(A, C, cliques, pivot)
+    absorbed = set(C[pivot])
+    for c in absorbed:
+        del cliques[c]
+    cliques[pivot] = set(neighbors)    # becomes L_pivot: the clique's pattern
 
+    pruned = []
+    for i in neighbors:
+        redundant = A[i] & neighbors    # both ends inside the new clique
+        for j in redundant:
+            if i < j:
+                pruned.append((i, j))
+        A[i] -= redundant               # implicit now: delete the explicit copy
+        A[i].discard(pivot)             # the pivot is no longer a variable
+        C[i] -= absorbed                # its absorbed cliques are gone
+        C[i].add(pivot)                 # i belongs to the new clique instead
 
-# %%
-def eliminate(graph, pivot):
-    """Eliminate one vertex: make its neighbors a clique, then detach it.
-
-    Making the neighbors mutually adjacent is where fill is created, and here we
-    actually store it. This function *is* the definition of a pivot's effect on
-    the graph, and the clique loop is the one line layer 2 will remove.
-    """
-    neighbors = set(graph[pivot])  # copy: we mutate the graph below
-    for u in neighbors:
-        for w in neighbors:
-            if u != w:
-                graph[u].add(w)  # the fill edge, materialized
-    for u in neighbors:
-        graph[u].discard(pivot)
-    graph[pivot].clear()
+    A[pivot].clear()
+    C[pivot].clear()
+    eliminated[pivot] = True
+    return neighbors, absorbed, pruned
 
 
 def minimum_degree(graph):
-    """Repeatedly eliminate the live vertex of least degree.
-
-    Returns the elimination order; order[k] is the vertex eliminated k-th, which
-    read as a sequence is the new-to-old permutation. Does not mutate the input.
-    """
-    graph = deepcopy(graph)
+    """Quotient-graph minimum degree. Same result as md1, no fill stored."""
     n = len(graph)
+    nnz_tril_A = sum(len(neigh) for neigh in graph) // 2 + n     # before we mutate
+    A = [set(neigh) for neigh in graph]   # explicit variable neighbors
+    C = [set() for _ in range(n)]         # cliques each variable belongs to
+    cliques = {}                           # clique id -> its live members
     eliminated = [False] * n
     order = []
+    degree_sum = 0                # sum of pivot degrees == sum of column counts of L
 
-    for _ in range(n):
-        # PICK the live vertex of least degree. Linear scan, first index wins a
-        # tie (strict <), matching the C++ layer 1 so the two agree.
-        pivot = -1
-        least_degree = 0
-        for vertex in range(n):
-            if eliminated[vertex]:
-                continue
-            degree = len(graph[vertex])
-            if pivot == -1 or degree < least_degree:
-                pivot = vertex
-                least_degree = degree
+    def show_state(neighbors=None, absorbed=None, pruned=None):
+        """A, C and cliques on their own lines; then the three results of the
+        eliminate call, in the order it returns them."""
+        a = "{" + ", ".join(f"{v}: {sorted(A[v])}" for v in range(n)) + "}"
+        c = "{" + ", ".join(
+            f"{v}: {[f'c{x}' for x in sorted(C[v])]}" for v in range(n)) + "}"
+        cl = "{" + ", ".join(
+            f"c{x}: {sorted(m)}" for x, m in sorted(cliques.items())) + "}"
+        print(f"         A       = {a}")
+        print(f"         C       = {c}")
+        print(f"         cliques = {cl}   storage {storage(A, cliques)}")
+        if neighbors is None:
+            print("         neighbors = none, absorbed = none, pruned = none"
+                  "   (nothing eliminated yet)")
+        else:
+            nb = sorted(neighbors)
+            ab = ", ".join(f"c{x}" for x in sorted(absorbed)) if absorbed else "none"
+            pr = ", ".join(f"{u}-{w}" for u, w in sorted(pruned)) if pruned else "none"
+            print(f"         neighbors = {nb}, absorbed = {ab}, pruned = {pr}")
 
-        eliminate(graph, pivot)
-        eliminated[pivot] = True
+    print("start: no cliques yet, every neighbor explicit")
+    show_state()
+    for step in range(n):
+        pivot = min((v for v in range(n) if not eliminated[v]),
+                    key=lambda v: len(reachable(A, C, cliques, v)))
+        degree = len(reachable(A, C, cliques, pivot))
+        neighbors, absorbed, pruned = eliminate(A, C, cliques, eliminated, pivot)
         order.append(pivot)
+        degree_sum += degree
 
+        print(f"step {step}: eliminate {pivot} (degree {degree})")
+        show_state(neighbors, absorbed, pruned)
+
+    # The degree of a pivot at elimination is the count of its column of L, so
+    # the degrees already computed give nnz(L) with no extra work (Section 5.1).
+    nnz_L = degree_sum + n
+    print(f"nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
+          f"fill = {nnz_L - nnz_tril_A}")
     return order
 
 
-def count_fill(graph, order):
-    """Count the fill an ordering produces, replaying it on a fresh copy."""
-    graph = deepcopy(graph)
-    fill = 0
-    for pivot in order:
-        neighbors = set(graph[pivot])
-        for u in neighbors:
-            for w in neighbors:
-                if u < w and w not in graph[u]:
-                    graph[u].add(w)
-                    graph[w].add(u)
-                    fill += 1
-        for u in neighbors:
-            graph[u].discard(pivot)
-        graph[pivot].clear()
-    return fill
-
-
 # %%
-def minimum_degree_steps(graph):
-    """Same as minimum_degree, but yields state after each elimination.
+# Two examples.
+#
+#   graph1, a 4-cycle: eliminating any vertex forces its two neighbors
+#   together, so it is the smallest graph that fills (one fill edge).
+#
+#      0---1          edges: 0-1 1-2 2-3 3-0
+#      |   |
+#      3---2
+#
+#   graph2, uneven degrees so the picker actually chooses; it fills twice.
+#
+#        0            edges: 0-1 0-2 1-3 2-4
+#       / \                  3-4 3-5 4-5
+#      1   2
+#      |   |
+#      3---4
+#       \ /
+#        5
+#
+#   graph3, twelve vertices: a path 0-1-...-11 with eight extra edges. Big
+#   enough that cliques grow past two members, which is where the quotient
+#   graph starts to pay, and its elimination order is not the identity.
+#
+#      edges: 0-1 0-3 0-8 1-2 1-6 1-8 2-3 2-5 3-4 4-5
+#             5-6 5-9 6-7 6-10 7-8 8-9 9-10 10-11
+graph1 = [
+    {1, 3}, {0, 2}, {1, 3}, {0, 2},
+]
+graph2 = [
+    {1, 2}, {0, 3}, {0, 4}, {1, 4, 5}, {2, 3, 5}, {3, 4},
+]
 
-    This is why we are in a notebook. Each yield carries the step number, the
-    pivot chosen, its degree at the moment of choice, and a snapshot of the live
-    graph, so we can watch degrees change and fill appear as the cell runs.
-    """
-    graph = deepcopy(graph)
-    n = len(graph)
-    eliminated = [False] * n
+graph3 = [
+    {1, 3, 8},        # 0
+    {0, 2, 6, 8},     # 1
+    {1, 3, 5},        # 2
+    {0, 2, 4},        # 3
+    {3, 5},           # 4
+    {2, 4, 6, 9},     # 5
+    {1, 5, 7, 10},    # 6
+    {6, 8},           # 7
+    {0, 1, 7, 9},     # 8
+    {5, 8, 10},       # 9
+    {6, 9, 11},       # 10
+    {10},             # 11
+]
 
-    for step in range(n):
-        pivot = -1
-        least_degree = 0
-        for vertex in range(n):
-            if eliminated[vertex]:
-                continue
-            degree = len(graph[vertex])
-            if pivot == -1 or degree < least_degree:
-                pivot = vertex
-                least_degree = degree
+# graph4, eight vertices and fourteen edges. Denser than the others, and here
+# for one specific reason: it is the smallest graph we could find on which AMD's
+# degree BOUND is ever loose. The bound overcounts only when a vertex belongs to
+# two elements that overlap outside the new one, which needs enough eliminations
+# to have made several elements and enough fill for them to intersect. Every
+# connected graph on five or six vertices is exact (checked exhaustively), and so
+# are graph1 to graph3, so without this one the amd trace would never show the
+# approximation approximating. The other layers use it as an ordinary denser test.
+#
+#   edges: 0-2 0-3 0-4 0-7 1-3 1-4 1-6 1-7 2-3 2-5 3-6 3-7 4-5 5-6
+graph4 = [
+    {2, 3, 4, 7},     # 0
+    {3, 4, 6, 7},     # 1
+    {0, 3, 5},        # 2
+    {0, 1, 2, 6, 7},  # 3
+    {0, 1, 5},        # 4
+    {2, 4, 6},        # 5
+    {1, 3, 5},        # 6
+    {0, 1, 3},        # 7
+]
 
-        eliminate(graph, pivot)
-        eliminated[pivot] = True
-        live = {v: sorted(graph[v]) for v in range(n) if not eliminated[v]}
-        yield step, pivot, least_degree, live
-
-
-# %%
-# Arrowhead: vertex 0 is a hub joined to 1..n-1; every other vertex touches only
-# the hub. Example 1 of the doc: eliminate the hub first and its neighbors become
-# a full clique (much fill); eliminate it last and there is none. Minimum degree
-# finds the good order on its own.
-n = 6
-arrowhead = graph_from_edges(n, [(0, leaf) for leaf in range(1, n)])
-
-md_order = minimum_degree(arrowhead)
-natural_order = list(range(n))  # hub first
-
-print("minimum degree order:     ", md_order,
-      " fill =", count_fill(arrowhead, md_order))
-print("natural order (hub first):", natural_order,
-      " fill =", count_fill(arrowhead, natural_order))
-
-# %%
-# The interactive payoff: watch it eliminate. Run this cell and read the pivots
-# and degrees. Notice the hub's degree falling by one each time a leaf goes.
-for step, pivot, degree, live in minimum_degree_steps(arrowhead):
-    print(f"step {step}: eliminate {pivot} (degree {degree}), live now {live}")
-
-# %%
-# A slightly richer graph to experiment with: a 3x3 grid. Change it, re-run, see
-# how the ordering and the fill move. This is the cell to play in.
-def grid_edges(rows, cols):
-    edges = []
-    for r in range(rows):
-        for c in range(cols):
-            v = r * cols + c
-            if c + 1 < cols:
-                edges.append((v, v + 1))
-            if r + 1 < rows:
-                edges.append((v, v + cols))
-    return edges
-
-
-grid = graph_from_edges(9, grid_edges(3, 3))
-grid_order = minimum_degree(grid)
-print("3x3 grid, minimum degree:", grid_order, " fill =", count_fill(grid, grid_order))
-print("3x3 grid, natural order: ", list(range(9)),
-      " fill =", count_fill(grid, list(range(9))))
+for name, g in [("graph1", graph1), ("graph2", graph2),
+                ("graph3", graph3), ("graph4", graph4)]:
+    print(f"=== {name} ===")
+    order = minimum_degree(g)
+    print("order:", order)
+    print()

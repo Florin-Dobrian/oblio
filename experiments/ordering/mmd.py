@@ -1,7 +1,7 @@
 # %% [markdown]
 # # Multiple minimum degree
 #
-# md6 finished the cheap wins. It has the quotient graph, supervariables,
+# md5 finished the cheap wins. It has the quotient graph, supervariables,
 # maintained degrees and degree buckets, and it returns exactly the ordering md1
 # returns, only far faster. Everything left costs something.
 #
@@ -74,7 +74,7 @@ def storage(A, cliques):
 
 
 def eliminate(A, C, cliques, weight, eliminated, pivot):
-    """Unchanged from md6: absorb, prune, merge. The batching lives in the
+    """Unchanged from md5: absorb, prune, merge. The batching lives in the
     caller, not here, which is also true of the vendored code (mmdelm knows
     nothing about batches)."""
     neighbors = reachable(A, C, cliques, pivot)
@@ -243,7 +243,7 @@ def mmd(graph, delta=0, verbose=True):
 
 
 # %%
-# The same three graphs as md1 through md6.
+# The same three graphs as md1 through md5.
 #
 #   graph1, a 4-cycle:        graph2, uneven degrees:
 #

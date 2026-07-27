@@ -1,6 +1,6 @@
 // mmd.cpp -- multiple minimum degree.
 //
-// md6 finished the cheap wins. It has the quotient graph, supervariables,
+// md5 finished the cheap wins. It has the quotient graph, supervariables,
 // maintained degrees and degree buckets, and it returns exactly the ordering md1
 // returns, only far faster. Everything left costs something.
 //
@@ -331,7 +331,7 @@ void run(const std::string& name, const std::vector<std::set<int>>& graph) {
 }
 
 int main() {
-    // The same three graphs as md1 and md3.
+    // The same three graphs as md1 and md2.
     //
     //   graph1, a 4-cycle: eliminating any vertex forces its two neighbors
     //   together, so it is the smallest graph that fills (one fill edge).

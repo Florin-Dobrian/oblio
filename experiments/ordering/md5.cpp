@@ -1,26 +1,28 @@
-// md5.cpp -- minimum degree, step 5: maintained degrees.
+// md5.cpp -- minimum degree, step 5: degree buckets.
 //
-// Every version so far recomputed a reachable set for EVERY live vertex at EVERY
-// step, just to find the smallest, then threw all but one away. On a 3D grid that
-// is roughly ten times the necessary work, and the ratio grows with n.
-// Section 5.7 of archive/sparse_factorization.md.
+// md4 stopped recomputing degrees that could not have changed. What it left in
+// place is the scan: the picker still walks every live vertex to find the
+// smallest cached degree, O(n) per step, now over integers rather than set
+// unions. Cheap, but still the only remaining O(n) per pivot.
 //
-// The waste is easy to see once stated: eliminating a pivot can only change the
-// degrees of the vertices it REACHED. Every other vertex has the same A, the same
-// cliques and the same weights as before, so its degree is still whatever it was.
+// The fix is to file each supervariable in a bucket indexed by its degree, so the
+// minimum can be found by walking UP from the last known minimum rather than
+// looking at everything. Section 5.9 of archive/sparse_factorization.md describes
+// this as common ground: both MMD and AMD do it, neither invented it.
 //
-// So we keep a degrees[] array and refresh only the reached set. The picker then
-// scans cached integers instead of building set unions. This is the first half of
-// what both MMD and AMD do before their ideas diverge; md6 adds the second half,
-// degree buckets, which removes the scan itself.
+// Two things make the walk cheap:
 //
-// Why refreshing the clique alone is enough, in three parts:
+//   - mdeg, a LOWER BOUND on the current minimum degree. Each search starts at
+//     mdeg rather than at 0, and every bucket below it is known to be empty.
+//   - a vertex whose degree changes must be pulled out of the middle of its old
+//     bucket, so buckets need O(1) removal. Here that is a std::set; the vendored
+//     codes use doubly linked lists (MMD's fwd/bwd, AMD's Next/Last) because
+//     Fortran and C of that era had no such container.
 //
-//   - PRUNING and clique membership change only for members of the new clique
-//   - ABSORPTION deletes cliques the pivot belonged to, and every member of such
-//     a clique is reachable from the pivot, hence in the new clique
-//   - MERGING removes a vertex i, but i merged only because everything it could
-//     see lay inside the new clique, so nobody outside sees i disappear
+// Keeping mdeg correct is the whole of the difficulty, and it is a lower bound
+// rather than the true minimum on purpose: it may lag, and the walk fixes it.
+// What it must never do is overshoot, since a bucket below mdeg is never examined
+// and a vertex sitting there would never be chosen.
 //
 // Build:  g++ -std=c++17 -O3 md5.cpp -o md5_cpp  (or: make)
 // Run:    ./md5_cpp
@@ -121,10 +123,12 @@ std::string braces(const std::set<int>& s) {
 void showState(const std::vector<std::set<int>>& A, const std::vector<std::set<int>>& C,
                const Cliques& cliques, const std::vector<int>& weight,
                const std::vector<int>& degrees, const std::vector<bool>& eliminated,
+               const std::vector<std::set<int>>& buckets, int mdeg,
                bool hasResult,
                const std::set<int>& neighbors, const std::set<int>& absorbed,
                const std::vector<std::pair<int, int>>& pruned,
-               const std::vector<int>& merged, const std::vector<int>& refreshed) {
+               const std::vector<int>& merged, const std::vector<int>& refreshed,
+               int walked) {
     int n = static_cast<int>(A.size());
 
     std::cout << "         A       = {";
@@ -148,7 +152,14 @@ void showState(const std::vector<std::set<int>>& A, const std::vector<std::set<i
         std::cout << (v ? ", " : "") << v << ": ";
         if (eliminated[v]) std::cout << "-"; else std::cout << degrees[v];
     }
-    std::cout << "}\n";
+    std::cout << "}\n         buckets = {";
+    { bool g = true;
+      for (std::size_t d = 0; d < buckets.size(); ++d)
+          if (!buckets[d].empty()) {
+              std::cout << (g ? "" : ", ") << d << ": " << braces(buckets[d]); g = false;
+          }
+    }
+    std::cout << "}   mdeg = " << mdeg << "\n";
 
     if (!hasResult) {
         std::cout << "         neighbors = none, absorbed = none, pruned = none, "
@@ -167,7 +178,7 @@ void showState(const std::vector<std::set<int>>& A, const std::vector<std::set<i
     std::cout << "\n         refreshed = ";
     if (refreshed.empty()) std::cout << "none";
     else { bool g = true; for (int x : refreshed) { std::cout << (g ? "" : ", ") << x; g = false; } }
-    std::cout << "\n";
+    std::cout << "   (walked " << walked << " bucket(s) to find the pivot)\n";
 }
 
 std::vector<int> minimumDegree(const std::vector<std::set<int>>& graph) {
@@ -186,32 +197,47 @@ std::vector<int> minimumDegree(const std::vector<std::set<int>>& graph) {
     std::vector<int> pivots;
     std::size_t nnzL = 0;
 
-    // The cache. Built once here, then touched only where it can be wrong.
     std::vector<int> degrees(n);
     for (int v = 0; v < n; ++v) degrees[v] = static_cast<int>(A[v].size());
-    std::size_t refreshes = n;          // count them: this is the whole point
 
-    std::cout << "start: no cliques yet, every neighbor explicit, degrees from A\n";
-    showState(A, C, cliques, weight, degrees, eliminated, false, {}, {}, {}, {}, {});
+    // Vertices filed by degree, so the pick is a walk rather than a scan.
+    std::vector<std::set<int>> buckets(n + 1);
+    for (int v = 0; v < n; ++v) buckets[degrees[v]].insert(v);
+    int mdeg = n ? *std::min_element(degrees.begin(), degrees.end()) : 0;
+    std::size_t probes = 0;             // bucket slots examined, the metric
+
+    // Move i to the bucket for its new degree. The bound may only ever fall.
+    auto refile = [&](int i, int newDegree) {
+        buckets[degrees[i]].erase(i);
+        degrees[i] = newDegree;
+        buckets[newDegree].insert(i);
+        if (newDegree < mdeg) mdeg = newDegree;
+    };
+
+    std::cout << "start: no cliques yet, degrees from A, vertices filed by degree\n";
+    showState(A, C, cliques, weight, degrees, eliminated, buckets, mdeg,
+              false, {}, {}, {}, {}, {}, 0);
 
     int step = 0;
     while (std::find(eliminated.begin(), eliminated.end(), false) != eliminated.end()) {
-        // The pick is now a scan over cached integers, not over set unions.
-        int pivot = -1;
-        for (int v = 0; v < n; ++v) {
-            if (eliminated[v]) continue;
-            if (pivot == -1 || degrees[v] < degrees[pivot]) pivot = v;
-        }
+        // PICK: walk up from mdeg to the first non-empty bucket. No scan.
+        int walked = 0;
+        while (buckets[mdeg].empty()) { ++mdeg; ++walked; }
+        probes += walked + 1;
+        int pivot = *buckets[mdeg].begin();   // lowest index, matching md4's tie-break
         int d = degrees[pivot];
         int w = weight[pivot];
+        buckets[d].erase(pivot);
 
         std::set<int> neighbors, absorbed;
         std::vector<std::pair<int, int>> pruned;
         std::vector<int> merged;
         eliminate(A, C, cliques, weight, eliminated, pivot,
                   neighbors, absorbed, pruned, merged);
-        for (int i : merged)
+        for (int i : merged) {
             members[pivot].insert(members[pivot].end(), members[i].begin(), members[i].end());
+            buckets[degrees[i]].erase(i);     // merged vertices leave the buckets
+        }
         pivots.push_back(pivot);
 
         // REFRESH, and only here. The surviving members of the new clique are
@@ -220,8 +246,7 @@ std::vector<int> minimumDegree(const std::vector<std::set<int>>& graph) {
         for (int i : neighbors)
             if (!eliminated[i]) refreshed.push_back(i);
         for (int i : refreshed)
-            degrees[i] = degreeOf(A, C, cliques, weight, i);
-        refreshes += refreshed.size();
+            refile(i, degreeOf(A, C, cliques, weight, i));
 
         // A supervariable of weight wp is wp consecutive columns of L. Its
         // EXTERNAL degree is what remains of the clique after the merges, since
@@ -232,8 +257,8 @@ std::vector<int> minimumDegree(const std::vector<std::set<int>>& graph) {
 
         std::cout << "step " << step << ": eliminate " << pivot << " (degree " << d
                   << ", weight " << w << " -> " << wp << ")\n";
-        showState(A, C, cliques, weight, degrees, eliminated, true,
-                  neighbors, absorbed, pruned, merged, refreshed);
+        showState(A, C, cliques, weight, degrees, eliminated, buckets, mdeg, true,
+                  neighbors, absorbed, pruned, merged, refreshed, walked);
         ++step;
     }
 
@@ -244,8 +269,8 @@ std::vector<int> minimumDegree(const std::vector<std::set<int>>& graph) {
     for (int p : pivots) std::cout << " " << p;
     std::cout << "\nnnz(L) = " << nnzL << " against nnz(tril A) = " << nnzTrilA
               << ", fill = " << (nnzL - nnzTrilA) << "\n";
-    std::cout << "degree computations: " << refreshes
-              << "   (md4 would do one per live vertex per step)\n";
+    std::cout << "bucket probes: " << probes
+              << "   (md4 would scan every live vertex per step)\n";
     return order;
 }
 
@@ -258,7 +283,7 @@ void run(const std::string& name, const std::vector<std::set<int>>& graph) {
 }
 
 int main() {
-    // The same three graphs as md1 and md3.
+    // The same three graphs as md1 and md2.
     //
     //   graph1, a 4-cycle: eliminating any vertex forces its two neighbors
     //   together, so it is the smallest graph that fills (one fill edge).

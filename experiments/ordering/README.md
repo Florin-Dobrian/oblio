@@ -18,18 +18,16 @@ Each adds exactly one mechanism to the one before. The right column cites
 | layer | adds | sections |
 |---|---|---|
 | `md1` | naive minimum degree, materializing the fill | 5.1, 5.2 |
-| `md3` | the quotient graph: cliques instead of fill | 5.3, 5.4 |
-| `md4` | supervariables and mass elimination | 5.5, 5.6 |
-| `md5` | maintained degrees, refreshed only where they changed | 5.7, 5.8 |
-| `md6` | degree buckets, so the minimum is walked to, not scanned | 5.9, 5.10 |
+| `md2` | the quotient graph: cliques instead of fill | 5.3, 5.4 |
+| `md3` | supervariables and mass elimination | 5.5, 5.6 |
+| `md4` | maintained degrees, refreshed only where they changed | 5.7, 5.8 |
+| `md5` | degree buckets, so the minimum is walked to, not scanned | 5.9, 5.10 |
 | `mmd` | multiple elimination: a batch of pivots per refresh | 5.11, 5.12 |
 | `amd` | approximate degree: a bound instead of a set union | 5.13, 5.14 |
 
-`md2` is an earlier naive variant, kept for reference and not built.
-
 ## What the layers show
 
-**`md1` through `md6` return the same ordering.** Every one of them. That is the point of the
+**`md1` through `md5` return the same ordering.** Every one of them. That is the point of the
 first five sections: the heuristic was fixed in `md1` and everything after is implementation, so
 the layers can be verified by demanding an identical permutation.
 
@@ -38,10 +36,10 @@ happen when a layer is added, and all three occur here:
 
 ```
                               order        fill        what the change is
-md1 -> md3                    same         same        a change of representation
-md3 -> md4  (mass elim.)      DIFFERENT    same        a provably free reordering
-md4 -> md5 -> md6             same         same        a change of implementation
-md6 -> mmd  (multiple elim.)  different     DIFFERENT  a wager
+md1 -> md2                    same         same        a change of representation
+md2 -> md3  (mass elim.)      DIFFERENT    same        a provably free reordering
+md3 -> md4 -> md5             same         same        a change of implementation
+md5 -> mmd  (multiple elim.)  different     DIFFERENT  a wager
 ```
 
 So `mmd` is not the first layer to change the permutation. Mass elimination already does, on nine
@@ -101,7 +99,7 @@ contributing to `|L|`; `Amd.cpp` does this at `degme -= nvi`. We computed `|L|` 
 loop. The effect is nearly invisible: identical results on all four test graphs and on every grid,
 surfacing only on a five-vertex bowtie where a bound came out one too large.
 
-**`mmd.cpp` printed display lines its Python twin did not**, left over from the `md6` file it was
+**`mmd.cpp` printed display lines its Python twin did not**, left over from the `md5` file it was
 derived from. This survived because the verification at the time used a `grep` filter narrow
 enough to skip exactly those lines, which is not a test. `make test` exists because of this one:
 it compares whole outputs, and it found the drift immediately.

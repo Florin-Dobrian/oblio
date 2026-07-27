@@ -1,28 +1,23 @@
-// md3.cpp -- minimum degree, step 3: the quotient graph.
+// md3.cpp -- minimum degree, step 3: supervariables and mass elimination.
 //
-// Same ordering as md1, computed WITHOUT ever storing fill. When a vertex is
-// eliminated it becomes a CLIQUE on the vertices it would have joined. A clique is
-// fully described by its vertex list, so every edge inside it is implicit, and
-// that cuts twice:
+// md2 stopped the graph from growing. This step stops it from being as wide, by
+// noticing that eliminating a pivot often makes some of its neighbors
+// INDISTINGUISHABLE from it: their whole remaining neighborhood lies inside the
+// new clique, so eliminating them next costs no fill at all. Rather than let the
+// picker rediscover them one at a time, we merge them into the pivot on the spot
+// and give the group a WEIGHT. Section 5.5 of archive/sparse_factorization.md.
 //
-//   - the fill edges are never added, and
-//   - the edges ALREADY present between two members are now redundant, so they
-//     are pruned from the explicit adjacency.
+// What changes from md2, and it is only these three things:
 //
-// So an elimination adds nothing and removes something. Each A[i] only ever
-// shrinks, which is why this representation never needs more room than the
-// original graph. Section 5.2 of archive/sparse_factorization.md.
+//   - weight[p] counts how many original vertices the supervariable p stands for
+//   - the degree is WEIGHTED: a neighbor of weight 3 counts 3, not 1
+//   - after forming a clique, any member i with A[i] empty and C[i] == {p} is
+//     merged into p (MASS ELIMINATION) and stops being a vertex
 //
-// A live variable i is stored as A[i], its remaining explicit variable neighbors,
-// and C[i], the cliques it belongs to. Its true neighborhood is the union of the
-// two, formed only when asked.
-//
-// Naming: the literature calls these objects ELEMENTS and writes E_i for C[i].
-// They are cliques; we name them for what they are.
-//
-// The order and the per-step degrees match md1 exactly: same algorithm, cheaper
-// storage. What this layer does NOT yet fix is that the degree is still a full
-// union every time it is asked; a cheap degree is a later layer.
+// The elimination order comes out over supervariables, so a final pass expands
+// each one into consecutive numbers. That expansion is why merged vertices must
+// be numbered together, and it is the one place this layer changes the answer
+// rather than just the cost.
 //
 // Build:  g++ -std=c++17 -O3 md3.cpp -o md3_cpp  (or: make)
 // Run:    ./md3_cpp
@@ -39,7 +34,7 @@
 using Cliques = std::map<int, std::set<int>>;
 
 // The true neighbors of live variable i: its explicit neighbors A[i] together
-// with the members of every element it belongs to, minus itself.
+// with the members of every clique it belongs to, minus itself.
 std::set<int> reachable(const std::vector<std::set<int>>& A,
                         const std::vector<std::set<int>>& C,
                         const Cliques& cliques, int i) {
@@ -50,39 +45,64 @@ std::set<int> reachable(const std::vector<std::set<int>>& A,
     return neighbors;
 }
 
-// What the quotient graph currently costs: explicit endpoints plus element
-// members. Watch it fall. The naive graph's edge count only rises.
-std::size_t storage(const std::vector<std::set<int>>& A, const Cliques& cliques) {
-    std::size_t total = 0;
-    for (const auto& a : A) total += a.size();
-    for (const auto& [e, members] : cliques) total += members.size();
+// External degree, WEIGHTED: each neighbor counts for the number of original
+// vertices it stands for. md2 counted this with size(); the only reason it
+// differs here is that supervariables now exist.
+int degreeOf(const std::vector<std::set<int>>& A, const std::vector<std::set<int>>& C,
+             const Cliques& cliques, const std::vector<int>& weight, int i) {
+    int total = 0;
+    for (int j : reachable(A, C, cliques, i)) total += weight[j];
     return total;
 }
 
-// Turn the pivot into an element. Fills neighbors (the pivot's reachable set,
-// stored once as an element; in that role the doc calls it the element's pattern
-// L_pivot, also the nonzero pattern of column pivot of L), absorbed (cliques the
-// pivot belonged to), and pruned (explicit edges the new element now implies).
+std::size_t storage(const std::vector<std::set<int>>& A, const Cliques& cliques) {
+    std::size_t total = 0;
+    for (const auto& a : A) total += a.size();
+    for (const auto& [c, members] : cliques) total += members.size();
+    return total;
+}
+
+// Turn the pivot into a clique, then absorb every member it makes
+// indistinguishable.
 void eliminate(std::vector<std::set<int>>& A, std::vector<std::set<int>>& C,
-               Cliques& cliques, std::vector<bool>& eliminated, int pivot,
+               Cliques& cliques, std::vector<int>& weight,
+               std::vector<bool>& eliminated, int pivot,
                std::set<int>& neighbors, std::set<int>& absorbed,
-               std::vector<std::pair<int, int>>& pruned) {
+               std::vector<std::pair<int, int>>& pruned, std::vector<int>& merged) {
     neighbors = reachable(A, C, cliques, pivot);
     absorbed = C[pivot];
     for (int c : absorbed) cliques.erase(c);
-    cliques[pivot] = neighbors;      // becomes L_pivot: the element's pattern
+    cliques[pivot] = neighbors;
 
     pruned.clear();
     for (int i : neighbors) {
-        std::set<int> redundant;         // both ends inside the new clique
+        std::set<int> redundant;
         std::set_intersection(A[i].begin(), A[i].end(), neighbors.begin(), neighbors.end(),
                               std::inserter(redundant, redundant.begin()));
         for (int j : redundant)
             if (i < j) pruned.push_back({i, j});
-        for (int j : redundant) A[i].erase(j);   // implicit now: delete the copy
-        A[i].erase(pivot);                        // the pivot is no longer a variable
-        for (int e : absorbed) C[i].erase(e);     // its absorbed cliques are gone
-        C[i].insert(pivot);                       // i belongs to the new element
+        for (int j : redundant) A[i].erase(j);
+        A[i].erase(pivot);
+        for (int c : absorbed) C[i].erase(c);
+        C[i].insert(pivot);
+    }
+
+    // MASS ELIMINATION. i is indistinguishable from the pivot when everything it
+    // still sees lies inside the new clique: nothing explicit left, and no other
+    // clique to reach through. Eliminating it next would create no fill, so we
+    // merge it into the pivot now and let the weight remember how many there are.
+    merged.clear();
+    for (int i : neighbors) {
+        if (A[i].empty() && C[i].size() == 1 && *C[i].begin() == pivot) {
+            weight[pivot] += weight[i];
+            weight[i] = 0;
+            C[i].clear();
+            eliminated[i] = true;
+            merged.push_back(i);
+        }
+    }
+    for (int i : merged) {                 // a merged vertex is no longer a vertex
+        for (auto& [c, members] : cliques) members.erase(i);
     }
 
     A[pivot].clear();
@@ -97,39 +117,34 @@ std::string braces(const std::set<int>& s) {
     return out + "}";
 }
 
-// A, C and cliques on their own lines; then the three results of the eliminate
-// call, in the order it returns them. `hasResult` false for the start-of-run dump.
 void showState(const std::vector<std::set<int>>& A, const std::vector<std::set<int>>& C,
-               const Cliques& cliques, bool hasResult,
+               const Cliques& cliques, const std::vector<int>& weight, bool hasResult,
                const std::set<int>& neighbors, const std::set<int>& absorbed,
-               const std::vector<std::pair<int, int>>& pruned) {
+               const std::vector<std::pair<int, int>>& pruned,
+               const std::vector<int>& merged) {
     int n = static_cast<int>(A.size());
 
     std::cout << "         A       = {";
-    for (int v = 0; v < n; ++v)
-        std::cout << (v ? ", " : "") << v << ": " << braces(A[v]);
-    std::cout << "}\n";
-
-    std::cout << "         C       = {";
+    for (int v = 0; v < n; ++v) std::cout << (v ? ", " : "") << v << ": " << braces(A[v]);
+    std::cout << "}\n         C       = {";
     for (int v = 0; v < n; ++v) {
         std::cout << (v ? ", " : "") << v << ": [";
         bool f = true;
         for (int x : C[v]) { std::cout << (f ? "" : ", ") << "c" << x; f = false; }
         std::cout << "]";
     }
-    std::cout << "}\n";
-
-    std::cout << "         cliques = {";
+    std::cout << "}\n         cliques = {";
     bool f = true;
     for (const auto& [x, members] : cliques) {
-        std::cout << (f ? "" : ", ") << "c" << x << ": " << braces(members);
-        f = false;
+        std::cout << (f ? "" : ", ") << "c" << x << ": " << braces(members); f = false;
     }
+    std::cout << "}\n         weights = {";
+    for (int v = 0; v < n; ++v) std::cout << (v ? ", " : "") << v << ": " << weight[v];
     std::cout << "}   storage " << storage(A, cliques) << "\n";
 
     if (!hasResult) {
-        std::cout << "         neighbors = none, absorbed = none, pruned = none"
-                     "   (nothing eliminated yet)\n";
+        std::cout << "         neighbors = none, absorbed = none, pruned = none, "
+                     "merged = none   (nothing eliminated yet)\n";
         return;
     }
     std::cout << "         neighbors = " << braces(neighbors) << ", absorbed = ";
@@ -138,48 +153,70 @@ void showState(const std::vector<std::set<int>>& A, const std::vector<std::set<i
     std::cout << ", pruned = ";
     if (pruned.empty()) std::cout << "none";
     else { bool g = true; for (auto [u, w] : pruned) { std::cout << (g ? "" : ", ") << u << "-" << w; g = false; } }
+    std::cout << ", merged = ";
+    if (merged.empty()) std::cout << "none";
+    else { bool g = true; for (int x : merged) { std::cout << (g ? "" : ", ") << x; g = false; } }
     std::cout << "\n";
 }
 
 std::vector<int> minimumDegree(const std::vector<std::set<int>>& graph) {
     int n = static_cast<int>(graph.size());
-    std::size_t nnzTrilA = 0;               // measured before we mutate
+    std::size_t nnzTrilA = 0;
     for (const auto& row : graph) nnzTrilA += row.size();
-    nnzTrilA = nnzTrilA / 2 + graph.size();
-    std::vector<std::set<int>> A = graph;   // explicit variable neighbors
-    std::vector<std::set<int>> C(n);        // cliques each variable belongs to
-    Cliques cliques;                      // element id -> its live members
-    std::vector<bool> eliminated(n, false);
-    std::vector<int> order;
-    std::size_t degreeSum = 0;              // sum of pivot degrees == column counts of L
+    nnzTrilA = nnzTrilA / 2 + n;
 
-    std::cout << "start: no cliques yet, every neighbor explicit\n";
-    showState(A, C, cliques, false, {}, {}, {});
-    for (int step = 0; step < n; ++step) {
-        int pivot = -1;
-        std::size_t leastDegree = 0;
+    std::vector<std::set<int>> A = graph;
+    std::vector<std::set<int>> C(n);
+    Cliques cliques;
+    std::vector<int> weight(n, 1);
+    std::vector<std::vector<int>> members(n);
+    for (int v = 0; v < n; ++v) members[v].push_back(v);
+    std::vector<bool> eliminated(n, false);
+    std::vector<int> pivots;
+    std::size_t nnzL = 0;
+
+    std::cout << "start: no cliques yet, every neighbor explicit, every weight 1\n";
+    showState(A, C, cliques, weight, false, {}, {}, {}, {});
+
+    int step = 0;
+    while (std::find(eliminated.begin(), eliminated.end(), false) != eliminated.end()) {
+        int pivot = -1, leastDegree = 0;
         for (int v = 0; v < n; ++v) {
             if (eliminated[v]) continue;
-            std::size_t d = reachable(A, C, cliques, v).size();
+            int d = degreeOf(A, C, cliques, weight, v);
             if (pivot == -1 || d < leastDegree) { pivot = v; leastDegree = d; }
         }
-        std::size_t degree = reachable(A, C, cliques, pivot).size();
+        int d = degreeOf(A, C, cliques, weight, pivot);
+        int w = weight[pivot];
 
         std::set<int> neighbors, absorbed;
         std::vector<std::pair<int, int>> pruned;
-        eliminate(A, C, cliques, eliminated, pivot, neighbors, absorbed, pruned);
-        order.push_back(pivot);
-        degreeSum += degree;
+        std::vector<int> merged;
+        eliminate(A, C, cliques, weight, eliminated, pivot,
+                  neighbors, absorbed, pruned, merged);
+        for (int i : merged)
+            members[pivot].insert(members[pivot].end(), members[i].begin(), members[i].end());
+        pivots.push_back(pivot);
 
-        std::cout << "step " << step << ": eliminate " << pivot
-                  << " (degree " << degree << ")\n";
-        showState(A, C, cliques, true, neighbors, absorbed, pruned);
+        // A supervariable of weight wp is wp consecutive columns of L. Its
+        // EXTERNAL degree is what remains of the clique after the merges, since
+        // a merged vertex joins the supervariable instead of neighboring it.
+        int wp = weight[pivot], ext = 0;
+        for (int j : cliques[pivot]) ext += weight[j];
+        nnzL += static_cast<std::size_t>(wp) * ext + wp * (wp - 1) / 2 + wp;
+
+        std::cout << "step " << step << ": eliminate " << pivot << " (degree " << d
+                  << ", weight " << w << " -> " << wp << ")\n";
+        showState(A, C, cliques, weight, true, neighbors, absorbed, pruned, merged);
+        ++step;
     }
 
-    // The degree of a pivot at elimination is the count of its column of L, so
-    // the degrees already computed give nnz(L) with no extra work (Section 5.1).
-    std::size_t nnzL = degreeSum + n;
-    std::cout << "nnz(L) = " << nnzL << " against nnz(tril A) = " << nnzTrilA
+    std::vector<int> order;
+    for (int p : pivots)
+        order.insert(order.end(), members[p].begin(), members[p].end());
+    std::cout << "supervariable pivots =";
+    for (int p : pivots) std::cout << " " << p;
+    std::cout << "\nnnz(L) = " << nnzL << " against nnz(tril A) = " << nnzTrilA
               << ", fill = " << (nnzL - nnzTrilA) << "\n";
     return order;
 }
@@ -193,7 +230,7 @@ void run(const std::string& name, const std::vector<std::set<int>>& graph) {
 }
 
 int main() {
-    // Two examples.
+    // The same three graphs as md1 and md2.
     //
     //   graph1, a 4-cycle: eliminating any vertex forces its two neighbors
     //   together, so it is the smallest graph that fills (one fill edge).

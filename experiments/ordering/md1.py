@@ -32,7 +32,7 @@ def eliminate(graph, pivot):
 
 def storage(graph, eliminated):
     """What the graph currently costs: one entry per edge endpoint. Compare with
-    md3, where the same number falls monotonically. Here fill pushes it back up."""
+    md2, where the same number falls monotonically. Here fill pushes it back up."""
     return sum(len(graph[v]) for v in range(len(graph)) if not eliminated[v])
 
 

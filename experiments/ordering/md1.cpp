@@ -37,7 +37,7 @@ std::vector<std::pair<int, int>> eliminate(Graph& graph, int pivot) {
     return fill;
 }
 
-// What the graph currently costs: one entry per edge endpoint. Compare with md3,
+// What the graph currently costs: one entry per edge endpoint. Compare with md2,
 // where the same number falls monotonically. Here fill pushes it back up.
 std::size_t storage(const Graph& graph, const std::vector<bool>& eliminated) {
     std::size_t total = 0;

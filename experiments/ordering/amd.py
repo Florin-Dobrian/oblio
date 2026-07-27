@@ -1,9 +1,9 @@
 # %% [markdown]
 # # Approximate minimum degree
 #
-# The other fork from md6. Section 5.13 of archive/sparse_factorization.md.
+# The other fork from md5. Section 5.13 of archive/sparse_factorization.md.
 #
-# md6 has the quotient graph, supervariables, maintained degrees and buckets,
+# md5 has the quotient graph, supervariables, maintained degrees and buckets,
 # and returns exactly md1's ordering. What is left costing anything is the
 # refresh itself, which for each reached vertex i unites the members of every
 # element in E_i and counts the result. That union is the expensive object.
@@ -28,7 +28,7 @@
 # below shows the gap widening with the size of the elements, which is to say
 # with the amount of fill, which is to say exactly where it matters.
 #
-# TWO MORE MECHANISMS, both beyond md6 and neither about the degree:
+# TWO MORE MECHANISMS, both beyond md5 and neither about the degree:
 #
 #   - AGGRESSIVE ABSORPTION. If |L_e \ L| == 0, element e lies entirely inside
 #     the new element, so it is dead and can be absorbed at once. Ordinary

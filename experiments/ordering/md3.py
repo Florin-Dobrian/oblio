@@ -1,29 +1,24 @@
 # %% [markdown]
-# # Minimum degree, step 3: the quotient graph
+# # Minimum degree, step 3: supervariables and mass elimination
 #
-# Same ordering as md1, computed WITHOUT ever storing fill. When a vertex is
-# eliminated it becomes a CLIQUE on the vertices it would have joined. A clique is
-# fully described by its vertex list, so every edge inside it is implicit, and that
-# cuts twice:
+# md2 stopped the graph from growing. This step stops it from being as wide, by
+# noticing that eliminating a pivot often makes some of its neighbors
+# INDISTINGUISHABLE from it: their whole remaining neighborhood lies inside the
+# new clique, so eliminating them next costs no fill at all. Rather than let the
+# picker rediscover them one at a time, we merge them into the pivot on the spot
+# and give the group a WEIGHT. Section 5.5 of archive/sparse_factorization.md.
 #
-#   - the fill edges are never added, and
-#   - the edges ALREADY present between two members are now redundant, so they
-#     are pruned from the explicit adjacency.
+# What changes from md2, and it is only these three things:
 #
-# So an elimination adds nothing and removes something. Each A[i] only ever
-# shrinks, which is why this representation never needs more room than the
-# original graph. Section 5.2 of archive/sparse_factorization.md.
+#   - weight[p] counts how many original vertices the supervariable p stands for
+#   - the degree is WEIGHTED: a neighbor of weight 3 counts 3, not 1
+#   - after forming a clique, any member i with A[i] empty and C[i] == {p} is
+#     merged into p (MASS ELIMINATION) and stops being a vertex
 #
-# A live variable i is stored as A[i], its remaining explicit variable neighbors,
-# and C[i], the cliques it belongs to. Its true neighborhood is the union of the
-# two, formed only when asked.
-#
-# Naming: the literature calls these objects ELEMENTS and writes E_i for C[i].
-# They are cliques; we name them for what they are.
-#
-# The order and the per-step degrees match md1 exactly: same algorithm, cheaper
-# storage. What this layer does NOT yet fix is that the degree is still a full
-# union every time it is asked; a cheap degree is a later layer.
+# The elimination order comes out over supervariables, so a final pass expands
+# each one into consecutive numbers. That expansion is why merged vertices must
+# be numbered together, and it is the one place this layer changes the answer
+# rather than just the cost.
 
 # %%
 def reachable(A, C, cliques, i):
@@ -36,98 +31,131 @@ def reachable(A, C, cliques, i):
     return neighbors
 
 
+def degree(A, C, cliques, weight, i):
+    """External degree, WEIGHTED: each neighbor counts for the number of
+    original vertices it stands for. This is the quantity md2 counted with
+    len(), and the only reason it differs is that supervariables now exist."""
+    return sum(weight[j] for j in reachable(A, C, cliques, i))
+
+
 def storage(A, cliques):
-    """What the quotient graph currently costs: explicit endpoints plus clique
-    members. Watch it fall. The naive graph's edge count only rises."""
+    """Explicit endpoints plus clique members."""
     return sum(len(a) for a in A) + sum(len(m) for m in cliques.values())
 
 
-def eliminate(A, C, cliques, eliminated, pivot):
-    """Turn the pivot into a clique. Returns (neighbors, absorbed, pruned).
-
-    neighbors the pivot's reachable set. Stored once as a clique instead of as
-              fill edges; in that role the doc calls it the pattern L_pivot,
-              which is also the nonzero pattern of column pivot of L.
-    absorbed  cliques the pivot belonged to, swallowed by the new one
-    pruned    explicit edges deleted because the new clique now implies them
-    """
+def eliminate(A, C, cliques, weight, eliminated, pivot):
+    """Turn the pivot into a clique, then absorb every member it makes
+    indistinguishable. Returns (neighbors, absorbed, pruned, merged)."""
     neighbors = reachable(A, C, cliques, pivot)
     absorbed = set(C[pivot])
     for c in absorbed:
         del cliques[c]
-    cliques[pivot] = set(neighbors)    # becomes L_pivot: the clique's pattern
+    cliques[pivot] = set(neighbors)
 
     pruned = []
     for i in neighbors:
-        redundant = A[i] & neighbors    # both ends inside the new clique
+        redundant = A[i] & neighbors     # both ends inside the new clique
         for j in redundant:
             if i < j:
                 pruned.append((i, j))
-        A[i] -= redundant               # implicit now: delete the explicit copy
-        A[i].discard(pivot)             # the pivot is no longer a variable
-        C[i] -= absorbed                # its absorbed cliques are gone
-        C[i].add(pivot)                 # i belongs to the new clique instead
+        A[i] -= redundant
+        A[i].discard(pivot)
+        C[i] -= absorbed
+        C[i].add(pivot)
+
+    # MASS ELIMINATION. i is indistinguishable from the pivot when everything it
+    # still sees lies inside the new clique: nothing explicit left, and no other
+    # clique to reach through. Eliminating it next would create no fill, so we
+    # merge it into the pivot now and let the weight remember how many there are.
+    merged = []
+    for i in sorted(neighbors):
+        if not A[i] and C[i] == {pivot}:
+            weight[pivot] += weight[i]
+            weight[i] = 0
+            C[i].clear()
+            eliminated[i] = True
+            merged.append(i)
+    for i in merged:                     # a merged vertex is no longer a vertex
+        cliques[pivot].discard(i)
+        for c in cliques.values():
+            c.discard(i)
 
     A[pivot].clear()
     C[pivot].clear()
     eliminated[pivot] = True
-    return neighbors, absorbed, pruned
+    return neighbors, absorbed, pruned, merged
 
 
 def minimum_degree(graph):
-    """Quotient-graph minimum degree. Same result as md1, no fill stored."""
+    """Quotient-graph minimum degree with supervariables."""
     n = len(graph)
-    nnz_tril_A = sum(len(neigh) for neigh in graph) // 2 + n     # before we mutate
-    A = [set(neigh) for neigh in graph]   # explicit variable neighbors
-    C = [set() for _ in range(n)]         # cliques each variable belongs to
-    cliques = {}                           # clique id -> its live members
+    nnz_tril_A = sum(len(neigh) for neigh in graph) // 2 + n
+    A = [set(neigh) for neigh in graph]
+    C = [set() for _ in range(n)]
+    cliques = {}
+    weight = [1] * n                  # original vertices per supervariable
+    members = [[v] for v in range(n)]  # which ones, for the final expansion
     eliminated = [False] * n
-    order = []
-    degree_sum = 0                # sum of pivot degrees == sum of column counts of L
+    pivots = []                       # supervariable order
+    nnz_L = 0
 
-    def show_state(neighbors=None, absorbed=None, pruned=None):
-        """A, C and cliques on their own lines; then the three results of the
-        eliminate call, in the order it returns them."""
+    def show_state(neighbors=None, absorbed=None, pruned=None, merged=None):
         a = "{" + ", ".join(f"{v}: {sorted(A[v])}" for v in range(n)) + "}"
         c = "{" + ", ".join(
             f"{v}: {[f'c{x}' for x in sorted(C[v])]}" for v in range(n)) + "}"
         cl = "{" + ", ".join(
             f"c{x}: {sorted(m)}" for x, m in sorted(cliques.items())) + "}"
+        w = "{" + ", ".join(f"{v}: {weight[v]}" for v in range(n)) + "}"
         print(f"         A       = {a}")
         print(f"         C       = {c}")
-        print(f"         cliques = {cl}   storage {storage(A, cliques)}")
+        print(f"         cliques = {cl}")
+        print(f"         weights = {w}   storage {storage(A, cliques)}")
         if neighbors is None:
-            print("         neighbors = none, absorbed = none, pruned = none"
-                  "   (nothing eliminated yet)")
+            print("         neighbors = none, absorbed = none, pruned = none, "
+                  "merged = none   (nothing eliminated yet)")
         else:
-            nb = sorted(neighbors)
             ab = ", ".join(f"c{x}" for x in sorted(absorbed)) if absorbed else "none"
-            pr = ", ".join(f"{u}-{w}" for u, w in sorted(pruned)) if pruned else "none"
-            print(f"         neighbors = {nb}, absorbed = {ab}, pruned = {pr}")
+            pr = ", ".join(f"{u}-{w2}" for u, w2 in sorted(pruned)) if pruned else "none"
+            mg = ", ".join(map(str, merged)) if merged else "none"
+            print(f"         neighbors = {sorted(neighbors)}, absorbed = {ab}, "
+                  f"pruned = {pr}, merged = {mg}")
 
-    print("start: no cliques yet, every neighbor explicit")
+    print("start: no cliques yet, every neighbor explicit, every weight 1")
     show_state()
-    for step in range(n):
+    step = 0
+    while any(not eliminated[v] for v in range(n)):
         pivot = min((v for v in range(n) if not eliminated[v]),
-                    key=lambda v: len(reachable(A, C, cliques, v)))
-        degree = len(reachable(A, C, cliques, pivot))
-        neighbors, absorbed, pruned = eliminate(A, C, cliques, eliminated, pivot)
-        order.append(pivot)
-        degree_sum += degree
+                    key=lambda v: degree(A, C, cliques, weight, v))
+        d = degree(A, C, cliques, weight, pivot)
+        w = weight[pivot]
+        neighbors, absorbed, pruned, merged = eliminate(
+            A, C, cliques, weight, eliminated, pivot)
+        for i in merged:
+            members[pivot] += members[i]
+        pivots.append(pivot)
 
-        print(f"step {step}: eliminate {pivot} (degree {degree})")
-        show_state(neighbors, absorbed, pruned)
+        # A supervariable of weight w is w consecutive columns of L. Its
+        # EXTERNAL degree is what remains of the clique after the merges, since
+        # a merged vertex joins the supervariable instead of neighboring it.
+        # The first column then has ext + w - 1 entries below its diagonal, the
+        # next ext + w - 2, down to ext, and each contributes its own diagonal.
+        wp = weight[pivot]
+        ext = sum(weight[j] for j in cliques[pivot])
+        nnz_L += wp * ext + wp * (wp - 1) // 2 + wp
 
-    # The degree of a pivot at elimination is the count of its column of L, so
-    # the degrees already computed give nnz(L) with no extra work (Section 5.1).
-    nnz_L = degree_sum + n
+        print(f"step {step}: eliminate {pivot} (degree {d}, weight {w} -> {wp})")
+        show_state(neighbors, absorbed, pruned, merged)
+        step += 1
+
+    order = [v for p in pivots for v in members[p]]
+    print(f"supervariable pivots = {pivots}")
     print(f"nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
           f"fill = {nnz_L - nnz_tril_A}")
     return order
 
 
 # %%
-# Two examples.
+# The same three graphs as md1 and md2.
 #
 #   graph1, a 4-cycle: eliminating any vertex forces its two neighbors
 #   together, so it is the smallest graph that fills (one fill edge).
@@ -158,7 +186,6 @@ graph1 = [
 graph2 = [
     {1, 2}, {0, 3}, {0, 4}, {1, 4, 5}, {2, 3, 5}, {3, 4},
 ]
-
 graph3 = [
     {1, 3, 8},        # 0
     {0, 2, 6, 8},     # 1

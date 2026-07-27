@@ -1,29 +1,29 @@
 # %% [markdown]
-# # Minimum degree, step 5: maintained degrees
+# # Minimum degree, step 5: degree buckets
 #
-# Every version so far has recomputed a reachable set for EVERY live vertex at
-# EVERY step, just to find the smallest, then thrown all but one away. On a 3D
-# grid that is roughly ten times the necessary work, and the ratio grows with n.
-# Section 5.7 of archive/sparse_factorization.md.
+# md4 stopped recomputing degrees that could not have changed. What it left in
+# place is the scan: the picker still walks every live vertex to find the
+# smallest cached degree, O(n) per step, now over integers rather than set
+# unions. Cheap, but still the only remaining O(n) per pivot.
 #
-# The waste is easy to see once stated: eliminating a pivot can only change the
-# degrees of the vertices it REACHED. Every other vertex has the same A, the same
-# cliques, and the same weights as before, so its degree is still whatever it was.
+# The fix is to file each supervariable in a bucket indexed by its degree, so
+# the minimum can be found by walking UP from the last known minimum rather than
+# looking at everything. Section 5.9 of archive/sparse_factorization.md describes
+# this as common ground: both MMD and AMD do it, neither invented it.
 #
-# So we keep a degrees[] array and refresh only the reached set. The picker then
-# scans cached integers instead of building set unions. This is the first half of
-# what both MMD and AMD do before their ideas diverge; md6 adds the second half,
-# degree buckets, which removes the scan itself.
+# Two things make the walk cheap:
 #
-# Why refreshing the clique alone is enough, in three parts:
+#   - mdeg, a LOWER BOUND on the current minimum degree. We start each search at
+#     mdeg rather than at 0, and every vertex below it is known to be gone.
+#   - a vertex whose degree changes must be pulled out of the middle of its old
+#     bucket, so buckets need O(1) removal. Here that is a Python set; the
+#     vendored codes use doubly linked lists (MMD's fwd/bwd, AMD's Next/Last)
+#     because Fortran and C of that era had no such container.
 #
-#   - PRUNING and clique membership change only for members of the new clique
-#   - ABSORPTION deletes cliques the pivot belonged to, and every member of such
-#     a clique is reachable from the pivot, hence in the new clique
-#   - MERGING removes a vertex i, but i merged only because everything it could
-#     see lay inside the new clique, so nobody outside sees i disappear
-#
-# Nothing else in the graph can tell that an elimination happened.
+# Keeping mdeg correct is the whole of the difficulty, and it is a lower bound
+# rather than the true minimum on purpose: it may lag, and the walk fixes it.
+# What it must never do is overshoot, since a bucket below mdeg is never
+# examined and a vertex sitting there would never be chosen.
 
 # %%
 def reachable(A, C, cliques, i):
@@ -36,7 +36,6 @@ def reachable(A, C, cliques, i):
 
 
 def weighted_degree(A, C, cliques, weight, i):
-    """External degree, weighted. Called only on refresh now, not on every pick."""
     return sum(weight[j] for j in reachable(A, C, cliques, i))
 
 
@@ -45,11 +44,7 @@ def storage(A, cliques):
 
 
 def eliminate(A, C, cliques, weight, eliminated, pivot):
-    """Turn the pivot into a clique, absorb, prune, and merge.
-
-    Returns (neighbors, absorbed, pruned, merged). Same as md4; the difference in
-    this file is entirely in who recomputes a degree afterwards.
-    """
+    """Unchanged from md4: absorb, prune, merge."""
     neighbors = reachable(A, C, cliques, pivot)
     absorbed = set(C[pivot])
     for c in absorbed:
@@ -87,7 +82,7 @@ def eliminate(A, C, cliques, weight, eliminated, pivot):
 
 
 def minimum_degree(graph):
-    """Quotient graph, supervariables, and degrees that are maintained."""
+    """Quotient graph, supervariables, maintained degrees, and degree buckets."""
     n = len(graph)
     nnz_tril_A = sum(len(neigh) for neigh in graph) // 2 + n
     A = [set(neigh) for neigh in graph]
@@ -99,12 +94,24 @@ def minimum_degree(graph):
     pivots = []
     nnz_L = 0
 
-    # The cache. Built once here, then touched only where it can be wrong.
     degrees = [len(A[v]) for v in range(n)]
-    refreshes = n                      # count them: this is the whole point
+    buckets = [set() for _ in range(n + 1)]      # buckets[d] holds degree-d vertices
+    for v in range(n):
+        buckets[degrees[v]].add(v)
+    mdeg = min(degrees) if n else 0              # lower bound on the minimum
+    probes = 0                                   # bucket slots examined, the metric
+
+    def refile(i, new_degree):
+        """Move i from its old bucket to the one for new_degree."""
+        nonlocal mdeg
+        buckets[degrees[i]].discard(i)
+        degrees[i] = new_degree
+        buckets[new_degree].add(i)
+        if new_degree < mdeg:                    # the bound may only ever fall
+            mdeg = new_degree
 
     def show_state(neighbors=None, absorbed=None, pruned=None, merged=None,
-                   refreshed=None):
+                   refreshed=None, walked=None):
         a = "{" + ", ".join(f"{v}: {sorted(A[v])}" for v in range(n)) + "}"
         c = "{" + ", ".join(
             f"{v}: {[f'c{x}' for x in sorted(C[v])]}" for v in range(n)) + "}"
@@ -113,11 +120,14 @@ def minimum_degree(graph):
         w = "{" + ", ".join(f"{v}: {weight[v]}" for v in range(n)) + "}"
         dg = "{" + ", ".join(
             f"{v}: {degrees[v] if not eliminated[v] else '-'}" for v in range(n)) + "}"
+        bk = "{" + ", ".join(f"{d}: {sorted(b)}"
+                             for d, b in enumerate(buckets) if b) + "}"
         print(f"         A       = {a}")
         print(f"         C       = {c}")
         print(f"         cliques = {cl}")
         print(f"         weights = {w}   storage {storage(A, cliques)}")
         print(f"         degrees = {dg}")
+        print(f"         buckets = {bk}   mdeg = {mdeg}")
         if neighbors is None:
             print("         neighbors = none, absorbed = none, pruned = none, "
                   "merged = none, refreshed = all (initial)")
@@ -128,49 +138,52 @@ def minimum_degree(graph):
             rf = ", ".join(map(str, sorted(refreshed))) if refreshed else "none"
             print(f"         neighbors = {sorted(neighbors)}, absorbed = {ab}, "
                   f"pruned = {pr}, merged = {mg}")
-            print(f"         refreshed = {rf}")
+            print(f"         refreshed = {rf}   (walked {walked} bucket(s) to find the pivot)")
 
-    print("start: no cliques yet, every neighbor explicit, degrees from A")
+    print("start: no cliques yet, degrees from A, vertices filed by degree")
     show_state()
     step = 0
     while any(not eliminated[v] for v in range(n)):
-        # The pick is now a scan over cached integers, not over set unions.
-        pivot = min((v for v in range(n) if not eliminated[v]),
-                    key=lambda v: degrees[v])
+        # PICK: walk up from mdeg to the first non-empty bucket. No scan.
+        walked = 0
+        while not buckets[mdeg]:
+            mdeg += 1
+            walked += 1
+        probes += walked + 1
+        pivot = min(buckets[mdeg])               # lowest index, to match md4's tie-break
         d = degrees[pivot]
         w = weight[pivot]
+        buckets[d].discard(pivot)
+
         neighbors, absorbed, pruned, merged = eliminate(
             A, C, cliques, weight, eliminated, pivot)
         for i in merged:
             members[pivot] += members[i]
+            buckets[degrees[i]].discard(i)       # merged vertices leave the buckets
         pivots.append(pivot)
 
-        # REFRESH, and only here. The surviving members of the new clique are
-        # exactly the vertices whose degree can have changed.
         refreshed = [i for i in sorted(neighbors) if not eliminated[i]]
         for i in refreshed:
-            degrees[i] = weighted_degree(A, C, cliques, weight, i)
-        refreshes += len(refreshed)
+            refile(i, weighted_degree(A, C, cliques, weight, i))
 
         wp = weight[pivot]
         ext = sum(weight[j] for j in cliques[pivot])
         nnz_L += wp * ext + wp * (wp - 1) // 2 + wp
 
         print(f"step {step}: eliminate {pivot} (degree {d}, weight {w} -> {wp})")
-        show_state(neighbors, absorbed, pruned, merged, refreshed)
+        show_state(neighbors, absorbed, pruned, merged, refreshed, walked)
         step += 1
 
     order = [v for p in pivots for v in members[p]]
     print(f"supervariable pivots = {pivots}")
     print(f"nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
           f"fill = {nnz_L - nnz_tril_A}")
-    print(f"degree computations: {refreshes}   "
-          f"(md4 would do one per live vertex per step)")
+    print(f"bucket probes: {probes}   (md4 would scan every live vertex per step)")
     return order
 
 
 # %%
-# The same three graphs as md1, md3 and md4.
+# The same three graphs as md1, md2, md3 and md4.
 #
 #   graph1, a 4-cycle:        graph2, uneven degrees:
 #

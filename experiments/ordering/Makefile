@@ -13,22 +13,20 @@
 # The layers, each adding exactly one mechanism to the one before:
 #
 #   md1   naive minimum degree, materializing the fill              5.1, 5.2
-#   md3   the quotient graph: cliques instead of fill               5.3, 5.4
-#   md4   supervariables and mass elimination                       5.5, 5.6
-#   md5   maintained degrees, refreshed only where they changed     5.7, 5.8
-#   md6   degree buckets, so the minimum is walked to not scanned   5.9, 5.10
+#   md2   the quotient graph: cliques instead of fill               5.3, 5.4
+#   md3   supervariables and mass elimination                       5.5, 5.6
+#   md4   maintained degrees, refreshed only where they changed     5.7, 5.8
+#   md5   degree buckets, so the minimum is walked to not scanned   5.9, 5.10
 #   mmd   multiple elimination: a batch of pivots per refresh       5.11, 5.12
 #   amd   approximate degree: a bound instead of a set union        5.13
 #
-# md1 through md6 all return the SAME ordering; mmd and amd do not, deliberately.
+# md1 through md5 all return the SAME ordering; mmd and amd do not, deliberately.
 # See archive/sparse_factorization.md section 5 for the sections cited above.
-#
-# md2 is an earlier naive variant, kept for reference and not built.
 
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O3 -Wall -Wextra
 
-LAYERS = md1 md3 md4 md5 md6 mmd amd
+LAYERS = md1 md2 md3 md4 md5 mmd amd
 BINS   = $(addsuffix _cpp,$(LAYERS))
 
 .PHONY: all test clean

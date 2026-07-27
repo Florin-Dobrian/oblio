@@ -885,8 +885,8 @@ bool NumFactorEngine::acceptPivot2x2(const Val* jjVal, std::int32_t jjNumNodeIdx
 }
 
 template<class Val>
-void NumFactorEngine::factor1x1(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j,
-                                std::int32_t k1, std::int32_t lk1,
+void NumFactorEngine::factor1x1(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t nextPivot,
+                                std::int32_t j1, std::int32_t lj1,
                                 std::size_t jjPreFactorFrontSize, std::size_t jjNumNodeIdx,
                                 std::vector<std::int32_t>& gblToLcl) const {
     Val*                 jjVal = nf.val(jj);
@@ -898,43 +898,46 @@ void NumFactorEngine::factor1x1(NumFactorDynamic<Val>& nf, std::int32_t jj, std:
 
     const bool withHermitian = hermitian(nf.factorization());
 
-    // Read before the swap, which is why it is not simply jjVal[at(j, j)]: the swap is what puts
-    // the pivot there.
+    // The position this pivot is going to. Named as in factor2x2, where there are two of them.
+    const std::int32_t np0 = nextPivot;
+
+    // Read before the swap, which is why it is not simply jjVal[at(np0, np0)]: the swap is what
+    // puts the pivot there.
     //
     // forceReal restores what a Hermitian diagonal is mathematically and floating point is not; see
     // its definition in Types.h. **This is the last moment it can be applied**, the value being
     // about to be divided by below and stored for the solve to divide by again.
-    const Val d = forceReal(jjVal[at(k1, k1)], withHermitian);
+    const Val d = forceReal(jjVal[at(j1, j1)], withHermitian);
 
-    if (j != k1) nf.swap(jj, j, k1, gblToLcl);
+    if (np0 != j1) nf.swap(jj, np0, j1, gblToLcl);
 
     // The corrected value replaces the stored one, because the corrected one is the right one and
     // this is the last place it can be put right: from here it is read by the elimination below,
     // which divides this column by it, and by the solve, which divides again. Neither could correct
     // it, having no way to know it should be real. As a store it is redundant exactly when there
     // was no swap and the factorization is not Hermitian, and it is one store per pivot either way.
-    jjVal[at(j, j)] = d;
+    jjVal[at(np0, np0)] = d;
 
     // L column: divide by the pivot
-    for (std::int32_t i = j + 1; i < static_cast<std::int32_t>(jjNumNodeIdx); ++i)
-        jjVal[at(i, j)] /= d;
+    for (std::int32_t i = np0 + 1; i < static_cast<std::int32_t>(jjNumNodeIdx); ++i)
+        jjVal[at(i, np0)] /= d;
 
     // D L^H row, in the upper part
-    for (std::int32_t k = j + 1; k < static_cast<std::int32_t>(jjPreFactorFrontSize); ++k)
-        jjVal[at(j, k)] = d * maybeConjugate(jjVal[at(k, j)], withHermitian);
+    for (std::int32_t k = np0 + 1; k < static_cast<std::int32_t>(jjPreFactorFrontSize); ++k)
+        jjVal[at(np0, k)] = d * maybeConjugate(jjVal[at(k, np0)], withHermitian);
 
     // rank-1 trailing update
-    for (std::int32_t k = j + 1; k < static_cast<std::int32_t>(jjPreFactorFrontSize); ++k)
+    for (std::int32_t k = np0 + 1; k < static_cast<std::int32_t>(jjPreFactorFrontSize); ++k)
         for (std::int32_t i = k; i < static_cast<std::int32_t>(jjNumNodeIdx); ++i)
-            jjVal[at(i, k)] -= jjVal[at(i, j)] * jjVal[at(j, k)];
+            jjVal[at(i, k)] -= jjVal[at(i, np0)] * jjVal[at(np0, k)];
 
-    nf.mPivotType[lk1] = 1;
+    nf.mPivotType[lj1] = 1;
 }
 
 template<class Val>
-void NumFactorEngine::factor2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j,
-                                std::int32_t k1, std::int32_t k2, std::int32_t lk1,
-                                std::int32_t lk2, std::size_t jjPreFactorFrontSize,
+void NumFactorEngine::factor2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t nextPivot,
+                                std::int32_t j1, std::int32_t j2, std::int32_t lj1,
+                                std::int32_t lj2, std::size_t jjPreFactorFrontSize,
                                 std::size_t jjNumNodeIdx,
                                 std::vector<std::int32_t>& gblToLcl) const {
     Val*                 jjVal = nf.val(jj);
@@ -948,24 +951,25 @@ void NumFactorEngine::factor2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, std:
 
     // Read before the swaps, as above. The caller read the same jjVal to decide on it; nothing
     // touches the front in between.
-    const PivotBlock2x2<Val> d = readPivotBlock2x2(jjVal, ld, k1, k2, withHermitian);
+    const PivotBlock2x2<Val> d = readPivotBlock2x2(jjVal, ld, j1, j2, withHermitian);
 
-    const std::int32_t j1 = j;
-    const std::int32_t j2 = j + 1;
+    // The two positions this pivot is going to, nextPivot and the one after it.
+    const std::int32_t np0 = nextPivot;
+    const std::int32_t np1 = nextPivot + 1;
 
-    // Bring lk1 and lk2 to the front's next two columns. Which swaps are needed depends on where
+    // Bring lj1 and lj2 to the front's next two columns. Which swaps are needed depends on where
     // they already are relative to each other, and doing them in the wrong order would undo one.
-    if (k1 < k2) {
-        if (!(j1 == k1 && j2 == k2)) {
-            if (j1 != k1) nf.swap(jj, j1, k1, gblToLcl);
-            nf.swap(jj, j2, k2, gblToLcl);
+    if (j1 < j2) {
+        if (!(np0 == j1 && np1 == j2)) {
+            if (np0 != j1) nf.swap(jj, np0, j1, gblToLcl);
+            nf.swap(jj, np1, j2, gblToLcl);
         }
     } else {
-        if (j1 == k2 && j2 == k1) {
-            nf.swap(jj, j1, j2, gblToLcl);
+        if (np0 == j2 && np1 == j1) {
+            nf.swap(jj, np0, np1, gblToLcl);
         } else {
-            if (j2 != k2) nf.swap(jj, j2, k2, gblToLcl);
-            nf.swap(jj, j1, k1, gblToLcl);
+            if (np1 != j2) nf.swap(jj, np1, j2, gblToLcl);
+            nf.swap(jj, np0, j1, gblToLcl);
         }
     }
 
@@ -975,20 +979,20 @@ void NumFactorEngine::factor2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, std:
     // correct them, having no way to know they should be real. The four divide into three cases and
     // only the last is unconditional:
     //
-    //   d21, at (j2, j1)    already there, carried by the swaps, conjugated on the way if
+    //   d21, at (np1, np0)    already there, carried by the swaps, conjugated on the way if
     //                       Hermitian. Nothing to write.
     //   d11 and d22         already there too, but as the raw accumulated values, which for a
     //                       Hermitian D are wrong: readPivotBlock2x2 applied forceReal and these
     //                       writes are what make that stick. See forceReal in Types.h. As stores
     //                       they are redundant exactly when there was no swap and the factorization
     //                       is not Hermitian.
-    //   d12, at (j1, j2)    never redundant. Only the lower triangle is populated before a pivot
+    //   d12, at (np0, np1)    never redundant. Only the lower triangle is populated before a pivot
     //                       is applied, so this position has held nothing until now, and
     //                       readPivotBlock2x2 reconstructed the value from d21. This is its only
     //                       home.
-    jjVal[at(j1, j1)] = d.d11;
-    jjVal[at(j2, j2)] = d.d22;
-    jjVal[at(j1, j2)] = d.d12;
+    jjVal[at(np0, np0)] = d.d11;
+    jjVal[at(np1, np1)] = d.d22;
+    jjVal[at(np0, np1)] = d.d12;
 
     // L columns: **x A = b**, with A = D and one such row system per row below the block, x being
     // that row's pair of L entries and b its pair of front values. A row system becomes a column
@@ -1067,42 +1071,42 @@ void NumFactorEngine::factor2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, std:
     const Val u12 = a21;                        // a21 exchange, and nothing else differs
     const Val u22 = a22 - l21 * u12;
 
-    for (std::int32_t i = j1 + 2; i < static_cast<std::int32_t>(jjNumNodeIdx); ++i) {
-        const Val t1 = jjVal[at(i, j1)];
-        const Val t2 = jjVal[at(i, j2)];
+    for (std::int32_t i = np0 + 2; i < static_cast<std::int32_t>(jjNumNodeIdx); ++i) {
+        const Val t1 = jjVal[at(i, np0)];
+        const Val t2 = jjVal[at(i, np1)];
         const Val b1 = swapped ? t2 : t1;       // the swap permutes the equations, not the unknowns
         const Val b2 = swapped ? t1 : t2;
 
         const Val x2 = (b2 - l21 * b1) / u22;
         const Val x1 = (b1 - u12 * x2) / u11;
 
-        jjVal[at(i, j1)] = x1;
-        jjVal[at(i, j2)] = x2;
+        jjVal[at(i, np0)] = x1;
+        jjVal[at(i, np1)] = x2;
     }
 
     // D L^H rows, in the upper part
-    for (std::int32_t k = j1 + 2; k < static_cast<std::int32_t>(jjPreFactorFrontSize); ++k) {
-        const Val l1 = maybeConjugate(jjVal[at(k, j1)], withHermitian);
-        const Val l2 = maybeConjugate(jjVal[at(k, j2)], withHermitian);
-        jjVal[at(j1, k)] = d.d11 * l1 + d.d12 * l2;
-        jjVal[at(j2, k)] = d.d21 * l1 + d.d22 * l2;
+    for (std::int32_t k = np0 + 2; k < static_cast<std::int32_t>(jjPreFactorFrontSize); ++k) {
+        const Val l1 = maybeConjugate(jjVal[at(k, np0)], withHermitian);
+        const Val l2 = maybeConjugate(jjVal[at(k, np1)], withHermitian);
+        jjVal[at(np0, k)] = d.d11 * l1 + d.d12 * l2;
+        jjVal[at(np1, k)] = d.d21 * l1 + d.d22 * l2;
     }
 
     // Rank-2 trailing update, in one pass over the trailing block rather than two rank-1 sweeps.
-    // The bounds already coincided, j2 + 1 and j1 + 2 being the same column since j2 = j1 + 1, so
-    // this is a merge and not a restructuring. Same flop count; what halves is traffic on the
+    // The bounds already coincided, np1 + 1 and np0 + 2 being the same column since np1 = np0 + 1,
+    // so this is a merge and not a restructuring. Same flop count; what halves is traffic on the
     // trailing block, which is the large object here, while the two multipliers are invariant in i
-    // and are hoisted. The merge is safe because the first sweep wrote only rows at or below k,
-    // and the second read column j2 and row j2, both above it, so neither fed the other.
-    for (std::int32_t k = j1 + 2; k < static_cast<std::int32_t>(jjPreFactorFrontSize); ++k) {
-        const Val l1k = jjVal[at(j1, k)];
-        const Val l2k = jjVal[at(j2, k)];
+    // and are hoisted. The merge is safe because the first sweep wrote only rows at or below k, and
+    // the second read column np1 and row np1, both above it, so neither fed the other.
+    for (std::int32_t k = np0 + 2; k < static_cast<std::int32_t>(jjPreFactorFrontSize); ++k) {
+        const Val l1k = jjVal[at(np0, k)];
+        const Val l2k = jjVal[at(np1, k)];
         for (std::int32_t i = k; i < static_cast<std::int32_t>(jjNumNodeIdx); ++i)
-            jjVal[at(i, k)] -= jjVal[at(i, j1)] * l1k + jjVal[at(i, j2)] * l2k;
+            jjVal[at(i, k)] -= jjVal[at(i, np0)] * l1k + jjVal[at(i, np1)] * l2k;
     }
 
-    nf.mPivotType[lk1] = 2;
-    nf.mPivotType[lk2] = 3;
+    nf.mPivotType[lj1] = 2;
+    nf.mPivotType[lj2] = 3;
 }
 
 

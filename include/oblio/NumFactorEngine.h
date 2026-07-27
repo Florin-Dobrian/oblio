@@ -244,13 +244,13 @@ private:
                         bool withHermitian) const;
 
     template<class Val>
-    void factor1x1(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j,
-                   std::int32_t k1, std::int32_t lk1, std::size_t jjPreFactorFrontSize,
+    void factor1x1(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t nextPivot,
+                   std::int32_t j1, std::int32_t lj1, std::size_t jjPreFactorFrontSize,
                    std::size_t jjNumNodeIdx, std::vector<std::int32_t>& gblToLcl) const;
 
     template<class Val>
-    void factor2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t j,
-                   std::int32_t k1, std::int32_t k2, std::int32_t lk1, std::int32_t lk2,
+    void factor2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, std::int32_t nextPivot,
+                   std::int32_t j1, std::int32_t j2, std::int32_t lj1, std::int32_t lj2,
                    std::size_t jjPreFactorFrontSize, std::size_t jjNumNodeIdx,
                    std::vector<std::int32_t>& gblToLcl) const;
 

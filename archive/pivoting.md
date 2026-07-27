@@ -310,6 +310,55 @@ Both now use partial-pivoted LU. Partial is not required over complete; it was c
 halves of the same system match, and because it remains valid should some later path ever admit an
 unbounded `L`.
 
+## Why the sparse search needs a queue and the dense one does not
+
+Figures 2.4 and 2.5 hold no candidate list. They take a column, chase, and accept. Figures 3.4 and
+3.6 both maintain a queue, rotate refused columns to the rear, and carry a termination condition
+counting how many have been tried since the last acceptance. That difference is not a matter of
+taste, and it is worth following precisely, because it is the deepest structural consequence of
+sparsity in this whole area.
+
+**The dense chase terminates because one scan produces both of its outputs.** In Figure 2.4, `r` is
+where column `i`'s largest off-diagonal sits and `gamma_i` is that entry's magnitude. Same scan,
+same entry. The monotonicity is then one line: the entry `a_ri` has magnitude `gamma_i` and it lies
+in column `r`, so it is a lower bound on column `r`'s own maximum, giving `gamma_r >= gamma_i`. The
+chase never decreases, so it never revisits a column, so it terminates, and it terminates on
+`gamma_i == gamma_r`, which is a local maximum and acceptable by construction. **No path out of the
+figure refuses**, and an algorithm that cannot refuse has nothing to remember: the frontier alone
+suffices.
+
+**Sparsity splits the argmax from the bound, and the proof goes with it.** The partner must be a
+column of `A11`, since an update row has no column and no diagonal, but the bound has to run the
+full column height, since the entries of `L` this pivot writes reach into the update rows. So the
+two come from different ranges: `q` is the argmax of `jFrontGamma` while the quantity bounding `L`
+is `jGamma`. What survives of the chain is
+
+```
+qGamma >= |a_qj| = jFrontGamma        and        jFrontGamma <= jGamma
+```
+
+with nothing relating `qGamma` to `jGamma`. The maximum can fall as the chase steps, so the chase
+can cycle.
+
+Neither repair works, which is what makes this a barrier rather than an inconvenience. Chase on
+`jFrontGamma` and it terminates, since that quantity is a genuine maximum over a fixed set, but it
+terminates at a maximum local to the front only, and that bounds nothing in the update rows, which
+is the case AGL make in section 3.3 against carrying the dense solution over. Chase on `jGamma` and
+the column holding it may lie in `A21`, where there is no column to jump to.
+
+**So refusal becomes possible, and that alone would still not need a queue.** If a refused column
+were refused for good, the loop would delay it and move on: one pass, a list of the delayed, no
+structure. The queue exists because **refusal is temporary**. Every acceptance applies a trailing
+update, so the values in every remaining column change, and a column refused a moment ago may pass
+on the next sweep. The queue holds the candidates still in play, preserves their order so the
+structurally eligible ones are tried before the previously postponed, and `trials` supplies the
+termination condition: every candidate tried since the last acceptance means no acceptance is
+possible without new values, and there are no new values coming.
+
+That is the whole of it. The root kernel needs no queue not because roots are simpler but because
+bounded Bunch-Kaufman cannot refuse, and the non-root kernel needs one not because the test is
+harder but because its refusals are provisional.
+
 ## Oblio notation
 
 Both loops below are transcribed from `src/NumFactorEngine.cpp` in the code's own names, with no

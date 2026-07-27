@@ -88,9 +88,11 @@ inline std::complex<double> maybeConjugate(std::complex<double> v, bool herm) {
     return herm ? std::conj(v) : v;
 }
 
-// A Hermitian matrix has a real diagonal. Rounding does not know that, so the diagonal is forced
-// rather than assumed, exactly as the static kernel does when it factors one. Nothing is corrected
-// here and nothing is tuned: the true imaginary part is known exactly, and it is zero.
+// **A correction for floating point, not for the algorithm.** A Hermitian matrix has a real
+// diagonal, so the imaginary part of such an entry is zero mathematically and there is nothing to
+// decide. It is not zero in storage. So this restores a value that is already determined rather
+// than choosing one: nothing is tuned, there is no threshold, and the true imaginary part is known
+// exactly.
 //
 // Where the nonzero comes from is worth knowing, because it is not generic rounding but a
 // cancellation that exact arithmetic guarantees and floating point does not. The kernels form a
@@ -105,8 +107,19 @@ inline std::complex<double> maybeConjugate(std::complex<double> v, bool herm) {
 // The residues are of order epsilon apiece and accumulate over a supernode's descendants, and the
 // entry they land on is about to become a pivot that its whole column is divided by.
 //
-// Applied to pivots only, which is the whole of D: ldl's 1x1, factor1x1's, and both diagonals of a
-// 2x2 through readPivotBlock2x2. Off-diagonal entries have no such constraint to restore.
+// Applied to pivots only, which is the whole of D, off-diagonal entries having no such constraint
+// to restore. Four call sites, and they divide into two kinds:
+//
+//   ldl, factor1x1, factor2x2's diagonals    **the last moment.** These correct a value that is
+//                                            about to be divided by, and then store the corrected
+//                                            one where the solve will divide by it again. Nothing
+//                                            downstream could put it right, having no way to know
+//                                            it should be real.
+//   readPivotBlock2x2 from acceptPivot2x2    not the last moment, but it matters all the same: the
+//                                            acceptance test compares magnitudes against the 2x2
+//                                            determinant, and that determinant is real only if the
+//                                            diagonals are. A residue there perturbs the test that
+//                                            decides whether the pivot is used at all.
 inline double               forceReal(double v, bool)                    { return v; }
 inline std::complex<double> forceReal(std::complex<double> v, bool herm) {
     return herm ? std::complex<double>(v.real(), 0.0) : v;

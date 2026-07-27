@@ -159,14 +159,15 @@ Done:
 - [x] Namespaced headers (`include/oblio/`), explicit instantiation throughout
 - [x] Validated against Oblio 0.9 as oracle; end-to-end residual at machine precision
 - [x] `DirectSolver<Val>`, the top-level analyze / factor / solve driver
-- [x] 179 tests across 8 suites
+- [x] 183 tests across 8 suites
 - [x] Dynamic LDL, threshold 1x1 / 2x2 pivots: all three traversals, delayed columns and all, at
       machine precision. Non-root supernodes follow Ashcraft, Grimes and Lewis (1998) Figure 3.4
       with the Figure 3.3 acceptance test; roots, which cannot delay, use bounded Bunch-Kaufman
-- [x] Multifrontal traversal, for every factorization
+- [x] Multifrontal traversal, for every factorization and both factor storages
+- [x] Complex LDL^H with dynamic pivoting, an extension rather than a port, since 0.9's complex
+      LDL is symmetric only: no reference to check against, so the oracles are the residual and
+      reconstruction of L D L^H on dense fronts
 
 Not yet:
 
-- [ ] Complex LDL^H with dynamic pivoting, an extension rather than a port, since 0.9's complex
-      LDL is symmetric only. Refused rather than answered as the symmetric factorization
 - [ ] Multi-RHS solve (dense right-hand sides)

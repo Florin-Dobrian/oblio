@@ -118,6 +118,10 @@ PivotBlock2x2<Val> readPivotBlock2x2(const Val* val, std::ptrdiff_t ld,
         return static_cast<std::ptrdiff_t>(c) * ld + static_cast<std::ptrdiff_t>(r);
     };
 
+    // forceReal restores what a Hermitian diagonal is mathematically and floating point is not; see
+    // its definition in Types.h. It matters here as well as at the point of use: the acceptance
+    // test compares magnitudes against this block's determinant, and that determinant is real only
+    // if these two are.
     PivotBlock2x2<Val> d;
     d.d11 = forceReal(val[at(k1, k1)], withHermitian);
     d.d22 = forceReal(val[at(k2, k2)], withHermitian);
@@ -895,12 +899,20 @@ void NumFactorEngine::factor1x1(NumFactorDynamic<Val>& nf, std::int32_t jj, std:
     const bool withHermitian = hermitian(nf.factorization());
 
     // Read before the swap, which is why it is not simply jjVal[at(j, j)]: the swap is what puts
-    // the pivot there. Forced real for a Hermitian factorization, and written back so the solve
-    // divides by the same value the elimination used.
+    // the pivot there.
+    //
+    // forceReal restores what a Hermitian diagonal is mathematically and floating point is not; see
+    // its definition in Types.h. **This is the last moment it can be applied**, the value being
+    // about to be divided by below and stored for the solve to divide by again.
     const Val d = forceReal(jjVal[at(k1, k1)], withHermitian);
 
     if (j != k1) nf.swap(jj, j, k1, gblToLcl);
 
+    // The corrected value replaces the stored one, because the corrected one is the right one and
+    // this is the last place it can be put right: from here it is read by the elimination below,
+    // which divides this column by it, and by the solve, which divides again. Neither could correct
+    // it, having no way to know it should be real. As a store it is redundant exactly when there
+    // was no swap and the factorization is not Hermitian, and it is one store per pivot either way.
     jjVal[at(j, j)] = d;
 
     // L column: divide by the pivot
@@ -957,22 +969,68 @@ void NumFactorEngine::factor2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, std:
         }
     }
 
-    // D's own four entries, written back where the solve expects them. The lower pair are already
-    // in place, the swaps having carried them (conjugating on the way, for Hermitian); the diagonal
-    // pair is rewritten because forceReal may have changed them, and the upper off-diagonal has no
-    // other home.
+    // D's own four entries, put where they belong. This is the last place the diagonal pair can be
+    // put right: from here d11 and d22 are read by the elimination below, which solves this block's
+    // columns against them, and by the solve, which solves against them again, and neither could
+    // correct them, having no way to know they should be real. The four divide into three cases and
+    // only the last is unconditional:
+    //
+    //   d21, at (j2, j1)    already there, carried by the swaps, conjugated on the way if
+    //                       Hermitian. Nothing to write.
+    //   d11 and d22         already there too, but as the raw accumulated values, which for a
+    //                       Hermitian D are wrong: readPivotBlock2x2 applied forceReal and these
+    //                       writes are what make that stick. See forceReal in Types.h. As stores
+    //                       they are redundant exactly when there was no swap and the factorization
+    //                       is not Hermitian.
+    //   d12, at (j1, j2)    never redundant. Only the lower triangle is populated before a pivot
+    //                       is applied, so this position has held nothing until now, and
+    //                       readPivotBlock2x2 reconstructed the value from d21. This is its only
+    //                       home.
     jjVal[at(j1, j1)] = d.d11;
     jjVal[at(j2, j2)] = d.d22;
     jjVal[at(j1, j2)] = d.d12;
 
-    // L columns: **[x1 x2] D = [b1 b2]**, a row system with one right-hand side per row below the
-    // block, which is M [x1; x2] = [b1; b2] with M = D transposed. diagonalDynamic in SolveEngine
-    // solves the other half of this same system at solve time, D [x1; x2] = [b1; b2], a column
-    // system with one right-hand side, and the two are written to look alike on purpose: same pivot
-    // choice, same four names for the factorization, same two-step substitution. The duplication is
-    // six lines of scalar arithmetic and is deliberate; a shared routine would have to take D in
-    // one orientation and be handed the transpose from one side, which costs more to state than
-    // these lines cost to carry.
+    // L columns: **x A = b**, with A = D and one such row system per row below the block, x being
+    // that row's pair of L entries and b its pair of front values. A row system becomes a column
+    // system either way round, and both identities hold:
+    //
+    //     x A = b   <=>   A^T x^T = b^T          unknown x^T, recovered by ^T
+    //     x A = b   <=>   A^H x^H = b^H          unknown x^H, recovered by ^H
+    //
+    // **The first is taken, so what is factored here is A^T**, not A. The second is less a rival
+    // than the same equation wearing conjugations, and for a Hermitian A it collapses into the
+    // first:
+    //
+    //     A^H x^H = b^H                       the starting point
+    //     A   x^H = b^H                       A^H = A, so A is untouched and b and x carry the conj
+    //     conj(A) conj(x^H) = conj(b^H)       conjugate the whole equation
+    //     A^T x^T = b^T                       conj(A) = A^T, conj(x^H) = x^T, conj(b^H) = b^T
+    //
+    // The conjugation has moved off b and x and onto A, and on A it is not an operation at all:
+    // conj(A) = A^T is the exchange of a12 and a21, two loads naming different entries. That is the
+    // whole gain, and it is worth having because b and x are per row below the block while A is
+    // read once. Conjugating them would also put maybeConjugate, and with it withHermitian, inside
+    // the row loop.
+    //
+    // For a symmetric A the same form holds with nothing to move, A^T = A making the exchange a
+    // no-op, so this one line covers LDL^T and LDL^H alike and needs no maybeConjugate at all.
+    //
+    // The ^T route is also the symmetry-blind one, which is why there is no withHermitian branch
+    // here. What the symmetry does decide is whether the a12 and a21 exchange in the factorization
+    // is doing any work:
+    //
+    //     D real or complex symmetric    A^T = A          the exchange is a bitwise no-op
+    //     D Hermitian                    A^T = conj(A)    the exchange is what makes it right
+    //
+    // So Hermitian fronts are the only ones that can detect an error in it. For those the ^H route
+    // would have factored A itself, A^H being A, paying the two conjugations instead of the
+    // transpose; neither is better, and only the ^T route is uniform across all three.
+    //
+    // diagonalDynamic in SolveEngine solves the other half of this same system at solve time,
+    // A x = b, already a column system and so factoring A itself. The two are written to look alike
+    // on purpose: same pivot choice, same four names, same two-step substitution. All that
+    // distinguishes them is the transpose, and it shows up in one place, the exchange of a12 and
+    // a21 in the factorization below.
     //
     // **Explicit LU with partial pivoting, not Cramer's rule.** AGL page 29 rules Cramer out for
     // this family: the 2x2 acceptance test bounds the entries of L but says nothing about the
@@ -994,17 +1052,19 @@ void NumFactorEngine::factor2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, std:
     // diagonalDynamic already does it, so the two halves of this system match, and because it stays
     // valid if some later path ever admits an unbounded L.
     //
-    // The factorization of M does not depend on the row, so it is done once here and applied below.
+    // The factorization of A^T does not depend on the row, so it is done once here and applied
+    // below. Partial pivoting is on A^T's rows, which are A's columns, so the pivoted branch loads
+    // A with its columns exchanged.
     Val  a11, a12, a21, a22;
     bool swapped;
     if (std::abs(d.d11) >= std::abs(d.d12)) {
-        a11 = d.d11;  a12 = d.d21;  a21 = d.d12;  a22 = d.d22;  swapped = false;
-    } else {                                    // pivot the rows: the second one is larger
-        a11 = d.d12;  a12 = d.d22;  a21 = d.d11;  a22 = d.d21;  swapped = true;
+        a11 = d.d11;  a12 = d.d12;  a21 = d.d21;  a22 = d.d22;  swapped = false;
+    } else {                                    // pivot: A^T's second row is the larger
+        a11 = d.d12;  a12 = d.d11;  a21 = d.d22;  a22 = d.d21;  swapped = true;
     }
-    const Val l21 = a21 / a11;
-    const Val u11 = a11;
-    const Val u12 = a12;
+    const Val l21 = a12 / a11;                  // A^T = L U here, against the A = L U that
+    const Val u11 = a11;                        // SolveEngine's diagonalDynamic runs: a12 and
+    const Val u12 = a21;                        // a21 exchange, and nothing else differs
     const Val u22 = a22 - l21 * u12;
 
     for (std::int32_t i = j1 + 2; i < static_cast<std::int32_t>(jjNumNodeIdx); ++i) {
@@ -1923,14 +1983,11 @@ bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, 
         return false;
 
     // **Dynamic pivoting cannot go into this storage, and never will.** A delayed column expands
-    // its
-    // parent's front, and this factor's value buffer is one flat array sized once from the symbolic
-    // factorization; expanding a front in the middle of it would mean moving everything after it.
-    // So
-    // this is a design refusal rather than a missing feature, and the combination is asserted to be
-    // refused in test_pipeline. Callers wanting a dynamic factorization pass NumFactorDynamic,
-    // which
-    // the overload below takes.
+    // its parent's front, and this factor's value buffer is one flat array sized once from the
+    // symbolic factorization; expanding a front in the middle of it would mean moving everything
+    // after it. So this is a design refusal rather than a missing feature, and the combination is
+    // asserted to be refused in test_pipeline. Callers wanting a dynamic factorization pass
+    // NumFactorDynamic, which the overload below takes.
     switch (mFactorization) {
         case Factorization::Cholesky:
         case Factorization::StaticLDLT:
@@ -1971,12 +2028,13 @@ bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, 
     // 0.9's two engines to begin with. Everything else is `Val` arithmetic and `std::abs`, which
     // means modulus for complex and is the right comparison either way.
     //
-    // **Complex `LDL^H` is the one cell still missing, and it is an extension, not a port.** 0.9's
-    // complex LDL is symmetric only, so there is nothing to transcribe. The Hermitian form needs a
-    // threshold test that knows the 2x2 block's diagonal is real; `readPivotBlock2x2` already takes
-    // the conjugate on the off-diagonal, so that half is in place. Refused here rather than
-    // silently
-    // computing the symmetric factorization under a Hermitian name. See docs/TODO.md.
+    // **Complex `LDL^H` is an extension rather than a port, and it runs.** 0.9's complex LDL is
+    // symmetric only, so there was nothing to transcribe and nothing to check against: the oracles
+    // are the residual in `test_pipeline`, on a genuinely Hermitian band through all three
+    // traversals, and reconstruction of `L D L^H` on dense fronts in `test_numfactor`. What the
+    // Hermitian form needs beyond the symmetric one is concentrated in two places,
+    // `readPivotBlock2x2`, which conjugates the off-diagonal and forces both diagonals real, and
+    // `forceReal` on the 1x1 pivot; everything downstream works from what those return.
     //
     // Over the reals the question does not arise: the two transposes are the same computation, and
     // `test_pipeline` asserts they agree bit for bit.
@@ -2006,7 +2064,7 @@ bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, 
     switch (mTraversal) {
         case Traversal::LeftLooking:  return factorStaticLeftLooking(A, p, sf, nf);
         case Traversal::RightLooking: return factorStaticRightLooking(A, p, sf, nf);
-        case Traversal::Multifrontal: return false;   // not ported yet
+        case Traversal::Multifrontal: return factorStaticMultifrontal(A, p, sf, nf);
     }
     return false;
 }

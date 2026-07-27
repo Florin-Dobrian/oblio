@@ -104,7 +104,9 @@ void gemmLower(int n, int k, const Val* l, int ldl, const Val* u, int ldu, Val* 
 template<class Val>
 int ldl(int n, Val* a, int lda, double perturbation, int* numPerturbations, bool hermitian) {
     if (n == 1) {
-        // The pivot. Force it real first if Hermitian, since that is what D is.
+        // The pivot. forceReal restores what a Hermitian diagonal is mathematically and floating
+        // point is not; see its definition in Types.h. **This is the last moment it can be
+        // applied**, the value being about to be divided by and left in place for the solve.
         *a = forceReal(*a, hermitian);
 
         // A static factorization cannot pivot, so a pivot too small to divide by has no remedy

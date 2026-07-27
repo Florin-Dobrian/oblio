@@ -412,6 +412,24 @@ int main() {
         ck(mfC.solved && mfC.residual < tol, with("tier 0 Cholesky  : multifrontal residual, real", mfC.residual));
         ck(mfT.solved && mfT.residual < tol, with("tier 0 StaticLDLT: multifrontal residual, real", mfT.residual));
         ck(mfH.solved && mfH.residual < tol, with("tier 0 StaticLDLH: multifrontal residual, real", mfH.residual));
+
+        // The same three into *dynamic* storage. A static factorization needs no pivoting and so
+        // delays nothing, but the storage is agnostic about that and the engine's second compute
+        // overload accepts it: the cell exists to keep the two storages interchangeable for the
+        // factorizations both can hold. Left- and right-looking were already dispatched here;
+        // multifrontal returned false as "not ported yet" until 2026-07-26.
+        const Outcome mfCD = run<double, FD>(A, OrderMethod::Natural, Factorization::Cholesky,
+                                     Traversal::Multifrontal);
+        const Outcome mfTD = run<double, FD>(A, OrderMethod::Natural, Factorization::StaticLDLT,
+                                     Traversal::Multifrontal);
+        const Outcome mfHD = run<double, FD>(A, OrderMethod::Natural, Factorization::StaticLDLH,
+                                     Traversal::Multifrontal);
+        ck(mfCD.solved && mfCD.residual < tol && mfCD.delayed == 0,
+           with("tier 0 Cholesky  : multifrontal into dynamic storage", mfCD.residual));
+        ck(mfTD.solved && mfTD.residual < tol && mfTD.delayed == 0,
+           with("tier 0 StaticLDLT: multifrontal into dynamic storage", mfTD.residual));
+        ck(mfHD.solved && mfHD.residual < tol && mfHD.delayed == 0,
+           with("tier 0 StaticLDLH: multifrontal into dynamic storage", mfHD.residual));
     }
 
     // =============================================================================================
@@ -601,7 +619,7 @@ int main() {
 
     // =============================================================================================
     // Complex. Nine of the ten (factorization, scalar type) cells are supported; the missing one is
-    // complex DynamicLDLH, which is refused rather than answered and is asserted to be.
+    // complex DynamicLDLH, the one cell with no 0.9 reference behind it.
     //
     // The dynamic kernels needed nothing to accept complex input. 0.9's complex factorDynamicLDL_
     // differs from its real one in six lines, all declaring the pivot magnitudes real rather than

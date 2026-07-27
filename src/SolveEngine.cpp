@@ -238,14 +238,12 @@ void SolveEngine::diagonalDynamic(const NumFactorDynamic<Val>& nf, Vector<Val>& 
             const std::int32_t j1 = lj;
             const std::int32_t j2 = jjNodeIdx[j + 1];
 
-            // **D [x1; x2] = [b1; b2]**, a column system with one right-hand side, solved by
-            // explicit LU with partial pivoting. factor2x2 in NumFactorEngine solves the other half
-            // of this same system, [x1 x2] D = [b1 b2], a row system with one right-hand side per
-            // row below the block, and the two are written to look alike on purpose: same pivot
-            // choice, same four names for the factorization, same two-step substitution. The
-            // duplication is six lines of scalar arithmetic and is deliberate; a shared routine
-            // would have to take D in one orientation and be handed the transpose from one side,
-            // which costs more to state than these lines cost to carry.
+            // **A x = b**, with A = D and one right-hand side, solved by explicit LU with partial
+            // pivoting. A column system to begin with, so A itself is what gets factored. factor2x2
+            // in NumFactorEngine has the row system x A = b instead, which turns into a column
+            // system in either A^T or A^H; it takes A^T in both cases, and see there for why. That
+            // makes it these same four lines with a12 and a21 exchanged. The two are written to
+            // look alike on purpose, and that exchange is the whole of what distinguishes them.
             Val  a11, a12, a21, a22;
             bool swapped;
             if (std::abs(jjVal[at(j, j)]) >= std::abs(jjVal[at(j + 1, j)])) {

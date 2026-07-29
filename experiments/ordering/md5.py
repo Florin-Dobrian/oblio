@@ -13,189 +13,275 @@
 #
 # Two things make the walk cheap:
 #
-#   - mdeg, a LOWER BOUND on the current minimum degree. We start each search at
-#     mdeg rather than at 0, and every vertex below it is known to be gone.
+#   - min_degree, a LOWER BOUND on the current minimum degree. Each search starts
+#     at min_degree rather than at 0, and every vertex below it is known to be gone.
 #   - a vertex whose degree changes must be pulled out of the middle of its old
 #     bucket, so buckets need O(1) removal. Here that is a Python set; the
 #     vendored codes use doubly linked lists (MMD's fwd/bwd, AMD's Next/Last)
 #     because Fortran and C of that era had no such container.
 #
-# Keeping mdeg correct is the whole of the difficulty, and it is a lower bound
-# rather than the true minimum on purpose: it may lag, and the walk fixes it.
-# What it must never do is overshoot, since a bucket below mdeg is never
-# examined and a vertex sitting there would never be chosen.
+# Keeping min_degree correct is the whole of the difficulty, and it is a lower
+# bound rather than the true minimum on purpose: it may lag, and the walk fixes
+# it. What it must never do is overshoot, since a bucket below min_degree is
+# never examined and a vertex sitting there would never be chosen.
 
 # %%
-def reachable(A, C, cliques, i):
-    """The true neighbors of live variable i."""
-    neighbors = set(A[i])
-    for c in C[i]:
-        neighbors |= cliques[c]
-    neighbors.discard(i)
+import sys
+
+# I[u] cliques that contain u
+# C[c] vertices that c contains
+
+def md5_show(A, I, C, degrees, title=None, eliminated=None):
+    """Print a quotient graph: adjacency, incidence, cliques, degrees. The degree
+    shown is the stored one, never recomputed, which is the point of this layer."""
+    n = len(A)
+    width = len(str(max(n - 1, 0)))
+    alive_vertices = [u for u in range(n) if eliminated is None or not eliminated[u]]
+    num_alive_edges = sum(len(A[u]) for u in alive_vertices) // 2
+    num_alive_incidences = sum(len(I[u]) for u in alive_vertices)
+    num_alive_cliques = len(C)
+    if title:
+        print(title)
+    alive_vertices_text = f"{n}" if eliminated is None else f"{len(alive_vertices)} of {n}"
+    print(f"num alive vertices = {alive_vertices_text}, "
+          f"num alive edges = {num_alive_edges}, "
+          f"num alive cliques = {num_alive_cliques}, "
+          f"storage = {2 * num_alive_edges} + {2 * num_alive_incidences} = {2 * (num_alive_edges + num_alive_incidences)}")
+    for u in alive_vertices:
+        adjacency_text = " ".join(f"{v:>{width}}" for v in sorted(A[u]))
+        incidence_text = " ".join(f"c{c}" for c in sorted(I[u]))
+        print(f"  {u:>{width}}: {{{adjacency_text}}} {{{incidence_text}}} "
+              f"degree {degrees[u]}")
+    for c in sorted(C):
+        clique_members_text = " ".join(f"{u:>{width}}" for u in sorted(C[c]))
+        print(f"  c{c}: {{{clique_members_text}}}")
+    print()
+
+def md5_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots,
+                   title=None):
+    """Print the state arrays: degrees, buckets, min degree, members, eliminated,
+    and the order so far."""
+    n = len(super_members)
+    width = len(str(max(n - 1, 0)))
+    if title:
+        print(title)
+    for u in range(n):
+        if not eliminated[u]:
+            status = "live"
+        elif super_members[u]:
+            status = "done"
+        else:
+            status = "merged"
+        super_members_text = " ".join(f"{v:>{width}}" for v in super_members[u])
+        print(f"  {u:>{width}}: members [{super_members_text}] {status}")
+    degrees_text = " ".join(f"{degrees[u]:>{width}}" for u in range(n))
+    super_members_text = " ".join("[" + " ".join(str(v) for v in super_members[u]) + "]"
+                                  for u in range(n))
+    eliminated_text = " ".join(f"{int(e):>{width}}" for e in eliminated)
+    buckets_text = "  ".join(f"{d}: {{{' '.join(str(v) for v in sorted(buckets[d]))}}}"
+                             for d in range(len(buckets)) if buckets[d])
+    print(f"  degrees: [{degrees_text}]")
+    print(f"  buckets: {buckets_text if buckets_text else 'all empty'}")
+    print(f"  min degree: {min_degree}")
+    print(f"  members: [{super_members_text}]")
+    print(f"  eliminated: [{eliminated_text}]")
+    print(f"  pivots: {pivots}")
+    print(f"  order: {[u for pivot in pivots for u in super_members[pivot]]}")
+    print()
+
+def md5_storage(A, I, C):
+    """Entries actually stored, as in md4. The degree cache and the buckets hold
+    no graph structure: every live vertex appears in exactly one bucket."""
+    return (sum(len(adjacency) for adjacency in A)
+            + sum(len(incidence) for incidence in I)
+            + sum(len(clique_members) for clique_members in C.values()))
+
+def md5_neighbors(A, I, C, u):
+    """The neighbors of live vertex u, exactly as in md3: its explicit adjacency
+    A[u] together with the members of every clique that contains u, minus u."""
+    neighbors = set(A[u])
+    for c in I[u]:
+        neighbors |= C[c]
+    neighbors.discard(u)
     return neighbors
 
+def md5_eliminate(A, I, C, eliminated, pivot):
+    """Turn the pivot into a clique, then merge in every member it makes
+    indistinguishable. Identical to md4_eliminate: this layer changes how the
+    minimum is found, not what an elimination does.
 
-def weighted_degree(A, C, cliques, weight, i):
-    return sum(weight[j] for j in reachable(A, C, cliques, i))
+    Returns (neighbors, absorbed_cliques, pruned_edges, merged_vertices).
+    """
+    neighbors = md5_neighbors(A, I, C, pivot)
+    absorbed_cliques = set(I[pivot])
+    for c in absorbed_cliques:
+        del C[c]
+    C[pivot] = set(neighbors)     # becomes L_pivot, the column pattern
 
+    pruned_edges = []
+    for u in neighbors:
+        redundant = A[u] & neighbors    # both ends inside the new clique
+        for v in redundant:
+            if u < v:
+                pruned_edges.append((u, v))
+        A[u] -= redundant               # implicit now: delete the explicit copy
+        A[u].discard(pivot)             # the pivot is no longer a variable
+        I[u] -= absorbed_cliques        # its absorbed cliques are gone
+        I[u].add(pivot)                 # u joins the new clique, whose id is the pivot
 
-def storage(A, cliques):
-    return sum(len(a) for a in A) + sum(len(m) for m in cliques.values())
-
-
-def eliminate(A, C, cliques, weight, eliminated, pivot):
-    """Unchanged from md4: absorb, prune, merge."""
-    neighbors = reachable(A, C, cliques, pivot)
-    absorbed = set(C[pivot])
-    for c in absorbed:
-        del cliques[c]
-    cliques[pivot] = set(neighbors)
-
-    pruned = []
-    for i in neighbors:
-        redundant = A[i] & neighbors
-        for j in redundant:
-            if i < j:
-                pruned.append((i, j))
-        A[i] -= redundant
-        A[i].discard(pivot)
-        C[i] -= absorbed
-        C[i].add(pivot)
-
-    merged = []
-    for i in sorted(neighbors):
-        if not A[i] and C[i] == {pivot}:
-            weight[pivot] += weight[i]
-            weight[i] = 0
-            C[i].clear()
-            eliminated[i] = True
-            merged.append(i)
-    for i in merged:
-        cliques[pivot].discard(i)
-        for c in cliques.values():
-            c.discard(i)
+    # Mass elimination. u is INDISTINGUISHABLE from the pivot when the two have
+    # the same closed neighborhood, md5_neighbors(u) | {u} == md5_neighbors(pivot)
+    # | {pivot}, as it stood before the step. Equivalently, now that the clique is
+    # formed, when everything u can still reach lies inside it. The test below is
+    # a cheap sufficient condition for that: nothing explicit left and no clique
+    # but the new one means u sees exactly what the pivot sees, so eliminating it
+    # next would cost no fill. Fold it into the pivot now and strip it from the
+    # cliques, since it is no longer a vertex.
+    merged_vertices = []
+    for u in sorted(neighbors):
+        if not A[u] and I[u] == {pivot}:
+            I[u].clear()
+            eliminated[u] = True
+            merged_vertices.append(u)
+    for u in merged_vertices:
+        for clique_members in C.values():
+            clique_members.discard(u)
 
     A[pivot].clear()
-    C[pivot].clear()
+    I[pivot].clear()
     eliminated[pivot] = True
-    return neighbors, absorbed, pruned, merged
+    return neighbors, absorbed_cliques, pruned_edges, merged_vertices
 
+def md5_refile(buckets, degrees, u, new_degree):
+    """Move u from the bucket for its old degree to the one for new_degree.
+    Removal from the middle of a bucket must be O(1), which is why a bucket is a
+    set here; the vendored codes use doubly linked lists for the same reason."""
+    buckets[degrees[u]].discard(u)
+    degrees[u] = new_degree
+    buckets[new_degree].add(u)
 
-def minimum_degree(graph):
-    """Quotient graph, supervariables, maintained degrees, and degree buckets."""
-    n = len(graph)
-    nnz_tril_A = sum(len(neigh) for neigh in graph) // 2 + n
-    A = [set(neigh) for neigh in graph]
-    C = [set() for _ in range(n)]
-    cliques = {}
-    weight = [1] * n
-    members = [[v] for v in range(n)]
+def md5_minimum_degree(G):
+    """Same as md4, with the live vertices filed in buckets by degree. The picker
+    walks up from min_degree to the first non-empty bucket instead of scanning."""
+    n = len(G)
+    nnz_tril_A = sum(len(G[u]) for u in range(n)) // 2 + n
+    A = [set(adjacency) for adjacency in G]    # explicit vertex neighbors
+    I = [set() for _ in range(n)]              # cliques that contain each vertex
+    C = {}                                     # clique id -> member set
+    super_members = [[u] for u in range(n)]    # the vertices each pivot stands for
     eliminated = [False] * n
-    pivots = []
+    pivots = []                                # the order over supervariables
     nnz_L = 0
 
-    degrees = [len(A[v]) for v in range(n)]
-    buckets = [set() for _ in range(n + 1)]      # buckets[d] holds degree-d vertices
-    for v in range(n):
-        buckets[degrees[v]].add(v)
-    mdeg = min(degrees) if n else 0              # lower bound on the minimum
-    probes = 0                                   # bucket slots examined, the metric
+    # The cache, as in md4, unchanged by this layer.
+    degrees = [len(A[u]) for u in range(n)]
+    num_degree_computations = n
 
-    def refile(i, new_degree):
-        """Move i from its old bucket to the one for new_degree."""
-        nonlocal mdeg
-        buckets[degrees[i]].discard(i)
-        degrees[i] = new_degree
-        buckets[new_degree].add(i)
-        if new_degree < mdeg:                    # the bound may only ever fall
-            mdeg = new_degree
+    # The buckets, and min_degree, a LOWER BOUND on the current minimum degree.
+    # The search starts at min_degree rather than at 0, so it never looks at
+    # buckets known to be empty. The bound may lag, and the walk corrects it; what
+    # it must never do is overshoot, since a vertex below it would never be seen.
+    #
+    # n buckets is exactly right. A live vertex counts only live neighbors, so its
+    # degree is at most n - 1, and the walk stops at the first non-empty bucket,
+    # which exists while anything is live. SuiteSparse AMD sizes its Head array
+    # the same way; MMD's head looks one longer only because it is indexed from 1.
+    buckets = [set() for _ in range(n)]        # buckets[d] holds the live degree-d
+    for u in range(n):
+        buckets[degrees[u]].add(u)
+    min_degree = min(degrees) if n else 0
+    num_bucket_probes = 0                      # slots examined, the metric here
 
-    def show_state(neighbors=None, absorbed=None, pruned=None, merged=None,
-                   refreshed=None, walked=None):
-        a = "{" + ", ".join(f"{v}: {sorted(A[v])}" for v in range(n)) + "}"
-        c = "{" + ", ".join(
-            f"{v}: {[f'c{x}' for x in sorted(C[v])]}" for v in range(n)) + "}"
-        cl = "{" + ", ".join(
-            f"c{x}: {sorted(m)}" for x, m in sorted(cliques.items())) + "}"
-        w = "{" + ", ".join(f"{v}: {weight[v]}" for v in range(n)) + "}"
-        dg = "{" + ", ".join(
-            f"{v}: {degrees[v] if not eliminated[v] else '-'}" for v in range(n)) + "}"
-        bk = "{" + ", ".join(f"{d}: {sorted(b)}"
-                             for d, b in enumerate(buckets) if b) + "}"
-        print(f"         A       = {a}")
-        print(f"         C       = {c}")
-        print(f"         cliques = {cl}")
-        print(f"         weights = {w}   storage {storage(A, cliques)}")
-        print(f"         degrees = {dg}")
-        print(f"         buckets = {bk}   mdeg = {mdeg}")
-        if neighbors is None:
-            print("         neighbors = none, absorbed = none, pruned = none, "
-                  "merged = none, refreshed = all (initial)")
-        else:
-            ab = ", ".join(f"c{x}" for x in sorted(absorbed)) if absorbed else "none"
-            pr = ", ".join(f"{u}-{w2}" for u, w2 in sorted(pruned)) if pruned else "none"
-            mg = ", ".join(map(str, merged)) if merged else "none"
-            rf = ", ".join(map(str, sorted(refreshed))) if refreshed else "none"
-            print(f"         neighbors = {sorted(neighbors)}, absorbed = {ab}, "
-                  f"pruned = {pr}, merged = {mg}")
-            print(f"         refreshed = {rf}   (walked {walked} bucket(s) to find the pivot)")
-
-    print("start: no cliques yet, degrees from A, vertices filed by degree")
-    show_state()
+    md5_show(A, I, C, degrees, "start: every edge explicit, no clique yet",
+             eliminated=eliminated)
+    md5_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
     step = 0
-    while any(not eliminated[v] for v in range(n)):
-        # PICK: walk up from mdeg to the first non-empty bucket. No scan.
-        walked = 0
-        while not buckets[mdeg]:
-            mdeg += 1
-            walked += 1
-        probes += walked + 1
-        pivot = min(buckets[mdeg])               # lowest index, to match md4's tie-break
-        d = degrees[pivot]
-        w = weight[pivot]
-        buckets[d].discard(pivot)
-
-        neighbors, absorbed, pruned, merged = eliminate(
-            A, C, cliques, weight, eliminated, pivot)
-        for i in merged:
-            members[pivot] += members[i]
-            buckets[degrees[i]].discard(i)       # merged vertices leave the buckets
+    while not all(eliminated):
+        while not buckets[min_degree]:         # walk up to the first live bucket
+            min_degree += 1
+            num_bucket_probes += 1
+        num_bucket_probes += 1
+        pivot = min(buckets[min_degree])       # lowest index, as the scan did
+        neighbors, absorbed_cliques, pruned_edges, merged_vertices = md5_eliminate(
+            A, I, C, eliminated, pivot)
+        degree = len(neighbors)
         pivots.append(pivot)
+        for u in merged_vertices:              # the pivot now stands for them too
+            super_members[pivot] += super_members[u]
+            super_members[u] = []
 
-        refreshed = [i for i in sorted(neighbors) if not eliminated[i]]
-        for i in refreshed:
-            refile(i, weighted_degree(A, C, cliques, weight, i))
+        # Only the new clique's surviving members can have a different degree.
+        # Everything else has the same A, the same cliques and the same live
+        # neighbors as before, so its cached value is still correct.
+        buckets[degrees[pivot]].discard(pivot)  # the pivot has left the graph
+        degrees[pivot] = 0
+        for u in merged_vertices:               # and so have the merged vertices
+            buckets[degrees[u]].discard(u)
+            degrees[u] = 0
 
-        wp = weight[pivot]
-        ext = sum(weight[j] for j in cliques[pivot])
-        nnz_L += wp * ext + wp * (wp - 1) // 2 + wp
+        refreshed_vertices = sorted(C[pivot])
+        for u in refreshed_vertices:
+            md5_refile(buckets, degrees, u, len(md5_neighbors(A, I, C, u)))
+        num_degree_computations += len(refreshed_vertices)
+        min_degree = min([min_degree] + [degrees[u] for u in refreshed_vertices])
 
-        print(f"step {step}: eliminate {pivot} (degree {d}, weight {w} -> {wp})")
-        show_state(neighbors, absorbed, pruned, merged, refreshed, walked)
+        # A supervariable of size w is w consecutive columns of L. Its external
+        # degree is what remains of the clique after the merges, since a merged
+        # vertex joins the supervariable instead of neighboring it, and every
+        # member left there is a live vertex standing for itself alone. The first
+        # column then holds ext + w - 1 entries below its diagonal, the next
+        # ext + w - 2, down to ext, and each column contributes its own diagonal.
+        super_size = len(super_members[pivot])
+        external_degree = len(C[pivot])
+        nnz_L += (super_size * external_degree
+                  + super_size * (super_size - 1) // 2
+                  + super_size)
+
+        absorbed_cliques_text = ", ".join(f"c{c}" for c in sorted(absorbed_cliques)) if absorbed_cliques else "none"
+        pruned_edges_text = ", ".join(f"{u}-{v}" for u, v in pruned_edges) if pruned_edges else "none"
+        merged_vertices_text = ", ".join(str(u) for u in merged_vertices) if merged_vertices else "none"
+        refreshed_vertices_text = ", ".join(str(u) for u in refreshed_vertices) if refreshed_vertices else "none"
+        md5_show(A, I, C, degrees,
+                 (f"step {step}: eliminate {pivot} (degree {degree}, size {super_size}, "
+                  f"external degree {external_degree}), "
+                  f"absorbed cliques: {absorbed_cliques_text}, pruned edges: {pruned_edges_text}, "
+                  f"merged vertices: {merged_vertices_text}, refreshed: {refreshed_vertices_text}"),
+                 eliminated=eliminated)
+        md5_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
         step += 1
 
-    order = [v for p in pivots for v in members[p]]
-    print(f"supervariable pivots = {pivots}")
+    order = [u for pivot in pivots for u in super_members[pivot]]
     print(f"nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
           f"fill = {nnz_L - nnz_tril_A}")
-    print(f"bucket probes: {probes}   (md4 would scan every live vertex per step)")
+    print(f"degree computations: {num_degree_computations}, "
+          f"bucket probes: {num_bucket_probes}")
+    print(f"order: {order}")
     return order
 
 
 # %%
-# The same three graphs as md1, md2, md3 and md4.
+# The same three graphs as md1 and md2.
 #
-#   graph1, a 4-cycle:        graph2, uneven degrees:
+#   graph1, a 4-cycle: eliminating any vertex forces its two neighbors
+#   together, so it is the smallest graph that fills (one fill edge).
 #
-#      0---1                       0            edges: 0-1 0-2 1-3 2-4
-#      |   |                      / \                  3-4 3-5 4-5
-#      3---2                     1   2
-#                                |   |
-#   edges: 0-1 1-2 2-3 3-0       3---4
-#                                 \ /
-#                                  5
+#      0---1          edges: 0-1 1-2 2-3 3-0
+#      |   |
+#      3---2
 #
-#   graph3, twelve vertices: a path 0-1-...-11 with eight extra edges.
+#   graph2, uneven degrees so the picker actually chooses; it fills twice.
+#
+#        0            edges: 0-1 0-2 1-3 2-4
+#       / \                  3-4 3-5 4-5
+#      1   2
+#      |   |
+#      3---4
+#       \ /
+#        5
+#
+#   graph3, twelve vertices: a path 0-1-...-11 with eight extra edges. Big
+#   enough that cliques grow past two members, which is where the quotient
+#   graph starts to pay, and its elimination order is not the identity.
 #
 #      edges: 0-1 0-3 0-8 1-2 1-6 1-8 2-3 2-5 3-4 4-5
 #             5-6 5-9 6-7 6-10 7-8 8-9 9-10 10-11
@@ -241,9 +327,72 @@ graph4 = [
     {0, 1, 3},        # 7
 ]
 
-for name, g in [("graph1", graph1), ("graph2", graph2),
-                ("graph3", graph3), ("graph4", graph4)]:
+# graph5, five vertices and four edges, two paths joined at 4: 2-1-4-0-3. Small
+# and fill free, and here for one reason: it is the smallest graph on which md3's
+# merge test declines a genuine supervariable. At the step whose pivot is 0 and
+# whose clique is {4}, vertex 4 has nothing explicit left but belongs to c1 as
+# well as to the new clique, so I[4] == {pivot} fails even though c1's only
+# member is 4 itself and everything 4 reaches lies inside the new clique. The
+# exact test md3_neighbors(A, I, C, u) <= C[pivot] would merge it. See the README
+# section on mass elimination.
+#
+#   edges: 0-3 0-4 1-2 1-4
+graph5 = [
+    {3, 4},           # 0
+    {2, 4},           # 1
+    {1},              # 2
+    {0},              # 3
+    {0, 1},           # 4
+]
+
+# graph6, six vertices and eight edges. Here because one small graph carries
+# three things at once. Its supervariable {0, 4} is a supernode but NOT a
+# fundamental one: the elimination forest is 2 -> 1 -> 4 and 3 -> 0 -> 4, so 4
+# already has 1 as a child when 0 merges into it. The merge happens at step 2 of
+# 5, so the run continues afterwards and the selection degree, 3 over {2, 3, 4},
+# differs from the external degree, 2 over {2, 3}, with the difference being the
+# size of what merged. And super_members ends with a hole in the middle, slot 4
+# empty between two used ones, while no pivot equals its own step number. See the
+# README sections on mass elimination and on external degree.
+#
+#   edges: 0-2 0-3 0-4 1-3 2-3 2-4 2-5 3-4
+graph6 = [
+    {2, 3, 4},        # 0
+    {3},              # 1
+    {0, 3, 4, 5},     # 2
+    {0, 1, 2, 4},     # 3
+    {0, 2, 3},        # 4
+    {2},              # 5
+]
+
+# graph7, five vertices and six edges. The pairwise case: at the step whose pivot
+# is 0 and whose clique is {2, 4}, vertices 2 and 4 are indistinguishable FROM
+# EACH OTHER, both reaching the same closed neighborhood, yet neither is
+# absorbable into the pivot, since each still reaches 3 from outside the clique.
+# No test framed against the pivot finds them, and the exact test does not help
+# either: both orders are 1 0 (2 3 4). Catching such pairs needs a comparison
+# between candidates, which is what amd's hashing does. See the README section on
+# detecting supervariables against each other.
+#
+#   edges: 0-1 0-2 0-4 1-4 2-3 2-4 3-4
+graph7 = [
+    {1, 2, 4},        # 0
+    {0, 4},           # 1
+    {0, 3, 4},        # 2
+    {2, 4},           # 3
+    {0, 1, 2, 3},     # 4
+]
+
+examples = [("graph1", graph1), ("graph2", graph2),
+            ("graph3", graph3), ("graph4", graph4),
+            ("graph5", graph5), ("graph6", graph6),
+            ("graph7", graph7)]
+
+# All of them by default. To run just one, pass its number: python3 md5.py 3
+selected = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+for number, (name, g) in enumerate(examples, start=1):
+    if selected and number != selected:
+        continue
     print(f"=== {name} ===")
-    order = minimum_degree(g)
-    print("order:", order)
+    md5_minimum_degree(g)
     print()

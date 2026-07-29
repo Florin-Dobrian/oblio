@@ -11,92 +11,119 @@
 // Build:  g++ -std=c++17 -O3 md1.cpp -o md1_cpp  (or: make)
 // Run:    ./md1_cpp
 
+#include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <set>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
 using Graph = std::vector<std::set<int>>;
 
-// Make the pivot's neighbors a clique, then remove the pivot. Returns the fill
-// edges created: pairs of neighbors that were not already adjacent.
-std::vector<std::pair<int, int>> eliminate(Graph& graph, int pivot) {
-    const std::set<int> neighbors = graph[pivot];
-    std::vector<std::pair<int, int>> fill;
-    for (int u : neighbors)
-        for (int w : neighbors)
-            if (u < w && graph[u].count(w) == 0) {   // a genuinely new edge
-                graph[u].insert(w);
-                graph[w].insert(u);
-                fill.push_back({u, w});
-            }
-    for (int u : neighbors)
-        graph[u].erase(pivot);
-    graph[pivot].clear();
-    return fill;
+// Print a graph: adjacency sets.
+void md1Show(const Graph& A, const std::string& title = "",
+             const std::vector<bool>* eliminated = nullptr) {
+    int n = static_cast<int>(A.size());
+    int width = static_cast<int>(std::to_string(std::max(n - 1, 0)).size());
+    std::vector<int> aliveVertices;
+    for (int u = 0; u < n; ++u)
+        if (eliminated == nullptr || !(*eliminated)[u]) aliveVertices.push_back(u);
+    std::size_t numAliveEdges = 0;
+    for (int u : aliveVertices) numAliveEdges += A[u].size();
+    numAliveEdges /= 2;
+    if (!title.empty()) std::cout << title << "\n";
+    std::ostringstream aliveVerticesText;
+    if (eliminated == nullptr) aliveVerticesText << n;
+    else aliveVerticesText << aliveVertices.size() << " of " << n;
+    std::cout << "num alive vertices = " << aliveVerticesText.str()
+              << ", num alive edges = " << numAliveEdges
+              << ", storage = " << 2 * numAliveEdges << "\n";
+    for (int u : aliveVertices) {
+        std::ostringstream adjacencyText;
+        bool first = true;
+        for (int v : A[u]) {
+            adjacencyText << (first ? "" : " ") << std::setw(width) << v;
+            first = false;
+        }
+        std::cout << "  " << std::setw(width) << u << ": {" << adjacencyText.str()
+                  << "} degree " << A[u].size() << "\n";
+    }
+    std::cout << "\n";
 }
 
 // What the graph currently costs: one entry per edge endpoint. Compare with md2,
 // where the same number falls monotonically. Here fill pushes it back up.
-std::size_t storage(const Graph& graph, const std::vector<bool>& eliminated) {
+std::size_t md1Storage(const Graph& A) {
     std::size_t total = 0;
-    for (int v = 0; v < static_cast<int>(graph.size()); ++v)
-        if (!eliminated[v]) total += graph[v].size();
+    for (const std::set<int>& adjacency : A) total += adjacency.size();
     return total;
 }
 
-// Print the vertices still live and their neighbors.
-void showState(const Graph& graph, const std::vector<bool>& eliminated) {
-    std::cout << "         graph:   ";
-    for (int v = 0; v < static_cast<int>(graph.size()); ++v) {
-        if (eliminated[v]) continue;
-        std::cout << v << ":{";
-        bool first = true;
-        for (int u : graph[v]) { std::cout << (first ? "" : ",") << u; first = false; }
-        std::cout << "} ";
-    }
-    std::cout << "  storage " << storage(graph, eliminated) << "\n";
+// Make the pivot's neighbors a clique, then remove the pivot.
+//
+// Returns (neighbors, fillEdges): the pivot's adjacency at elimination, which is
+// the pattern of its column of L, and the fill edges created among those
+// neighbors, pairs that were not already adjacent.
+std::pair<std::set<int>, std::vector<std::pair<int, int>>> md1Eliminate(
+        Graph& A, std::vector<bool>& eliminated, int pivot) {
+    const std::set<int> neighbors = A[pivot];
+    std::vector<std::pair<int, int>> fillEdges;
+    for (int u : neighbors)
+        for (int v : neighbors)
+            if (u < v && A[u].count(v) == 0) {   // a genuinely new edge
+                A[u].insert(v);
+                A[v].insert(u);
+                fillEdges.push_back({u, v});
+            }
+    for (int u : neighbors)
+        A[u].erase(pivot);
+    A[pivot].clear();
+    eliminated[pivot] = true;
+    return {neighbors, fillEdges};
 }
 
 // Eliminate the least-degree vertex each step, naming the fill it makes.
-std::vector<int> minimumDegree(Graph& graph) {
-    int n = static_cast<int>(graph.size());
+std::vector<int> md1MinimumDegree(const Graph& G) {
+    int n = static_cast<int>(G.size());
+    std::size_t nnzTrilA = 0;                      // before we mutate it
+    for (int u = 0; u < n; ++u) nnzTrilA += G[u].size();
+    nnzTrilA = nnzTrilA / 2 + n;
+    Graph A = G;
     std::vector<bool> eliminated(n, false);
     std::vector<int> order;
     int totalFill = 0;
-    int degreeSum = 0;             // sum of pivot degrees == column counts of L
-    std::size_t nnzTrilA = 0;      // measured before we mutate the graph
-    for (int v = 0; v < n; ++v) nnzTrilA += graph[v].size();
-    nnzTrilA = nnzTrilA / 2 + n;
+    int degreeSum = 0;             // sum of pivot degrees == sum of column counts of L
 
-    std::cout << "start: every edge explicit, no fill yet\n";
-    showState(graph, eliminated);
+    md1Show(A, "start: every edge explicit, no fill yet", &eliminated);
     for (int step = 0; step < n; ++step) {
         int pivot = -1;
-        for (int v = 0; v < n; ++v) {
-            if (eliminated[v]) continue;
-            if (pivot == -1 || graph[v].size() < graph[pivot].size())
-                pivot = v;
+        for (int u = 0; u < n; ++u) {
+            if (eliminated[u]) continue;
+            if (pivot == -1 || A[u].size() < A[pivot].size()) pivot = u;
         }
-        int degree = static_cast<int>(graph[pivot].size());
-        std::vector<std::pair<int, int>> fill = eliminate(graph, pivot);
-        eliminated[pivot] = true;
+        auto [neighbors, fillEdges] = md1Eliminate(A, eliminated, pivot);
+        int degree = static_cast<int>(neighbors.size());
         order.push_back(pivot);
-        totalFill += static_cast<int>(fill.size());
+        totalFill += static_cast<int>(fillEdges.size());
         degreeSum += degree;
 
-        std::cout << "step " << step << ": eliminate " << pivot
-                  << " (degree " << degree << ")\n";
-        std::cout << "         fill: ";
-        if (fill.empty()) {
-            std::cout << "none";
+        std::ostringstream fillEdgesText;
+        if (fillEdges.empty()) {
+            fillEdgesText << "none";
         } else {
             bool first = true;
-            for (auto [u, w] : fill) { std::cout << (first ? "" : ", ") << u << "-" << w; first = false; }
+            for (auto [u, v] : fillEdges) {
+                fillEdgesText << (first ? "" : ", ") << u << "-" << v;
+                first = false;
+            }
         }
-        std::cout << "   (fill so far " << totalFill << ")\n";
-        showState(graph, eliminated);
+        std::ostringstream title;
+        title << "step " << step << ": eliminate " << pivot << " (degree " << degree
+              << "), fill edges: " << fillEdgesText.str()
+              << ", fill so far: " << totalFill;
+        md1Show(A, title.str(), &eliminated);
     }
 
     // The degree of a pivot at elimination is the count of its column of L, so
@@ -104,19 +131,21 @@ std::vector<int> minimumDegree(Graph& graph) {
     std::size_t nnzL = static_cast<std::size_t>(degreeSum) + n;
     std::cout << "nnz(L) = " << nnzL << " against nnz(tril A) = " << nnzTrilA
               << ", fill = " << (nnzL - nnzTrilA)
-              << "   (edges counted: " << totalFill << ")\n";
+              << " (fill edges counted: " << totalFill << ")\n";
+    std::cout << "order: [";
+    for (std::size_t k = 0; k < order.size(); ++k)
+        std::cout << (k == 0 ? "" : ", ") << order[k];
+    std::cout << "]\n";
     return order;
 }
 
-void run(const std::string& name, Graph graph) {
+void run(const std::string& name, const Graph& G) {
     std::cout << "=== " << name << " ===\n";
-    std::vector<int> order = minimumDegree(graph);
-    std::cout << "order:";
-    for (int v : order) std::cout << " " << v;
-    std::cout << "\n\n";
+    md1MinimumDegree(G);
+    std::cout << "\n";
 }
 
-int main() {
+int main(int argc, char** argv) {
     // Two examples.
     //
     //   graph1, a 4-cycle: eliminating any vertex forces its two neighbors
@@ -194,9 +223,76 @@ int main() {
         {0, 1, 3},        // 7
     };
 
-    run("graph1", graph1);
-    run("graph2", graph2);
-    run("graph3", graph3);
-    run("graph4", graph4);
+    // graph5, five vertices and four edges, two paths joined at 4: 2-1-4-0-3.
+    // Small and fill free, and here for one reason: it is the smallest graph on
+    // which md3's merge test declines a genuine supervariable. At the step whose
+    // pivot is 0 and whose clique is {4}, vertex 4 has nothing explicit left but
+    // belongs to c1 as well as to the new clique, so I[4] == {pivot} fails even
+    // though c1's only member is 4 itself and everything 4 reaches lies inside
+    // the new clique. The exact test md3Neighbors(A, I, C, u) contained in
+    // C[pivot] would merge it. See the README section on mass elimination.
+    //
+    //   edges: 0-3 0-4 1-2 1-4
+    std::vector<std::set<int>> graph5 = {
+        {3, 4},           // 0
+        {2, 4},           // 1
+        {1},              // 2
+        {0},              // 3
+        {0, 1},           // 4
+    };
+
+    // graph6, six vertices and eight edges. Here because one small graph carries
+    // three things at once. Its supervariable {0, 4} is a supernode but NOT a
+    // fundamental one: the elimination forest is 2 -> 1 -> 4 and 3 -> 0 -> 4, so
+    // 4 already has 1 as a child when 0 merges into it. The merge happens at step
+    // 2 of 5, so the run continues afterwards and the selection degree, 3 over
+    // {2, 3, 4}, differs from the external degree, 2 over {2, 3}, with the
+    // difference being the weight that merged. And superMembers ends with a hole
+    // in the middle, slot 4 empty between two used ones, while no pivot equals
+    // its own step number. See the README sections on mass elimination and on
+    // external degree.
+    //
+    //   edges: 0-2 0-3 0-4 1-3 2-3 2-4 2-5 3-4
+    std::vector<std::set<int>> graph6 = {
+        {2, 3, 4},        // 0
+        {3},              // 1
+        {0, 3, 4, 5},     // 2
+        {0, 1, 2, 4},     // 3
+        {0, 2, 3},        // 4
+        {2},              // 5
+    };
+
+    // graph7, five vertices and six edges. The pairwise case: at the step whose
+    // pivot is 0 and whose clique is {2, 4}, vertices 2 and 4 are
+    // indistinguishable FROM EACH OTHER, both reaching the same closed
+    // neighborhood, yet neither is absorbable into the pivot, since each still
+    // reaches 3 from outside the clique. No test framed against the pivot finds
+    // them, and the exact test does not help either: both orders are 1 0 (2 3 4).
+    // Catching such pairs needs a comparison between candidates, which is what
+    // amd's hashing does. See the README section on detecting supervariables
+    // against each other.
+    //
+    //   edges: 0-1 0-2 0-4 1-4 2-3 2-4 3-4
+    std::vector<std::set<int>> graph7 = {
+        {1, 2, 4},        // 0
+        {0, 4},           // 1
+        {0, 3, 4},        // 2
+        {2, 4},           // 3
+        {0, 1, 2, 3},     // 4
+    };
+
+    std::vector<std::pair<std::string, Graph>> examples = {
+        {"graph1", graph1}, {"graph2", graph2},
+        {"graph3", graph3}, {"graph4", graph4},
+        {"graph5", graph5}, {"graph6", graph6},
+        {"graph7", graph7},
+    };
+
+    // All of them by default. To run just one, pass its number: ./md1_cpp 3
+    int selected = (argc > 1) ? std::atoi(argv[1]) : 0;
+    for (int number = 1; number <= static_cast<int>(examples.size()); ++number) {
+        if (selected != 0 && number != selected) continue;
+        run(examples[number - 1].first, examples[number - 1].second);
+    }
     return 0;
 }

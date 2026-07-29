@@ -22,7 +22,7 @@ Each adds exactly one mechanism to the one before. The right column cites
 | `md3` | supervariables and mass elimination | 5.5, 5.6 |
 | `md4` | maintained degrees, refreshed only where they changed | 5.7, 5.8 |
 | `md5` | degree buckets, so the minimum is walked to, not scanned | 5.9, 5.10 |
-| `mmd` | multiple elimination: a batch of pivots per refresh | 5.11, 5.12 |
+| `mmd1` | multiple elimination: a batch of pivots per refresh | 5.11, 5.12 |
 | `amd` | approximate degree: a bound instead of a set union | 5.13, 5.14 |
 
 ## What the layers show
@@ -39,17 +39,17 @@ happen when a layer is added, and all three occur here:
 md1 -> md2                    same         same        a change of representation
 md2 -> md3  (mass elim.)      DIFFERENT    same*       a reordering, free step by step
 md3 -> md4 -> md5             same         same        a change of implementation
-md5 -> mmd  (multiple elim.)  different     DIFFERENT  a wager
+md5 -> mmd1 (multiple elim.)  different     DIFFERENT  a wager
 ```
 
-So `mmd` is not the first layer to change the permutation. Mass elimination already does, on nine
-of twelve test graphs, with identical `nnz(L)` on all twelve. What `mmd` is first to change is the
+So `mmd1` is not the first layer to change the permutation. Mass elimination already does, on nine
+of twelve test graphs, with identical `nnz(L)` on all twelve. What `mmd1` is first to change is the
 **fill**.
 
 The asterisk on `md2 -> md3`: the individual merge is provably free, but the equality of the
 totals across the whole run is measured rather than proved. See the open question below.
 
-**`mmd` and `amd` give up different things.** `mmd`'s pivots are always true minimum-degree
+**`mmd1` and `amd` give up different things.** `mmd1`'s pivots are always true minimum-degree
 vertices; only the tie among equals is broken differently, because a batch evicts what it has
 touched. `amd`'s pivots may simply not be minimal, because an overcounted bound can hide the true
 minimum. MMD perturbs; AMD can be wrong. Both cost well under a percent of fill, in either
@@ -119,10 +119,10 @@ seemed the worse trade.
 
 ## What is not implemented
 
-The `mmd` and `amd` prototypes are deliberately subsets of the vendored routines. Each file header
+The `mmd1` and `amd` prototypes are deliberately subsets of the vendored routines. Each file header
 carries its own list, and sections 5.11 and 5.13 carry the same lists in prose. In brief:
 
-- **`mmd`** lacks the prepass that numbers degree-0 and degree-1 vertices before the main loop, and
+- **`mmd1`** lacks the prepass that numbers degree-0 and degree-1 vertices before the main loop, and
   `mmdupd`'s `q2h` merging of vertices indistinguishable *from each other* rather than from the
   pivot. It also files degrees at a different offset and never uses bucket 0.
 - **`amd`** performs its degree update in one pass where `Amd.cpp` uses two, which changes the
@@ -140,7 +140,7 @@ contributing to `|L|`; `Amd.cpp` does this at `degme -= nvi`. We computed `|L|` 
 loop. The effect is nearly invisible: identical results on all four test graphs and on every grid,
 surfacing only on a five-vertex bowtie where a bound came out one too large.
 
-**`mmd.cpp` printed display lines its Python twin did not**, left over from the `md5` file it was
+**`mmd1.cpp` printed display lines its Python twin did not**, left over from the `md5` file it was
 derived from. This survived because the verification at the time used a `grep` filter narrow
 enough to skip exactly those lines, which is not a test. `make test` exists because of this one:
 it compares whole outputs, and it found the drift immediately.
@@ -448,7 +448,7 @@ does count the internal members. Minimum degree with supervariables uses the ext
 and the choice is not cosmetic: it changes which pivot is selected, not merely what number is
 printed beside it. Where the weighting first has that effect is amd, whose hash detection
 folds a vertex into a LIVE supervariable, `weight[i] += weight[j]` with i still a candidate.
-Through mmd every transfer is into the pivot, so the invariant that a live vertex stands for
+Through mmd1 every transfer is into the pivot, so the invariant that a live vertex stands for
 one original vertex holds all the way, and the weighting stays inert.
 
 ## Counting nnz(L), md1 through md3
@@ -758,12 +758,12 @@ That also names a real gap rather than a defect: the test misses genuine superva
 Catching them needs a second mechanism, comparing vertices against each other rather than
 against the pivot, which is what the next section is about.
 
-## Detecting supervariables against each other, in mmd and amd
+## Detecting supervariables against each other, in mmd1 and amd
 
 md3's test is positional: it asks whether a neighbor u is indistinguishable from the PIVOT,
 in the step that just created the clique. Two vertices can be indistinguishable from each
 other with neither absorbable into the pivot, and no sharpening of a pivot-relative test will
-find them. Both mmd and amd carry a second mechanism for exactly that population, and the two
+find them. Both mmd1 and amd carry a second mechanism for exactly that population, and the two
 mechanisms are different, which is worth recording because the goal is shared and nothing
 else about them is.
 
@@ -793,17 +793,17 @@ adjacent to each other and would otherwise never match. And the absorption goes 
 way from mass elimination: j is folded into the live supervariable i, which stays a candidate
 carrying the combined weight, rather than being eliminated with a pivot.
 
-mmd reaches the same vertices through the vendored code's q2h path. mmdelm stashes each
+mmd1 reaches the same vertices through the vendored code's q2h path. mmdelm stashes each
 reached vertex's pruned adjacency count as fwd[rn] = nq+1, and mmdupd routes the nq == 1
 cases into a separate list where it merges indistinguishable pairs. Same population, entirely
 different route, and no hashing.
 
-Neither is implemented in our mmd, which is why the not-implemented list above names the q2h
+Neither is implemented in our mmd1, which is why the not-implemented list above names the q2h
 path. Our amd does implement the hash detection, along with aggressive absorption, and the
 amd file header calls those out as the two mechanisms beyond md5 that are not about the
 degree at all.
 
-Neither mechanism is what its layer is named for, and both are separable from it. mmd is
+Neither mechanism is what its layer is named for, and both are separable from it. mmd1 is
 multiple elimination: eliminate a whole independent set of minimum-degree vertices before
 refreshing any degrees, so one expensive update pass serves many pivots. amd is the
 approximate degree: replace the exact size of the union with a bound computable in one pass.
@@ -814,7 +814,7 @@ what our amd would be with that block deleted, and hash detection could be bolte
 with no approximation anywhere.
 
 The practical consequence is a coarseness ordering. md3, md4 and md5 merge only against the
-pivot, so their supervariables are the finest. mmd's are at least as coarse as ours and
+pivot, so their supervariables are the finest. mmd1's are at least as coarse as ours and
 sometimes coarser. amd's are coarser again where the hash finds pairs the elimination never
 brings into the same step. Coarser is not automatically better: a supervariable is a
 commitment to eliminate its members consecutively, and while that commitment is fill-free by
@@ -967,7 +967,7 @@ because the algorithm is written in set algebra and reads that way: `md1` tests 
 inside a doubly nested loop over a neighborhood, which is O(1) hashed and O(deg) on a list, and
 `md2` says `A[i] & neighbors` and `C[i] -= absorbed` directly. On lists those become membership
 scans and stop resembling the mathematics they illustrate. None of this carries to the C++ side,
-where the same objects are index arrays over a flat pool: `mmd` and `amd` get their speed from a
+where the same objects are index arrays over a flat pool: `mmd1` and `amd` get their speed from a
 scratch mark array and in-place compression, not from hashing, and that is what the real ordering
 code will look like.
 

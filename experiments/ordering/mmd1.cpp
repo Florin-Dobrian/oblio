@@ -1,4 +1,4 @@
-// mmd.cpp -- multiple minimum degree.
+// mmd1.cpp -- multiple minimum degree.
 //
 // md5 finished the cheap wins. It has the quotient graph, supervariables,
 // maintained degrees and degree buckets, and it returns exactly the ordering md1
@@ -49,8 +49,8 @@
 // The tag/marker machinery with its overflow reset, and the ncsub statistic, are
 // implementation detail with no counterpart here (we use std::set).
 //
-// Build:  g++ -std=c++17 -O3 mmd.cpp -o mmd_cpp  (or: make)
-// Run:    ./mmd_cpp
+// Build:  g++ -std=c++17 -O3 mmd1.cpp -o mmd1_cpp  (or: make)
+// Run:    ./mmd1_cpp
 
 #include <algorithm>
 #include <iomanip>

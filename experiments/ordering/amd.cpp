@@ -7,7 +7,7 @@
 // refresh itself, which for each reached vertex i unites the members of every
 // element in C[i] and counts the result. That union is the expensive object.
 //
-// MMD made the refresh RARE (mmd.cpp). AMD makes each one CHEAP, and the two are
+// MMD made the refresh RARE (mmd1.cpp). AMD makes each one CHEAP, and the two are
 // the same answer reached from opposite ends: do the expensive thing less.
 //
 // THE BOUND. Rather than uniting the elements, sum their separate contributions:

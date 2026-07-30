@@ -18,6 +18,7 @@
 #   md4   maintained degrees, refreshed only where they changed     5.7, 5.8
 #   md5   degree buckets, so the minimum is walked to not scanned   5.9, 5.10
 #   mmd1  multiple elimination: a batch of pivots per refresh       5.11, 5.12
+#   mmd2  the rest of genmmd, one pass at a time                    5.11, 5.12
 #   amd   approximate degree: a bound instead of a set union        5.13
 #
 # md1 through md5 all return the SAME ordering; mmd1 and amd do not, deliberately.
@@ -26,7 +27,7 @@
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O3 -Wall -Wextra
 
-LAYERS = md1 md2 md3 md4 md5 mmd1 amd
+LAYERS = md1 md2 md3 md4 md5 mmd1 mmd2 amd
 BINS   = $(addsuffix _cpp,$(LAYERS))
 
 .PHONY: all test vendored clean

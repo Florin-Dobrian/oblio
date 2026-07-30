@@ -23,6 +23,7 @@ Each adds exactly one mechanism to the one before. The right column cites
 | `md4` | maintained degrees, refreshed only where they changed | 5.7, 5.8 |
 | `md5` | degree buckets, so the minimum is walked to, not scanned | 5.9, 5.10 |
 | `mmd1` | multiple elimination: a batch of pivots per refresh | 5.11, 5.12 |
+| `mmd2` | the rest of genmmd, one pass at a time | 5.11, 5.12 |
 | `amd` | approximate degree: a bound instead of a set union | 5.13, 5.14 |
 
 ## What the layers show
@@ -41,6 +42,7 @@ md2 -> md3  (mass elim.)      DIFFERENT    same*       a reordering, free step b
 md3 -> md4                    same         same        a change of implementation
 md4 -> md5  (buckets)         DIFFERENT    same-ish    a change of TIE-BREAK
 md5 -> mmd1 (multiple elim.)  different     DIFFERENT  a wager
+mmd1 -> mmd2 (genmmd's rest)  different     different  fidelity to the vendored routine
 ```
 
 `md5`'s change is the odd one, and it is a consequence of the data structure rather than of the
@@ -55,6 +57,10 @@ So `mmd1` is not the first layer to change the permutation, and neither is `md5`
 elimination already does it at `md3`, on nine of twelve test graphs, with identical `nnz(L)` on
 all twelve. What `mmd1` is first to change *systematically* is the **fill**, because it is the
 first to choose a pivot on stale information.
+
+`mmd2` is the odd one out: its additions are not there to improve anything but to match what the
+vendored routine does, so each pass is judged by fidelity rather than by fill. The first of them,
+the prepass, costs a little fill on 10 of 207 graphs and gains none, which is the expected shape.
 
 The asterisk on `md2 -> md3`: the individual merge is provably free, but the equality of the
 totals across the whole run is measured rather than proved. See the open question below.
@@ -171,39 +177,50 @@ representation, then order, then implementation twice. What is left of the vendo
 not a sequence of ideas but the completion of two, so from here the steps are bigger. Two
 versions each.
 
-**mmd1, the idea.** Multiple elimination. A batch is an independent set in the current
-elimination graph, enforced by evicting every reached vertex from its bucket with a stale
-degree, so no later pivot in the batch can be a neighbor of an earlier one. `delta` widens the
-batch to near-minima, which is a real concession rather than a free one. Everything else is
-md5 unchanged: the quotient graph, mass elimination, the buckets, the expansion.
+**mmd1, the idea. Done.** Multiple elimination. A batch is an independent set in the current
+elimination graph, enforced by evicting every reached vertex from its bucket with a stale degree,
+so no later pivot in the batch can be a neighbor of an earlier one. `delta` widens the batch to
+near-minima. Everything else is md5 unchanged: the quotient graph, mass elimination, the buckets,
+the expansion.
 
-`delta < 0` belongs here, taking a single pivot per round, which is what `genmmd` does when the
-tolerance is negative. It is one line at the bottom of the batch loop, and it is worth having
-because it turns the batching off: mmd1 at `delta < 0` should reproduce md5's ordering exactly,
-which is a check on the batching rather than a feature of it. The current code loops forever on
-a negative delta, so the line has to be written either way.
+`delta` lives here, with the full signed range: negative takes one pivot per round, which turns
+the batching off and reproduces md5's ordering exactly, verified on 100 random graphs; 0 through
+n - 1 widen the window; anything larger saturates. No weight array, because mass elimination
+merges only into the pivot and the pivot dies in the same call, so no live vertex ever stands for
+more than one original vertex, checked over 200 graphs and 1386 eliminations.
 
-No weight array in mmd1, for the reason md3 through md5 have none: mass elimination merges only
-into the pivot, the pivot dies in the same call, and a supervariable's size is
-`len(super_members[pivot])`. Checked rather than assumed, over 200 graphs and 1386
-eliminations with batching on: no live vertex ever stands for more than one original vertex.
+**mmd2, genmmd complete.** Six additions, all of them holes rather than ideas, listed against
+the vendored routine that carries each:
 
-**mmd2, genmmd complete.** Four additions, all of them holes rather than ideas:
+1. **The prepass** (`genmmd`, the loop over `head[1]` before the main loop). It numbers every
+   vertex in the degree-1 list, marks each `marker[mn] = maxint`, and never refreshes a neighbor.
+   `mmdint` maps degree 0 to 1, so isolated and degree-1 vertices are numbered together. Two
+   details travel with it: `head[1] = 0` afterwards, and the main loop then starts at `mdeg = 2`.
 
-- the PREPASS over `head[1]`, which by `mmdint`'s mapping of degree 0 to degree 1 numbers
-  isolated and degree-1 vertices together, before the main loop and without refreshing their
-  neighbors;
-- `mmdelm`'s `fwd[rn] = nq + 1` stash and `mmdupd`'s split into `q2h` and `qxh`, with the
-  pairwise merge inside the `q2h` walk, which is what makes MMD's supervariables coarser than
-  ours;
-- OUTMATCHED marking, `bwd[nd] = -maxint`, which takes a vertex out of the degree lists without
-  merging it;
-- the filing convention, `dg - qsize[en] + 1` floored at 1, hence no bucket 0, together with the
-  `ncsub` subscript statistic.
+2. **The q2h path** (`mmdelm` stashes `fwd[rn] = nq + 1`; `mmdupd` splits on it). A reached vertex
+   with exactly one explicit neighbor left besides the element goes on the `q2h` list, everything
+   else on `qxh`, and the two are walked separately because the q2h case can be answered without
+   a full union.
 
-The weight array returns in mmd2, and this is where it earns its place: the `q2h` merge folds a
-vertex into a LIVE one, so from then on a candidate can stand for several original vertices and
-every degree that reaches it has to count them.
+3. **The pairwise merge**, inside the q2h walk: `qsize[en] += qsize[nd]` with `fwd[nd] = -en`.
+   This is what makes MMD's supervariables coarser than ours, and it folds a vertex into a LIVE
+   one, so from here a candidate can stand for several original vertices.
+
+4. **Outmatched marking**, `bwd[nd] = -maxint` in the same walk. It takes a vertex out of the
+   degree lists without merging it; `mmdelm` puts it back with `bwd[rn] = 0` the next time it is
+   reached.
+
+5. **The filing convention**, `dg = dg - qsize[en] + 1` floored at 1 (`mmdupd`, n2100), so the
+   least bucket is 1 and bucket 0 is never used. `dg` there is a weighted sum over the reached
+   set, so it arrives with the weighted counting item 3 brings.
+
+6. **The counters**: `ncsub += mdeg + qsize[mn] - 2`, the subscript statistic, and the early
+   termination `if (num + qsize[mn] > neqns) goto n1000`, which stops the main loop as soon as
+   the last vertex is accounted for rather than eliminating it.
+
+Items 3 and 5 make a candidate stand for several original vertices, so every degree becomes a
+weighted count. It is taken from `len(super_members[v])`, which is O(1), so no weight array is
+introduced. Our `super_members` already does what `mmdnum` does, so the expansion needs nothing.
 
 **amd1, the ideas.** The approximate degree bound, computed in one pass as now, plus the two
 mechanisms that ride along in the same sweep, aggressive absorption and hash supervariable
@@ -221,12 +238,14 @@ than raw elimination order; `amd_valid` as an input check; and the `Control`/`In
 Two pieces of the vendored codes are consequences of packing state into reusable integer arrays
 rather than features of the ordering, and neither is modeled:
 
-- MMD's tag and marker machinery with its `maxint` overflow reset. The marks exist because the
-  same integer arrays are reused across eliminations; we use sets.
-- AMD's workspace with `iwlen`, `pfree` and the `ncmpa` garbage collection. That is the flat
-  pool being compacted when it fills.
+- MMD's `maxint` overflow reset, `if (tag >= maxint) { tag = 1; for each i with marker[i] < maxint,
+  marker[i] = 0; }`. We use the same mark-and-tag idiom, so the reset would be needed only if the
+  tag could wrap, which it cannot at the sizes these prototypes run.
+- AMD's workspace with `iwlen`, `pfree` and the `ncmpa` garbage collection. That is a flat pool
+  being compacted when it fills, and our member lists grow on their own.
 
-Both are exactly the kind of thing the C++ rewrite will need and the prototypes do not.
+Both are what the ordering engine will need once the lists live in one pool; the mark arrays
+themselves are already here, in `mark` and `touched_round`.
 
 ### Tie-breaks, and what the acceptance test is
 
@@ -954,6 +973,222 @@ the batching buys. md5 and mmd1 pay the same per refresh; mmd1 pays for fewer of
 graph3, md5 makes 34 degree computations over 10 steps and mmd1 makes 26 over 5 rounds; on
 graph4, 20 over 5 against 15 over 3. graph1 is the case where batching buys nothing, 6 either
 way, since md5 already finishes it in two steps.
+
+## mmd2: the extras
+
+mmd1 is multiple elimination and nothing else. genmmd is multiple elimination plus six other
+things, none of them an idea and all of them load-bearing for matching the vendored routine.
+mmd2 adds them one pass at a time, and this section grows a subsection per pass. The checklist
+and its vendored references are in the plan section above.
+
+### Pass 1: the prepass
+
+genmmd numbers every vertex in the degree-1 list before the main loop runs, and never refreshes
+a neighbor:
+
+```c
+    int nextmd = head[1];
+    while (nextmd > 0) { int mn = nextmd; nextmd = invp[mn];
+                         marker[mn] = maxint; invp[mn] = -num; num++; }
+```
+
+Three things travel with it, and the middle one is the whole of the pass.
+
+**The floor.** `mmdint` files a degree-0 vertex under degree 1, `if (dg == 0) dg = 1`, so
+isolated and degree-1 vertices sit in the same bucket and are numbered together. From that
+point the bucket a vertex sits in is max(degree, 1) rather than its degree, and MMD compares and
+files by that value rather than by the true one. Our degrees[] now holds it too, which is the
+same choice made explicit.
+
+**Numbered is not eliminated.** A prepass vertex is ordered and then skipped. No clique is
+formed for it, nothing is pruned, and its neighbors keep degrees that still count it. That
+staleness is the point rather than an oversight: the prepass buys its speed by not paying for
+the updates. In genmmd the skipping is `marker[mn] = maxint`, which no later `marker[nb] < tag`
+test can pass; here it is `eliminated[u]`, which the neighbor query checks and which the prune
+loop uses to drop the vertex when it compacts. The compaction drop is the same line in
+`mmdelm`, where a numbered vertex fails `marker[nb] < tag` and is left out of the rewritten
+adjacency.
+
+**Then bucket 1 is empty.** `head[1] = 0` and the main loop starts at `mdeg = 2`. Ours sets
+min_degree to 2 for the same reason. Vertices can return to bucket 1 later, since the filing
+convention floors there, and min_degree falls back to meet them.
+
+What it costs, measured on 207 graphs including the seven examples: the permutation is always
+valid and the reported nnz(L) always matches an independent symbolic factorization, the fill is
+unchanged on 197 and worse on 10, and better on none. On the three grids it is unchanged, 636,
+2088 and 4684 against mmd1's. So the prepass is a small concession bought for a real saving,
+which is the shape the rest of genmmd has too.
+
+Three of the seven examples exercise it: graph3 numbers vertex 11, graph5 numbers 3 and 2, and
+graph6 numbers 5 and 1. The other four have no vertex of degree 0 or 1 to begin with, so the
+trace shows no prepass line at all.
+
+### Pass 2: the q2h split
+
+`mmdupd` does not walk a flat list of reached vertices. It walks the ELEMENTS this round created,
+`el = list[el]`, and for each one computes `dg0` once, the size of that element, before visiting
+its members. A member is classified by what it has left BESIDES the new element: `mmdelm` stashes
+`fwd[rn] = nq + 1` where `nq` counts the survivors of the compaction, which in our split
+representation is `len(A[u]) + len(I[u]) - 1`. `nq == 1` puts the vertex on the `q2h` list,
+anything else on `qxh`.
+
+**Why the split pays.** Everything a q2h vertex reaches is either inside the element, already
+counted in `dg0`, or comes from its one other source. So its degree is `dg0` plus what that
+source contributes, and the union is never built. The qxh case pays for the full union as
+before. Measured on grids, the q2h path takes 36 per cent of the refreshes at 10 by 10, 42 at
+16 by 16 and 44 at 22 by 22, so it is not a rare case.
+
+**Two mark levels, and the bug that taught me why.** My first version marked the other source's
+members with the element's tag, which made a second q2h vertex in the same element skip them as
+already counted and report a degree too small. `mmdupd` avoids this with two levels: element
+members carry `mt`, above every tag used in the round, while each vertex gets a fresh `(*tag)++`
+for its own walk. Ours does the same with `element_tag` and `vertex_tag`, testing both.
+
+**The check on this pass, and the check that was wrong.** Every degree the shortcut produces must
+equal the full union, and it does, on 307 graphs. My first attempt at that check called
+`md2_neighbors` to get the true value, which advances the tag and overwrites the mark array, so
+it destroyed the state it was inspecting and reported failures that were its own doing. The
+verification has to compute the true neighbors independently, with plain sets and no marks. Worth
+remembering for the passes to come: an instrument that shares state with the thing it measures
+is not an instrument.
+
+What moves is the filing order, since the refresh is now element by element with q2h first, and
+filing order decides what a bucket holds. So the permutation changes even though every degree is
+identical: on the grids, nnz(L) goes 636 to 633, 2088 to 2101, and 4684 to 4684 against mmd1.
+A vertex reached by two pivots in the same round is still refreshed once, skipped on the second
+visit by the `filed` flag, which is `if (bwd[en] != 0) goto n2200` there.
+
+### Pass 3: the pairwise merge, and outmatched marking
+
+Both live in the same branch of the q2h walk, reached when a member of the one other source is
+ALSO a member of the new element:
+
+```c
+    else if(bwd[nd]==0){
+        if(fwd[nd]==2){qsize[en]+=qsize[nd];qsize[nd]=0;marker[nd]=maxint;
+                       fwd[nd]=-en;bwd[nd]=-maxint;}
+        else if(bwd[nd]==0)bwd[nd]=-maxint;}
+```
+
+**The merge.** If nd is q2h too, its only other source is that same element, so en and nd reach
+exactly the same vertices: indistinguishable, and en absorbs nd. This is the first merge in the
+whole sequence that folds a vertex into a LIVE one. Every earlier merge went into the pivot,
+which died in the same call, so a supervariable never survived in the buckets. Now one does, and
+a degree has to count original vertices rather than entries. It is also, concretely, what makes
+MMD's supervariables coarser than md3's, whose test only ever compares a vertex against the
+pivot.
+
+There is still no weight array. The count is `len(super_members[v])`, which is O(1), and the
+invariant `weight == len(super_members)` was checked across 307 graphs before the array was
+removed again. The rule has not changed since md3: an array is kept when it stops being
+derivable, not when the quantity it holds starts varying. MMD keeps qsize because its members are
+a chain rather than a list, and that is the condition under which ours will need one too.
+
+**Outmatched.** If nd is not q2h it has sources besides these two, so its reach contains en's and
+it can never be the minimum before en. MMD withdraws it from the degree lists rather than
+refiling it, `bwd[nd] = -maxint`. It is not merged and not eliminated, just held out until
+something reaches it again, at which point `mmdelm` restores it with `bwd[rn] = 0`. Ours is an
+`outmatched` flag, cleared in mmd2_eliminate for every vertex the new clique reaches. Both are
+withheld from the q2h and qxh lists while the flag is set.
+
+**Weights everywhere.** dg0 becomes a weighted sum, the q2h walk starts at
+`dg0 - len(super_members[u])` rather than `dg0 - 1`, every count adds `len(super_members[v])`,
+the qxh path goes through mmd2_degree, and the nnz(L) accounting sums the same over the live
+members of C[pivot].
+
+**What it does.** On the same 307 graphs: 245 pair merges and 126 outmatched markings, all
+permutations valid, all reported nnz(L) correct against an independent symbolic factorization,
+and the fill against mmd1 better on 2, same on 289, worse on 16. On grids the mechanisms fire
+steadily: 18 merges and 55 outmatched at 10 by 10, 56 and 135 at 16 by 16, 111 and 276 at 22 by
+22, with nnz(L) 631, 2105 and 4783 against mmd1's 636, 2088 and 4684.
+
+That last column is worth reading honestly. These two mechanisms do not improve the ordering
+here; they make it match the vendored routine. mmd2 is fidelity, and the fill goes where the
+vendored algorithm puts it.
+
+### Pass 4: the filing convention
+
+`mmdupd` does not file a vertex under its degree. It files under `dg = dg - qsize[en] + 1`,
+floored at 1, where `dg` was the weighted reach INCLUDING en's own members. So the bucket index
+is the external degree plus one, and the floor catches a vertex that reaches nothing outside
+itself.
+
+`mmdint` meanwhile files at the plain degree, with only the zero case lifted to 1. So MMD runs on
+two scales: the initial buckets hold degrees, every refiled bucket holds degree + 1. That is
+genuine rather than a misreading, and it tilts the pivot choice slightly against refreshed
+vertices, which sit a bucket higher than an untouched vertex of the same reach. From here
+degrees[] holds the FILED value, which is what the picker compares and what min_degree tracks;
+the nnz(L) accounting is unaffected, since it sums weights over the live members of C[pivot].
+
+### Pass 5: the counters
+
+Two small things in genmmd's main loop, and one of them cannot be checked.
+
+`ncsub`, accumulated per pivot as `mdeg + qsize[mn] - 2`, is the statistic genmmd returns
+alongside the permutation, an estimate of the subscript storage the factor will need. Ours prints
+it with the other counters. It cannot be compared against the vendored number: `mmd_order`
+computes it and drops it, and `genmmd` is static, so the only way to see it would be to edit a
+file we do not edit.
+
+The early termination, `if((num+qsize[mn])>neqns)goto n1000`, is checked after the pivot is
+numbered and before it is eliminated. When the last supervariable is reached there is nothing
+left to update, so genmmd skips the elimination entirely and goes to the numbering. Ours is the
+same test on num_eliminated.
+
+### Where mmd2 got to, and what is still unchecked
+
+Everything on the six-item list is implemented, in both twins, with the traces agreeing byte for
+byte on the seven examples and on forty random graphs. Two things are deliberately absent, both
+tag arithmetic that a monotone tag makes unnecessary: MMD's `maxint` overflow reset, and
+`md0 = mdeg + delta` feeding the marker window `mt`.
+
+The changes landed almost entirely in the driver, 131 of 158 changed lines. The buckets, the
+display and the storage function are untouched, as they have been since md4 and md5. Three
+functions outside the driver did change, and each marks a place where an extra was not confined
+to policy: mmd2_neighbors skips numbered vertices, which is what the prepass requires;
+mmd2_eliminate clears the outmatched flag for everything the new clique reaches, which is
+mmdelm's `bwd[rn] = 0` and the first change to the eliminator since md2; and mmd2_degree is new,
+because a candidate can now stand for several original vertices.
+
+Against the vendored routine, which is the acceptance test the plan section sets:
+
+```
+                       identical order   identical nnz(L)
+seven examples               2 of 7            7 of 7
+60 random graphs            23 of 60          59 of 60
+```
+
+The one disagreement was worth chasing rather than accepting, since a fill difference can hide a
+missing feature. It does not here. On that graph, 14 vertices, the two runs agree through the
+prepass and the first three pivots, and then diverge on a bucket holding six vertices at degree
+4: ours pops the head, 4, and the vendored routine pops 2, which sits second in our list. Same
+degrees, different insertion history. Orders differ far more often than fill does for the same
+reason, which is what the tie-break section predicts.
+
+For contrast, mmd1 matches the vendored nnz(L) on 54 of the same 60, so the six passes moved the
+agreement from 54 to 59 rather than from nothing. That is the honest size of what they buy: MMD's
+extra machinery changes the ordering in small ways, and most of the fill was already there.
+
+On grids, mmd2 against mmd1: 624 against 636 at 10 by 10, 2078 against 2088 at 16 by 16, 4681
+against 4684 at 22 by 22, with the mechanisms firing steadily, 108 pair merges and 285 outmatched
+markings on the largest.
+
+What is still unchecked, to be done later rather than assumed:
+
+- **Scaling on grids.** The complexity claim, that mmd2 performs the same operations at the same
+  cost as genmmd, rests on a reading of both codes rather than on a measurement. The check is a
+  grid family of growing size with operation counts plotted against n, and it is cheap now that
+  mmd2 is complete.
+- **delta beyond the batch limit.** The vendored mmdupd also uses `mdeg + delta` in its tag
+  window. That belongs to the excluded machinery, so the omission is consistent, but it is the
+  one place our reading of delta is narrower than theirs and it has not been shown to be
+  harmless.
+- **Larger and more structured graphs.** Everything measured here is at most a few hundred
+  vertices. The q2h share, the pair merge count and the outmatched count all grew with size on
+  grids, so the behavior at real problem sizes is extrapolation.
+- **ncsub against the vendored value.** It cannot be compared through the public interface, since
+  mmd_order drops it and genmmd is static. Ours is computed from the same expression, but that is
+  a reading rather than a check.
 
 ## Why md3 reorders, and what would align it
 

@@ -117,10 +117,26 @@ Python renders a dict as `{0: [1,3]}` and the C++ renders `0: {1,3}`. Every numb
 still has to match. The alternative was editing fourteen files to unify the spellings, which
 seemed the worse trade.
 
+Each prototype also takes an example number, `python3 md3.py 3` or `./md3_cpp 3`, and runs every
+example when given none.
+
+The vendored routines are built separately, and not by `make`:
+
+```
+g++ -std=c++17 -O3 vendored.cpp vendored/Mmd.cpp vendored/Amd.cpp -o vendored_cpp
+./vendored_cpp        both routines on all seven graphs
+./vendored_cpp 3      just the third
+```
+
+`vendored/Mmd.cpp` and `vendored/Amd.cpp` are copies of `src/Mmd.cpp` and `src/Amd.cpp`, kept here
+so the comparison is self-contained, and never edited. `vendored.cpp` only feeds them the same
+seven graphs and prints their permutations in our format.
+
 ## What is not implemented
 
-The `mmd1` and `amd` prototypes are deliberately subsets of the vendored routines. Each file header
-carries its own list, and sections 5.11 and 5.13 carry the same lists in prose. In brief:
+The `mmd1` and `amd` prototypes are deliberately subsets of the vendored routines, and the plan
+for closing the gap is the section that follows. Each file header carries its own list, and
+sections 5.11 and 5.13 carry the same lists in prose. In brief:
 
 - **`mmd1`** lacks the prepass that numbers degree-0 and degree-1 vertices before the main loop, and
   `mmdupd`'s `q2h` merging of vertices indistinguishable *from each other* rather than from the
@@ -129,6 +145,92 @@ carries its own list, and sections 5.11 and 5.13 carry the same lists in prose. 
   ordering on four of eleven test graphs. It also lacks dense-row handling and the postorder, both
   of which change the output, along with `amd_aat`, `amd_valid`, the `Control`/`Info` interface and
   the workspace compression, none of which do.
+
+## The plan for mmd and amd
+
+md1 through md5 were a teaching ladder: each isolated one idea and changed exactly one property,
+representation, then order, then implementation twice. What is left of the vendored routines is
+not a sequence of ideas but the completion of two, so from here the steps are bigger. Two
+versions each.
+
+**mmd1, the idea.** Multiple elimination. A batch is an independent set in the current
+elimination graph, enforced by evicting every reached vertex from its bucket with a stale
+degree, so no later pivot in the batch can be a neighbor of an earlier one. `delta` widens the
+batch to near-minima, which is a real concession rather than a free one. Everything else is
+md5 unchanged: the quotient graph, mass elimination, the buckets, the expansion.
+
+`delta < 0` belongs here, taking a single pivot per round, which is what `genmmd` does when the
+tolerance is negative. It is one line at the bottom of the batch loop, and it is worth having
+because it turns the batching off: mmd1 at `delta < 0` should reproduce md5's ordering exactly,
+which is a check on the batching rather than a feature of it. The current code loops forever on
+a negative delta, so the line has to be written either way.
+
+No weight array in mmd1, for the reason md3 through md5 have none: mass elimination merges only
+into the pivot, the pivot dies in the same call, and a supervariable's size is
+`len(super_members[pivot])`. Checked rather than assumed, over 200 graphs and 1386
+eliminations with batching on: no live vertex ever stands for more than one original vertex.
+
+**mmd2, genmmd complete.** Four additions, all of them holes rather than ideas:
+
+- the PREPASS over `head[1]`, which by `mmdint`'s mapping of degree 0 to degree 1 numbers
+  isolated and degree-1 vertices together, before the main loop and without refreshing their
+  neighbors;
+- `mmdelm`'s `fwd[rn] = nq + 1` stash and `mmdupd`'s split into `q2h` and `qxh`, with the
+  pairwise merge inside the `q2h` walk, which is what makes MMD's supervariables coarser than
+  ours;
+- OUTMATCHED marking, `bwd[nd] = -maxint`, which takes a vertex out of the degree lists without
+  merging it;
+- the filing convention, `dg - qsize[en] + 1` floored at 1, hence no bucket 0, together with the
+  `ncsub` subscript statistic.
+
+The weight array returns in mmd2, and this is where it earns its place: the `q2h` merge folds a
+vertex into a LIVE one, so from then on a candidate can stand for several original vertices and
+every degree that reaches it has to count them.
+
+**amd1, the ideas.** The approximate degree bound, computed in one pass as now, plus the two
+mechanisms that ride along in the same sweep, aggressive absorption and hash supervariable
+detection.
+
+**amd2, amd_1 and amd_2 complete.** The two-pass degree update, so every survivor sees the same
+final degme rather than a shrinking one, which is the one difference that already shows in our
+output; dense row and column detection by the alpha ratio, with those vertices held out of the
+ordering and placed last; `amd_aat` forming the pattern of A + A' with the diagonal dropped,
+and `amd_preprocess`; `amd_postorder`, so the output is a postorder of the assembly tree rather
+than raw elimination order; `amd_valid` as an input check; and the `Control`/`Info` interface.
+
+### What is deliberately excluded
+
+Two pieces of the vendored codes are consequences of packing state into reusable integer arrays
+rather than features of the ordering, and neither is modeled:
+
+- MMD's tag and marker machinery with its `maxint` overflow reset. The marks exist because the
+  same integer arrays are reused across eliminations; we use sets.
+- AMD's workspace with `iwlen`, `pfree` and the `ncmpa` garbage collection. That is the flat
+  pool being compacted when it fills.
+
+Both are exactly the kind of thing the C++ rewrite will need and the prototypes do not.
+
+### Tie-breaks, and what the acceptance test is
+
+The vendored routines break ties differently from every layer here, and not by a rule: a degree
+list is a singly linked chain prepended at `head[dg]`, in `mmdint` and again in `mmdupd`, and
+the pop takes the front. So the bucket is a stack and the winner is whatever was pushed last.
+After construction, which walks `nd` upward, that is the highest-numbered vertex of its degree,
+which is why the vendored MMD starts graph1 at vertex 3 where we start at 0. There is no
+quality claim behind it: prepending is the cheap end of a linked list, and a tail pointer would
+have cost another array of size n.
+
+Our buckets are index-ordered instead, `min(buckets[min_degree])`, which is md5's convention and
+the reason md1 through md5 agree with each other. mmd1 and mmd2 keep it. Matching the vendored
+permutation exactly would mean reproducing its whole insertion history, including the order in
+which `mmdupd` walks `q2h` and then `qxh`, and that is coupled to the features rather than
+separable from them. It stays a possible later mode, not the acceptance test.
+
+The test is `vendored.cpp`, which links `vendored/Mmd.cpp` and `vendored/Amd.cpp`, copies of
+`src/Mmd.cpp` and `src/Amd.cpp` that are never edited, and runs both routines on the same seven
+graphs, printing permutations in our format. mmd2 and amd2 are accepted when every feature above
+is present and exercised, nnz(L) matches the vendored routine on the seven graphs and on random
+ones, and every remaining order difference is traceable to a tie.
 
 ## Two bugs this found, both ours
 
@@ -362,11 +464,12 @@ at the instant the first loop finishes, C[pivot] still contains the merged verti
 what the second loop fixes. That is also why the driver computes external_degree from
 C[pivot] AFTER the call and not before.
 
-**One conservatism in the second loop.** It scans every clique, `for clique_members in
-C.values()`, where `I[u] == {pivot}` already guarantees that u belongs to no clique but
-C[pivot], so `C[pivot].discard(u)` would do. The wide scan is defensive against a test that
-admits a u with more than one clique, which is exactly what the exact containment test would
-do.
+**The second loop touches C[pivot] only.** `I[u] == {pivot}` guarantees that u belongs to no
+other clique, so `C[pivot].discard(u)` is the whole of it. An earlier version scanned every
+clique as a defense against a test that admits a u with more than one clique, which is what the
+exact containment test would do; the measurement in the complexity section below made that
+defense untenable, since it cost more than the work it accompanied. Should the test ever be
+widened, the loop has to be widened with it.
 
 ## What mass elimination costs and saves
 
@@ -682,6 +785,97 @@ The run prints both metrics. Degree computations are unchanged from md4, as they
 since this layer touches only how the minimum is found. Bucket probes replace what was an
 n-per-step scan: 12 on graph3, 5 on graph4, 7 on graph6.
 
+## mmd1: multiple elimination
+
+Refreshing degrees is the expensive step, so do it less often: eliminate a whole INDEPENDENT
+SET of least-degree vertices before refreshing anything. Non-adjacent pivots cannot disturb
+each other's degrees, so every pivot in a batch is still a true minimum-degree vertex when it
+is taken. That is Liu's M in MMD, and it is the first layer whose ordering differs from md1's
+for a reason other than a tie in the same graph state.
+
+Six of the seven functions are md5's with the prefix changed: mmd1_neighbors, mmd1_storage,
+mmd1_eliminate, mmd1_refile and the two display functions. That is the pattern across the
+whole ladder from md2 onward. The elimination itself has not changed since the quotient graph
+appeared, and the degree cache and buckets have not changed since md4 and md5. What each layer
+varies is the SELECTION POLICY: recompute per candidate, cache, bucket, and now batch. So for
+mmd1 the whole layer is the driver.
+
+**The independent set is never searched for.** It falls out of the eviction:
+
+```python
+            for u in C[pivot]:                 # EVICT, with a stale degree
+                buckets[degrees[u]].discard(u)
+                touched.add(u)
+```
+
+Every vertex the pivot reached leaves the buckets and stays out until the round ends. So
+whatever is still filed was not reached by any pivot taken so far, hence is not adjacent to
+any of them, and draining a bucket drains an independent set. The eviction is also what makes
+the deferred refresh safe: a vertex with a stale degree is not a candidate, because it is not
+in a bucket to be found in.
+
+**The batch loop takes at least one pivot, then consults the limit.**
+
+```python
+        batch_limit = min_degree + delta
+        while True:
+            if not buckets[min_degree]:        # this degree is drained
+                if min_degree >= batch_limit:
+                    break
+                min_degree += 1
+                num_bucket_probes += 1
+                continue
+            pivot = min(buckets[min_degree])
+            ...
+            if delta < 0:                      # one pivot per round, as md5 does
+                break
+```
+
+The shape matters. On entry the outer walk has left buckets[min_degree] non-empty, so the
+first iteration always takes a pivot, whatever the limit says. Only after that does delta
+decide whether the round continues. Written the other way round, as a `while min_degree <=
+batch_limit` guard, a negative delta makes the loop body unreachable, the batch comes out
+empty, nothing is eliminated and the driver spins forever. That was a real bug in the first
+draft of this rewrite.
+
+**delta is the whole control, and its sign selects between two behaviors.** delta = 0 keeps
+the batch to true minima. delta > 0 admits vertices up to delta above the minimum, which are
+not minimal, so that is a concession in quality for still fewer refreshes. delta < 0 takes one
+pivot per round, which is md5 reached through this code path, and it is the check on the
+batching rather than a feature of it: mmd1 at delta = -1 reproduces md5's ordering exactly,
+verified on the seven graphs and 150 random ones.
+
+**The refresh is one pass per round, over everything the batch touched.**
+
+```python
+        refreshed_vertices = sorted(u for u in touched if not eliminated[u])
+        for u in refreshed_vertices:
+            degrees[u] = len(mmd1_neighbors(A, I, C, u))
+            buckets[degrees[u]].add(u)
+        num_degree_computations += len(refreshed_vertices)
+        min_degree = min([min_degree] + [degrees[u] for u in refreshed_vertices])
+```
+
+Note the asymmetry with md5's refresh, which called mmd1_refile: here the vertex is already
+out of its bucket, evicted during the batch, so the refresh only writes the degree and files
+it. The `not eliminated[u]` filter matters because a vertex evicted early in the round can be
+merged away by a later pivot in the same round.
+
+**What is given up is not what one would guess.** The pivots are exact: every one was a true
+minimum when it was taken. What the batch loses is the vertices it evicted, which are
+invisible for the rest of the round, so the choice is made among the untouched remainder
+rather than among all candidates. The batch does not pick a worse vertex, it picks a different
+vertex of the same degree. Minimum degree is famously sensitive to tie-breaks, so the fill
+moves by a fraction of a percent, in either direction. Batching across connected components is
+free, since the components cannot interact at all; batching within one is the wager.
+
+**The metric is rounds against pivots.** The closing line prints degree computations, bucket
+probes and rounds, and the ratio of pivots to rounds is the average batch size, which is what
+the batching buys. md5 and mmd1 pay the same per refresh; mmd1 pays for fewer of them. On
+graph3, md5 makes 34 degree computations over 10 steps and mmd1 makes 26 over 5 rounds; on
+graph4, 20 over 5 against 15 over 3. graph1 is the case where batching buys nothing, 6 either
+way, since md5 already finishes it in two steps.
+
 ## Why md3 reorders, and what would align it
 
 md1 and md2 are guaranteed to produce the same order on every graph, and the guarantee is
@@ -849,6 +1043,103 @@ configuration. Or push the search where it is most likely to break: a merge occu
 with the deferred vertex separated from its group by several unrelated eliminations before
 md2 reaches it. Until one or the other lands, this belongs here as a question and not in the
 claims above.
+
+## Complexity: matching the vendored cost without the vendored style
+
+The goal is the same asymptotic cost as `Mmd.cpp` and `Amd.cpp`, reached in our own style
+rather than theirs. Style and complexity are separate questions, and it is possible to write
+perfectly modern code that is asymptotically worse, which is what happened here in two places.
+Both were found by counting elementary operations rather than by reading.
+
+**The real work was always right.** `md*_neighbors` makes one pass over `A[u]` and one over each
+element's member list, which is what `mmdelm` and AMD's inner loop do. No set is unioned twice.
+Hashing instead of a mark array is a constant factor. That is the economy symbolic factorization
+gets from the elimination tree, in the form available during ordering.
+
+**Two things were asymptotically wrong.**
+
+The driver loop condition, `while not all(eliminated)`, is an O(n) scan per step, so the
+condition alone is quadratic over the run. On a path of 400 vertices it cost 80800 elementary
+steps against 1596 of real neighbor work. It is now a counter, incremented by
+`1 + len(merged_vertices)` per elimination. In md3 and md4 this was only a constant factor,
+since their pivot search is already O(n), but in md5 and mmd1 it defeated the buckets outright.
+
+The mass elimination block stripped a merged vertex from every clique:
+
+```python
+    for u in merged_vertices:
+        for clique_members in C.values():
+            clique_members.discard(u)
+```
+
+which costs O(number of cliques) per merged vertex. That wide scan was deliberate, described in
+this README as defensive against a test that admits a u belonging to more than one clique. The
+measurement made the defense untenable: 4247 elementary steps on a 20 by 20 grid against 28283
+of real work, growing faster than the work it accompanied. It is now
+
+```python
+    for u in merged_vertices:
+        C[pivot].discard(u)     # I[u] was {pivot}, so no other clique holds u
+```
+
+sound because the merge test requires `I[u] == {pivot}`, so no other clique holds u. Both fixes
+are in md3, md4, md5 and mmd1, in both twins. Measured on the 20 by 20 grid: loop 14800 down to
+34, clique scan 4247 down to 47, real work 26408. No ordering moved, checked on the seven graphs
+and 200 random ones, and mmd1 at delta = -1 still reproduces md5 exactly.
+
+**One place the Python is asymptotically worse than the C++, and it stays.** The pop is
+`min(buckets[min_degree])`, which is O(bucket size) because a Python `set` is unordered, and grid
+buckets are large since degrees repeat: 24567 elementary steps on the 20 by 20, comparable to all
+the real work. The C++ twin does not pay it. `std::set` is ordered, so
+`*buckets[minDegree].begin()` is O(1), which matches the vendored `head[dg]` in cost while
+keeping our index-ordered tie-break. Closing the gap in Python would need a heap per bucket with
+lazy deletion and a membership set to skip stale entries, which is more machinery than these
+files should carry. Documented rather than fixed, and noted in the md5 and mmd1 headers.
+
+### A log factor remains in the C++, and it is the containers
+
+With the two fixes above, the C++ prototypes perform the same NUMBER of graph operations as the
+vendored routines. What they do not yet match is the cost of each operation, and the gap is a
+factor of log, which is asymptotic rather than a constant and therefore not something tuning
+removes. It comes entirely from the containers, not from a line of the algorithm.
+
+Where the logs are today, in mmd1.cpp:
+
+| operation | ours | vendored | ours vs theirs |
+|---|---|---|---|
+| build a neighbor set | `std::set` insert | mark array, one pass per list | O(log k) vs O(1) each |
+| find a clique's members | `std::map` lookup | index an array by element id | O(log n) vs O(1) |
+| test v in the new clique | `neighbors.count(v)` | `marker[v] < tag` | O(log d) vs O(1) |
+| delete a pruned edge | `A[u].erase(v)` | compact the list in place | O(log d) vs O(1) amortized |
+| file or unfile a bucket | `std::set` insert, erase | splice a linked list | O(log n) vs O(1) |
+
+What the real implementation looks like instead, and none of it changes the algorithm:
+
+**A[u] and I[u] become sorted `std::vector<int>`.** The query then costs one pass over each list.
+Membership, which is what `redundant = A[u] & neighbors` needs, comes from a scratch mark array
+of size n: stamp every member of the new clique with the current tag, walk A[u] once, keep what is
+unmarked. That is `mmdelm`'s `marker[nb] < tag` exactly. Deletion becomes compaction in place,
+writing survivors forward, which prunes in the same pass rather than in a second one.
+
+**C stops being a map and becomes indexed by clique id.** An id is a vertex number, so C is a
+`std::vector` over 0..n-1 and the lookup is direct. Its member lists become vectors in the same
+shape as A.
+
+**The buckets become head plus next and prev arrays over n.** Filing and unfiling are then O(1)
+splices. This is where the tie-break question returns: an intrusive list has no order to take a
+minimum from, so index-ordered popping stops being free, and the choice is either to accept the
+list's own order, which is what the vendored codes do, or to pay for the tie-break some other
+way.
+
+Two consequences arrive with that substitution, and they are the three things this README
+currently lists as excluded or deferred. Member lists in a shared pool can outgrow their slots
+when a clique grows, which is where AMD's `iwlen`, `pfree` and garbage collection come from. And
+once a supervariable's members are a chain rather than a list, its size stops being O(1) to read,
+which is where the `weight` array earns its place. So the exclusions are not independent
+decisions: they are all consequences of moving off `std::set` and `std::map`.
+
+This is the work that turns the prototypes into the ordering code, and it belongs to that step
+rather than to mmd2, which is about features.
 
 ## Translation choices
 

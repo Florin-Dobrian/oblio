@@ -139,8 +139,7 @@ def md4_eliminate(A, I, C, eliminated, pivot):
             eliminated[u] = True
             merged_vertices.append(u)
     for u in merged_vertices:
-        for clique_members in C.values():
-            clique_members.discard(u)
+        C[pivot].discard(u)     # I[u] was {pivot}, so no other clique holds u
 
     A[pivot].clear()
     I[pivot].clear()
@@ -158,6 +157,7 @@ def md4_minimum_degree(G):
     super_members = [[u] for u in range(n)]    # the vertices each pivot stands for
     eliminated = [False] * n
     pivots = []                                # the order over supervariables
+    num_eliminated = 0                         # a counter, not a scan of eliminated
     nnz_L = 0
 
     # The cache, and the count of degree computations, which is what this layer
@@ -169,13 +169,14 @@ def md4_minimum_degree(G):
              eliminated=eliminated)
     md4_show_state(degrees, super_members, eliminated, pivots)
     step = 0
-    while not all(eliminated):
+    while num_eliminated < n:
         pivot = min((u for u in range(n) if not eliminated[u]),
                     key=lambda u: degrees[u])
         neighbors, absorbed_cliques, pruned_edges, merged_vertices = md4_eliminate(
             A, I, C, eliminated, pivot)
         degree = len(neighbors)
         pivots.append(pivot)
+        num_eliminated += 1 + len(merged_vertices)
         for u in merged_vertices:              # the pivot now stands for them too
             super_members[pivot] += super_members[u]
             super_members[u] = []

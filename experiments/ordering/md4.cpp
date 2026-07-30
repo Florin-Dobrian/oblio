@@ -225,7 +225,7 @@ std::tuple<std::set<int>, std::set<int>, std::vector<std::pair<int, int>>,
         }
     }
     for (int u : mergedVertices)
-        for (auto& [c, cliqueMembers] : C) { (void)c; cliqueMembers.erase(u); }
+        C[pivot].erase(u);      // I[u] was {pivot}, so no other clique holds u
 
     A[pivot].clear();
     I[pivot].clear();
@@ -247,6 +247,7 @@ std::vector<int> md4MinimumDegree(const Graph& G) {
     for (int u = 0; u < n; ++u) superMembers[u].push_back(u);
     std::vector<bool> eliminated(n, false);
     std::vector<int> pivots;                      // the order over supervariables
+    int numEliminated = 0;                        // a counter, not a scan of eliminated
     std::size_t nnzL = 0;
 
     // The cache, and the count of degree computations, which is what this layer
@@ -258,18 +259,18 @@ std::vector<int> md4MinimumDegree(const Graph& G) {
     md4Show(A, I, C, degrees, "start: every edge explicit, no clique yet", &eliminated);
     md4ShowState(degrees, superMembers, eliminated, pivots);
     int step = 0;
-    while (true) {
+    while (numEliminated < n) {
         int pivot = -1;
         int best = 0;
         for (int u = 0; u < n; ++u) {
             if (eliminated[u]) continue;
             if (pivot == -1 || degrees[u] < best) { pivot = u; best = degrees[u]; }
         }
-        if (pivot == -1) break;
         auto [neighbors, absorbedCliques, prunedEdges, mergedVertices] =
             md4Eliminate(A, I, C, eliminated, pivot);
         int degree = static_cast<int>(neighbors.size());
         pivots.push_back(pivot);
+        numEliminated += 1 + static_cast<int>(mergedVertices.size());
         for (int u : mergedVertices) {            // the pivot now stands for them too
             superMembers[pivot].insert(superMembers[pivot].end(),
                                        superMembers[u].begin(), superMembers[u].end());

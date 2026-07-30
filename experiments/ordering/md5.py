@@ -25,6 +25,24 @@
 # it. What it must never do is overshoot, since a bucket below min_degree is
 # never examined and a vertex sitting there would never be chosen.
 
+#
+# COMPLEXITY, AND ONE PLACE THE PYTHON PAYS MORE THAN THE C++. The goal is the
+# same asymptotic cost as the vendored routines, without their coding style. Two
+# things were wrong and are fixed: the driver loop counts eliminations rather than
+# scanning `eliminated` (O(n) per step before, O(1) now), and the mass elimination
+# block strips a merged vertex from C[pivot] alone rather than from every clique,
+# which is sound because I[u] was {pivot}. On a 20 by 20 grid those two cost 14800
+# and 4247 elementary steps before, against 34 and 47 after, with the real
+# neighbor work at 26408.
+#
+# What remains is min(buckets[min_degree]), which is O(bucket size) because a
+# Python set is unordered. The C++ twin does not pay it: std::set is ordered, so
+# *buckets[minDegree].begin() is O(1) and matches the vendored head[dg] in cost
+# while keeping our index-ordered tie-break. Closing the gap in Python would need
+# a heap per bucket with lazy deletion, plus a membership set to skip stale
+# entries, which is more machinery than a prototype should carry. It is the one
+# documented place where the Python is asymptotically worse than the C++.
+
 # %%
 import sys
 
@@ -144,8 +162,7 @@ def md5_eliminate(A, I, C, eliminated, pivot):
             eliminated[u] = True
             merged_vertices.append(u)
     for u in merged_vertices:
-        for clique_members in C.values():
-            clique_members.discard(u)
+        C[pivot].discard(u)     # I[u] was {pivot}, so no other clique holds u
 
     A[pivot].clear()
     I[pivot].clear()
@@ -171,6 +188,7 @@ def md5_minimum_degree(G):
     super_members = [[u] for u in range(n)]    # the vertices each pivot stands for
     eliminated = [False] * n
     pivots = []                                # the order over supervariables
+    num_eliminated = 0                         # a counter, not a scan of eliminated
     nnz_L = 0
 
     # The cache, as in md4, unchanged by this layer.
@@ -196,7 +214,7 @@ def md5_minimum_degree(G):
              eliminated=eliminated)
     md5_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
     step = 0
-    while not all(eliminated):
+    while num_eliminated < n:
         while not buckets[min_degree]:         # walk up to the first live bucket
             min_degree += 1
             num_bucket_probes += 1
@@ -206,6 +224,7 @@ def md5_minimum_degree(G):
             A, I, C, eliminated, pivot)
         degree = len(neighbors)
         pivots.append(pivot)
+        num_eliminated += 1 + len(merged_vertices)
         for u in merged_vertices:              # the pivot now stands for them too
             super_members[pivot] += super_members[u]
             super_members[u] = []

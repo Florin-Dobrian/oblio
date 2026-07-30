@@ -24,6 +24,24 @@
 // it. What it must never do is overshoot, since a bucket below minDegree is
 // never examined and a vertex sitting there would never be chosen.
 //
+//
+// COMPLEXITY, AND ONE PLACE THE PYTHON PAYS MORE THAN THE C++. The goal is the
+// same asymptotic cost as the vendored routines, without their coding style. Two
+// things were wrong and are fixed: the driver loop counts eliminations rather than
+// scanning `eliminated` (O(n) per step before, O(1) now), and the mass elimination
+// block strips a merged vertex from C[pivot] alone rather than from every clique,
+// which is sound because I[u] was {pivot}. On a 20 by 20 grid those two cost 14800
+// and 4247 elementary steps before, against 34 and 47 after, with the real
+// neighbor work at 26408.
+//
+// What remains is min(buckets[min_degree]), which is O(bucket size) because a
+// Python set is unordered. The C++ twin does not pay it: std::set is ordered, so
+// *buckets[minDegree].begin() is O(1) and matches the vendored head[dg] in cost
+// while keeping our index-ordered tie-break. Closing the gap in Python would need
+// a heap per bucket with lazy deletion, plus a membership set to skip stale
+// entries, which is more machinery than a prototype should carry. It is the one
+// documented place where the Python is asymptotically worse than the C++.
+//
 // Build:  g++ -std=c++17 -O3 md5.cpp -o md5_cpp  (or: make)
 // Run:    ./md5_cpp
 //         ./md5_cpp 3      just the third example
@@ -241,7 +259,7 @@ std::tuple<std::set<int>, std::set<int>, std::vector<std::pair<int, int>>,
         }
     }
     for (int u : mergedVertices)
-        for (auto& [c, cliqueMembers] : C) { (void)c; cliqueMembers.erase(u); }
+        C[pivot].erase(u);      // I[u] was {pivot}, so no other clique holds u
 
     A[pivot].clear();
     I[pivot].clear();
@@ -273,6 +291,7 @@ std::vector<int> md5MinimumDegree(const Graph& G) {
     for (int u = 0; u < n; ++u) superMembers[u].push_back(u);
     std::vector<bool> eliminated(n, false);
     std::vector<int> pivots;                      // the order over supervariables
+    int numEliminated = 0;                        // a counter, not a scan of eliminated
     std::size_t nnzL = 0;
 
     // The cache, as in md4, unchanged by this layer.
@@ -297,10 +316,7 @@ std::vector<int> md5MinimumDegree(const Graph& G) {
     md5Show(A, I, C, degrees, "start: every edge explicit, no clique yet", &eliminated);
     md5ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
     int step = 0;
-    while (true) {
-        bool anyLive = false;
-        for (int u = 0; u < n; ++u) if (!eliminated[u]) { anyLive = true; break; }
-        if (!anyLive) break;
+    while (numEliminated < n) {
         while (buckets[minDegree].empty()) {   // walk up to the first live bucket
             ++minDegree;
             ++numBucketProbes;
@@ -311,6 +327,7 @@ std::vector<int> md5MinimumDegree(const Graph& G) {
             md5Eliminate(A, I, C, eliminated, pivot);
         int degree = static_cast<int>(neighbors.size());
         pivots.push_back(pivot);
+        numEliminated += 1 + static_cast<int>(mergedVertices.size());
         for (int u : mergedVertices) {            // the pivot now stands for them too
             superMembers[pivot].insert(superMembers[pivot].end(),
                                        superMembers[u].begin(), superMembers[u].end());

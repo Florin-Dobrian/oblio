@@ -25,312 +25,478 @@
 // OF THE SAME DEGREE. Minimum degree is famously sensitive to tie-breaks, so the
 // fill moves by a fraction of a percent, in either direction.
 //
-// HOW THIS DIFFERS FROM THE VENDORED Mmd.cpp. Two algorithmic gaps, to fill later;
-// neither changes the shape of what is here.
+// WHAT IS HERE, AND WHAT MMD2 ADDS. This file is the idea alone. Everything else
+// genmmd does is deliberately left to mmd1's successor, which completes it:
 //
 //   - the PREPASS that numbers degree 0 and 1 vertices before the main loop,
 //     leaving their neighbors' degrees stale (genmmd, the loop over head[1])
 //   - mmdupd's q2h path. mmdelm stashes each reached vertex's pruned adjacency
 //     count as fwd[rn] = nq+1, and mmdupd routes the nq==1 cases into a separate
-//     list where it merges indistinguishable PAIRS. Our merge test only catches
-//     vertices indistinguishable from the pivot, so MMD's supervariables are at
-//     least as coarse as ours and sometimes coarser.
+//     list where it merges indistinguishable PAIRS. The merge test here catches
+//     only vertices indistinguishable from the pivot, so MMD's supervariables are
+//     at least as coarse as ours and sometimes coarser.
+//   - OUTMATCHED marking, bwd[nd] = -maxint, which takes a vertex out of the
+//     degree lists without merging it.
+//   - the filing convention: MMD files at `dg - qsize[en] + 1` floored at 1, so
+//     its least bucket is 1 where ours is 0, and it never uses bucket 0. Plus the
+//     ncsub subscript statistic.
 //
-// And two bookkeeping conventions, which matter only if one tries to match bucket
-// indices against the vendored code, not to the ordering:
+// NO WEIGHT ARRAY, for the same reason md3 through md5 have none: mass elimination
+// merges only into the PIVOT, which is eliminated in the same call, so no live
+// vertex ever stands for more than one original vertex, and a supervariable's size
+// is superMembers[pivot].size() whenever it is wanted. mmd2 needs one, because its
+// q2h merge folds a vertex into a LIVE one.
 //
-//   - MMD never uses bucket 0. mmdint maps degree 0 to 1 and mmdupd floors with
-//     `if(dg<1)dg=1`, so its least bucket is 1 where ours is 0.
-//   - MMD files at `dg - qsize[en] + 1`, an offset convention; we file at the
-//     plain external degree. A monotone shift, so the pivot choice is the same,
-//     except that flooring merges degree 0 and 1 into one bucket and can therefore
-//     break a tie differently.
+// TIE-BREAKS. Our buckets are index-ordered, *buckets[minDegree].begin(), which is
+// md5's convention and the reason md1 through md5 agree. MMD's degree lists are
+// linked chains prepended at head[dg], so its bucket is a stack and the winner is
+// whatever was pushed last, which after construction is the highest-numbered
+// vertex of that degree. There is no quality claim behind it: prepending is the
+// cheap end of a linked list. We keep our convention and the orderings differ in
+// ties; see the README.
 //
-// The tag/marker machinery with its overflow reset, and the ncsub statistic, are
-// implementation detail with no counterpart here (we use std::set).
+// The tag/marker machinery with its maxint overflow reset is not modeled at all.
+// It exists because the marks live in reusable integer arrays; we use std::set.
+//
+//
+// COMPLEXITY, AND ONE PLACE THE PYTHON PAYS MORE THAN THE C++. The goal is the
+// same asymptotic cost as the vendored routines, without their coding style. Two
+// things were wrong and are fixed: the driver loop counts eliminations rather than
+// scanning `eliminated` (O(n) per step before, O(1) now), and the mass elimination
+// block strips a merged vertex from C[pivot] alone rather than from every clique,
+// which is sound because I[u] was {pivot}. On a 20 by 20 grid those two cost 14800
+// and 4247 elementary steps before, against 34 and 47 after, with the real
+// neighbor work at 26408.
+//
+// What remains is min(buckets[min_degree]), which is O(bucket size) because a
+// Python set is unordered. The C++ twin does not pay it: std::set is ordered, so
+// *buckets[minDegree].begin() is O(1) and matches the vendored head[dg] in cost
+// while keeping our index-ordered tie-break. Closing the gap in Python would need
+// a heap per bucket with lazy deletion, plus a membership set to skip stale
+// entries, which is more machinery than a prototype should carry. It is the one
+// documented place where the Python is asymptotically worse than the C++.
 //
 // Build:  g++ -std=c++17 -O3 mmd1.cpp -o mmd1_cpp  (or: make)
 // Run:    ./mmd1_cpp
+//         ./mmd1_cpp 3      just the third example
 
 #include <algorithm>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
-#include <iterator>
 #include <map>
-#include <string>
 #include <set>
+#include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
+using Graph = std::vector<std::set<int>>;
 using Cliques = std::map<int, std::set<int>>;
 
-// The true neighbors of live variable i: its explicit neighbors A[i] together
-// with the members of every clique it belongs to, minus itself.
-std::set<int> reachable(const std::vector<std::set<int>>& A,
-                        const std::vector<std::set<int>>& C,
-                        const Cliques& cliques, int i) {
-    std::set<int> neighbors = A[i];
-    for (int c : C[i])
-        neighbors.insert(cliques.at(c).begin(), cliques.at(c).end());
-    neighbors.erase(i);
+// I[u] cliques that contain u
+// C[c] vertices that c contains
+
+std::set<int> mmd1Neighbors(const Graph& A, const Graph& I, const Cliques& C, int u);
+
+// Print a quotient graph with supervariables: adjacency, incidence, cliques.
+void mmd1Show(const Graph& A, const Graph& I, const Cliques& C,
+             const std::vector<int>& degrees, const std::string& title = "",
+             const std::vector<bool>* eliminated = nullptr) {
+    int n = static_cast<int>(A.size());
+    int width = static_cast<int>(std::to_string(std::max(n - 1, 0)).size());
+    std::vector<int> aliveVertices;
+    for (int u = 0; u < n; ++u)
+        if (eliminated == nullptr || !(*eliminated)[u]) aliveVertices.push_back(u);
+    std::size_t numAliveEdges = 0;
+    for (int u : aliveVertices) numAliveEdges += A[u].size();
+    numAliveEdges /= 2;
+    std::size_t numAliveIncidences = 0;
+    for (int u : aliveVertices) numAliveIncidences += I[u].size();
+    std::size_t numAliveCliques = C.size();
+    if (!title.empty()) std::cout << title << "\n";
+    std::ostringstream aliveVerticesText;
+    if (eliminated == nullptr) aliveVerticesText << n;
+    else aliveVerticesText << aliveVertices.size() << " of " << n;
+    std::cout << "num alive vertices = " << aliveVerticesText.str()
+              << ", num alive edges = " << numAliveEdges
+              << ", num alive cliques = " << numAliveCliques
+              << ", storage = " << 2 * numAliveEdges << " + " << 2 * numAliveIncidences
+              << " = " << 2 * (numAliveEdges + numAliveIncidences) << "\n";
+    for (int u : aliveVertices) {
+        std::ostringstream adjacencyText;
+        bool first = true;
+        for (int v : A[u]) {
+            adjacencyText << (first ? "" : " ") << std::setw(width) << v;
+            first = false;
+        }
+        std::ostringstream incidenceText;
+        first = true;
+        for (int c : I[u]) {
+            incidenceText << (first ? "" : " ") << "c" << c;
+            first = false;
+        }
+        std::cout << "  " << std::setw(width) << u << ": {" << adjacencyText.str()
+                  << "} {" << incidenceText.str() << "} degree " << degrees[u] << "\n";
+    }
+    for (const auto& [c, cliqueMembers] : C) {
+        std::ostringstream cliqueMembersText;
+        bool first = true;
+        for (int u : cliqueMembers) {
+            cliqueMembersText << (first ? "" : " ") << std::setw(width) << u;
+            first = false;
+        }
+        std::cout << "  c" << c << ": {" << cliqueMembersText.str() << "}\n";
+    }
+    std::cout << "\n";
+}
+
+// Print the state arrays: members, eliminated, and the order so far.
+void mmd1ShowState(const std::vector<int>& degrees,
+                  const std::vector<std::set<int>>& buckets, int minDegree,
+                  const std::vector<std::vector<int>>& superMembers,
+                  const std::vector<bool>& eliminated,
+                  const std::vector<int>& pivots, const std::string& title = "") {
+    int n = static_cast<int>(superMembers.size());
+    int width = static_cast<int>(std::to_string(std::max(n - 1, 0)).size());
+    if (!title.empty()) std::cout << title << "\n";
+    for (int u = 0; u < n; ++u) {
+        std::string status;
+        if (!eliminated[u]) status = "live";
+        else if (!superMembers[u].empty()) status = "done";
+        else status = "merged";
+        std::ostringstream superMemberList;
+        bool first = true;
+        for (int v : superMembers[u]) {
+            superMemberList << (first ? "" : " ") << std::setw(width) << v;
+            first = false;
+        }
+        std::cout << "  " << std::setw(width) << u << ": members ["
+                  << superMemberList.str() << "] " << status << "\n";
+    }
+    std::ostringstream degreesText;
+    for (int u = 0; u < n; ++u)
+        degreesText << (u == 0 ? "" : " ") << std::setw(width) << degrees[u];
+    std::ostringstream superMembersText;
+    for (int u = 0; u < n; ++u) {
+        superMembersText << (u == 0 ? "" : " ") << "[";
+        bool firstMember = true;
+        for (int v : superMembers[u]) {
+            superMembersText << (firstMember ? "" : " ") << v;
+            firstMember = false;
+        }
+        superMembersText << "]";
+    }
+    std::ostringstream eliminatedText;
+    for (int u = 0; u < n; ++u)
+        eliminatedText << (u == 0 ? "" : " ") << std::setw(width) << (eliminated[u] ? 1 : 0);
+    std::ostringstream bucketsText;
+    bool firstBucket = true;
+    for (std::size_t d = 0; d < buckets.size(); ++d) {
+        if (buckets[d].empty()) continue;
+        bucketsText << (firstBucket ? "" : "  ") << d << ": {";
+        bool firstMember = true;
+        for (int v : buckets[d]) {
+            bucketsText << (firstMember ? "" : " ") << v;
+            firstMember = false;
+        }
+        bucketsText << "}";
+        firstBucket = false;
+    }
+    std::cout << "  degrees: [" << degreesText.str() << "]\n";
+    std::cout << "  buckets: " << (firstBucket ? "all empty" : bucketsText.str()) << "\n";
+    std::cout << "  min degree: " << minDegree << "\n";
+    std::cout << "  members: [" << superMembersText.str() << "]\n";
+    std::cout << "  eliminated: [" << eliminatedText.str() << "]\n";
+    std::cout << "  pivots: [";
+    for (std::size_t k = 0; k < pivots.size(); ++k)
+        std::cout << (k == 0 ? "" : ", ") << pivots[k];
+    std::cout << "]\n";
+    std::cout << "  order: [";
+    bool firstOrder = true;
+    for (int pivot : pivots)
+        for (int u : superMembers[pivot]) {
+            std::cout << (firstOrder ? "" : ", ") << u;
+            firstOrder = false;
+        }
+    std::cout << "]\n\n";
+}
+
+// Entries actually stored, as in md5. Batching changes when degrees are
+// refreshed, not what the quotient graph holds.
+std::size_t mmd1Storage(const Graph& A, const Graph& I, const Cliques& C) {
+    std::size_t total = 0;
+    for (const std::set<int>& adjacency : A) total += adjacency.size();
+    for (const std::set<int>& incidence : I) total += incidence.size();
+    for (const auto& [c, cliqueMembers] : C) { (void)c; total += cliqueMembers.size(); }
+    return total;
+}
+
+// The neighbors of live vertex u, exactly as in md2: its explicit adjacency A[u]
+// together with the members of every clique that contains u, minus u.
+std::set<int> mmd1Neighbors(const Graph& A, const Graph& I, const Cliques& C, int u) {
+    std::set<int> neighbors = A[u];
+    for (int c : I[u]) {
+        const std::set<int>& cliqueMembers = C.at(c);
+        neighbors.insert(cliqueMembers.begin(), cliqueMembers.end());
+    }
+    neighbors.erase(u);
     return neighbors;
 }
 
-// External degree, WEIGHTED. Called only on refresh now, not on every pick.
-int degreeOf(const std::vector<std::set<int>>& A, const std::vector<std::set<int>>& C,
-             const Cliques& cliques, const std::vector<int>& weight, int i) {
-    int total = 0;
-    for (int j : reachable(A, C, cliques, i)) total += weight[j];
-    return total;
-}
+// Turn the pivot into a clique, then merge in every member it makes
+// indistinguishable. Identical to md5Eliminate: this layer changes how often
+// degrees are refreshed, not what an elimination does.
+//
+// Returns (neighbors, absorbedCliques, prunedEdges, mergedVertices): as in md2,
+// plus the vertices folded into the pivot by mass elimination. The last three
+// are reported for display; only neighbors is used by the caller.
+std::tuple<std::set<int>, std::set<int>, std::vector<std::pair<int, int>>,
+           std::vector<int>> mmd1Eliminate(
+        Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated, int pivot) {
+    const std::set<int> neighbors = mmd1Neighbors(A, I, C, pivot);
+    const std::set<int> absorbedCliques = I[pivot];
+    for (int c : absorbedCliques)
+        C.erase(c);
+    C[pivot] = neighbors;           // becomes L_pivot, the column pattern
 
-std::size_t storage(const std::vector<std::set<int>>& A, const Cliques& cliques) {
-    std::size_t total = 0;
-    for (const auto& a : A) total += a.size();
-    for (const auto& [c, members] : cliques) total += members.size();
-    return total;
-}
-
-// Turn the pivot into a clique, then absorb every member it makes
-// indistinguishable.
-void eliminate(std::vector<std::set<int>>& A, std::vector<std::set<int>>& C,
-               Cliques& cliques, std::vector<int>& weight,
-               std::vector<bool>& eliminated, int pivot,
-               std::set<int>& neighbors, std::set<int>& absorbed,
-               std::vector<std::pair<int, int>>& pruned, std::vector<int>& merged) {
-    neighbors = reachable(A, C, cliques, pivot);
-    absorbed = C[pivot];
-    for (int c : absorbed) cliques.erase(c);
-    cliques[pivot] = neighbors;
-
-    pruned.clear();
-    for (int i : neighbors) {
-        std::set<int> redundant;
-        std::set_intersection(A[i].begin(), A[i].end(), neighbors.begin(), neighbors.end(),
-                              std::inserter(redundant, redundant.begin()));
-        for (int j : redundant)
-            if (i < j) pruned.push_back({i, j});
-        for (int j : redundant) A[i].erase(j);
-        A[i].erase(pivot);
-        for (int c : absorbed) C[i].erase(c);
-        C[i].insert(pivot);
+    std::vector<std::pair<int, int>> prunedEdges;
+    for (int u : neighbors) {
+        std::set<int> redundant;    // both ends inside the new clique
+        for (int v : A[u])
+            if (neighbors.count(v) != 0) redundant.insert(v);
+        for (int v : redundant)
+            if (u < v) prunedEdges.push_back({u, v});
+        for (int v : redundant)
+            A[u].erase(v);          // implicit now: delete the explicit copy
+        A[u].erase(pivot);          // the pivot is no longer a variable
+        for (int c : absorbedCliques)
+            I[u].erase(c);          // its absorbed cliques are gone
+        I[u].insert(pivot);         // u joins the new clique, whose id is the pivot
     }
 
-    // MASS ELIMINATION. i is indistinguishable from the pivot when everything it
-    // still sees lies inside the new clique: nothing explicit left, and no other
-    // clique to reach through. Eliminating it next would create no fill, so we
-    // merge it into the pivot now and let the weight remember how many there are.
-    merged.clear();
-    for (int i : neighbors) {
-        if (A[i].empty() && C[i].size() == 1 && *C[i].begin() == pivot) {
-            weight[pivot] += weight[i];
-            weight[i] = 0;
-            C[i].clear();
-            eliminated[i] = true;
-            merged.push_back(i);
+    // Mass elimination. u is INDISTINGUISHABLE from the pivot when the two have
+    // the same closed neighborhood, mmd1Neighbors(u) | {u} == mmd1Neighbors(pivot)
+    // | {pivot}, as it stood before the step. Equivalently, now that the clique is
+    // formed, when everything u can still reach lies inside it. The test below is
+    // a cheap sufficient condition for that: nothing explicit left and no clique
+    // but the new one means u sees exactly what the pivot sees, so eliminating it
+    // next would cost no fill. Fold it into the pivot now and strip it from the
+    // cliques, since it is no longer a vertex.
+    std::vector<int> mergedVertices;
+    for (int u : neighbors) {
+        if (A[u].empty() && I[u].size() == 1 && *I[u].begin() == pivot) {
+            I[u].clear();
+            eliminated[u] = true;
+            mergedVertices.push_back(u);
         }
     }
-    for (int i : merged) {                 // a merged vertex is no longer a vertex
-        for (auto& [c, members] : cliques) members.erase(i);
-    }
+    for (int u : mergedVertices)
+        C[pivot].erase(u);      // I[u] was {pivot}, so no other clique holds u
 
     A[pivot].clear();
-    C[pivot].clear();
+    I[pivot].clear();
     eliminated[pivot] = true;
+    return {neighbors, absorbedCliques, prunedEdges, mergedVertices};
 }
 
-std::string braces(const std::set<int>& s) {
-    std::string out = "{";
-    bool first = true;
-    for (int x : s) { out += (first ? "" : ", ") + std::to_string(x); first = false; }
-    return out + "}";
+// Move u from the bucket for its old degree to the one for newDegree. Removal
+// from the middle of a bucket must be O(1), which is why a bucket is a set here;
+// the vendored codes use doubly linked lists for the same reason.
+void mmd1Refile(std::vector<std::set<int>>& buckets, std::vector<int>& degrees,
+               int u, int newDegree) {
+    buckets[degrees[u]].erase(u);
+    degrees[u] = newDegree;
+    buckets[newDegree].insert(u);
 }
 
-void showState(const std::vector<std::set<int>>& A, const std::vector<std::set<int>>& C,
-               const Cliques& cliques, const std::vector<int>& weight,
-               const std::vector<int>& degrees, const std::vector<bool>& eliminated,
-               const std::vector<std::set<int>>& buckets, int mdeg,
-               bool hasResult,
-               const std::set<int>& neighbors, const std::set<int>& absorbed,
-               const std::vector<std::pair<int, int>>& pruned,
-               const std::vector<int>& merged, const std::vector<int>& refreshed,
-               int walked, const std::string& label = "") {
-    int n = static_cast<int>(A.size());
-
-    std::cout << "         A       = {";
-    for (int v = 0; v < n; ++v) std::cout << (v ? ", " : "") << v << ": " << braces(A[v]);
-    std::cout << "}\n         C       = {";
-    for (int v = 0; v < n; ++v) {
-        std::cout << (v ? ", " : "") << v << ": [";
-        bool f = true;
-        for (int x : C[v]) { std::cout << (f ? "" : ", ") << "c" << x; f = false; }
-        std::cout << "]";
-    }
-    std::cout << "}\n         cliques = {";
-    bool f = true;
-    for (const auto& [x, members] : cliques) {
-        std::cout << (f ? "" : ", ") << "c" << x << ": " << braces(members); f = false;
-    }
-    std::cout << "}\n         weights = {";
-    for (int v = 0; v < n; ++v) std::cout << (v ? ", " : "") << v << ": " << weight[v];
-    std::cout << "}   storage " << storage(A, cliques) << "\n         degrees = {";
-    for (int v = 0; v < n; ++v) {
-        std::cout << (v ? ", " : "") << v << ": ";
-        if (eliminated[v]) std::cout << "-"; else std::cout << degrees[v];
-    }
-    std::cout << "}   " << label << "\n         buckets = {";
-    { bool g = true;
-      for (std::size_t d = 0; d < buckets.size(); ++d)
-          if (!buckets[d].empty()) {
-              std::cout << (g ? "" : ", ") << d << ": " << braces(buckets[d]); g = false;
-          }
-    }
-    std::cout << "}   mdeg = " << mdeg << "\n";
-
-    (void)neighbors; (void)absorbed; (void)pruned; (void)merged; (void)walked;
-    (void)hasResult; (void)refreshed;
-}
-
-// delta widens the batch to vertices within delta of the minimum, buying fewer
-// refreshes for a real concession: those vertices are not minimal, so taking them
-// is a worse choice and not merely a different one. We pass 0.
-std::vector<int> mmd(const std::vector<std::set<int>>& graph, int delta = 0) {
-    int n = static_cast<int>(graph.size());
+// Multiple elimination: a batch of independent pivots per degree refresh.
+//
+// delta widens the batch to vertices within delta of the minimum degree, which
+// buys still fewer refreshes for a real concession, since those vertices are not
+// minimal. delta = 0 keeps the batch to true minima. A negative delta takes one
+// pivot per round, which is md5's behavior reached through this code path.
+std::vector<int> mmd1MinimumDegree(const Graph& G, int delta = 0) {
+    int n = static_cast<int>(G.size());
     std::size_t nnzTrilA = 0;
-    for (const auto& row : graph) nnzTrilA += row.size();
+    for (int u = 0; u < n; ++u) nnzTrilA += G[u].size();
     nnzTrilA = nnzTrilA / 2 + n;
-
-    std::vector<std::set<int>> A = graph;
-    std::vector<std::set<int>> C(n);
-    Cliques cliques;
-    std::vector<int> weight(n, 1);
-    std::vector<std::vector<int>> members(n);
-    for (int v = 0; v < n; ++v) members[v].push_back(v);
+    Graph A = G;                                  // explicit vertex neighbors
+    Graph I(n);                                   // cliques that contain each vertex
+    Cliques C;                                    // clique id -> member set
+    std::vector<std::vector<int>> superMembers(n);   // which ones, for the expansion
+    for (int u = 0; u < n; ++u) superMembers[u].push_back(u);
     std::vector<bool> eliminated(n, false);
-    std::vector<int> pivots;
+    std::vector<int> pivots;                      // the order over supervariables
+    int numEliminated = 0;                        // a counter, not a scan of eliminated
     std::size_t nnzL = 0;
 
     std::vector<int> degrees(n);
-    for (int v = 0; v < n; ++v) degrees[v] = static_cast<int>(A[v].size());
+    for (int u = 0; u < n; ++u) degrees[u] = static_cast<int>(A[u].size());
+    int numDegreeComputations = n;
 
-    // Vertices filed by degree, so the pick is a walk rather than a scan.
-    std::vector<std::set<int>> buckets(n + 1);
-    for (int v = 0; v < n; ++v) buckets[degrees[v]].insert(v);
-    int mdeg = n ? *std::min_element(degrees.begin(), degrees.end()) : 0;
-    std::size_t probes = 0;             // bucket slots examined, the metric
+    std::vector<std::set<int>> buckets(n);       // buckets[d] holds the live degree-d
+    for (int u = 0; u < n; ++u) buckets[degrees[u]].insert(u);
+    int minDegree = n > 0 ? *std::min_element(degrees.begin(), degrees.end()) : 0;
+    int numBucketProbes = 0;
+    int numRounds = 0;                           // batches, the metric this layer adds
 
-    // Move i to the bucket for its new degree. The bound may only ever fall.
-    auto refile = [&](int i, int newDegree) {
-        buckets[degrees[i]].erase(i);
-        degrees[i] = newDegree;
-        buckets[newDegree].insert(i);
-        if (newDegree < mdeg) mdeg = newDegree;
-    };
+    mmd1Show(A, I, C, degrees, "start: every edge explicit, no clique yet", &eliminated);
+    mmd1ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
+    while (numEliminated < n) {
+        while (buckets[minDegree].empty()) {     // walk up to the first live bucket
+            ++minDegree;
+            ++numBucketProbes;
+        }
+        ++numBucketProbes;
 
-    std::cout << "start: no cliques yet, degrees from A, vertices filed by degree\n";
-    showState(A, C, cliques, weight, degrees, eliminated, buckets, mdeg,
-              false, {}, {}, {}, {}, {}, 0, "(all fresh)");
-    (void)probes;
-
-    int rounds = 0;
-    std::size_t refreshes = n;
-
-    while (std::find(eliminated.begin(), eliminated.end(), false) != eliminated.end()) {
-        while (mdeg <= n && buckets[mdeg].empty()) ++mdeg;
-        if (mdeg > n) break;
-
-        // ---- one BATCH: take pivots from [mdeg, mdeg+delta], refreshing nothing.
-        //      Eviction inside the loop is what keeps them independent.
-        int mdlmt = mdeg + delta;
+        // ---- one BATCH, no degree refreshed inside it ----------------------
+        // Take pivots from buckets [minDegree, minDegree + delta]. Eviction is
+        // what keeps them independent: eliminating a pivot pulls every vertex it
+        // reached out of the buckets, so whatever is still filed was not reached,
+        // hence is not adjacent to anything taken this round.
+        int batchLimit = minDegree + delta;
         std::vector<int> batch;
         std::set<int> touched;
-        std::cout << "round " << rounds << ": mdeg = " << mdeg
-                  << ", batch limit = " << mdlmt << "\n";
         while (true) {
-            while (mdeg <= mdlmt && buckets[mdeg].empty()) ++mdeg;
-            if (mdeg > mdlmt) break;
-            int pivot = *buckets[mdeg].begin();
-            int d = degrees[pivot], w = weight[pivot];
-            buckets[d].erase(pivot);
+            if (buckets[minDegree].empty()) {    // this degree is drained
+                if (minDegree >= batchLimit) break;
+                ++minDegree;
+                ++numBucketProbes;
+                continue;
+            }
+            int pivot = *buckets[minDegree].begin();
+            int degree = degrees[pivot];
+            buckets[degree].erase(pivot);
 
-            std::set<int> neighbors, absorbed;
-            std::vector<std::pair<int, int>> pruned;
-            std::vector<int> merged;
-            eliminate(A, C, cliques, weight, eliminated, pivot,
-                      neighbors, absorbed, pruned, merged);
-            for (int i : merged) {
-                members[pivot].insert(members[pivot].end(),
-                                      members[i].begin(), members[i].end());
-                buckets[degrees[i]].erase(i);
+            auto [neighbors, absorbedCliques, prunedEdges, mergedVertices] =
+                mmd1Eliminate(A, I, C, eliminated, pivot);
+            batch.push_back(pivot);
+            pivots.push_back(pivot);
+            numEliminated += 1 + static_cast<int>(mergedVertices.size());
+            for (int u : mergedVertices) {        // the pivot now stands for them too
+                superMembers[pivot].insert(superMembers[pivot].end(),
+                                           superMembers[u].begin(), superMembers[u].end());
+                superMembers[u].clear();
+                buckets[degrees[u]].erase(u);
+                degrees[u] = 0;
+            }
+            degrees[pivot] = 0;
+
+            for (int u : C[pivot]) {              // EVICT, with a stale degree
+                buckets[degrees[u]].erase(u);
+                touched.insert(u);
             }
 
-            // EVICT. Every reached vertex leaves its bucket with a stale degree,
-            // which is what makes the rest of this bucket an independent set.
-            std::vector<int> evicted;
-            for (int i : neighbors)
-                if (!eliminated[i]) {
-                    buckets[degrees[i]].erase(i);
-                    touched.insert(i);
-                    evicted.push_back(i);
+            int superSize = static_cast<int>(superMembers[pivot].size());
+            int externalDegree = static_cast<int>(C[pivot].size());
+            nnzL += static_cast<std::size_t>(superSize) * externalDegree
+                    + static_cast<std::size_t>(superSize) * (superSize - 1) / 2
+                    + superSize;
+
+            std::ostringstream absorbedCliquesText;
+            if (absorbedCliques.empty()) {
+                absorbedCliquesText << "none";
+            } else {
+                bool first = true;
+                for (int c : absorbedCliques) {
+                    absorbedCliquesText << (first ? "" : ", ") << "c" << c;
+                    first = false;
                 }
-
-            batch.push_back(pivot);
-            int wp = weight[pivot], ext = 0;
-            for (int j : cliques[pivot]) ext += weight[j];
-            nnzL += static_cast<std::size_t>(wp) * ext + wp * (wp - 1) / 2 + wp;
-
-            std::cout << "  eliminate " << pivot << " (degree " << d << ", weight "
-                      << w << " -> " << wp << ")   merged = ";
-            if (merged.empty()) std::cout << "none";
-            else { bool g = true; for (int x : merged) { std::cout << (g ? "" : ", ") << x; g = false; } }
-            std::cout << "   evicted = ";
-            if (evicted.empty()) std::cout << "none";
-            else { bool g = true; for (int x : evicted) { std::cout << (g ? "" : ", ") << x; g = false; } }
-            std::cout << "\n";
+            }
+            std::ostringstream prunedEdgesText;
+            if (prunedEdges.empty()) {
+                prunedEdgesText << "none";
+            } else {
+                bool first = true;
+                for (auto [u, v] : prunedEdges) {
+                    prunedEdgesText << (first ? "" : ", ") << u << "-" << v;
+                    first = false;
+                }
+            }
+            std::ostringstream mergedVerticesText;
+            if (mergedVertices.empty()) {
+                mergedVerticesText << "none";
+            } else {
+                bool first = true;
+                for (int u : mergedVertices) {
+                    mergedVerticesText << (first ? "" : ", ") << u;
+                    first = false;
+                }
+            }
+            std::ostringstream evictedText;
+            if (C[pivot].empty()) {
+                evictedText << "none";
+            } else {
+                bool first = true;
+                for (int u : C[pivot]) {
+                    evictedText << (first ? "" : ", ") << u;
+                    first = false;
+                }
+            }
+            std::cout << "round " << numRounds << ": eliminate " << pivot << " (degree "
+                      << degree << ", size " << superSize << ", external degree "
+                      << externalDegree << "), absorbed cliques: "
+                      << absorbedCliquesText.str() << ", pruned edges: "
+                      << prunedEdgesText.str() << ", merged vertices: "
+                      << mergedVerticesText.str() << ", evicted: " << evictedText.str() << "\n";
+            if (delta < 0) break;                 // one pivot per round, as md5 does
         }
 
-        // ---- one REFRESH, for everything the batch reached ----
-        std::vector<int> refreshed;
-        for (int i : touched) if (!eliminated[i]) refreshed.push_back(i);
-        for (int i : refreshed) refile(i, degreeOf(A, C, cliques, weight, i));
-        refreshes += refreshed.size();
-        for (int p : batch) pivots.push_back(p);
-        ++rounds;
+        // ---- one REFRESH, for everything the batch reached -----------------
+        std::vector<int> refreshedVertices;
+        for (int u : touched) if (!eliminated[u]) refreshedVertices.push_back(u);
+        for (int u : refreshedVertices) {
+            degrees[u] = static_cast<int>(mmd1Neighbors(A, I, C, u).size());
+            buckets[degrees[u]].insert(u);
+        }
+        numDegreeComputations += static_cast<int>(refreshedVertices.size());
+        for (int u : refreshedVertices) minDegree = std::min(minDegree, degrees[u]);
+        ++numRounds;
 
-        std::cout << "  batch of " << batch.size() << ":";
-        for (int p : batch) std::cout << " " << p;
-        std::cout << "\n  refreshed = ";
-        if (refreshed.empty()) std::cout << "none";
-        else { bool g = true; for (int x : refreshed) { std::cout << (g ? "" : ", ") << x; g = false; } }
-        std::cout << "\n";
-        showState(A, C, cliques, weight, degrees, eliminated, buckets, mdeg, true,
-                  {}, {}, {}, {}, refreshed, 0,
-                  "(refreshed " + std::to_string(refreshed.size()) + ")");
+        std::ostringstream batchText;
+        for (std::size_t k = 0; k < batch.size(); ++k)
+            batchText << (k == 0 ? "" : ", ") << batch[k];
+        std::ostringstream refreshedVerticesText;
+        if (refreshedVertices.empty()) {
+            refreshedVerticesText << "none";
+        } else {
+            bool first = true;
+            for (int u : refreshedVertices) {
+                refreshedVerticesText << (first ? "" : ", ") << u;
+                first = false;
+            }
+        }
+        std::ostringstream title;
+        title << "round " << (numRounds - 1) << " done: batch of " << batch.size() << ": "
+              << batchText.str() << ", refreshed: " << refreshedVerticesText.str();
+        mmd1Show(A, I, C, degrees, title.str(), &eliminated);
+        mmd1ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
     }
 
     std::vector<int> order;
-    for (int p : pivots)
-        order.insert(order.end(), members[p].begin(), members[p].end());
-    std::cout << "rounds = " << rounds << ", pivots = " << pivots.size()
-              << ", average batch = "
-              << std::fixed << std::setprecision(1)
-              << (rounds ? static_cast<double>(pivots.size()) / rounds : 0.0) << "\n";
+    for (int pivot : pivots)
+        for (int u : superMembers[pivot]) order.push_back(u);
     std::cout << "nnz(L) = " << nnzL << " against nnz(tril A) = " << nnzTrilA
               << ", fill = " << (nnzL - nnzTrilA) << "\n";
-    std::cout << "degree computations: " << refreshes << "\n";
+    std::cout << "degree computations: " << numDegreeComputations
+              << ", bucket probes: " << numBucketProbes
+              << ", rounds: " << numRounds << "\n";
+    std::cout << "order: [";
+    for (std::size_t k = 0; k < order.size(); ++k)
+        std::cout << (k == 0 ? "" : ", ") << order[k];
+    std::cout << "]\n";
     return order;
 }
 
-void run(const std::string& name, const std::vector<std::set<int>>& graph) {
+void run(const std::string& name, const Graph& G) {
     std::cout << "=== " << name << " ===\n";
-    std::vector<int> order = mmd(graph);
-    std::cout << "order:";
-    for (int v : order) std::cout << " " << v;
-    std::cout << "\n\n";
+    mmd1MinimumDegree(G);
+    std::cout << "\n";
 }
 
-int main() {
+int main(int argc, char** argv) {
     // The same three graphs as md1 and md2.
     //
     //   graph1, a 4-cycle: eliminating any vertex forces its two neighbors
@@ -399,9 +565,76 @@ int main() {
         {0, 1, 3},        // 7
     };
 
-    run("graph1", graph1);
-    run("graph2", graph2);
-    run("graph3", graph3);
-    run("graph4", graph4);
+    // graph5, five vertices and four edges, two paths joined at 4: 2-1-4-0-3.
+    // Small and fill free, and here for one reason: it is the smallest graph on
+    // which mmd1's merge test declines a genuine supervariable. At the step whose
+    // pivot is 0 and whose clique is {4}, vertex 4 has nothing explicit left but
+    // belongs to c1 as well as to the new clique, so I[4] == {pivot} fails even
+    // though c1's only member is 4 itself and everything 4 reaches lies inside
+    // the new clique. The exact test mmd1Neighbors(A, I, C, u) contained in
+    // C[pivot] would merge it. See the README section on mass elimination.
+    //
+    //   edges: 0-3 0-4 1-2 1-4
+    std::vector<std::set<int>> graph5 = {
+        {3, 4},           // 0
+        {2, 4},           // 1
+        {1},              // 2
+        {0},              // 3
+        {0, 1},           // 4
+    };
+
+    // graph6, six vertices and eight edges. Here because one small graph carries
+    // three things at once. Its supervariable {0, 4} is a supernode but NOT a
+    // fundamental one: the elimination forest is 2 -> 1 -> 4 and 3 -> 0 -> 4, so
+    // 4 already has 1 as a child when 0 merges into it. The merge happens at step
+    // 2 of 5, so the run continues afterwards and the selection degree, 3 over
+    // {2, 3, 4}, differs from the external degree, 2 over {2, 3}, with the
+    // difference being the size of what merged. And superMembers ends with a hole
+    // in the middle, slot 4 empty between two used ones, while no pivot equals
+    // its own step number. See the README sections on mass elimination and on
+    // external degree.
+    //
+    //   edges: 0-2 0-3 0-4 1-3 2-3 2-4 2-5 3-4
+    std::vector<std::set<int>> graph6 = {
+        {2, 3, 4},        // 0
+        {3},              // 1
+        {0, 3, 4, 5},     // 2
+        {0, 1, 2, 4},     // 3
+        {0, 2, 3},        // 4
+        {2},              // 5
+    };
+
+    // graph7, five vertices and six edges. The pairwise case: at the step whose
+    // pivot is 0 and whose clique is {2, 4}, vertices 2 and 4 are
+    // indistinguishable FROM EACH OTHER, both reaching the same closed
+    // neighborhood, yet neither is absorbable into the pivot, since each still
+    // reaches 3 from outside the clique. No test framed against the pivot finds
+    // them, and the exact test does not help either: both orders are 1 0 (2 3 4).
+    // Catching such pairs needs a comparison between candidates, which is what
+    // amd's hashing does. See the README section on detecting supervariables
+    // against each other.
+    //
+    //   edges: 0-1 0-2 0-4 1-4 2-3 2-4 3-4
+    std::vector<std::set<int>> graph7 = {
+        {1, 2, 4},        // 0
+        {0, 4},           // 1
+        {0, 3, 4},        // 2
+        {2, 4},           // 3
+        {0, 1, 2, 3},     // 4
+    };
+
+    std::vector<std::pair<std::string, Graph>> examples = {
+        {"graph1", graph1}, {"graph2", graph2},
+        {"graph3", graph3}, {"graph4", graph4},
+        {"graph5", graph5}, {"graph6", graph6},
+        {"graph7", graph7},
+    };
+
+    // All of them by default. To run just one, pass its number: ./mmd1_cpp 3
+    int selected = (argc > 1) ? std::atoi(argv[1]) : 0;
+    for (int number = 1; number <= static_cast<int>(examples.size()); ++number) {
+        if (selected != 0 && number != selected) continue;
+        run(examples[number - 1].first, examples[number - 1].second);
+    }
     return 0;
 }

@@ -11,27 +11,40 @@
 // Build:  g++ -std=c++17 -O3 md1.cpp -o md1_cpp  (or: make)
 // Run:    ./md1_cpp
 
+#include <cstdint>
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
-#include <set>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
-using Graph = std::vector<std::set<int>>;
+// The adjacency of a vertex is a plain vector, UNSORTED. A set costs O(log d) per
+// membership test and per insertion; a sorted vector costs a merge to keep the
+// order. Neither is needed: membership comes from a mark array stamped with a
+// tag, which answers in one comparison and keeps every pass linear in what it
+// touches, and that is what the vendored codes and Oblio's own SymFactorEngine
+// do. See the README section on complexity.
+//
+// Types follow Oblio's rule, since this code is meant to grow into the ordering
+// engine: an INDEX names a vertex and is a std::int32_t, with NIL for "none"; a
+// POSITION locates something inside a vector and is a std::size_t. A vector of
+// indices is std::vector<std::int32_t>; both kinds are subscripted by position.
+constexpr std::int32_t NIL = -1;
+
+using Graph = std::vector<std::vector<std::int32_t>>;
 
 // Print a graph: adjacency sets.
 void md1Show(const Graph& A, const std::string& title = "",
              const std::vector<bool>* eliminated = nullptr) {
-    int n = static_cast<int>(A.size());
-    int width = static_cast<int>(std::to_string(std::max(n - 1, 0)).size());
-    std::vector<int> aliveVertices;
-    for (int u = 0; u < n; ++u)
+    const std::size_t n = A.size();
+    int width = static_cast<int>(std::to_string(n > 0 ? n - 1 : 0).size());  // setw field
+    std::vector<std::int32_t> aliveVertices;
+    for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u)
         if (eliminated == nullptr || !(*eliminated)[u]) aliveVertices.push_back(u);
     std::size_t numAliveEdges = 0;
-    for (int u : aliveVertices) numAliveEdges += A[u].size();
+    for (std::int32_t u : aliveVertices) numAliveEdges += A[u].size();
     numAliveEdges /= 2;
     if (!title.empty()) std::cout << title << "\n";
     std::ostringstream aliveVerticesText;
@@ -40,10 +53,10 @@ void md1Show(const Graph& A, const std::string& title = "",
     std::cout << "num alive vertices = " << aliveVerticesText.str()
               << ", num alive edges = " << numAliveEdges
               << ", storage = " << 2 * numAliveEdges << "\n";
-    for (int u : aliveVertices) {
+    for (std::int32_t u : aliveVertices) {
         std::ostringstream adjacencyText;
         bool first = true;
-        for (int v : A[u]) {
+        for (std::int32_t v : A[u]) {
             adjacencyText << (first ? "" : " ") << std::setw(width) << v;
             first = false;
         }
@@ -57,7 +70,7 @@ void md1Show(const Graph& A, const std::string& title = "",
 // where the same number falls monotonically. Here fill pushes it back up.
 std::size_t md1Storage(const Graph& A) {
     std::size_t total = 0;
-    for (const std::set<int>& adjacency : A) total += adjacency.size();
+    for (const std::vector<std::int32_t>& adjacency : A) total += adjacency.size();
     return total;
 }
 
@@ -66,47 +79,66 @@ std::size_t md1Storage(const Graph& A) {
 // Returns (neighbors, fillEdges): the pivot's adjacency at elimination, which is
 // the pattern of its column of L, and the fill edges created among those
 // neighbors, pairs that were not already adjacent.
-std::pair<std::set<int>, std::vector<std::pair<int, int>>> md1Eliminate(
-        Graph& A, std::vector<bool>& eliminated, int pivot) {
-    const std::set<int> neighbors = A[pivot];
-    std::vector<std::pair<int, int>> fillEdges;
-    for (int u : neighbors)
-        for (int v : neighbors)
-            if (u < v && A[u].count(v) == 0) {   // a genuinely new edge
-                A[u].insert(v);
-                A[v].insert(u);
-                fillEdges.push_back({u, v});
+std::pair<std::vector<std::int32_t>, std::vector<std::pair<std::int32_t, std::int32_t>>>
+md1Eliminate(Graph& A, std::vector<std::int32_t>& mark, std::int32_t& tag,
+             std::vector<bool>& eliminated, std::int32_t pivot) {
+    const std::vector<std::int32_t> neighbors = A[pivot];
+    std::vector<std::pair<std::int32_t, std::int32_t>> fillEdges;
+
+    // Nothing is sorted. For each neighbor u, stamp what u already sees, then walk
+    // the clique once and append what is missing. One pass per neighbor, O(d) each,
+    // against the O(d log d) a merge would cost to keep an order nobody needs.
+    for (std::int32_t u : neighbors) {
+        ++tag;
+        for (std::int32_t v : A[u]) mark[v] = tag;
+        mark[u] = tag;                      // never adjacent to itself
+        mark[pivot] = tag;                  // the pivot is leaving anyway
+        for (std::int32_t v : neighbors) {
+            if (mark[v] != tag) {           // a genuinely new edge
+                mark[v] = tag;
+                A[u].push_back(v);
+                if (u < v) fillEdges.push_back({u, v});
             }
-    for (int u : neighbors)
-        A[u].erase(pivot);
+        }
+    }
+
+    std::vector<std::int32_t> kept;
+    for (std::int32_t u : neighbors) {       // drop the pivot, compacting in place
+        kept.clear();
+        for (std::int32_t v : A[u])
+            if (v != pivot) kept.push_back(v);
+        A[u].swap(kept);
+    }
     A[pivot].clear();
     eliminated[pivot] = true;
     return {neighbors, fillEdges};
 }
 
 // Eliminate the least-degree vertex each step, naming the fill it makes.
-std::vector<int> md1MinimumDegree(const Graph& G) {
-    int n = static_cast<int>(G.size());
+std::vector<std::int32_t> md1MinimumDegree(const Graph& G) {
+    const std::size_t n = G.size();
     std::size_t nnzTrilA = 0;                      // before we mutate it
-    for (int u = 0; u < n; ++u) nnzTrilA += G[u].size();
+    for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) nnzTrilA += G[u].size();
     nnzTrilA = nnzTrilA / 2 + n;
     Graph A = G;
+    std::vector<std::int32_t> mark(n, NIL);   // scratch for membership, stamped with tag
+    std::int32_t tag = 0;
     std::vector<bool> eliminated(n, false);
-    std::vector<int> order;
-    int totalFill = 0;
-    int degreeSum = 0;             // sum of pivot degrees == sum of column counts of L
+    std::vector<std::int32_t> order;
+    std::size_t totalFill = 0;
+    std::size_t degreeSum = 0;     // sum of pivot degrees == sum of column counts of L
 
     md1Show(A, "start: every edge explicit, no fill yet", &eliminated);
-    for (int step = 0; step < n; ++step) {
-        int pivot = -1;
-        for (int u = 0; u < n; ++u) {
+    for (std::int32_t step = 0; step < static_cast<std::int32_t>(n); ++step) {
+        std::int32_t pivot = NIL;
+        for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) {
             if (eliminated[u]) continue;
-            if (pivot == -1 || A[u].size() < A[pivot].size()) pivot = u;
+            if (pivot == NIL || A[u].size() < A[pivot].size()) pivot = u;
         }
-        auto [neighbors, fillEdges] = md1Eliminate(A, eliminated, pivot);
-        int degree = static_cast<int>(neighbors.size());
+        auto [neighbors, fillEdges] = md1Eliminate(A, mark, tag, eliminated, pivot);
+        std::size_t degree = neighbors.size();
         order.push_back(pivot);
-        totalFill += static_cast<int>(fillEdges.size());
+        totalFill += fillEdges.size();
         degreeSum += degree;
 
         std::ostringstream fillEdgesText;
@@ -128,7 +160,7 @@ std::vector<int> md1MinimumDegree(const Graph& G) {
 
     // The degree of a pivot at elimination is the count of its column of L, so
     // the degrees already computed give nnz(L) with no extra work (Section 5.1).
-    std::size_t nnzL = static_cast<std::size_t>(degreeSum) + n;
+    std::size_t nnzL = degreeSum + n;
     std::cout << "nnz(L) = " << nnzL << " against nnz(tril A) = " << nnzTrilA
               << ", fill = " << (nnzL - nnzTrilA)
               << " (fill edges counted: " << totalFill << ")\n";
@@ -186,7 +218,7 @@ int main(int argc, char** argv) {
         {3, 4},      // 5
     };
 
-    std::vector<std::set<int>> graph3 = {
+    Graph graph3 = {
         {1, 3, 8},        // 0
         {0, 2, 6, 8},     // 1
         {1, 3, 5},        // 2
@@ -212,7 +244,7 @@ int main(int argc, char** argv) {
     // it as an ordinary denser test.
     //
     //   edges: 0-2 0-3 0-4 0-7 1-3 1-4 1-6 1-7 2-3 2-5 3-6 3-7 4-5 5-6
-    std::vector<std::set<int>> graph4 = {
+    Graph graph4 = {
         {2, 3, 4, 7},     // 0
         {3, 4, 6, 7},     // 1
         {0, 3, 5},        // 2
@@ -233,7 +265,7 @@ int main(int argc, char** argv) {
     // C[pivot] would merge it. See the README section on mass elimination.
     //
     //   edges: 0-3 0-4 1-2 1-4
-    std::vector<std::set<int>> graph5 = {
+    Graph graph5 = {
         {3, 4},           // 0
         {2, 4},           // 1
         {1},              // 2
@@ -253,7 +285,7 @@ int main(int argc, char** argv) {
     // external degree.
     //
     //   edges: 0-2 0-3 0-4 1-3 2-3 2-4 2-5 3-4
-    std::vector<std::set<int>> graph6 = {
+    Graph graph6 = {
         {2, 3, 4},        // 0
         {3},              // 1
         {0, 3, 4, 5},     // 2
@@ -273,7 +305,7 @@ int main(int argc, char** argv) {
     // against each other.
     //
     //   edges: 0-1 0-2 0-4 1-4 2-3 2-4 3-4
-    std::vector<std::set<int>> graph7 = {
+    Graph graph7 = {
         {1, 2, 4},        // 0
         {0, 4},           // 1
         {0, 3, 4},        // 2
@@ -290,8 +322,8 @@ int main(int argc, char** argv) {
 
     // All of them by default. To run just one, pass its number: ./md1_cpp 3
     int selected = (argc > 1) ? std::atoi(argv[1]) : 0;
-    for (int number = 1; number <= static_cast<int>(examples.size()); ++number) {
-        if (selected != 0 && number != selected) continue;
+    for (std::size_t number = 1; number <= examples.size(); ++number) {
+        if (selected != 0 && number != static_cast<std::size_t>(selected)) continue;
         run(examples[number - 1].first, examples[number - 1].second);
     }
     return 0;

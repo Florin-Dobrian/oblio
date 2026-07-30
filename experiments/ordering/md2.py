@@ -32,8 +32,10 @@ import sys
 # I[u] cliques that contain u
 # C[c] vertices that c contains
 
-def md2_show(A, I, C, title=None, eliminated=None):
-    """Print a quotient graph: adjacency sets, incidence sets, cliques."""
+def md2_show(A, I, C, mark, tag, title=None, eliminated=None):
+    """Print a quotient graph: adjacency, incidence, cliques, in the order the
+    structure holds them. Returns the advanced tag, since the degree it prints is
+    recomputed through md2_neighbors."""
     n = len(A)
     width = len(str(max(n - 1, 0)))
     alive_vertices = [u for u in range(n) if eliminated is None or not eliminated[u]]
@@ -48,14 +50,16 @@ def md2_show(A, I, C, title=None, eliminated=None):
           f"num alive cliques = {num_alive_cliques}, "
           f"storage = {2 * num_alive_edges} + {2 * num_alive_incidences} = {2 * (num_alive_edges + num_alive_incidences)}")
     for u in alive_vertices:
-        adjacency_text = " ".join(f"{v:>{width}}" for v in sorted(A[u]))
-        incidence_text = " ".join(f"c{c}" for c in sorted(I[u]))
-        degree = len(md2_neighbors(A, I, C, u))
+        adjacency_text = " ".join(f"{v:>{width}}" for v in A[u])
+        incidence_text = " ".join(f"c{c}" for c in I[u])
+        neighbors, tag = md2_neighbors(A, I, C, mark, tag, u)
+        degree = len(neighbors)
         print(f"  {u:>{width}}: {{{adjacency_text}}} {{{incidence_text}}} degree {degree}")
     for c in sorted(C):
-        clique_members_text = " ".join(f"{u:>{width}}" for u in sorted(C[c]))
+        clique_members_text = " ".join(f"{u:>{width}}" for u in C[c])
         print(f"  c{c}: {{{clique_members_text}}}")
     print()
+    return tag
 
 def md2_storage(A, I, C):
     """Entries actually stored. Each edge costs two, one per endpoint in A. Each
@@ -65,72 +69,116 @@ def md2_storage(A, I, C):
             + sum(len(incidence) for incidence in I)
             + sum(len(clique_members) for clique_members in C.values()))
 
-def md2_neighbors(A, I, C, u):
+def md2_neighbors(A, I, C, mark, tag, u):
     """The neighbors of live vertex u: its explicit adjacency A[u] together with
     the members of every clique that contains u, minus u itself, which the
     cliques always carry. This is George and Liu's reachable set, and it is what
-    the elimination graph would hold explicitly."""
-    neighbors = set(A[u])
-    for c in I[u]:
-        neighbors |= C[c]
-    neighbors.discard(u)
-    return neighbors
+    the elimination graph would hold explicitly.
 
-def md2_eliminate(A, I, C, eliminated, pivot):
+    One pass per source, with the mark array doing the deduplication, so the cost
+    is linear in what is touched. Returns (neighbors, tag): nothing is sorted, and
+    the order is the order the sources were walked in.
+    """
+    tag += 1
+    neighbors = []
+    mark[u] = tag                      # never its own neighbor
+    for v in A[u]:
+        if mark[v] != tag:
+            mark[v] = tag
+            neighbors.append(v)
+    for c in I[u]:
+        for v in C[c]:
+            if mark[v] != tag:
+                mark[v] = tag
+                neighbors.append(v)
+    return neighbors, tag
+
+def md2_eliminate(A, I, C, mark, tag, eliminated, pivot):
     """Turn the pivot into a clique.
 
-    Returns (neighbors, absorbed_cliques, pruned_edges): the pivot's neighbor set,
-    which becomes the clique and the pattern of its column of L; the cliques that
-    the new one swallows; and the explicit edges the new clique makes redundant.
-    The last two are reported for display; only neighbors is used by the caller.
+    Returns (neighbors, absorbed_cliques, pruned_edges, tag): the pivot's neighbor
+    set, which becomes the clique and the pattern of its column of L; the cliques
+    that the new one swallows; the explicit edges the new clique makes redundant;
+    and the advanced tag. The middle two are reported for display; only neighbors
+    is used by the caller.
     """
-    neighbors = md2_neighbors(A, I, C, pivot)
-    absorbed_cliques = set(I[pivot])
+    neighbors, tag = md2_neighbors(A, I, C, mark, tag, pivot)
+    absorbed_cliques = list(I[pivot])
     for c in absorbed_cliques:
         del C[c]
-    C[pivot] = set(neighbors)     # becomes L_pivot, the column pattern
+    C[pivot] = list(neighbors)      # becomes L_pivot, the column pattern
+
+    # Stamp the new clique once, and the absorbed cliques once. Membership is then
+    # a comparison, and both loops below are compactions in place.
+    tag += 1
+    clique_tag = tag
+    for v in neighbors:
+        mark[v] = clique_tag
+    tag += 1
+    absorbed_tag = tag
+    for c in absorbed_cliques:
+        mark[c] = absorbed_tag
 
     pruned_edges = []
     for u in neighbors:
-        redundant = A[u] & neighbors    # both ends inside the new clique
-        for v in redundant:
-            if u < v:
-                pruned_edges.append((u, v))
-        A[u] -= redundant               # implicit now: delete the explicit copy
-        A[u].discard(pivot)             # the pivot is no longer a variable
-        I[u] -= absorbed_cliques        # its absorbed cliques are gone
-        I[u].add(pivot)                 # u joins the new clique, whose id is the pivot
+        kept = []
+        for v in A[u]:
+            if v == pivot:              # the pivot is no longer a variable
+                continue
+            if mark[v] == clique_tag:   # both ends inside the new clique
+                if u < v:
+                    pruned_edges.append((u, v))
+                continue                # implicit now: delete the explicit copy
+            kept.append(v)
+        A[u] = kept
 
-    A[pivot].clear()
-    I[pivot].clear()
+        kept = [c for c in I[u] if mark[c] != absorbed_tag]   # absorbed are gone
+        kept.append(pivot)              # u joins the new clique, whose id is the pivot
+        I[u] = kept
+
+    A[pivot] = []
+    I[pivot] = []
     eliminated[pivot] = True
-    return neighbors, absorbed_cliques, pruned_edges
+    return neighbors, absorbed_cliques, pruned_edges, tag
 
 def md2_minimum_degree(G):
     """Same heuristic as md1, on the quotient graph. No fill is ever stored."""
     n = len(G)
     nnz_tril_A = sum(len(G[u]) for u in range(n)) // 2 + n
-    A = [set(adjacency) for adjacency in G]    # explicit variable neighbors
-    I = [set() for _ in range(n)]          # cliques each variable belongs to
-    C = {}                           # clique id -> member set
+    # The input is given as sets, so sort once here to match the C++ literals.
+    # After this nothing is sorted: the order is whatever the structure produces.
+    A = [sorted(adjacency) for adjacency in G]    # explicit vertex neighbors
+    I = [[] for _ in range(n)]             # cliques each vertex belongs to
+    C = {}                                 # clique id -> member list
+    mark = [-1] * n                        # scratch for membership, stamped with tag
+    tag = 0
     eliminated = [False] * n
     order = []
     degree_sum = 0
 
-    md2_show(A, I, C, "start: every edge explicit, no clique yet", eliminated=eliminated)
+    tag = md2_show(A, I, C, mark, tag, "start: every edge explicit, no clique yet",
+                   eliminated=eliminated)
     for step in range(n):
-        pivot = min((u for u in range(n) if not eliminated[u]), key=lambda u: len(md2_neighbors(A, I, C, u)))
-        neighbors, absorbed_cliques, pruned_edges = md2_eliminate(A, I, C, eliminated, pivot)
+        pivot, best = -1, 0
+        for u in range(n):                 # the key advances the tag, so no lambda
+            if eliminated[u]:
+                continue
+            candidate, tag = md2_neighbors(A, I, C, mark, tag, u)
+            if pivot == -1 or len(candidate) < best:
+                pivot, best = u, len(candidate)
+        neighbors, absorbed_cliques, pruned_edges, tag = md2_eliminate(
+            A, I, C, mark, tag, eliminated, pivot)
         degree = len(neighbors)
         order.append(pivot)
         degree_sum += degree
 
-        absorbed_cliques_text = ", ".join(f"c{c}" for c in sorted(absorbed_cliques)) if absorbed_cliques else "none"
+        absorbed_cliques_text = ", ".join(f"c{c}" for c in absorbed_cliques) if absorbed_cliques else "none"
         pruned_edges_text = ", ".join(f"{u}-{v}" for u, v in pruned_edges) if pruned_edges else "none"
-        md2_show(A, I, C,
-                 (f"step {step}: eliminate {pivot} (degree {degree}), "
-                  f"absorbed cliques: {absorbed_cliques_text}, pruned edges: {pruned_edges_text}"),
-                 eliminated=eliminated)
+        tag = md2_show(A, I, C, mark, tag,
+                       (f"step {step}: eliminate {pivot} (degree {degree}), "
+                        f"absorbed cliques: {absorbed_cliques_text}, "
+                        f"pruned edges: {pruned_edges_text}"),
+                       eliminated=eliminated)
 
     nnz_L = degree_sum + n
     print(f"nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "

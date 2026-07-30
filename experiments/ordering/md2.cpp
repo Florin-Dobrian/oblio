@@ -29,38 +29,74 @@
 // Run:    ./md2_cpp
 
 #include <cstdlib>
+#include <cstdint>
 #include <iomanip>
 #include <iostream>
-#include <map>
-#include <set>
 #include <sstream>
 #include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
 
-using Graph = std::vector<std::set<int>>;
-using Cliques = std::map<int, std::set<int>>;
+// Plain vectors, UNSORTED, and a vector indexed by clique id, not std::map. A set
+// costs O(log d) per membership test and per insertion; keeping a vector sorted
+// costs a merge per union. Neither is needed: membership comes from a MARK array
+// stamped with a tag, so "is v in the new clique" is one comparison, and every
+// pass is linear in what it touches. That is what the vendored codes and Oblio's
+// own SymFactorEngine do. See the README section on complexity.
+//
+// Types follow Oblio's rule: an INDEX names a vertex or a clique and is a
+// std::int32_t, with NIL for "none"; a POSITION locates something inside a vector
+// and is a std::size_t.
+constexpr std::int32_t NIL = -1;
+
+using Graph = std::vector<std::vector<std::int32_t>>;
+
+// C[c] holds the members of clique c, and cliqueLive[c] says whether c exists.
+// A clique id is the pivot that created it, so the id space is the vertex space.
+struct Cliques {
+    std::vector<std::vector<std::int32_t>> members;
+    std::vector<bool> live;
+    std::size_t count = 0;
+
+    explicit Cliques(std::int32_t n) : members(n), live(n, false) {}
+    const std::vector<std::int32_t>& at(std::int32_t c) const { return members[c]; }
+    std::vector<std::int32_t>& operator[](std::int32_t c) { return members[c]; }
+    void create(std::int32_t c, std::vector<std::int32_t> m) {
+        if (!live[c]) ++count;
+        live[c] = true;
+        members[c] = std::move(m);
+    }
+    void erase(std::int32_t c) {
+        if (live[c]) --count;
+        live[c] = false;
+        members[c].clear();
+    }
+    std::size_t size() const { return count; }
+};
 
 // I[u] cliques that contain u
 // C[c] vertices that c contains
 
-std::set<int> md2Neighbors(const Graph& A, const Graph& I, const Cliques& C, int u);
+std::vector<std::int32_t> md2Neighbors(const Graph& A, const Graph& I, const Cliques& C,
+                                       std::vector<std::int32_t>& mark, std::int32_t& tag,
+                                       std::int32_t u);
 
 // Print a quotient graph: adjacency sets, incidence sets, cliques.
 void md2Show(const Graph& A, const Graph& I, const Cliques& C,
+             std::vector<std::int32_t>& mark, std::int32_t& tag,
              const std::string& title = "",
              const std::vector<bool>* eliminated = nullptr) {
-    int n = static_cast<int>(A.size());
-    int width = static_cast<int>(std::to_string(std::max(n - 1, 0)).size());
-    std::vector<int> aliveVertices;
-    for (int u = 0; u < n; ++u)
+    const std::size_t n = A.size();
+    int width = static_cast<int>(std::to_string(n > 0 ? n - 1 : 0).size());
+    std::vector<std::int32_t> aliveVertices;
+    for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u)
         if (eliminated == nullptr || !(*eliminated)[u]) aliveVertices.push_back(u);
     std::size_t numAliveEdges = 0;
-    for (int u : aliveVertices) numAliveEdges += A[u].size();
+    for (std::int32_t u : aliveVertices) numAliveEdges += A[u].size();
     numAliveEdges /= 2;
     std::size_t numAliveIncidences = 0;
-    for (int u : aliveVertices) numAliveIncidences += I[u].size();
+    for (std::int32_t u : aliveVertices) numAliveIncidences += I[u].size();
     std::size_t numAliveCliques = C.size();
     if (!title.empty()) std::cout << title << "\n";
     std::ostringstream aliveVerticesText;
@@ -71,27 +107,28 @@ void md2Show(const Graph& A, const Graph& I, const Cliques& C,
               << ", num alive cliques = " << numAliveCliques
               << ", storage = " << 2 * numAliveEdges << " + " << 2 * numAliveIncidences
               << " = " << 2 * (numAliveEdges + numAliveIncidences) << "\n";
-    for (int u : aliveVertices) {
+    for (std::int32_t u : aliveVertices) {
         std::ostringstream adjacencyText;
         bool first = true;
-        for (int v : A[u]) {
+        for (std::int32_t v : A[u]) {
             adjacencyText << (first ? "" : " ") << std::setw(width) << v;
             first = false;
         }
         std::ostringstream incidenceText;
         first = true;
-        for (int c : I[u]) {
+        for (std::int32_t c : I[u]) {
             incidenceText << (first ? "" : " ") << "c" << c;
             first = false;
         }
-        std::size_t degree = md2Neighbors(A, I, C, u).size();
+        std::size_t degree = md2Neighbors(A, I, C, mark, tag, u).size();
         std::cout << "  " << std::setw(width) << u << ": {" << adjacencyText.str()
                   << "} {" << incidenceText.str() << "} degree " << degree << "\n";
     }
-    for (const auto& [c, cliqueMembers] : C) {
+    for (std::int32_t c = 0; c < static_cast<std::int32_t>(n); ++c) {
+        if (!C.live[c]) continue;
         std::ostringstream cliqueMembersText;
         bool first = true;
-        for (int u : cliqueMembers) {
+        for (std::int32_t u : C.at(c)) {
             cliqueMembersText << (first ? "" : " ") << std::setw(width) << u;
             first = false;
         }
@@ -105,9 +142,10 @@ void md2Show(const Graph& A, const Graph& I, const Cliques& C,
 // the total fall monotonically; the naive graph's only rises.
 std::size_t md2Storage(const Graph& A, const Graph& I, const Cliques& C) {
     std::size_t total = 0;
-    for (const std::set<int>& adjacency : A) total += adjacency.size();
-    for (const std::set<int>& incidence : I) total += incidence.size();
-    for (const auto& [c, cliqueMembers] : C) { (void)c; total += cliqueMembers.size(); }
+    for (const std::vector<std::int32_t>& adjacency : A) total += adjacency.size();
+    for (const std::vector<std::int32_t>& incidence : I) total += incidence.size();
+    for (std::size_t c = 0; c < C.members.size(); ++c)
+        if (C.live[c]) total += C.members[c].size();
     return total;
 }
 
@@ -115,13 +153,20 @@ std::size_t md2Storage(const Graph& A, const Graph& I, const Cliques& C) {
 // members of every clique that contains u, minus u itself, which the cliques
 // always carry. This is George and Liu's reachable set, and it is what the
 // elimination graph would hold explicitly.
-std::set<int> md2Neighbors(const Graph& A, const Graph& I, const Cliques& C, int u) {
-    std::set<int> neighbors = A[u];
-    for (int c : I[u]) {
-        const std::set<int>& cliqueMembers = C.at(c);
-        neighbors.insert(cliqueMembers.begin(), cliqueMembers.end());
-    }
-    neighbors.erase(u);
+std::vector<std::int32_t> md2Neighbors(const Graph& A, const Graph& I, const Cliques& C,
+                                       std::vector<std::int32_t>& mark, std::int32_t& tag,
+                                       std::int32_t u) {
+    // One pass per source, with the mark array doing the deduplication, so the
+    // cost is linear in what is touched. Nothing is sorted: the order is the order
+    // the sources were walked in.
+    ++tag;
+    std::vector<std::int32_t> neighbors;
+    mark[u] = tag;                          // never its own neighbor
+    for (std::int32_t v : A[u])
+        if (mark[v] != tag) { mark[v] = tag; neighbors.push_back(v); }
+    for (std::int32_t c : I[u])
+        for (std::int32_t v : C.at(c))
+            if (mark[v] != tag) { mark[v] = tag; neighbors.push_back(v); }
     return neighbors;
 }
 
@@ -131,27 +176,44 @@ std::set<int> md2Neighbors(const Graph& A, const Graph& I, const Cliques& C, int
 // which becomes the clique and the pattern of its column of L; the cliques that
 // the new one swallows; and the explicit edges the new clique makes redundant.
 // The last two are reported for display; only neighbors is used by the caller.
-std::tuple<std::set<int>, std::set<int>, std::vector<std::pair<int, int>>> md2Eliminate(
-        Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated, int pivot) {
-    const std::set<int> neighbors = md2Neighbors(A, I, C, pivot);
-    const std::set<int> absorbedCliques = I[pivot];
-    for (int c : absorbedCliques)
+std::tuple<std::vector<std::int32_t>, std::vector<std::int32_t>,
+           std::vector<std::pair<std::int32_t, std::int32_t>>>
+md2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
+             std::vector<std::int32_t>& mark, std::int32_t& tag, std::int32_t pivot) {
+    const std::vector<std::int32_t> neighbors = md2Neighbors(A, I, C, mark, tag, pivot);
+    const std::vector<std::int32_t> absorbedCliques = I[pivot];
+    for (std::int32_t c : absorbedCliques)
         C.erase(c);
-    C[pivot] = neighbors;           // becomes L_pivot, the column pattern
+    C.create(pivot, neighbors);     // becomes L_pivot, the column pattern
 
-    std::vector<std::pair<int, int>> prunedEdges;
-    for (int u : neighbors) {
-        std::set<int> redundant;    // both ends inside the new clique
-        for (int v : A[u])
-            if (neighbors.count(v) != 0) redundant.insert(v);
-        for (int v : redundant)
-            if (u < v) prunedEdges.push_back({u, v});
-        for (int v : redundant)
-            A[u].erase(v);          // implicit now: delete the explicit copy
-        A[u].erase(pivot);          // the pivot is no longer a variable
-        for (int c : absorbedCliques)
-            I[u].erase(c);          // its absorbed cliques are gone
-        I[u].insert(pivot);         // u joins the new clique, whose id is the pivot
+    // Stamp the new clique once, and the absorbed cliques once. Membership is then
+    // a comparison, and both loops below are compactions in place.
+    ++tag;
+    const std::int32_t cliqueTag = tag;
+    for (std::int32_t v : neighbors) mark[v] = cliqueTag;
+    ++tag;
+    const std::int32_t absorbedTag = tag;
+    for (std::int32_t c : absorbedCliques) mark[c] = absorbedTag;
+
+    std::vector<std::pair<std::int32_t, std::int32_t>> prunedEdges;
+    std::vector<std::int32_t> kept;
+    for (std::int32_t u : neighbors) {
+        kept.clear();
+        for (std::int32_t v : A[u]) {
+            if (v == pivot) continue;            // the pivot is no longer a variable
+            if (mark[v] == cliqueTag) {          // both ends inside the new clique
+                if (u < v) prunedEdges.push_back({u, v});
+                continue;                        // implicit now: drop the explicit copy
+            }
+            kept.push_back(v);
+        }
+        A[u].swap(kept);
+
+        kept.clear();                            // I[u] loses the absorbed cliques
+        for (std::int32_t c : I[u])
+            if (mark[c] != absorbedTag) kept.push_back(c);
+        kept.push_back(pivot);                   // u joins the new clique, id = pivot
+        I[u].swap(kept);
     }
 
     A[pivot].clear();
@@ -161,30 +223,32 @@ std::tuple<std::set<int>, std::set<int>, std::vector<std::pair<int, int>>> md2El
 }
 
 // Same heuristic as md1, on the quotient graph. No fill is ever stored.
-std::vector<int> md2MinimumDegree(const Graph& G) {
-    int n = static_cast<int>(G.size());
+std::vector<std::int32_t> md2MinimumDegree(const Graph& G) {
+    const std::size_t n = G.size();
     std::size_t nnzTrilA = 0;
-    for (int u = 0; u < n; ++u) nnzTrilA += G[u].size();
+    for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) nnzTrilA += G[u].size();
     nnzTrilA = nnzTrilA / 2 + n;
-    Graph A = G;                            // explicit variable neighbors
-    Graph I(n);                             // cliques each variable belongs to
-    Cliques C;                              // clique id -> member set
+    Graph A = G;                            // explicit vertex neighbors
+    Graph I(n);                             // cliques each vertex belongs to
+    Cliques C(static_cast<std::int32_t>(n));   // clique id -> member list
+    std::vector<std::int32_t> mark(n, NIL);    // scratch for membership, with tag
+    std::int32_t tag = 0;
     std::vector<bool> eliminated(n, false);
-    std::vector<int> order;
-    int degreeSum = 0;
+    std::vector<std::int32_t> order;
+    std::size_t degreeSum = 0;
 
-    md2Show(A, I, C, "start: every edge explicit, no clique yet", &eliminated);
-    for (int step = 0; step < n; ++step) {
-        int pivot = -1;
+    md2Show(A, I, C, mark, tag, "start: every edge explicit, no clique yet", &eliminated);
+    for (std::int32_t step = 0; step < static_cast<std::int32_t>(n); ++step) {
+        std::int32_t pivot = NIL;
         std::size_t best = 0;
-        for (int u = 0; u < n; ++u) {
+        for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) {
             if (eliminated[u]) continue;
-            std::size_t degree = md2Neighbors(A, I, C, u).size();
-            if (pivot == -1 || degree < best) { pivot = u; best = degree; }
+            std::size_t degree = md2Neighbors(A, I, C, mark, tag, u).size();
+            if (pivot == NIL || degree < best) { pivot = u; best = degree; }
         }
         auto [neighbors, absorbedCliques, prunedEdges] =
-            md2Eliminate(A, I, C, eliminated, pivot);
-        int degree = static_cast<int>(neighbors.size());
+            md2Eliminate(A, I, C, eliminated, mark, tag, pivot);
+        std::size_t degree = neighbors.size();
         order.push_back(pivot);
         degreeSum += degree;
 
@@ -193,7 +257,7 @@ std::vector<int> md2MinimumDegree(const Graph& G) {
             absorbedCliquesText << "none";
         } else {
             bool first = true;
-            for (int c : absorbedCliques) {
+            for (std::int32_t c : absorbedCliques) {
                 absorbedCliquesText << (first ? "" : ", ") << "c" << c;
                 first = false;
             }
@@ -212,10 +276,10 @@ std::vector<int> md2MinimumDegree(const Graph& G) {
         title << "step " << step << ": eliminate " << pivot << " (degree " << degree
               << "), absorbed cliques: " << absorbedCliquesText.str()
               << ", pruned edges: " << prunedEdgesText.str();
-        md2Show(A, I, C, title.str(), &eliminated);
+        md2Show(A, I, C, mark, tag, title.str(), &eliminated);
     }
 
-    std::size_t nnzL = static_cast<std::size_t>(degreeSum) + n;
+    std::size_t nnzL = degreeSum + n;
     std::cout << "nnz(L) = " << nnzL << " against nnz(tril A) = " << nnzTrilA
               << ", fill = " << (nnzL - nnzTrilA) << "\n";
     std::cout << "order: [";
@@ -257,13 +321,13 @@ int main(int argc, char** argv) {
     //
     //      edges: 0-1 0-3 0-8 1-2 1-6 1-8 2-3 2-5 3-4 4-5
     //             5-6 5-9 6-7 6-10 7-8 8-9 9-10 10-11
-    std::vector<std::set<int>> graph1 = {
+    Graph graph1 = {
         {1, 3}, {0, 2}, {1, 3}, {0, 2},
     };
-    std::vector<std::set<int>> graph2 = {
+    Graph graph2 = {
         {1, 2}, {0, 3}, {0, 4}, {1, 4, 5}, {2, 3, 5}, {3, 4},
     };
-    std::vector<std::set<int>> graph3 = {
+    Graph graph3 = {
         {1, 3, 8},        // 0
         {0, 2, 6, 8},     // 1
         {1, 3, 5},        // 2
@@ -289,7 +353,7 @@ int main(int argc, char** argv) {
     // it as an ordinary denser test.
     //
     //   edges: 0-2 0-3 0-4 0-7 1-3 1-4 1-6 1-7 2-3 2-5 3-6 3-7 4-5 5-6
-    std::vector<std::set<int>> graph4 = {
+    Graph graph4 = {
         {2, 3, 4, 7},     // 0
         {3, 4, 6, 7},     // 1
         {0, 3, 5},        // 2
@@ -310,7 +374,7 @@ int main(int argc, char** argv) {
     // C[pivot] would merge it. See the README section on mass elimination.
     //
     //   edges: 0-3 0-4 1-2 1-4
-    std::vector<std::set<int>> graph5 = {
+    Graph graph5 = {
         {3, 4},           // 0
         {2, 4},           // 1
         {1},              // 2
@@ -330,7 +394,7 @@ int main(int argc, char** argv) {
     // external degree.
     //
     //   edges: 0-2 0-3 0-4 1-3 2-3 2-4 2-5 3-4
-    std::vector<std::set<int>> graph6 = {
+    Graph graph6 = {
         {2, 3, 4},        // 0
         {3},              // 1
         {0, 3, 4, 5},     // 2
@@ -350,7 +414,7 @@ int main(int argc, char** argv) {
     // against each other.
     //
     //   edges: 0-1 0-2 0-4 1-4 2-3 2-4 3-4
-    std::vector<std::set<int>> graph7 = {
+    Graph graph7 = {
         {1, 2, 4},        // 0
         {0, 4},           // 1
         {0, 3, 4},        // 2
@@ -367,8 +431,8 @@ int main(int argc, char** argv) {
 
     // All of them by default. To run just one, pass its number: ./md2_cpp 3
     int selected = (argc > 1) ? std::atoi(argv[1]) : 0;
-    for (int number = 1; number <= static_cast<int>(examples.size()); ++number) {
-        if (selected != 0 && number != selected) continue;
+    for (std::size_t number = 1; number <= examples.size(); ++number) {
+        if (selected != 0 && number != static_cast<std::size_t>(selected)) continue;
         run(examples[number - 1].first, examples[number - 1].second);
     }
     return 0;

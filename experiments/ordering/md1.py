@@ -13,7 +13,7 @@
 import sys
 
 def md1_show(A, title=None, eliminated=None):
-    """Print a graph: adjacency sets."""
+    """Print a graph: adjacency lists, in the order the structure holds them."""
     n = len(A)
     width = len(str(max(n - 1, 0)))
     alive_vertices = [u for u in range(n) if eliminated is None or not eliminated[u]]
@@ -25,7 +25,7 @@ def md1_show(A, title=None, eliminated=None):
           f"num alive edges = {num_alive_edges}, "
           f"storage = {2 * num_alive_edges}")
     for u in alive_vertices:
-        adjacency_text = " ".join(f"{v:>{width}}" for v in sorted(A[u]))
+        adjacency_text = " ".join(f"{v:>{width}}" for v in A[u])
         print(f"  {u:>{width}}: {{{adjacency_text}}} degree {len(A[u])}")
     print()
 
@@ -34,32 +34,46 @@ def md1_storage(A):
     md2, where the same number falls monotonically. Here fill pushes it back up."""
     return sum(len(adjacency) for adjacency in A)
 
-def md1_eliminate(A, eliminated, pivot):
+def md1_eliminate(A, mark, tag, eliminated, pivot):
     """Make the pivot's neighbors a clique, then remove the pivot.
 
-    Returns (neighbors, fill_edges): the pivot's adjacency at elimination, which is the
-    pattern of its column of L, and the fill edges created among those neighbors,
-    pairs that were not already adjacent.
+    Returns (neighbors, fill_edges, tag): the pivot's adjacency at elimination,
+    which is the pattern of its column of L; the fill edges created among those
+    neighbors, pairs that were not already adjacent; and the advanced tag.
+
+    Nothing is sorted. Membership comes from the mark array, one stamp per query,
+    which is what the vendored codes do and what keeps every pass linear in what
+    it touches.
     """
-    neighbors = set(A[pivot])
+    neighbors = list(A[pivot])
     fill_edges = []
     for u in neighbors:
+        tag += 1                          # stamp what u already sees
+        for v in A[u]:
+            mark[v] = tag
+        mark[u] = tag                     # never adjacent to itself
+        mark[pivot] = tag                 # the pivot is leaving anyway
         for v in neighbors:
-            if u < v and v not in A[u]:   # a genuinely new edge
-                A[u].add(v)
-                A[v].add(u)
-                fill_edges.append((u, v))
-    for u in neighbors:
-        A[u].discard(pivot)
-    A[pivot].clear()
+            if mark[v] != tag:            # a genuinely new edge
+                mark[v] = tag
+                A[u].append(v)
+                if u < v:
+                    fill_edges.append((u, v))
+    for u in neighbors:                   # drop the pivot, compacting in place
+        A[u] = [v for v in A[u] if v != pivot]
+    A[pivot] = []
     eliminated[pivot] = True
-    return neighbors, fill_edges
+    return neighbors, fill_edges, tag
 
 def md1_minimum_degree(G):
     """Eliminate the least-degree vertex each step, naming the fill it makes."""
     n = len(G)
     nnz_tril_A = sum(len(G[u]) for u in range(n)) // 2 + n   # before we mutate it
-    A = [set(adjacency) for adjacency in G]
+    # The input is given as sets, so sort once here to match the C++ literals.
+    # After this nothing is sorted: the order is whatever the structure produces.
+    A = [sorted(adjacency) for adjacency in G]
+    mark = [-1] * n                # scratch for membership, stamped with tag
+    tag = 0
     eliminated = [False] * n
     order = []
     total_fill = 0
@@ -68,7 +82,7 @@ def md1_minimum_degree(G):
     md1_show(A, "start: every edge explicit, no fill yet", eliminated=eliminated)
     for step in range(n):
         pivot = min((u for u in range(n) if not eliminated[u]), key=lambda u: len(A[u]))
-        neighbors, fill_edges = md1_eliminate(A, eliminated, pivot)
+        neighbors, fill_edges, tag = md1_eliminate(A, mark, tag, eliminated, pivot)
         degree = len(neighbors)
         order.append(pivot)
         total_fill += len(fill_edges)

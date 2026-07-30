@@ -27,24 +27,34 @@ Each adds exactly one mechanism to the one before. The right column cites
 
 ## What the layers show
 
-**`md1` through `md5` return the same ordering.** Every one of them. That is the point of the
-first five sections: the heuristic was fixed in `md1` and everything after is implementation, so
-the layers can be verified by demanding an identical permutation.
+**`md1` through `md4` return the same ordering.** That is the point of the first four sections:
+the heuristic was fixed in `md1` and everything after is implementation, so those layers can be
+verified by demanding an identical permutation. From `md5` on the permutation moves, and the
+reason is worth separating from the reason the fill moves.
 
-One refinement, because "same ordering" is not quite true across the whole run. Three things can
-happen when a layer is added, and all three occur here:
+Four things can happen when a layer is added, and all four occur here:
 
 ```
                               order        fill        what the change is
 md1 -> md2                    same         same        a change of representation
 md2 -> md3  (mass elim.)      DIFFERENT    same*       a reordering, free step by step
-md3 -> md4 -> md5             same         same        a change of implementation
+md3 -> md4                    same         same        a change of implementation
+md4 -> md5  (buckets)         DIFFERENT    same-ish    a change of TIE-BREAK
 md5 -> mmd1 (multiple elim.)  different     DIFFERENT  a wager
 ```
 
-So `mmd1` is not the first layer to change the permutation. Mass elimination already does, on nine
-of twelve test graphs, with identical `nnz(L)` on all twelve. What `mmd1` is first to change is the
-**fill**.
+`md5`'s change is the odd one, and it is a consequence of the data structure rather than of the
+heuristic. A bucket is a linked list pushed and popped at the head, which is the only O(1)
+structure for the job, so the winner among equal degrees is whatever was filed last rather than
+the lowest index. On the seven examples the order differs every time and `nnz(L)` is identical
+every time; on 200 random graphs the order differs on 198, `nnz(L)` agrees on 181, and where it
+differs `md5` is better on 12 and worse on 7. Different, not worse: the pivots are still exact
+minima and only the choice among equals moves.
+
+So `mmd1` is not the first layer to change the permutation, and neither is `md5`. Mass
+elimination already does it at `md3`, on nine of twelve test graphs, with identical `nnz(L)` on
+all twelve. What `mmd1` is first to change *systematically* is the **fill**, because it is the
+first to choose a pivot on stale information.
 
 The asterisk on `md2 -> md3`: the individual merge is provably free, but the equality of the
 totals across the whole run is measured rather than proved. See the open question below.
@@ -123,14 +133,21 @@ example when given none.
 The vendored routines are built separately, and not by `make`:
 
 ```
-g++ -std=c++17 -O3 vendored.cpp vendored/Mmd.cpp vendored/Amd.cpp -o vendored_cpp
+g++ -std=c++17 -O3 vendored.cpp vendored/vendored_mmd.cpp vendored/vendored_amd.cpp \
+    -o vendored_cpp
 ./vendored_cpp        both routines on all seven graphs
 ./vendored_cpp 3      just the third
 ```
 
-`vendored/Mmd.cpp` and `vendored/Amd.cpp` are copies of `src/Mmd.cpp` and `src/Amd.cpp`, kept here
-so the comparison is self-contained, and never edited. `vendored.cpp` only feeds them the same
-seven graphs and prints their permutations in our format.
+`vendored/vendored_mmd.cpp` and `vendored/vendored_amd.cpp` are copies of `src/Mmd.cpp` and
+`src/Amd.cpp`, kept here so the comparison is self-contained, and never edited. `vendored.cpp`
+only feeds them the same seven graphs and prints their permutations in our format.
+
+The lowercase names are deliberate, and so is the subfolder. Oblio capitalizes source files, but
+macOS formats APFS case-insensitive by default, so `Amd.cpp` and `amd.cpp` are one path: dropping
+the vendored copy beside the prototype overwrote `amd.cpp` silently, and `git status` said nothing
+because `core.ignorecase` is on. The subfolder keeps the two kinds of file apart, and the prefix
+means no vendored name can ever collide with a prototype.
 
 ## What is not implemented
 
@@ -220,17 +237,20 @@ which is why the vendored MMD starts graph1 at vertex 3 where we start at 0. The
 quality claim behind it: prepending is the cheap end of a linked list, and a tail pointer would
 have cost another array of size n.
 
-Our buckets are index-ordered instead, `min(buckets[min_degree])`, which is md5's convention and
-the reason md1 through md5 agree with each other. mmd1 and mmd2 keep it. Matching the vendored
-permutation exactly would mean reproducing its whole insertion history, including the order in
-which `mmdupd` walks `q2h` and then `qxh`, and that is coupled to the features rather than
-separable from them. It stays a possible later mode, not the acceptance test.
+We now do the same, because the alternative costs a log factor on the dominant operation and the
+goal is to match the vendored asymptotics. Buckets are linked lists in both twins from md5 on, so
+our tie-break is theirs in kind: whatever was filed last. It is not theirs in detail, since the
+insertion history differs, and reproducing that exactly would mean reproducing the order in which
+`mmdupd` walks `q2h` and then `qxh`, which is coupled to the features rather than separable from
+them. So the permutations still differ, and exact equality stays a possible later mode rather
+than the acceptance test.
 
-The test is `vendored.cpp`, which links `vendored/Mmd.cpp` and `vendored/Amd.cpp`, copies of
-`src/Mmd.cpp` and `src/Amd.cpp` that are never edited, and runs both routines on the same seven
-graphs, printing permutations in our format. mmd2 and amd2 are accepted when every feature above
-is present and exercised, nnz(L) matches the vendored routine on the seven graphs and on random
-ones, and every remaining order difference is traceable to a tie.
+The test is `vendored.cpp`, which links `vendored/vendored_mmd.cpp` and
+`vendored/vendored_amd.cpp`, copies of `src/Mmd.cpp` and `src/Amd.cpp` that are never edited, and
+runs both routines on the same seven graphs, printing permutations in our format. mmd2 and amd2
+are accepted when every feature above is present and exercised, nnz(L) matches the vendored
+routine on the seven graphs and on random ones, and every remaining order difference is traceable
+to a tie.
 
 ## Two bugs this found, both ours
 
@@ -690,12 +710,21 @@ md5_storage and md5_eliminate are md4's word for word.
 **Fragment 1, construction.**
 
 ```python
-    buckets = [set() for _ in range(n)]        # buckets[d] holds the live degree-d
+    buckets = [[] for _ in range(n)]           # buckets[d] holds the live degree-d
+    filed = [False] * n                        # whether u is in a bucket at all
     for u in range(n):
-        buckets[degrees[u]].add(u)
+        md5_file(buckets, filed, degrees[u], u)
     min_degree = min(degrees) if n else 0
     num_bucket_probes = 0
 ```
+
+A bucket is a LINKED LIST, not a set. The C++ twin holds `head[d]` with `next` and `prev` over
+n, which is what MMD's fwd/bwd and AMD's Next/Last are, and push, pop and splice are all O(1).
+An ordered container cannot give that: `std::set` costs O(log n) per file and unfile, and those
+happen once per degree change, which is the dominant operation of the whole algorithm. The
+Python mirrors the same sequence with a list whose position 0 is the head, so both twins hold
+the same order at every step and pick the same pivot; it pays O(bucket) for insert and remove,
+which is the one place it is asymptotically behind its twin.
 
 n slots is exactly right, indices 0 through n - 1. A live vertex counts only live neighbors,
 so its degree is at most n - 1, and the walk stops at the first non-empty bucket, which
@@ -713,24 +742,26 @@ correct and would cost one extra walk on the first step.
             min_degree += 1
             num_bucket_probes += 1
         num_bucket_probes += 1
-        pivot = min(buckets[min_degree])       # lowest index, as the scan did
+        pivot = buckets[min_degree][0]         # the head, whatever was filed last
 ```
 
 The walk only ever climbs, and min_degree is never reset between steps, so the work is
 amortized across the run rather than paid per step. Termination rests on the outer loop
 condition: some live vertex exists, it is filed under its own degree, and that degree is at
 or above the bound, so a non-empty bucket is found before the array ends.
-`min(buckets[min_degree])` is the tie-break, and it is why the orders match md1 through md4:
-those scan range(n) keeping the first strict minimum, so ties go to the lowest index, and
-this reproduces it exactly.
+The pop takes the head, and that is the tie-break: whatever was filed last, not the lowest
+index. md1 through md4 scan range(n) and keep the first strict minimum, so ties there go to the
+lowest index, and this does not reproduce it. That is the price of an O(1) bucket, and it is why
+md5's permutation differs from md4's; see the section on what the layers show for the
+measurements.
 
 **Fragment 3, the deletions.**
 
 ```python
-        buckets[degrees[pivot]].discard(pivot)  # the pivot has left the graph
+        md5_unfile(buckets, filed, degrees[pivot], pivot)   # the pivot has left
         degrees[pivot] = 0
         for u in merged_vertices:               # and so have the merged vertices
-            buckets[degrees[u]].discard(u)
+            md5_unfile(buckets, filed, degrees[u], u)
             degrees[u] = 0
 ```
 
@@ -745,23 +776,25 @@ before the zeroing, or the vertex is erased from buckets[0] and left where it wa
 ```python
         refreshed_vertices = sorted(C[pivot])
         for u in refreshed_vertices:
-            md5_refile(buckets, degrees, u, len(md5_neighbors(A, I, C, u)))
+            md5_refile(buckets, filed, degrees, u, len(md5_neighbors(A, I, C, u)))
         num_degree_computations += len(refreshed_vertices)
 ```
 
 ```python
-def md5_refile(buckets, degrees, u, new_degree):
-    buckets[degrees[u]].discard(u)
+def md5_refile(buckets, filed, degrees, u, new_degree):
+    md5_unfile(buckets, filed, degrees[u], u)
     degrees[u] = new_degree
-    buckets[new_degree].add(u)
+    md5_file(buckets, filed, new_degree, u)
 ```
 
 Same refresh set as md4, and the only change is that the new degree goes through the helper so
 the bucket moves with it. The helper exists so the three steps cannot be written half-way. A
 vertex whose degree did not change is removed and reinserted into the same set, which is
-harmless. Removal from the middle of a bucket must be O(1), which is why a bucket is a set
-here; the vendored codes use doubly linked lists, MMD's fwd/bwd and AMD's Next/Last, because
-Fortran and C of that era had no such container.
+harmless. Removal from the middle of a bucket must be O(1), which is why a bucket is a linked
+list rather than an ordered container. `filed[u]` makes unfiling idempotent, which matters in
+mmd1 rather than here: a vertex evicted early in a batch can be merged away by a later pivot in
+the same batch, and unfiling it twice would splice a list it is no longer in. With sets that was
+a harmless `discard`; with a linked list it would corrupt the bucket head.
 
 **Fragment 5, lowering the bound.**
 
@@ -825,7 +858,7 @@ in a bucket to be found in.
                 min_degree += 1
                 num_bucket_probes += 1
                 continue
-            pivot = min(buckets[min_degree])
+            pivot = buckets[min_degree][0]
             ...
             if delta < 0:                      # one pivot per round, as md5 does
                 break
@@ -1087,94 +1120,112 @@ are in md3, md4, md5 and mmd1, in both twins. Measured on the 20 by 20 grid: loo
 34, clique scan 4247 down to 47, real work 26408. No ordering moved, checked on the seven graphs
 and 200 random ones, and mmd1 at delta = -1 still reproduces md5 exactly.
 
-**One place the Python is asymptotically worse than the C++, and it stays.** The pop is
-`min(buckets[min_degree])`, which is O(bucket size) because a Python `set` is unordered, and grid
-buckets are large since degrees repeat: 24567 elementary steps on the 20 by 20, comparable to all
-the real work. The C++ twin does not pay it. `std::set` is ordered, so
-`*buckets[minDegree].begin()` is O(1), which matches the vendored `head[dg]` in cost while
-keeping our index-ordered tie-break. Closing the gap in Python would need a heap per bucket with
-lazy deletion and a membership set to skip stale entries, which is more machinery than these
-files should carry. Documented rather than fixed, and noted in the md5 and mmd1 headers.
+**One place the Python is asymptotically worse than the C++, and it stays.** Both twins hold a
+bucket as a list pushed and popped at the head, so the pop is O(1) in each. Filing and unfiling
+are not: the C++ splices a doubly linked list in O(1) through `head`, `next` and `prev`, while
+the Python does `insert(0, u)` and `remove(u)` on a list, which are O(bucket). Closing that would
+mean mirroring the link arrays in Python and giving up the readable list, which is more machinery
+than these files should carry. Documented rather than fixed, and noted in the md5 and mmd1
+headers.
 
-### A log factor remains in the C++, and it is the containers
+### Matching the vendored cost: what the containers became
 
-With the two fixes above, the C++ prototypes perform the same NUMBER of graph operations as the
-vendored routines. What they do not yet match is the cost of each operation, and the gap is a
-factor of log, which is asymptotic rather than a constant and therefore not something tuning
-removes. It comes entirely from the containers, not from a line of the algorithm.
+With the two fixes above the prototypes performed the same NUMBER of graph operations as the
+vendored routines, but not at the same cost per operation. `std::set` and `std::map` add a factor
+of log, which is asymptotic rather than a constant and therefore not something tuning removes,
+and a sorted vector trades that for a merge per union. Both are now gone, in both twins.
 
-Where the logs are today, in mmd1.cpp:
+Where the costs were, and what replaced them:
 
-| operation | ours | vendored | ours vs theirs |
+| operation | before | now | vendored |
 |---|---|---|---|
-| build a neighbor set | `std::set` insert | mark array, one pass per list | O(log k) vs O(1) each |
-| find a clique's members | `std::map` lookup | index an array by element id | O(log n) vs O(1) |
-| test v in the new clique | `neighbors.count(v)` | `marker[v] < tag` | O(log d) vs O(1) |
-| delete a pruned edge | `A[u].erase(v)` | compact the list in place | O(log d) vs O(1) amortized |
-| file or unfile a bucket | `std::set` insert, erase | splice a linked list | O(log n) vs O(1) |
+| build a neighbor set | `std::set`, then a merge | one pass per source, marks | the same |
+| find a clique's members | `std::map` lookup | index a vector by clique id | the same |
+| test v in the new clique | `count(v)`, then search | `mark[v] == tag` | `marker[v] < tag` |
+| delete a pruned edge | `erase(v)` each | compaction in place | the same |
+| drop absorbed cliques | `set_difference` | stamp and compact | the same |
+| add the pivot to I[u] | `lower_bound` then insert | `push_back` | the same |
+| file or unfile a bucket | `std::set` insert, erase | splice a list | `fwd`/`bwd`, `Next`/`Last` |
 
-What the real implementation looks like instead, and none of it changes the algorithm:
+**A, I and the clique member lists are plain vectors, UNSORTED.** Nothing needs the order.
+Membership comes from a mark array of size n stamped with a monotone tag, so a query is one
+comparison and the array is never cleared, which is `mmdelm`'s `marker[nb] < tag` and Oblio's own
+`SymFactorEngine`, where the comment reads "as an index is added to the index set of supernode kk
+it is marked with kk, which makes is it already there a single comparison".
 
-**A[u] and I[u] become sorted `std::vector<int>`.** The query then costs one pass over each list.
-Membership, which is what `redundant = A[u] & neighbors` needs, comes from a scratch mark array
-of size n: stamp every member of the new clique with the current tag, walk A[u] once, keep what is
-unmarked. That is `mmdelm`'s `marker[nb] < tag` exactly. Deletion becomes compaction in place,
-writing survivors forward, which prunes in the same pass rather than in a second one.
+**C is indexed by clique id.** An id is a vertex number, so C is a vector over 0..n-1 with a
+liveness flag, and the lookup is direct.
 
-**C stops being a map and becomes indexed by clique id.** An id is a vertex number, so C is a
-`std::vector` over 0..n-1 and the lookup is direct. Its member lists become vectors in the same
-shape as A.
+**The buckets are head plus next and prev arrays over n**, with a `filed` flag so unfiling is
+idempotent, which matters because a vertex evicted early in an mmd1 batch can be merged away by a
+later pivot in the same round. Filing, unfiling and popping are O(1).
 
-**The buckets become head plus next and prev arrays over n.** Filing and unfiling are then O(1)
-splices. This is where the tie-break question returns: an intrusive list has no order to take a
-minimum from, so index-ordered popping stops being free, and the choice is either to accept the
-list's own order, which is what the vendored codes do, or to pay for the tie-break some other
-way.
+Two things follow from the tie-break rather than the cost. An intrusive list has no order to take
+a minimum from, so the pop takes the head, which is whatever was filed last. That is the vendored
+convention, it is why md5 and mmd1 order differently from md1 through md4, and it was accepted
+deliberately: best complexity wins over a nice ordering, and the ordering is different rather
+than worse.
 
-Two consequences arrive with that substitution, and they are the three things this README
-currently lists as excluded or deferred. Member lists in a shared pool can outgrow their slots
-when a clique grows, which is where AMD's `iwlen`, `pfree` and garbage collection come from. And
-once a supervariable's members are a chain rather than a list, its size stops being O(1) to read,
-which is where the `weight` array earns its place. So the exclusions are not independent
-decisions: they are all consequences of moving off `std::set` and `std::map`.
+**The Python moved with it.** A, I and C are lists there too, with their own mark array and tag,
+because the twins are checked by comparing traces and a trace shows the order the structure
+holds. The set algebra that made md2 read as mathematics is gone; that was the price of the
+check, and the check is what catches drift. Tags are threaded through return values, since
+Python has no reference parameters. One sort remains, at construction, because the input is
+given as sets in Python and as ascending literals in C++; it is outside every loop, which is the
+same place `SymFactorEngine` puts its final sort.
 
-This is the work that turns the prototypes into the ordering code, and it belongs to that step
-rather than to mmd2, which is about features.
+What is left for the ordering code proper is the shared pool with its garbage collection, and
+the weight array. Both are consequences rather than choices: member lists in a pool can outgrow
+their slots when a clique grows, which is where AMD's `iwlen`, `pfree` and `ncmpa` come from, and
+once a supervariable's members are a chain rather than a list its size stops being O(1) to read,
+which is where `weight` earns its place.
+
+### Two things the seven examples were hiding
+
+The conversion turned up a latent divergence that had nothing to do with the containers. The
+Python's `for u in neighbors` iterated a set, so its order was a hash artifact depending on the
+insertion and deletion history, while the C++ iterated ascending. On the seven examples the two
+happened to coincide, which is why `make test` never caught it; on random graphs of a dozen
+vertices they did not, and the fill and pruned edge lists printed in different orders. It is
+moot now that both sides hold lists, but it was fixed twice on the way here, first with `sorted()`
+at the loops that feed a printed list and then by the conversion itself.
+
+The lesson is about the test rather than the code: seven small graphs are not enough to keep the
+twins honest. The stress harness that found it builds a variant of each `.cpp` whose main runs
+forty random graphs, and diffs it against the same graphs through the Python. It caught two more
+divergences during the conversion, one per layer, and it is worth running after every change to
+either twin.
 
 ## Translation choices
 
-The Python is where the thinking happens; the C++ twin is generated alongside it and exists
-to keep the Python honest, since two implementations that print the same trace are unlikely
-to be wrong in the same way. That makes the twin a correctness instrument and not yet a
-performance one. Every choice below was made to keep the two texts recognizably the same
-program, and several of them are known to be the wrong choice for speed. Revisiting them is
-a separate activity, to be done when the ordering code moves out of this directory, and the
-likely conclusion is that most of the sets become plain vectors.
+The Python is where the thinking happens; the C++ twin is written alongside it and exists to keep
+it honest, since two implementations that print the same trace are unlikely to be wrong in the
+same way. That was once a near-transliteration, one identifier per identifier, with the C++ using
+ordered containers so the two would agree without effort. It is not any more: the C++ is written
+for the vendored asymptotics, and the Python mirrors whatever structure decides an answer. The
+mapping below is what survives of the correspondence.
 
 The mapping is mechanical wherever it can be. Names translate from `alive_vertices` to
-`aliveVertices`, one identifier to one identifier, and docstrings become the comment block
-above the same function. The container mapping is: a list of sets is `std::vector<std::set<int>>`,
-a dict from clique id to member set is `std::map<int, std::set<int>>`, a list of pairs is
-`std::vector<std::pair<int, int>>`, and a list of lists is `std::vector<std::vector<int>>`.
+`aliveVertices`, one identifier to one identifier, and docstrings become the comment block above
+the same function. The containers now correspond directly: a list of lists is
+`std::vector<std::vector<std::int32_t>>`, the clique store is a vector indexed by clique id with
+a liveness flag, a bucket is `head`/`next`/`prev` over n in C++ and a list whose position 0 is
+the head in Python, and the mark array is the same array in both.
 
 Six choices are worth recording, since none of them is forced.
 
-**Sets stay sets.** `std::set` is a red-black tree, so a membership test costs O(log n) against
-Python's O(1), and a traversal chases pointers between separately allocated nodes. It is used
-anyway because it iterates in key order, which is what makes the two traces match without the
-C++ having to sort anything, and because `A[u]`, `I[u]` and the clique members are written in
-set algebra in the Python. The performance answer later is almost certainly a sorted
-`std::vector<int>` with `std::set_intersection` and friends, or an index array over a flat
-pool with a scratch mark array, which is what the real minimum degree codes do.
+**No sets anywhere.** The C++ holds `A`, `I` and the clique members as plain unsorted vectors, and
+the Python holds them as plain lists. Membership is a mark array with a monotone tag in both.
+That is what the vendored codes do and what `SymFactorEngine` does, and it is the reason the two
+twins agree on the order a structure holds: neither is imposing one.
 
-**Cliques are a `std::map`, not an `unordered_map`.** The reason is again iteration order:
-`for c in sorted(C)` in the display becomes a plain range-for, because the map is already in
-key order. An `unordered_map` would be faster to probe and would then need an explicit sort
-at every display.
+**Cliques are a vector, not a map.** A clique id is the pivot that created it, so the id space is
+the vertex space and the lookup is direct. The display walks ids ascending, which is the one
+place an order is imposed, and it is imposed identically in both twins.
 
-**Set algebra is spelled out.** `A[u] & neighbors` has no operator, so the C++ builds
-`redundant` in a loop and then erases from it. This is the one place the twin is visibly
-longer than the Python rather than the same shape.
+**Set algebra is gone from both.** `A[u] & neighbors` became a stamp and a compaction pass, in the
+Python as much as in the C++, so the two now read alike again. What the Python loses in
+expressiveness it gains in saying exactly what the engine does.
 
 **Optional arguments become defaults and a pointer.** `title=None` is `const std::string&
 title = ""`, and `eliminated=None` is `const std::vector<bool>* eliminated = nullptr`, so
@@ -1253,14 +1304,14 @@ entry and slower to build. Plain `dict` covers most uses now, and `OrderedDict` 
 only for `move_to_end`, for eviction from either end, or when order-sensitive equality is the
 property being tested.
 
-For these prototypes the choice is settled and worth stating. The Python layers use a list of sets,
-because the algorithm is written in set algebra and reads that way: `md1` tests `w not in graph[u]`
-inside a doubly nested loop over a neighborhood, which is O(1) hashed and O(deg) on a list, and
-`md2` says `A[i] & neighbors` and `C[i] -= absorbed` directly. On lists those become membership
-scans and stop resembling the mathematics they illustrate. None of this carries to the C++ side,
-where the same objects are index arrays over a flat pool: `mmd1` and `amd` get their speed from a
-scratch mark array and in-place compression, not from hashing, and that is what the real ordering
-code will look like.
+For these prototypes the choice was settled twice, in opposite directions. The Python layers began
+as lists of sets, because the algorithm reads as set algebra that way: `md1` tested `w not in
+graph[u]`, `md2` said `A[u] & neighbors` and `I[u] -= absorbed` directly. That lasted until the
+goal was stated plainly as a performant ordering engine, at which point the C++ moved to flat
+unsorted vectors with a mark array, and the Python followed so the traces would still match. Both
+sides now hold lists and test membership with a stamp, which is what `mmd1` and `amd` need for
+their speed and what `SymFactorEngine` already does. What was lost is the notation; what was
+gained is that the Python says what the engine does.
 
 ## Related
 

@@ -1,11 +1,17 @@
 // vendored.cpp -- run the vendored MMD and AMD on our test graphs.
 //
-// Nothing here is ours to change: vendored/Mmd.cpp and vendored/Amd.cpp are
-// copies of src/Mmd.cpp and src/Amd.cpp, and this file only feeds them the same
-// seven graphs the prototypes use and prints their permutations in our format.
-// It exists so that "no feature missing" is a diff rather than a judgement.
+// Nothing here is ours to change: vendored/vendored_mmd.cpp and
+// vendored/vendored_amd.cpp are copies of src/Mmd.cpp and src/Amd.cpp, and this
+// file only feeds them the same seven graphs the prototypes use and prints their
+// permutations in our format. It exists so that "no feature missing" is a diff
+// rather than a judgement.
 //
-// Build:  g++ -std=c++17 -O3 vendored.cpp vendored/Mmd.cpp vendored/Amd.cpp -o vendored_cpp
+// The lowercase names are deliberate. Oblio capitalizes source files, but macOS
+// is case-insensitive by default, so Amd.cpp and amd.cpp are one path: dropping
+// the vendored copy next to the prototype silently overwrote it once already.
+//
+// Build:  g++ -std=c++17 -O3 vendored.cpp vendored/vendored_mmd.cpp \
+//             vendored/vendored_amd.cpp -o vendored_cpp
 // Run:    ./vendored_cpp
 //         ./vendored_cpp 3      just the third example
 

@@ -118,7 +118,7 @@ struct Cliques {
     std::vector<bool> live;
     std::size_t count = 0;
 
-    explicit Cliques(std::int32_t n) : members(n), live(n, false) {}
+    explicit Cliques(std::size_t n) : members(n), live(n, false) {}
     const std::vector<std::int32_t>& at(std::int32_t c) const { return members[c]; }
     std::vector<std::int32_t>& operator[](std::int32_t c) { return members[c]; }
     void create(std::int32_t c, std::vector<std::int32_t> m) {
@@ -174,7 +174,8 @@ struct Buckets {
     bool empty(std::size_t d) const { return head[d] == NIL; }
 };
 
-// Print a quotient graph: adjacency sets, incidence sets, cliques.
+// Print a quotient graph: adjacency, incidence, cliques, in the order the
+// structure holds them.
 void mmd1Show(const Graph& A, const Graph& I, const Cliques& C,
              const std::vector<std::size_t>& degrees, const std::string& title = "",
              const std::vector<bool>* eliminated = nullptr) {
@@ -425,14 +426,17 @@ void mmd1Refile(Buckets& buckets, std::vector<std::size_t>& degrees,
 // buys still fewer refreshes for a real concession, since those vertices are not
 // minimal. delta = 0 keeps the batch to true minima. A negative delta takes one
 // pivot per round, which is md5's behavior reached through this code path.
-std::vector<std::int32_t> mmd1MinimumDegree(const Graph& G, int delta = 0) {
+// delta is signed: negative means one pivot per round. It is compared against a
+// degree and its useful range stops at n - 1, so it is an index-like quantity by
+// Oblio's rule, a std::int32_t rather than a count.
+std::vector<std::int32_t> mmd1MinimumDegree(const Graph& G, std::int32_t delta = 0) {
     const std::size_t n = G.size();
     std::size_t nnzTrilA = 0;
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) nnzTrilA += G[u].size();
     nnzTrilA = nnzTrilA / 2 + n;
     Graph A = G;                                  // explicit vertex neighbors
     Graph I(n);                                   // cliques that contain each vertex
-    Cliques C(static_cast<std::int32_t>(n));      // clique id -> member list
+    Cliques C(n);      // clique id -> member list
     std::vector<std::int32_t> mark(n, NIL);       // scratch for membership, with tag
     std::int32_t tag = 0;
     std::vector<std::vector<std::int32_t>> superMembers(n);   // for the expansion
@@ -469,8 +473,11 @@ std::vector<std::int32_t> mmd1MinimumDegree(const Graph& G, int delta = 0) {
         // what keeps them independent: eliminating a pivot pulls every vertex it
         // reached out of the buckets, so whatever is still filed was not reached,
         // hence is not adjacent to anything taken this round.
-        std::size_t batchLimit = (delta >= 0) ? minDegree + static_cast<std::size_t>(delta)
-                                              : minDegree;
+        // Clamped: a degree is at most n - 1, so a wider window would walk the
+        // bucket array off its end.
+        std::size_t batchLimit = minDegree;      // delta > 0 here, so no narrowing
+        if (delta > 0)
+            batchLimit = std::min(minDegree + delta, n - 1);
         std::vector<std::int32_t> batch;
         std::vector<std::int32_t> touched;    // first-touch order, no set and no sort
         while (true) {

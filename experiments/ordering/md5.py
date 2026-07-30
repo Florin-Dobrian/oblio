@@ -29,10 +29,9 @@
 
 #
 # COMPLEXITY. The goal is the same asymptotic cost as the vendored routines,
-# without their coding style. Two things were wrong and are fixed: the driver loop
-# counts eliminations rather than scanning `eliminated` (O(n) per step before, O(1)
-# now), and the mass elimination block strips a merged vertex from C[pivot] alone
-# rather than from every clique, which is sound because I[u] was {pivot}.
+# without their coding style. The containers are flat: A, I and the clique member
+# lists are unsorted lists, membership comes from a mark array with a tag, and a
+# bucket is a linked list. Every pass is linear in what it touches.
 #
 # THE TIE-BREAK CHANGES HERE, and it is the price of the buckets. md1 through md4
 # scan ascending and keep the first strict minimum, so ties go to the lowest index.

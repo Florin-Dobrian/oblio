@@ -276,6 +276,10 @@ def mmd1_refile(buckets, filed, degrees, u, new_degree):
 def mmd1_minimum_degree(G, delta=0):
     """Multiple elimination: a batch of independent pivots per degree refresh.
 
+    delta is signed: negative means one pivot per round. It is compared against a
+    degree and its useful range stops at n - 1, so in the C++ twin it is a
+    std::int32_t, an index-like quantity rather than a count.
+
     delta widens the batch to vertices within delta of the minimum degree, which
     buys still fewer refreshes for a real concession, since those vertices are not
     minimal. delta = 0 keeps the batch to true minima. A negative delta takes one
@@ -322,7 +326,9 @@ def mmd1_minimum_degree(G, delta=0):
         # what keeps them independent: eliminating a pivot pulls every vertex it
         # reached out of the buckets, so whatever is still filed was not reached,
         # hence is not adjacent to anything taken this round.
-        batch_limit = min_degree + delta
+        # Clamped: a degree is at most n - 1, so a wider window would walk the
+        # bucket array off its end.
+        batch_limit = min(min_degree + delta, n - 1) if delta >= 0 else min_degree
         batch = []
         touched = []                           # first-touch order, no set and no sort
         while True:

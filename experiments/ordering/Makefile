@@ -29,7 +29,7 @@ CXXFLAGS ?= -std=c++17 -O3 -Wall -Wextra
 LAYERS = md1 md2 md3 md4 md5 mmd1 amd
 BINS   = $(addsuffix _cpp,$(LAYERS))
 
-.PHONY: all test clean
+.PHONY: all test vendored clean
 
 all: $(BINS)
 
@@ -61,5 +61,15 @@ test: all
 	done; \
 	exit $$rc
 
+# The vendored routines, built separately: they are not layers and have no Python
+# twin. vendored/vendored_mmd.cpp and vendored/vendored_amd.cpp are copies of
+# src/Mmd.cpp and src/Amd.cpp, never edited. The lowercase prefixed names matter:
+# macOS is case-insensitive by default, so Amd.cpp and amd.cpp would be one path.
+# Warnings are suppressed for these two only: they are not ours to clean up.
+vendored_cpp: vendored.cpp vendored/vendored_mmd.cpp vendored/vendored_amd.cpp
+	$(CXX) -std=c++17 -O3 -w $^ -o $@
+
+vendored: vendored_cpp
+
 clean:
-	rm -f $(BINS)
+	rm -f $(BINS) vendored_cpp

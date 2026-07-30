@@ -60,7 +60,7 @@ struct Cliques {
     std::vector<bool> live;
     std::size_t count = 0;
 
-    explicit Cliques(std::int32_t n) : members(n), live(n, false) {}
+    explicit Cliques(std::size_t n) : members(n), live(n, false) {}
     const std::vector<std::int32_t>& at(std::int32_t c) const { return members[c]; }
     std::vector<std::int32_t>& operator[](std::int32_t c) { return members[c]; }
     void create(std::int32_t c, std::vector<std::int32_t> m) {
@@ -83,7 +83,8 @@ std::vector<std::int32_t> md4Neighbors(const Graph& A, const Graph& I, const Cli
                                        std::vector<std::int32_t>& mark, std::int32_t& tag,
                                        std::int32_t u);
 
-// Print a quotient graph: adjacency sets, incidence sets, cliques.
+// Print a quotient graph: adjacency, incidence, cliques, in the order the
+// structure holds them.
 void md4Show(const Graph& A, const Graph& I, const Cliques& C,
              const std::vector<std::size_t>& degrees, const std::string& title = "",
              const std::vector<bool>* eliminated = nullptr) {
@@ -311,7 +312,7 @@ std::vector<std::int32_t> md4MinimumDegree(const Graph& G) {
     nnzTrilA = nnzTrilA / 2 + n;
     Graph A = G;                                  // explicit vertex neighbors
     Graph I(n);                                   // cliques that contain each vertex
-    Cliques C(static_cast<std::int32_t>(n));      // clique id -> member list
+    Cliques C(n);      // clique id -> member list
     std::vector<std::int32_t> mark(n, NIL);       // scratch for membership, with tag
     std::int32_t tag = 0;
     std::vector<std::vector<std::int32_t>> superMembers(n);   // for the expansion

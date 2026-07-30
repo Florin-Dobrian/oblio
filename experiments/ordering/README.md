@@ -130,14 +130,15 @@ seemed the worse trade.
 Each prototype also takes an example number, `python3 md3.py 3` or `./md3_cpp 3`, and runs every
 example when given none.
 
-The vendored routines are built separately, and not by `make`:
+The vendored routines have their own target, since they are not layers and have no Python twin:
 
 ```
-g++ -std=c++17 -O3 vendored.cpp vendored/vendored_mmd.cpp vendored/vendored_amd.cpp \
-    -o vendored_cpp
+make vendored         builds vendored_cpp
 ./vendored_cpp        both routines on all seven graphs
 ./vendored_cpp 3      just the third
 ```
+
+That target compiles with warnings off, because the two files are not ours to clean up.
 
 `vendored/vendored_mmd.cpp` and `vendored/vendored_amd.cpp` are copies of `src/Mmd.cpp` and
 `src/Amd.cpp`, kept here so the comparison is self-contained, and never edited. `vendored.cpp`
@@ -439,27 +440,29 @@ and before the pivot's own containers are cleared:
 
 ```python
     merged_vertices = []
-    for u in sorted(neighbors):
-        if not A[u] and I[u] == {pivot}:
-            I[u].clear()
+    for u in neighbors:
+        if not A[u] and len(I[u]) == 1 and I[u][0] == pivot:
+            I[u] = []
             eliminated[u] = True
             merged_vertices.append(u)
-    for u in merged_vertices:
-        for clique_members in C.values():
-            clique_members.discard(u)
+    if merged_vertices:                 # one compaction pass, not a removal each
+        tag += 1
+        for u in merged_vertices:
+            mark[u] = tag
+        C[pivot] = [v for v in C[pivot] if mark[v] != tag]
 ```
 
 **The candidates come from the snapshot.** `neighbors` was computed before anything was
 touched, so it still lists every member of the new clique even though A and I have since been
-rewritten by the prune loop. The `sorted` is not cosmetic: the order of merged_vertices
-becomes the order of super_members[pivot], which becomes the order of those vertices in the
-returned permutation. Set iteration order would make the output depend on hashing.
+rewritten by the prune loop. Its order is the order the query produced, which is the same on both
+sides, and it matters: the order of merged_vertices becomes the order of super_members[pivot],
+which becomes the order of those vertices in the returned permutation.
 
-**The test reads post-prune state.** By this point A[u] has had `redundant` subtracted and
-the pivot discarded, and I[u] has had the absorbed cliques removed and the pivot added. So
-`not A[u]` means every explicit neighbor u had was inside the clique, and `I[u] == {pivot}`
-means the new clique is its only remaining route out. Together they say u's reachable set is
-contained in the clique, which is the fill-free condition.
+**The test reads post-prune state.** By this point A[u] has been compacted against the clique
+and the pivot dropped, and I[u] has lost the absorbed cliques and gained the pivot. So `not A[u]`
+means every explicit neighbor u had was inside the clique, and `I[u] == [pivot]` means the new
+clique is its only remaining route out. Together they say u's reachable set is contained in the
+clique, which is the fill-free condition.
 
 **There is no weight array.** md3 merges only into the pivot, which is eliminated in the same
 call, so no live vertex ever stands for more than one original vertex, and the size of a
@@ -468,11 +471,11 @@ weight per vertex and later layers will need one, but here it would be a cached 
 nothing on the hot path reads. It earns its place once the members are held as chains over a
 flat array rather than as lists, where a size stops being free.
 
-**Clearing I[u] and the second loop are two halves of one thing.** An incidence is stored
-twice, the clique id in I[u] and the member u in C[c]. `I[u].clear()` removes u's side of it;
-the second loop removes the cliques' side. They are separate loops because one is per vertex
-and the other per clique, not because of any ordering hazard: C[pivot] is a copy of
-neighbors, so mutating it cannot disturb the iteration over neighbors.
+**Clearing I[u] and the second block are two halves of one thing.** An incidence is stored twice,
+the clique id in I[u] and the member u in C[c]. Emptying I[u] removes u's side of it; the
+compaction removes the cliques' side. They are separate because one is per vertex and the other
+per clique, not because of any ordering hazard: C[pivot] is a copy of neighbors, so rewriting it
+cannot disturb the iteration over neighbors.
 
 **A[u] is not cleared, and does not need to be.** The test has already established that it is
 empty. Nor does anything have to remove u from other vertices' adjacency, because A is
@@ -484,8 +487,9 @@ at the instant the first loop finishes, C[pivot] still contains the merged verti
 what the second loop fixes. That is also why the driver computes external_degree from
 C[pivot] AFTER the call and not before.
 
-**The second loop touches C[pivot] only.** `I[u] == {pivot}` guarantees that u belongs to no
-other clique, so `C[pivot].discard(u)` is the whole of it. An earlier version scanned every
+**The second block touches C[pivot] only.** `I[u] == [pivot]` guarantees that u belongs to no
+other clique, so compacting C[pivot] against the merged set is the whole of it, one pass rather
+than a removal each. An earlier version scanned every
 clique as a defense against a test that admits a u with more than one clique, which is what the
 exact containment test would do; the measurement in the complexity section below made that
 defense untenable, since it cost more than the work it accompanied. Should the test ever be
@@ -674,17 +678,19 @@ vertices out of the search, but it keeps a dead slot holding a neutral value rat
 stale one. In md5 the same two lines become load-bearing.
 
 ```python
-        refreshed_vertices = sorted(C[pivot])
+        refreshed_vertices = list(C[pivot])
         for u in refreshed_vertices:
-            degrees[u] = len(md4_neighbors(A, I, C, u))
+            neighbors_u, tag = md4_neighbors(A, I, C, mark, tag, u)
+            degrees[u] = len(neighbors_u)
         num_degree_computations += len(refreshed_vertices)
         degrees[pivot] = 0
         for u in merged_vertices:
             degrees[u] = 0
 ```
 
-The `sorted` is for the trace, not the algorithm: the refresh is order-independent, but the
-printed list has to match the C++ twin, whose std::set is sorted by construction.
+Nothing is sorted. C[pivot] is a list in both twins and the refresh walks it as it stands, which
+is the same sequence on each side. The tag comes back from the query because a degree computation
+advances it and Python has no reference parameters.
 
 Two query sites remain in the whole file, and that is the layer's claim: md4_eliminate's
 first line, which becomes the clique, and the refresh above. Everything else reads integers.
@@ -774,9 +780,10 @@ before the zeroing, or the vertex is erased from buckets[0] and left where it wa
 **Fragment 4, the refresh.**
 
 ```python
-        refreshed_vertices = sorted(C[pivot])
+        refreshed_vertices = list(C[pivot])
         for u in refreshed_vertices:
-            md5_refile(buckets, filed, degrees, u, len(md5_neighbors(A, I, C, u)))
+            neighbors_u, tag = md5_neighbors(A, I, C, mark, tag, u)
+            md5_refile(buckets, filed, degrees, u, len(neighbors_u))
         num_degree_computations += len(refreshed_vertices)
 ```
 
@@ -881,10 +888,11 @@ verified on the seven graphs and 150 random ones.
 **The refresh is one pass per round, over everything the batch touched.**
 
 ```python
-        refreshed_vertices = sorted(u for u in touched if not eliminated[u])
+        refreshed_vertices = [u for u in touched if not eliminated[u]]
         for u in refreshed_vertices:
-            degrees[u] = len(mmd1_neighbors(A, I, C, u))
-            buckets[degrees[u]].add(u)
+            neighbors_u, tag = mmd1_neighbors(A, I, C, mark, tag, u)
+            degrees[u] = len(neighbors_u)
+            mmd1_file(buckets, filed, degrees[u], u)
         num_degree_computations += len(refreshed_vertices)
         min_degree = min([min_degree] + [degrees[u] for u in refreshed_vertices])
 ```
@@ -893,6 +901,44 @@ Note the asymmetry with md5's refresh, which called mmd1_refile: here the vertex
 out of its bucket, evicted during the batch, so the refresh only writes the degree and files
 it. The `not eliminated[u]` filter matters because a vertex evicted early in the round can be
 merged away by a later pivot in the same round.
+
+**Choosing delta, measured.** The vendored driver passes 0, which is also what SPARSPAK does and
+what Liu's paper treats as the default. On grids, with fill and refresh count both reported:
+
+```
+grid 22x22, n=484
+   delta   -1: nnz(L) 4773   degree computations 2690   rounds 367
+   delta    0: nnz(L) 4684   degree computations 1859   rounds  36
+   delta    1: nnz(L) 4754   degree computations 1733   rounds  22
+   delta    2: nnz(L) 4706   degree computations 1756   rounds  21
+   delta    4: nnz(L) 4747   degree computations 1601   rounds  14
+   delta    n: nnz(L) 5964   degree computations 1514   rounds   9
+```
+
+Two things in that table are worth more than the recommendation they support.
+
+The first is that delta = 0 beats delta = -1 on BOTH axes, here and on the 10 by 10 and 16 by 16
+grids as well. Batching is not trading quality for speed at that setting; it is simply better.
+The wager appears only as delta grows, and by delta = n it is decisively bad: 27 per cent more
+fill for 19 per cent fewer refreshes.
+
+The second is why it goes bad, which is not stale degrees. Every pivot in a batch has a CORRECT
+degree, since anything whose degree could have changed was evicted. What the round cannot see is
+the evicted set, and those are exactly the vertices whose degrees typically FELL, so they are the
+candidates that should be picked next. With delta = 0 the round ends as soon as the minimum
+bucket drains and they come back at once. With delta = n the round keeps climbing through the
+degrees, taking vertices of degree 4, 5, 6 while better candidates wait until the end.
+
+**delta is total, and the top end is clamped.** Any negative value means one pivot per round; 0
+through n - 1 widen the window; anything larger saturates at n - 1, since a live vertex's degree
+cannot exceed that. That range also fixes its type: delta is signed, it is compared against a
+degree, and it stops being meaningful at n - 1, which is itself bounded by the index type. So it
+is an index-like quantity by Oblio's rule, a std::int32_t rather than a count.
+
+The clamp is not cosmetic: without it the walk indexes past the last bucket and crashes, which it
+did the first time delta = n was tried. The vendored genmmd has the same
+latent bug and no clamp, `mdlmt = mdeg + delta` with the walk climbing until it passes mdlmt while
+indexing head[mdeg]; it never bites because mmd_order always passes 0.
 
 **What is given up is not what one would guess.** The pivots are exact: every one was a true
 minimum when it was taken. What the batch loses is the vertices it evicted, which are
@@ -948,14 +994,16 @@ rather than merged and the degree stays unweighted:
 
 ```python
     merged_vertices = []
-    for u in sorted(neighbors):
-        if not A[u] and I[u] == {pivot}:
-            I[u].clear()
+    for u in neighbors:
+        if not A[u] and len(I[u]) == 1 and I[u][0] == pivot:
+            I[u] = []
             eliminated[u] = True
             merged_vertices.append(u)
-    for u in merged_vertices:
-        for clique_members in C.values():
-            clique_members.discard(u)
+    if merged_vertices:                 # one compaction pass, not a removal each
+        tag += 1
+        for u in merged_vertices:
+            mark[u] = tag
+        C[pivot] = [v for v in C[pivot] if mark[v] != tag]
 ```
 
 with the driver emitting `order.append(pivot)` then `order += merged_vertices`, and its loop
@@ -1111,11 +1159,16 @@ measurement made the defense untenable: 4247 elementary steps on a 20 by 20 grid
 of real work, growing faster than the work it accompanied. It is now
 
 ```python
-    for u in merged_vertices:
-        C[pivot].discard(u)     # I[u] was {pivot}, so no other clique holds u
+    if merged_vertices:                 # one compaction pass, not a removal each
+        tag += 1
+        for u in merged_vertices:
+            mark[u] = tag
+        C[pivot] = [v for v in C[pivot] if mark[v] != tag]
 ```
 
-sound because the merge test requires `I[u] == {pivot}`, so no other clique holds u. Both fixes
+sound because the merge test requires `I[u] == [pivot]`, so no other clique holds u. A later pass
+replaced the per-vertex removal with the single compaction above, since erasing m vertices one at
+a time from a clique of size d costs O(m d) where one pass costs O(d + m). Both fixes
 are in md3, md4, md5 and mmd1, in both twins. Measured on the 20 by 20 grid: loop 14800 down to
 34, clique scan 4247 down to 47, real work 26408. No ordering moved, checked on the seven graphs
 and 200 random ones, and mmd1 at delta = -1 still reproduces md5 exactly.

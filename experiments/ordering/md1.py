@@ -8,6 +8,12 @@
 #
 # It names each fill edge as it is created, so the ordering can be seen earning
 # (or wasting) its keep, step by step.
+#
+# The adjacency of a vertex is a plain list, UNSORTED, and membership comes from a
+# mark array stamped with a tag, one comparison per query. That is what the C++
+# twin does and what the vendored codes do; see the README section on complexity.
+# The one sort is at construction, since the input is given as sets here and as
+# ascending literals there.
 
 # %%
 import sys

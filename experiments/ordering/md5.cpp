@@ -15,9 +15,10 @@
 //   - minDegree, a LOWER BOUND on the current minimum degree. Each search starts
 //     at minDegree rather than at 0, and every vertex below it is known to be gone.
 //   - a vertex whose degree changes must be pulled out of the middle of its old
-//     bucket, so buckets need O(1) removal. Here that is a std::set; the
-//     vendored codes use doubly linked lists (MMD's fwd/bwd, AMD's Next/Last)
-//     because Fortran and C of that era had no such container.
+//     bucket, so buckets need O(1) removal. That is a doubly linked list, head[d]
+//     with next and prev over n, which is what MMD's fwd/bwd and AMD's Next/Last
+//     are. The Python twin mirrors the same sequence with a list whose position 0
+//     is the head, so both pick the same pivot.
 //
 // Keeping minDegree correct is the whole of the difficulty, and it is a lower
 // bound rather than the true minimum on purpose: it may lag, and the walk fixes
@@ -25,22 +26,23 @@
 // never examined and a vertex sitting there would never be chosen.
 //
 //
-// COMPLEXITY, AND ONE PLACE THE PYTHON PAYS MORE THAN THE C++. The goal is the
-// same asymptotic cost as the vendored routines, without their coding style. Two
-// things were wrong and are fixed: the driver loop counts eliminations rather than
-// scanning `eliminated` (O(n) per step before, O(1) now), and the mass elimination
-// block strips a merged vertex from C[pivot] alone rather than from every clique,
-// which is sound because I[u] was {pivot}. On a 20 by 20 grid those two cost 14800
-// and 4247 elementary steps before, against 34 and 47 after, with the real
-// neighbor work at 26408.
+// COMPLEXITY. The goal is the same asymptotic cost as the vendored routines,
+// without their coding style. The containers are flat: A, I and the clique member
+// lists are unsorted vectors, C is indexed by clique id, membership comes from a
+// mark array with a tag, and a bucket is a linked list. Every pass is linear in
+// what it touches.
 //
-// What remains is min(buckets[min_degree]), which is O(bucket size) because a
-// Python set is unordered. The C++ twin does not pay it: std::set is ordered, so
-// *buckets[minDegree].begin() is O(1) and matches the vendored head[dg] in cost
-// while keeping our index-ordered tie-break. Closing the gap in Python would need
-// a heap per bucket with lazy deletion, plus a membership set to skip stale
-// entries, which is more machinery than a prototype should carry. It is the one
-// documented place where the Python is asymptotically worse than the C++.
+// THE TIE-BREAK CHANGES HERE, and it is the price of the buckets. md1 through md4
+// scan ascending and keep the first strict minimum, so ties go to the lowest
+// index. A bucket is pushed and popped at the head, so the winner is whatever was
+// filed last. That is what the vendored codes do, it is O(1) where an
+// index-ordered pop is not, and it means md5 and mmd1 may return a different
+// permutation from md1 through md4. Different, not worse: the pivots are still
+// exact minima and only the choice among equals moves.
+//
+// The Python mirrors the buckets with a list whose position 0 is the head, and
+// pays O(bucket) for insert and remove where the C++ splices in O(1). That is the
+// one place it is asymptotically worse than its twin.
 //
 // Build:  g++ -std=c++17 -O3 md5.cpp -o md5_cpp  (or: make)
 // Run:    ./md5_cpp
@@ -78,7 +80,7 @@ struct Cliques {
     std::vector<bool> live;
     std::size_t count = 0;
 
-    explicit Cliques(std::int32_t n) : members(n), live(n, false) {}
+    explicit Cliques(std::size_t n) : members(n), live(n, false) {}
     const std::vector<std::int32_t>& at(std::int32_t c) const { return members[c]; }
     std::vector<std::int32_t>& operator[](std::int32_t c) { return members[c]; }
     void create(std::int32_t c, std::vector<std::int32_t> m) {
@@ -134,7 +136,8 @@ struct Buckets {
     bool empty(std::size_t d) const { return head[d] == NIL; }
 };
 
-// Print a quotient graph: adjacency sets, incidence sets, cliques.
+// Print a quotient graph: adjacency, incidence, cliques, in the order the
+// structure holds them.
 void md5Show(const Graph& A, const Graph& I, const Cliques& C,
              const std::vector<std::size_t>& degrees, const std::string& title = "",
              const std::vector<bool>* eliminated = nullptr) {
@@ -388,7 +391,7 @@ std::vector<std::int32_t> md5MinimumDegree(const Graph& G) {
     nnzTrilA = nnzTrilA / 2 + n;
     Graph A = G;                                  // explicit vertex neighbors
     Graph I(n);                                   // cliques that contain each vertex
-    Cliques C(static_cast<std::int32_t>(n));      // clique id -> member list
+    Cliques C(n);      // clique id -> member list
     std::vector<std::int32_t> mark(n, NIL);       // scratch for membership, with tag
     std::int32_t tag = 0;
     std::vector<std::vector<std::int32_t>> superMembers(n);   // for the expansion

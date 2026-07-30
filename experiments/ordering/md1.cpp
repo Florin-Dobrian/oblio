@@ -10,6 +10,7 @@
 //
 // Build:  g++ -std=c++17 -O3 md1.cpp -o md1_cpp  (or: make)
 // Run:    ./md1_cpp
+//         ./md1_cpp 3      just the third example
 
 #include <cstdint>
 #include <cstdlib>
@@ -35,7 +36,7 @@ constexpr std::int32_t NIL = -1;
 
 using Graph = std::vector<std::vector<std::int32_t>>;
 
-// Print a graph: adjacency sets.
+// Print a graph: adjacency lists, in the order the structure holds them.
 void md1Show(const Graph& A, const std::string& title = "",
              const std::vector<bool>* eliminated = nullptr) {
     const std::size_t n = A.size();

@@ -1,52 +1,53 @@
-// md5.cpp -- minimum degree, step 5: degree buckets.
+// amd1.cpp -- approximate minimum degree, the idea alone.
 //
-// md4 stopped recomputing degrees that could not have changed. What it left in
-// place is the scan: the picker still walks every live vertex to find the
-// smallest cached degree, O(n) per step, now over integers rather than set
-// unions. Cheap, but still the only remaining O(n) per pivot.
+// The other fork from md5. Section 5.13 of archive/sparse_factorization.md.
 //
-// The fix is to file each supervariable in a bucket indexed by its degree, so
-// the minimum can be found by walking UP from the last known minimum rather than
-// looking at everything. Section 5.9 of archive/sparse_factorization.md describes
-// this as common ground: both MMD and AMD do it, neither invented it.
+// md5 has the quotient graph, supervariables, maintained degrees and buckets, and
+// returns exactly md1's ordering. What is left costing anything is the refresh
+// itself, which for each reached vertex u unites the members of every clique in
+// I[u] and counts the result. That union is the expensive object.
 //
-// Two things make the walk cheap:
+// MMD made the refresh RARE. AMD makes each one CHEAP, and the two are the same
+// answer reached from opposite ends: do the expensive thing less.
 //
-//   - minDegree, a LOWER BOUND on the current minimum degree. Each search starts
-//     at minDegree rather than at 0, and every vertex below it is known to be gone.
-//   - a vertex whose degree changes must be pulled out of the middle of its old
-//     bucket, so buckets need O(1) removal. That is a doubly linked list, head[d]
-//     with next and prev over n, which is what MMD's fwd/bwd and AMD's Next/Last
-//     are. The Python twin mirrors the same sequence with a list whose position 0
-//     is the head, so both pick the same pivot.
+// THE BOUND. Rather than uniting the cliques, sum their separate contributions:
 //
-// Keeping minDegree correct is the whole of the difficulty, and it is a lower
-// bound rather than the true minimum on purpose: it may lag, and the walk fixes
-// it. What it must never do is overshoot, since a bucket below minDegree is
-// never examined and a vertex sitting there would never be chosen.
+//   degree(u) <= min( n - k - weight(u),                nothing exceeds what remains
+//                     degree_old[u] + |C[p] - {u}|,     it can only grow by the new clique
+//                     |A[u] - C[p]| + |C[p] - {u}|
+//                                   + sum |C[c] - C[p]| )   over c in I[u] - {p}
 //
+// where p is the pivot, so C[p] is the new clique, k is the count of original vertices
+// eliminated so far, and weight(u) is the size of u's supervariable. The third line
+// OVERCOUNTS, because two cliques may overlap outside C[p] and the overlap is counted
+// twice. So it is an upper bound, not the degree.
 //
-// COMPLEXITY. The goal is the same asymptotic cost as the vendored routines,
-// without their coding style. The containers are flat: A, I and the clique member
-// lists are unsorted vectors, C is indexed by clique id, membership comes from a
-// mark array with a tag, and a bucket is a linked list. Every pass is linear in
-// what it touches.
+// WHY THAT IS FAST, which is the entire point and is easy to miss. The quantity
+// |C[c] - C[p]| depends only on the clique c, not on the vertex u, so it is
+// computed ONCE PER CLIQUE and then read by every vertex whose incidence list
+// holds c. The exact degree costs, per vertex, a walk over the members of all its
+// cliques. The bound costs, per vertex, one addition per clique. Both are counted
+// below, and the gap widens with the size of the cliques, which is to say with the
+// amount of fill, which is to say exactly where it matters.
 //
-// THE TIE-BREAK CHANGES HERE, and it is the price of the buckets. md1 through md4
-// scan ascending and keep the first strict minimum, so ties go to the lowest
-// index. A bucket is pushed and popped at the head, so the winner is whatever was
-// filed last. That is what the vendored codes do, it is O(1) where an
-// index-ordered pop is not, and it means md5 and mmd1 may return a different
-// permutation from md1 through md4. Different, not worse: the pivots are still
-// exact minima and only the choice among equals moves.
+// WHAT IS GIVEN UP, and it is a different kind of loss from mmd1's. Every layer up
+// to here picks a true minimum-degree vertex and differs only in how it finds one
+// or how ties fall. This one can pick the WRONG vertex outright, because an
+// overcounted bound can hide the true minimum. It is the first layer whose
+// heuristic changes rather than its implementation, and the first whose pivot is
+// not guaranteed to be minimal at all.
 //
-// The Python mirrors the buckets with a list whose position 0 is the head, and
-// pays O(bucket) for insert and remove where the C++ splices in O(1). That is the
-// one place it is asymptotically worse than its twin.
+// The trace prints the exact degree beside the bound, so the gap is visible at
+// every step, and the closing lines count how often the bound was loose.
 //
-// Build:  g++ -std=c++17 -O3 md5.cpp -o md5_cpp  (or: make)
-// Run:    ./md5_cpp
-//         ./md5_cpp 3      just the third example
+// THIS FILE IS THE IDEA ALONE. Aggressive absorption, hash supervariable
+// detection, the two-pass update, dense row handling and the rest of amd_1 and
+// amd_2 are amd2's business, exactly as mmd1 held only the batching and mmd2 took
+// the rest of genmmd.
+//
+// Build:  g++ -std=c++17 -O3 amd1.cpp -o amd1_cpp  (or: make)
+// Run:    ./amd1_cpp
+//         ./amd1_cpp 3      just the third example
 
 #include <cstdlib>
 #include <algorithm>
@@ -99,7 +100,7 @@ struct Cliques {
 // I[u] cliques that contain u
 // C[c] vertices that c contains
 
-std::vector<std::int32_t> md5Neighbors(const Graph& A, const Graph& I, const Cliques& C,
+std::vector<std::int32_t> amd1Neighbors(const Graph& A, const Graph& I, const Cliques& C,
                                        std::vector<std::int32_t>& mark, std::int32_t& tag,
                                        std::int32_t u);
 
@@ -138,9 +139,10 @@ struct Buckets {
 
 // Print a quotient graph: adjacency, incidence, cliques, in the order the
 // structure holds them.
-void md5Show(const Graph& A, const Graph& I, const Cliques& C,
-             const std::vector<std::size_t>& degrees, const std::string& title = "",
-             const std::vector<bool>* eliminated = nullptr) {
+void amd1Show(const Graph& A, const Graph& I, const Cliques& C,
+              const std::vector<std::size_t>& degrees,
+              const std::vector<std::size_t>& exact, const std::string& title = "",
+              const std::vector<bool>* eliminated = nullptr) {
     const std::size_t n = A.size();
     int width = static_cast<int>(std::to_string(n > 0 ? n - 1 : 0).size());
     std::vector<std::int32_t> aliveVertices;
@@ -175,7 +177,8 @@ void md5Show(const Graph& A, const Graph& I, const Cliques& C,
             first = false;
         }
         std::cout << "  " << std::setw(width) << u << ": {" << adjacencyText.str()
-                  << "} {" << incidenceText.str() << "} degree " << degrees[u] << "\n";
+                  << "} {" << incidenceText.str() << "} bound " << degrees[u]
+                  << " exact " << exact[u] << "\n";
     }
     for (std::int32_t c = 0; c < static_cast<std::int32_t>(n); ++c) {
         if (!C.live[c]) continue;
@@ -192,7 +195,7 @@ void md5Show(const Graph& A, const Graph& I, const Cliques& C,
 
 // Print the state arrays: degrees, buckets, min degree, members, eliminated,
 // and the order so far.
-void md5ShowState(const std::vector<std::size_t>& degrees, const Buckets& buckets,
+void amd1ShowState(const std::vector<std::size_t>& degrees, const Buckets& buckets,
                   std::size_t minDegree,
                   const std::vector<std::vector<std::int32_t>>& superMembers,
                   const std::vector<bool>& eliminated,
@@ -265,7 +268,7 @@ void md5ShowState(const std::vector<std::size_t>& degrees, const Buckets& bucket
 // Entries actually stored. Each edge costs two, one per endpoint in A. Each
 // incidence costs two as well, the clique id in I and the member in C. Watch
 // the total fall monotonically; the naive graph's only rises.
-std::size_t md5Storage(const Graph& A, const Graph& I, const Cliques& C) {
+std::size_t amd1Storage(const Graph& A, const Graph& I, const Cliques& C) {
     std::size_t total = 0;
     for (const std::vector<std::int32_t>& adjacency : A) total += adjacency.size();
     for (const std::vector<std::int32_t>& incidence : I) total += incidence.size();
@@ -278,7 +281,7 @@ std::size_t md5Storage(const Graph& A, const Graph& I, const Cliques& C) {
 // members of every clique that contains u, minus u itself, which the cliques
 // always carry. This is George and Liu's reachable set, and it is what the
 // elimination graph would hold explicitly.
-std::vector<std::int32_t> md5Neighbors(const Graph& A, const Graph& I, const Cliques& C,
+std::vector<std::int32_t> amd1Neighbors(const Graph& A, const Graph& I, const Cliques& C,
                                        std::vector<std::int32_t>& mark, std::int32_t& tag,
                                        std::int32_t u) {
     // In set terms this is one line, and it is worth keeping in view because the
@@ -304,9 +307,25 @@ std::vector<std::int32_t> md5Neighbors(const Graph& A, const Graph& I, const Cli
     return neighbors;
 }
 
+// The degree md5 would have computed: the union of A[u] with the members of every
+// clique in I[u], counted in original vertices. Kept only so the trace can show
+// the bound beside the truth and count how often the bound is loose.
+//
+// Set view: sum of |superMembers[v]| over v in reach(u). It is the union the bound
+// exists to avoid, so this function is instrumentation and nothing more.
+std::size_t amd1ExactDegree(const Graph& A, const Graph& I, const Cliques& C,
+                            const std::vector<std::vector<std::int32_t>>& superMembers,
+                            std::vector<std::int32_t>& mark, std::int32_t& tag,
+                            std::int32_t u) {
+    std::size_t degree = 0;
+    for (std::int32_t v : amd1Neighbors(A, I, C, mark, tag, u))
+        degree += superMembers[v].size();
+    return degree;
+}
+
 // Turn the pivot into a clique, then merge in every member it makes
-// indistinguishable. Identical to md4Eliminate: this layer changes how the
-// minimum is found, not what an elimination does.
+// indistinguishable. Identical to md5Eliminate: this layer changes how a degree is
+// estimated afterwards, not what an elimination does.
 //
 // Returns (neighbors, absorbedCliques, prunedEdges, mergedVertices): as in md2,
 // plus the vertices folded into the pivot by mass elimination. The last three
@@ -335,9 +354,9 @@ std::vector<std::int32_t> md5Neighbors(const Graph& A, const Graph& I, const Cli
 //     C[pivot] = C[pivot] - merged
 std::tuple<std::vector<std::int32_t>, std::vector<std::int32_t>,
            std::vector<std::pair<std::int32_t, std::int32_t>>, std::vector<std::int32_t>>
-md5Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
+amd1Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
              std::vector<std::int32_t>& mark, std::int32_t& tag, std::int32_t pivot) {
-    const std::vector<std::int32_t> neighbors = md5Neighbors(A, I, C, mark, tag, pivot);
+    const std::vector<std::int32_t> neighbors = amd1Neighbors(A, I, C, mark, tag, pivot);
     const std::vector<std::int32_t> absorbedCliques = I[pivot];
     for (std::int32_t c : absorbedCliques)
         C.erase(c);
@@ -376,7 +395,7 @@ md5Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
     }
 
     // Mass elimination. u is INDISTINGUISHABLE from the pivot when the two have
-    // the same closed neighborhood, md5Neighbors(u) | {u} == md5Neighbors(pivot)
+    // the same closed neighborhood, amd1Neighbors(u) | {u} == amd1Neighbors(pivot)
     // | {pivot}, as it stood before the step. Equivalently, now that the clique is
     // formed, when everything u can still reach lies inside it. The test below is
     // a cheap sufficient condition for that: nothing explicit left and no clique
@@ -416,16 +435,16 @@ md5Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
 // everything the picker asks of it. What it does not give is a minimum, which is
 // why minDegree walks. A sorted container would hand over the minimum directly and
 // charge a log on every file, and files outnumber picks.
-void md5Refile(Buckets& buckets, std::vector<std::size_t>& degrees,
+void amd1Refile(Buckets& buckets, std::vector<std::size_t>& degrees,
                std::int32_t u, std::size_t newDegree) {
     buckets.unfile(degrees[u], u);
     degrees[u] = newDegree;
     buckets.file(newDegree, u);
 }
 
-// Same as md4, with the live vertices filed in buckets by degree. The picker
-// walks up from minDegree to the first non-empty bucket instead of scanning.
-std::vector<std::int32_t> md5MinimumDegree(const Graph& G) {
+// Same as md5, with the exact refresh replaced by the approximate bound.
+// Everything else, the quotient graph, mass elimination, the buckets, is md5's.
+std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
     const std::size_t n = G.size();
     std::size_t nnzTrilA = 0;
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) nnzTrilA += G[u].size();
@@ -445,9 +464,16 @@ std::vector<std::int32_t> md5MinimumDegree(const Graph& G) {
 
     // The cache, and the count of degree computations, which is what this layer
     // exists to reduce. Built once, then touched only where it can be wrong.
+    // The cache, as in md5, except that from the first elimination it holds a
+    // BOUND rather than a degree. exact[] is carried alongside for the trace only.
     std::vector<std::size_t> degrees(n);          // a degree counts, so it measures
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) degrees[u] = A[u].size();
+    std::vector<std::size_t> exact = degrees;
     std::size_t numDegreeComputations = n;
+    std::size_t numMemberVisits = 0;              // what an exact refresh would cost
+    std::size_t numCliqueReads = 0;               // what the bound costs instead
+    std::size_t numBoundChecks = 0;
+    std::size_t numLooseBounds = 0;
 
     // The buckets, and minDegree, a LOWER BOUND on the current minimum degree.
     // The search starts at minDegree rather than at 0, so it never looks at
@@ -463,8 +489,9 @@ std::vector<std::int32_t> md5MinimumDegree(const Graph& G) {
     std::size_t minDegree = n > 0 ? *std::min_element(degrees.begin(), degrees.end()) : 0;
     std::size_t numBucketProbes = 0;
 
-    md5Show(A, I, C, degrees, "start: every edge explicit, no clique yet", &eliminated);
-    md5ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
+    amd1Show(A, I, C, degrees, exact,
+             "start: every edge explicit, no clique yet, degrees exact", &eliminated);
+    amd1ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
     int step = 0;
     while (numEliminated < n) {
         while (buckets.empty(minDegree)) {      // walk up to the first live bucket
@@ -474,7 +501,7 @@ std::vector<std::int32_t> md5MinimumDegree(const Graph& G) {
         ++numBucketProbes;
         std::int32_t pivot = buckets.head[minDegree];   // whatever was filed last
         auto [neighbors, absorbedCliques, prunedEdges, mergedVertices] =
-            md5Eliminate(A, I, C, eliminated, mark, tag, pivot);
+            amd1Eliminate(A, I, C, eliminated, mark, tag, pivot);
         std::size_t degree = neighbors.size();
         pivots.push_back(pivot);
         numEliminated += 1 + mergedVertices.size();
@@ -491,15 +518,72 @@ std::vector<std::int32_t> md5MinimumDegree(const Graph& G) {
             degrees[u] = 0;
         }
 
-        // Only the new clique's surviving members can have a different degree.
-        // Everything else has the same A, the same cliques and the same live
-        // neighbors as before, so its cached value is still correct.
-        // Set view: the refresh set is exactly C[pivot], because reach(u) can only
-        // change when a source of it changed, and the step touched no source
-        // outside C[pivot].
-        const std::vector<std::int32_t> refreshedVertices = C[pivot];
-        for (std::int32_t u : refreshedVertices)
-            md5Refile(buckets, degrees, u, md5Neighbors(A, I, C, mark, tag, u).size());
+        // ---- the BOUND, in place of md5's exact refresh --------------------
+        // C[pivot] is the new clique. Everything it reached needs a new degree, and
+        // the bound replaces the union with a sum of separate contributions.
+        //
+        // Set view of the three quantities, none of which is built as a set:
+        //
+        //     pivotClique = C[pivot]
+        //     degme       = |C[pivot]|             weighted, original vertices
+        //     outside[c]  = |C[c] - C[pivot]|      ONE value per CLIQUE
+        //
+        // The last line is the whole idea. |C[c] - C[pivot]| depends on c and not
+        // on the vertex asking, so it is computed once and read many times, where
+        // the exact degree recomputes a union per vertex. mark[v] == inClique is
+        // the membership test for C[pivot]; a second tag makes touchedCliques a set
+        // too, so a clique is listed once however many vertices reach it.
+        const std::vector<std::int32_t> pivotClique = C[pivot];
+        ++tag;
+        const std::int32_t inClique = tag;      // membership of C[pivot], one test
+        for (std::int32_t v : pivotClique) mark[v] = inClique;
+        std::size_t degme = 0;
+        for (std::int32_t v : pivotClique) degme += superMembers[v].size();
+
+        // |C[c] - C[pivot]| ONCE PER CLIQUE. This is the whole reason the bound is
+        // cheap: the quantity depends on c alone, so every vertex whose incidence
+        // list holds c reads it rather than recomputing it.
+        std::vector<std::int32_t> touchedCliques;
+        ++tag;
+        const std::int32_t seenClique = tag;
+        for (std::int32_t u : pivotClique)
+            for (std::int32_t c : I[u])
+                if (c != pivot && mark[c] != seenClique) {
+                    mark[c] = seenClique;
+                    touchedCliques.push_back(c);
+                }
+        std::vector<std::size_t> outside(n, 0);
+        for (std::int32_t c : touchedCliques) {
+            std::size_t total = 0;
+            for (std::int32_t v : C[c])
+                if (mark[v] != inClique && !eliminated[v]) total += superMembers[v].size();
+            outside[c] = total;
+            numMemberVisits += C[c].size();     // what an exact degree pays PER VERTEX
+        }
+
+        const std::size_t numLeft = n - numEliminated;
+        const std::vector<std::int32_t>& refreshedVertices = pivotClique;
+        for (std::int32_t u : refreshedVertices) {
+            // bound = |A[u]| + |C[pivot] - {u}| + sum |C[c] - C[pivot]| over the
+            // cliques in I[u] - {pivot}, against the exact
+            // |( A[u] | C[c] for c in I[u] ) - {u}|. The bound replaces the union
+            // by a sum, so an overlap outside C[pivot] is counted once per clique
+            // that holds it, which is exactly where it overcounts.
+            std::size_t explicitPart = 0;
+            for (std::int32_t v : A[u]) explicitPart += superMembers[v].size();
+            std::size_t bound = explicitPart + degme - superMembers[u].size();
+            for (std::int32_t c : I[u]) {
+                if (c == pivot) continue;
+                bound += outside[c];
+                ++numCliqueReads;               // what the bound pays instead
+            }
+            bound = std::min(bound, numLeft - superMembers[u].size());
+            bound = std::min(bound, degrees[u] + degme - superMembers[u].size());
+            exact[u] = amd1ExactDegree(A, I, C, superMembers, mark, tag, u);
+            ++numBoundChecks;
+            if (bound > exact[u]) ++numLooseBounds;
+            amd1Refile(buckets, degrees, u, bound);
+        }
         numDegreeComputations += refreshedVertices.size();
         for (std::int32_t u : refreshedVertices) minDegree = std::min(minDegree, degrees[u]);
 
@@ -560,8 +644,8 @@ std::vector<std::int32_t> md5MinimumDegree(const Graph& G) {
               << ", pruned edges: " << prunedEdgesText.str()
               << ", merged vertices: " << mergedVerticesText.str()
               << ", refreshed: " << refreshedVerticesText.str();
-        md5Show(A, I, C, degrees, title.str(), &eliminated);
-        md5ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
+        amd1Show(A, I, C, degrees, exact, title.str(), &eliminated);
+        amd1ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
         ++step;
     }
 
@@ -572,6 +656,12 @@ std::vector<std::int32_t> md5MinimumDegree(const Graph& G) {
               << ", fill = " << (nnzL - nnzTrilA) << "\n";
     std::cout << "degree computations: " << numDegreeComputations
               << ", bucket probes: " << numBucketProbes << "\n";
+    std::cout << "clique-member visits an exact degree would need: "
+              << numMemberVisits << "\n";
+    std::cout << "clique reads the bound needed:                    "
+              << numCliqueReads << "\n";
+    std::cout << "bound was loose " << numLooseBounds << " times out of "
+              << numBoundChecks << "\n";
     std::cout << "order: [";
     for (std::size_t k = 0; k < order.size(); ++k)
         std::cout << (k == 0 ? "" : ", ") << order[k];
@@ -581,7 +671,7 @@ std::vector<std::int32_t> md5MinimumDegree(const Graph& G) {
 
 void run(const std::string& name, const Graph& G) {
     std::cout << "=== " << name << " ===\n";
-    md5MinimumDegree(G);
+    amd1MinimumDegree(G);
     std::cout << "\n";
 }
 
@@ -635,8 +725,8 @@ int main(int argc, char** argv) {
     // graph4, eight vertices and fourteen edges. Denser than the others, and here
     // for one specific reason: it is the smallest graph we could find on which
     // AMD's degree BOUND is ever loose. The bound overcounts only when a vertex
-    // belongs to two elements that overlap outside the new one, which needs enough
-    // eliminations to have made several elements and enough fill for them to
+    // belongs to two cliques that overlap outside the new one, which needs enough
+    // eliminations to have made several cliques and enough fill for them to
     // intersect. Every connected graph on five or six vertices is exact (checked
     // exhaustively), and so are graph1 to graph3, so without this one the amd
     // trace would never show the approximation approximating. The other layers use
@@ -656,11 +746,11 @@ int main(int argc, char** argv) {
 
     // graph5, five vertices and four edges, two paths joined at 4: 2-1-4-0-3.
     // Small and fill free, and here for one reason: it is the smallest graph on
-    // which md5's merge test declines a genuine supervariable. At the step whose
+    // which amd1's merge test declines a genuine supervariable. At the step whose
     // pivot is 0 and whose clique is {4}, vertex 4 has nothing explicit left but
     // belongs to c1 as well as to the new clique, so I[4] == {pivot} fails even
     // though c1's only member is 4 itself and everything 4 reaches lies inside
-    // the new clique. The exact test md5Neighbors(A, I, C, u) contained in
+    // the new clique. The exact test amd1Neighbors(A, I, C, u) contained in
     // C[pivot] would merge it. See the README section on mass elimination.
     //
     //   edges: 0-3 0-4 1-2 1-4
@@ -719,7 +809,7 @@ int main(int argc, char** argv) {
         {"graph7", graph7},
     };
 
-    // All of them by default. To run just one, pass its number: ./md5_cpp 3
+    // All of them by default. To run just one, pass its number: ./amd1_cpp 3
     int selected = (argc > 1) ? std::atoi(argv[1]) : 0;
     for (int number = 1; number <= static_cast<int>(examples.size()); ++number) {
         if (selected != 0 && number != selected) continue;

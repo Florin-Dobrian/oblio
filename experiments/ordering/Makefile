@@ -27,7 +27,7 @@
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O3 -Wall -Wextra
 
-LAYERS = md1 md2 md3 md4 md5 mmd1 mmd2 amd
+LAYERS = md1 md2 md3 md4 md5 mmd1 mmd2 amd1 amd2
 BINS   = $(addsuffix _cpp,$(LAYERS))
 
 .PHONY: all test vendored clean

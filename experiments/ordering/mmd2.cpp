@@ -179,14 +179,14 @@ struct Buckets {
     explicit Buckets(std::size_t n)
         : head(n, NIL), next(n, NIL), prev(n, NIL), filed(n, false) {}
 
-    void file(std::size_t d, std::int32_t u) {          // push at the head
+    void file(std::size_t d, std::int32_t u) {          // buckets[d].add(u), at the head
         next[u] = head[d];
         prev[u] = NIL;
         if (head[d] != NIL) prev[head[d]] = u;
         head[d] = u;
         filed[u] = true;
     }
-    void unfile(std::size_t d, std::int32_t u) {        // splice out of the middle
+    void unfile(std::size_t d, std::int32_t u) {        // buckets[d].discard(u)
         if (!filed[u]) return;                          // idempotent, as set.discard was
         if (prev[u] != NIL) next[prev[u]] = next[u];
         else head[d] = next[u];
@@ -344,6 +344,15 @@ std::vector<std::int32_t> mmd2Neighbors(const Graph& A, const Graph& I, const Cl
                                        const std::vector<bool>& eliminated,
                                        std::vector<std::int32_t>& mark, std::int32_t& tag,
                                        std::int32_t u) {
+    // In set terms this is one line, and it is worth keeping in view because the
+    // code below is that line with the set taken away:
+    //
+    //     reach(u) = ( A[u] | C[c] for every c in I[u] ) - {u}
+    //
+    // The mark array IS the set. mark[v] == tag is the membership test, one
+    // comparison; mark[v] = tag is the insertion, one store. So the union costs one
+    // pass per source rather than a hash per member, and nothing is allocated.
+    //
     // One pass per source, with the mark array doing the deduplication, so the
     // cost is linear in what is touched. Nothing is sorted: the order is the order
     // the sources were walked in. A vertex numbered by the prepass is skipped,
@@ -360,7 +369,12 @@ std::vector<std::int32_t> mmd2Neighbors(const Graph& A, const Graph& I, const Cl
 }
 
 // The weighted degree of u: its neighbors counted in ORIGINAL vertices, since a
-// neighbor may stand for several. The count of a supervariable is
+// neighbor may stand for several.
+//
+// Set view: sum of |superMembers[v]| over v in reach(u), which is |reach(u)| once
+// every supervariable is expanded back to the vertices it stands for.
+//
+// The count of a supervariable is
 // superMembers[v].size(), which is O(1), so no weight array is kept: md3 through
 // mmd1 have none for the same reason. One becomes necessary only when the members
 // are chains over a flat array, where a size stops being free.
@@ -381,7 +395,29 @@ std::size_t mmd2Degree(const Graph& A, const Graph& I, const Cliques& C,
 //
 // Returns (neighbors, absorbedCliques, prunedEdges, mergedVertices): as in md2,
 // plus the vertices folded into the pivot by mass elimination. The last three
-// are reported for display; only neighbors is used by the caller.
+// are reported for display; only neighbors is used by the caller.//
+// Set view of the whole function, in the order the code does it:
+//
+//     C[pivot] = reach(pivot)                    absorb into C[pivot]
+//     C        = C - I[pivot]                    reclaim I[pivot]
+//     for u in C[pivot]:
+//         A[u] = A[u] - C[pivot] - {pivot}       prune
+//         I[u] = ( I[u] - I[pivot] ) | {pivot}   absorb into C[pivot], reclaim I[pivot]
+//
+// The new clique is C[pivot] and gets no name of its own, so the first line reads
+// as what an elimination IS: the pivot stops being a vertex with a reachable set
+// and becomes a clique holding that same set. The last line is the first two
+// written on the I side, since u is in C[c] exactly when c is in I[u].
+//
+// Three set differences, and not one of them builds a set. Each is a single stamp
+// of the subtrahend followed by one compaction pass over the minuend, which turns
+// |A[u]| * |C[pivot]| comparisons into |A[u]| + |C[pivot]|.
+//
+// Mass elimination adds two more lines, and breaks the identity in the first one:
+// from here C[pivot] is reach(pivot) minus what the pivot absorbed.
+//
+//     merged   = { u in C[pivot] : A[u] == {} and I[u] == {pivot} }
+//     C[pivot] = C[pivot] - merged
 std::tuple<std::vector<std::int32_t>, std::vector<std::int32_t>,
            std::vector<std::pair<std::int32_t, std::int32_t>>, std::vector<std::int32_t>>
 mmd2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
@@ -394,7 +430,9 @@ mmd2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
     C.create(pivot, neighbors);     // becomes L_pivot, the column pattern
 
     // Stamp the new clique once, and the absorbed cliques once. Membership is then
-    // a comparison, and both loops below are compactions in place.
+    // a comparison, and both loops below are compactions in place. cliqueTag is the
+    // set C[pivot] and absorbedTag is the set I[pivot], each built in one pass and
+    // then queried for free.
     ++tag;
     const std::int32_t cliqueTag = tag;
     for (std::int32_t v : neighbors) mark[v] = cliqueTag;
@@ -416,7 +454,7 @@ mmd2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
             }
             kept.push_back(v);
         }
-        A[u].swap(kept);
+        A[u].swap(kept);                         // what survives is A[u] - C[pivot] - {pivot}
 
         kept.clear();                            // I[u] loses the absorbed cliques
         for (std::int32_t c : I[u])
@@ -433,6 +471,7 @@ mmd2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
     // but the new one means u sees exactly what the pivot sees, so eliminating it
     // next would cost no fill. Fold it into the pivot now and strip it from the
     // cliques, since it is no longer a vertex.
+    // merged = { u in C[pivot] : A[u] == {} and I[u] == {pivot} }
     std::vector<std::int32_t> mergedVertices;
     for (std::int32_t u : neighbors) {
         if (A[u].empty() && I[u].size() == 1 && I[u][0] == pivot) {
@@ -441,7 +480,7 @@ mmd2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
             mergedVertices.push_back(u);
         }
     }
-    if (!mergedVertices.empty()) {           // one compaction pass, not a removal each
+    if (!mergedVertices.empty()) {           // C[pivot] - merged, one compaction pass
         ++tag;
         for (std::int32_t u : mergedVertices) mark[u] = tag;
         kept.clear();
@@ -458,6 +497,13 @@ mmd2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
 
 // Move u from the bucket for its old degree to the one for newDegree. Filing
 // pushes at the head, which is the O(1) end of the list.
+//
+// Set view: buckets[d] is the set of live vertices whose current degree is d, and
+// filing, unfiling and refiling are add, discard and move between two of them. A
+// linked list gives all three in O(1) and gives the head in O(1) too, which is
+// everything the picker asks of it. What it does not give is a minimum, which is
+// why minDegree walks. A sorted container would hand over the minimum directly and
+// charge a log on every file, and files outnumber picks.
 void mmd2Refile(Buckets& buckets, std::vector<std::size_t>& degrees,
                std::int32_t u, std::size_t newDegree) {
     buckets.unfile(degrees[u], u);
@@ -557,6 +603,16 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
         // what keeps them independent: eliminating a pivot pulls every vertex it
         // reached out of the buckets, so whatever is still filed was not reached,
         // hence is not adjacent to anything taken this round.
+        //
+        // Set view of the invariant the eviction maintains, where reached is the
+        // union of C[p] over the pivots taken so far:
+        //
+        //     filed = live - reached,  so  batch & reached == {}
+        //
+        // No set is built for either side. Membership in filed is the filed flag,
+        // and touchedRound is the same idea one level up: it stamps the round a
+        // vertex was evicted in, so the refresh set is accumulated without a set
+        // and without a sort.
         // Clamped: a degree is at most n - 1, so a wider window would walk the
         // bucket array off its end.
         std::size_t batchLimit = minDegree;      // delta > 0 here, so no narrowing
@@ -680,6 +736,11 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
             std::size_t dg0 = 0;
             for (std::int32_t v : elementMembers) dg0 += superMembers[v].size();
 
+            // Set view of the split. reach(u) has |A[u]| + |I[u]| sources once the
+            // new element is counted, so |A[u]| + |I[u]| - 1 == 1 says everything u
+            // reaches lies in this element plus ONE other source. That is the case a
+            // union is not needed for: dg0 already counts the element, and the one
+            // other source is walked directly.
             q2h.clear();
             qxh.clear();
             for (std::int32_t u : elementMembers) {
@@ -715,7 +776,10 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
                             if (buckets.filed[v] || outmatched[v]) continue;
                             if (A[v].size() + I[v].size() - 1 == 1) {
                                 // v is q2h too, so its only other source is this
-                                // one: identical reach, and u absorbs it.
+                                // one: identical reach, and u absorbs it. Set view:
+                                // reach(u) | {u} == reach(v) | {v}, decided without
+                                // forming either side, because both sets are pinned
+                                // to the same two sources.
                                 superMembers[u].insert(superMembers[u].end(),
                                                        superMembers[v].begin(),
                                                        superMembers[v].end());
@@ -726,6 +790,9 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
                             } else {
                                 // v reaches more than u does, so it can never be
                                 // the minimum first. Withhold it from the buckets.
+                                // Set view: reach(u) <= reach(v), a containment
+                                // rather than an equality, so v is withheld and not
+                                // merged.
                                 outmatched[v] = true;
                                 ++outmatchedCount;
                             }

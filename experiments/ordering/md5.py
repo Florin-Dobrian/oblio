@@ -33,6 +33,13 @@
 # lists are unsorted lists, membership comes from a mark array with a tag, and a
 # bucket is a linked list. Every pass is linear in what it touches.
 #
+# THE SET VIEW, kept in comments. Flat containers cost the Python its set algebra,
+# which is what made the earlier layers readable. So every place a set operation is
+# being computed by stamping and compacting says which set operation it is, in a
+# comment above the loop. The reading stays "union, difference, containment" and
+# the code stays flat, which is the only arrangement that serves both the teaching
+# and the twin.
+#
 # THE TIE-BREAK CHANGES HERE, and it is the price of the buckets. md1 through md4
 # scan ascending and keep the first strict minimum, so ties go to the lowest index.
 # A bucket is a linked list pushed at the head and popped at the head, so the
@@ -124,6 +131,17 @@ def md5_neighbors(A, I, C, mark, tag, u):
     cliques always carry. This is George and Liu's reachable set, and it is what
     the elimination graph would hold explicitly.
 
+    In set terms this is one line, and it is worth keeping in view because the code
+    below is that line with the set taken away:
+
+        reach(u) = ( A[u] | C[c] for every c in I[u] ) - {u}
+
+    The mark array IS the set. mark[v] == tag is the membership test, one
+    comparison; mark[v] = tag is the insertion, one store. So the union costs one
+    pass per source rather than a hash per member, and nothing is allocated.
+    Python could write the union directly, and earlier drafts of this file did, but
+    the C++ twin cannot afford it and the two must agree line for line.
+
     One pass per source, with the mark array doing the deduplication, so the cost
     is linear in what is touched. Returns (neighbors, tag): nothing is sorted, and
     the order is the order the sources were walked in.
@@ -150,6 +168,29 @@ def md5_eliminate(A, I, C, mark, tag, eliminated, pivot):
     Returns (neighbors, absorbed_cliques, pruned_edges, merged_vertices, tag): as
     in md2, plus the vertices folded into the pivot by mass elimination. The middle
     three are reported for display; only neighbors is used by the caller.
+
+    Set view of the whole function, in the order the code does it:
+
+        C[pivot] = reach(pivot)                    absorb into C[pivot]
+        C        = C - I[pivot]                    reclaim I[pivot]
+        for u in C[pivot]:
+            A[u] = A[u] - C[pivot] - {pivot}       prune
+            I[u] = ( I[u] - I[pivot] ) | {pivot}   absorb into C[pivot], reclaim I[pivot]
+
+    The new clique is C[pivot] and gets no name of its own, so the first line reads
+    as what an elimination IS: the pivot stops being a vertex with a reachable set
+    and becomes a clique holding that same set. The last line is the first two
+    written on the I side, since u is in C[c] exactly when c is in I[u].
+
+    Three set differences, and not one of them builds a set. Each is a single stamp
+    of the subtrahend followed by one compaction pass over the minuend, which turns
+    |A[u]| * |C[pivot]| comparisons into |A[u]| + |C[pivot]|.
+
+    Mass elimination adds two more lines, and breaks the identity in the first one:
+    from here C[pivot] is reach(pivot) minus what the pivot absorbed.
+
+        merged   = { u in C[pivot] : A[u] == {} and I[u] == {pivot} }
+        C[pivot] = C[pivot] - merged
     """
     neighbors, tag = md5_neighbors(A, I, C, mark, tag, pivot)
     absorbed_cliques = list(I[pivot])
@@ -158,7 +199,9 @@ def md5_eliminate(A, I, C, mark, tag, eliminated, pivot):
     C[pivot] = list(neighbors)      # becomes L_pivot, the column pattern
 
     # Stamp the new clique once, and the absorbed cliques once. Membership is then
-    # a comparison, and both loops below are compactions in place.
+    # a comparison, and both loops below are compactions in place. clique_tag is
+    # the set C[pivot] and absorbed_tag is the set I[pivot], each built in one pass
+    # and then queried for free.
     tag += 1
     clique_tag = tag
     for v in neighbors:
@@ -179,9 +222,9 @@ def md5_eliminate(A, I, C, mark, tag, eliminated, pivot):
                     pruned_edges.append((u, v))
                 continue                # implicit now: delete the explicit copy
             kept.append(v)
-        A[u] = kept
+        A[u] = kept                     # what survives is A[u] - C[pivot] - {pivot}
 
-        kept = [c for c in I[u] if mark[c] != absorbed_tag]   # absorbed are gone
+        kept = [c for c in I[u] if mark[c] != absorbed_tag]   # I[u] - I[pivot]
         kept.append(pivot)              # u joins the new clique, whose id is the pivot
         I[u] = kept
 
@@ -193,13 +236,14 @@ def md5_eliminate(A, I, C, mark, tag, eliminated, pivot):
     # but the new one means u sees exactly what the pivot sees, so eliminating it
     # next would cost no fill. Fold it into the pivot now and strip it from the
     # cliques, since it is no longer a vertex.
+    # merged = { u in C[pivot] : A[u] == {} and I[u] == {pivot} }
     merged_vertices = []
     for u in neighbors:
         if not A[u] and len(I[u]) == 1 and I[u][0] == pivot:
             I[u] = []
             eliminated[u] = True
             merged_vertices.append(u)
-    if merged_vertices:                 # one compaction pass, not a removal each
+    if merged_vertices:                 # C[pivot] - merged, in one compaction pass
         tag += 1
         for u in merged_vertices:
             mark[u] = tag
@@ -212,19 +256,28 @@ def md5_eliminate(A, I, C, mark, tag, eliminated, pivot):
 
 def md5_file(buckets, filed, d, u):
     """Push u at the head of bucket d, which is the O(1) end of the C++ twin's
-    linked list."""
+    linked list.
+
+    Set view: buckets[d] is the set of live vertices whose current degree is d, and
+    the three functions here are add, discard and move between two of them. A
+    linked list gives all three in O(1) and gives the head in O(1) too, which is
+    everything the picker asks of it. What it does not give is a minimum, which is
+    why min_degree walks. A sorted container would hand over the minimum directly
+    and charge a log on every file, and files outnumber picks."""
     buckets[d].insert(0, u)
     filed[u] = True
 
 def md5_unfile(buckets, filed, d, u):
-    """Take u out of bucket d, if it is there."""
+    """Take u out of bucket d, if it is there. Set view: buckets[d].discard(u), and
+    discard rather than remove, since a caller may unfile a vertex twice."""
     if not filed[u]:
         return
     buckets[d].remove(u)
     filed[u] = False
 
 def md5_refile(buckets, filed, degrees, u, new_degree):
-    """Move u from the bucket for its old degree to the one for new_degree."""
+    """Move u from the bucket for its old degree to the one for new_degree. Set
+    view: buckets[old].discard(u) then buckets[new].add(u)."""
     md5_unfile(buckets, filed, degrees[u], u)
     degrees[u] = new_degree
     md5_file(buckets, filed, new_degree, u)
@@ -295,6 +348,9 @@ def md5_minimum_degree(G):
         # Only the new clique's surviving members can have a different degree.
         # Everything else has the same A, the same cliques and the same live
         # neighbors as before, so its cached value is still correct.
+        # Set view: the refresh set is exactly C[pivot], because reach(u) can only
+        # change when a source of it changed, and the step touched no source
+        # outside C[pivot].
         refreshed_vertices = list(C[pivot])
         for u in refreshed_vertices:
             neighbors_u, tag = md5_neighbors(A, I, C, mark, tag, u)

@@ -47,6 +47,18 @@ def md1_eliminate(A, mark, tag, eliminated, pivot):
     which is the pattern of its column of L; the fill edges created among those
     neighbors, pairs that were not already adjacent; and the advanced tag.
 
+    In set terms this is the elimination game itself, three lines:
+
+        for u in A[pivot]:
+            fill(u) = A[pivot] - A[u] - {u}       what was not already there
+            A[u]    = ( A[u] | fill(u) ) - {pivot}
+        A[pivot] = {}
+
+    The loop below is that difference without a set: stamp A[u], then walk
+    A[pivot] and keep whatever is unstamped. Two passes over lists rather than a
+    hash per element, and A[pivot] is captured before the loop because u is inside
+    it.
+
     Nothing is sorted. Membership comes from the mark array, one stamp per query,
     which is what the vendored codes do and what keeps every pass linear in what
     it touches.
@@ -59,13 +71,13 @@ def md1_eliminate(A, mark, tag, eliminated, pivot):
             mark[v] = tag
         mark[u] = tag                     # never adjacent to itself
         mark[pivot] = tag                 # the pivot is leaving anyway
-        for v in neighbors:
+        for v in neighbors:               # A[pivot] - A[u] - {u, pivot}, one pass
             if mark[v] != tag:            # a genuinely new edge
                 mark[v] = tag
                 A[u].append(v)
                 if u < v:
                     fill_edges.append((u, v))
-    for u in neighbors:                   # drop the pivot, compacting in place
+    for u in neighbors:                   # A[u] - {pivot}, compacting in place
         A[u] = [v for v in A[u] if v != pivot]
     A[pivot] = []
     eliminated[pivot] = True

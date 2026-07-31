@@ -211,6 +211,15 @@ std::size_t md4Storage(const Graph& A, const Graph& I, const Cliques& C) {
 std::vector<std::int32_t> md4Neighbors(const Graph& A, const Graph& I, const Cliques& C,
                                        std::vector<std::int32_t>& mark, std::int32_t& tag,
                                        std::int32_t u) {
+    // In set terms this is one line, and it is worth keeping in view because the
+    // code below is that line with the set taken away:
+    //
+    //     reach(u) = ( A[u] | C[c] for every c in I[u] ) - {u}
+    //
+    // The mark array IS the set. mark[v] == tag is the membership test, one
+    // comparison; mark[v] = tag is the insertion, one store. So the union costs one
+    // pass per source rather than a hash per member, and nothing is allocated.
+    //
     // One pass per source, with the mark array doing the deduplication, so the
     // cost is linear in what is touched. Nothing is sorted: the order is the order
     // the sources were walked in.
@@ -231,7 +240,29 @@ std::vector<std::int32_t> md4Neighbors(const Graph& A, const Graph& I, const Cli
 //
 // Returns (neighbors, absorbedCliques, prunedEdges, mergedVertices): as in md2,
 // plus the vertices folded into the pivot by mass elimination. The last three
-// are reported for display; only neighbors is used by the caller.
+// are reported for display; only neighbors is used by the caller.//
+// Set view of the whole function, in the order the code does it:
+//
+//     C[pivot] = reach(pivot)                    absorb into C[pivot]
+//     C        = C - I[pivot]                    reclaim I[pivot]
+//     for u in C[pivot]:
+//         A[u] = A[u] - C[pivot] - {pivot}       prune
+//         I[u] = ( I[u] - I[pivot] ) | {pivot}   absorb into C[pivot], reclaim I[pivot]
+//
+// The new clique is C[pivot] and gets no name of its own, so the first line reads
+// as what an elimination IS: the pivot stops being a vertex with a reachable set
+// and becomes a clique holding that same set. The last line is the first two
+// written on the I side, since u is in C[c] exactly when c is in I[u].
+//
+// Three set differences, and not one of them builds a set. Each is a single stamp
+// of the subtrahend followed by one compaction pass over the minuend, which turns
+// |A[u]| * |C[pivot]| comparisons into |A[u]| + |C[pivot]|.
+//
+// Mass elimination adds two more lines, and breaks the identity in the first one:
+// from here C[pivot] is reach(pivot) minus what the pivot absorbed.
+//
+//     merged   = { u in C[pivot] : A[u] == {} and I[u] == {pivot} }
+//     C[pivot] = C[pivot] - merged
 std::tuple<std::vector<std::int32_t>, std::vector<std::int32_t>,
            std::vector<std::pair<std::int32_t, std::int32_t>>, std::vector<std::int32_t>>
 md4Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
@@ -243,7 +274,9 @@ md4Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
     C.create(pivot, neighbors);     // becomes L_pivot, the column pattern
 
     // Stamp the new clique once, and the absorbed cliques once. Membership is then
-    // a comparison, and both loops below are compactions in place.
+    // a comparison, and both loops below are compactions in place. cliqueTag is the
+    // set C[pivot] and absorbedTag is the set I[pivot], each built in one pass and
+    // then queried for free.
     ++tag;
     const std::int32_t cliqueTag = tag;
     for (std::int32_t v : neighbors) mark[v] = cliqueTag;
@@ -263,7 +296,7 @@ md4Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
             }
             kept.push_back(v);
         }
-        A[u].swap(kept);
+        A[u].swap(kept);                         // what survives is A[u] - C[pivot] - {pivot}
 
         kept.clear();                            // I[u] loses the absorbed cliques
         for (std::int32_t c : I[u])
@@ -280,6 +313,7 @@ md4Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
     // but the new one means u sees exactly what the pivot sees, so eliminating it
     // next would cost no fill. Fold it into the pivot now and strip it from the
     // cliques, since it is no longer a vertex.
+    // merged = { u in C[pivot] : A[u] == {} and I[u] == {pivot} }
     std::vector<std::int32_t> mergedVertices;
     for (std::int32_t u : neighbors) {
         if (A[u].empty() && I[u].size() == 1 && I[u][0] == pivot) {
@@ -288,7 +322,7 @@ md4Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
             mergedVertices.push_back(u);
         }
     }
-    if (!mergedVertices.empty()) {           // one compaction pass, not a removal each
+    if (!mergedVertices.empty()) {           // C[pivot] - merged, one compaction pass
         ++tag;
         for (std::int32_t u : mergedVertices) mark[u] = tag;
         kept.clear();
@@ -353,6 +387,9 @@ std::vector<std::int32_t> md4MinimumDegree(const Graph& G) {
         // Only the new clique's surviving members can have a different degree.
         // Everything else has the same A, the same cliques and the same live
         // neighbors as before, so its cached value is still correct.
+        // Set view: the refresh set is exactly C[pivot], because reach(u) can only
+        // change when a source of it changed, and the step touched no source
+        // outside C[pivot].
         const std::vector<std::int32_t> refreshedVertices = C[pivot];
         for (std::int32_t u : refreshedVertices)
             degrees[u] = md4Neighbors(A, I, C, mark, tag, u).size();

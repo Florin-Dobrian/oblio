@@ -24,7 +24,8 @@ Each adds exactly one mechanism to the one before. The right column cites
 | `md5` | degree buckets, so the minimum is walked to, not scanned | 5.9, 5.10 |
 | `mmd1` | multiple elimination: a batch of pivots per refresh | 5.11, 5.12 |
 | `mmd2` | the rest of genmmd, one pass at a time | 5.11, 5.12 |
-| `amd` | approximate degree: a bound instead of a set union | 5.13, 5.14 |
+| `amd1` | approximate degree: a bound instead of a set union | 5.13, 5.14 |
+| `amd2` | the rest of amd_1 and amd_2, one pass at a time | 5.13, 5.14 |
 
 ## What the layers show
 
@@ -65,9 +66,9 @@ the prepass, costs a little fill on 10 of 207 graphs and gains none, which is th
 The asterisk on `md2 -> md3`: the individual merge is provably free, but the equality of the
 totals across the whole run is measured rather than proved. See the open question below.
 
-**`mmd1` and `amd` give up different things.** `mmd1`'s pivots are always true minimum-degree
+**`mmd1` and `amd1` give up different things.** `mmd1`'s pivots are always true minimum-degree
 vertices; only the tie among equals is broken differently, because a batch evicts what it has
-touched. `amd`'s pivots may simply not be minimal, because an overcounted bound can hide the true
+touched. `amd1`'s pivots may simply not be minimal, because an overcounted bound can hide the true
 minimum. MMD perturbs; AMD can be wrong. Both cost well under a percent of fill, in either
 direction, and both are noticeably faster.
 
@@ -79,11 +80,11 @@ in a single step, 1 taking 2 and 3, which makes it the simplest case for reading
 mass elimination, at the price of the run ending there. `graph2` has six vertices, `graph3` has
 twelve and is the first whose ordering is not the identity. `graph4` has eight vertices and
 fourteen edges and exists for one reason: **it is the smallest graph we found on which AMD's
-bound is ever loose.** The bound overcounts only when a vertex belongs to two elements that
-overlap outside the new one, which needs enough eliminations to have made several elements and
+bound is ever loose.** The bound overcounts only when a vertex belongs to two cliques that
+overlap outside the new one, which needs enough eliminations to have made several cliques and
 enough fill for them to intersect.
 Checked exhaustively, no connected graph on five or six vertices is ever loose anywhere in its
-run, and none in thirty thousand samples on seven. Without `graph4` the `amd` trace would display
+run, and none in thirty thousand samples on seven. Without `graph4` the `amd1` trace would display
 the whole algorithm and never once show it approximating.
 
 `graph5` has five vertices and four edges, two paths joined at 4, and is present in `md1`, `md2`
@@ -91,8 +92,8 @@ and `md3` only. It is the smallest graph on which **md3's merge test declines a 
 supervariable**: at the step whose pivot is 0, vertex 4 has nothing explicit left but belongs to
 `c1` as well as to the new clique, so `I[4] == {pivot}` fails even though everything 4 reaches lies
 inside that clique. It orders as 2 1 3 0 4 with no merge and no fill, where the exact test would
-give 2 1 3 (0 4). It also separates amd's two extra mechanisms: with aggressive absorption on,
-`amd` takes four steps and reports `merged = 4, absorbed = c1`; with it off, five steps and no
+give 2 1 3 (0 4). It also separates amd2's two extra mechanisms: with aggressive absorption on,
+`amd2` takes four steps and reports `merged = 4, absorbed = c1`; with it off, five steps and no
 merge, exactly like `md3`. The hashing plays no part either way. See the section on mass
 elimination.
 
@@ -110,7 +111,7 @@ two used ones, while no pivot equals its own step number.
 indistinguishable from each other, both reaching the same closed neighborhood, yet neither is
 absorbable into the pivot since each still reaches 3 from outside the clique. It orders as
 1 0 (2 3 4) under both md3's test and the exact one, since no test framed against the pivot can
-see such a pair. Catching them needs a comparison between candidates, which is amd's hashing.
+see such a pair. Catching them needs a comparison between candidates, which is amd2's hashing.
 
 The three small graphs added for the mass elimination story line up as follows.
 
@@ -152,23 +153,23 @@ only feeds them the same seven graphs and prints their permutations in our forma
 
 The lowercase names are deliberate, and so is the subfolder. Oblio capitalizes source files, but
 macOS formats APFS case-insensitive by default, so `Amd.cpp` and `amd.cpp` are one path: dropping
-the vendored copy beside the prototype overwrote `amd.cpp` silently, and `git status` said nothing
-because `core.ignorecase` is on. The subfolder keeps the two kinds of file apart, and the prefix
-means no vendored name can ever collide with a prototype.
+the vendored copy beside the prototype overwrote the amd prototype silently, and `git status` said
+nothing because `core.ignorecase` is on. The subfolder keeps the two kinds of file apart, and the
+prefix means no vendored name can ever collide with a prototype.
 
 ## What is not implemented
 
-The `mmd1` and `amd` prototypes are deliberately subsets of the vendored routines, and the plan
+The `mmd1` and `amd1` prototypes are deliberately subsets of the vendored routines, and the plan
 for closing the gap is the section that follows. Each file header carries its own list, and
 sections 5.11 and 5.13 carry the same lists in prose. In brief:
 
 - **`mmd1`** lacks the prepass that numbers degree-0 and degree-1 vertices before the main loop, and
   `mmdupd`'s `q2h` merging of vertices indistinguishable *from each other* rather than from the
   pivot. It also files degrees at a different offset and never uses bucket 0.
-- **`amd`** performs its degree update in one pass where `Amd.cpp` uses two, which changes the
-  ordering on four of eleven test graphs. It also lacks dense-row handling and the postorder, both
-  of which change the output, along with `amd_aat`, `amd_valid`, the `Control`/`Info` interface and
-  the workspace compression, none of which do.
+- **`amd1`** is the bound and nothing else. It lacks aggressive absorption and hash supervariable
+  detection, which `amd2` now carries, and everything on `amd2`'s remaining list: the two-pass
+  degree update, dense-row handling, the postorder, `amd_aat`, `amd_valid`, the `Control`/`Info`
+  interface and the workspace compression.
 
 ## The plan for mmd and amd
 
@@ -222,16 +223,38 @@ Items 3 and 5 make a candidate stand for several original vertices, so every deg
 weighted count. It is taken from `len(super_members[v])`, which is O(1), so no weight array is
 introduced. Our `super_members` already does what `mmdnum` does, so the expansion needs nothing.
 
-**amd1, the ideas.** The approximate degree bound, computed in one pass as now, plus the two
-mechanisms that ride along in the same sweep, aggressive absorption and hash supervariable
-detection.
+**amd1, the idea. Done.** The approximate degree bound, and nothing else. The same rule mmd1
+follows: one layer, one idea. Everything md5 had is kept unchanged, and the only thing that moves
+is how a degree is estimated after an elimination.
 
-**amd2, amd_1 and amd_2 complete.** The two-pass degree update, so every survivor sees the same
-final degme rather than a shrinking one, which is the one difference that already shows in our
-output; dense row and column detection by the alpha ratio, with those vertices held out of the
-ordering and placed last; `amd_aat` forming the pattern of A + A' with the diagonal dropped,
-and `amd_preprocess`; `amd_postorder`, so the output is a postorder of the assembly tree rather
-than raw elimination order; `amd_valid` as an input check; and the `Control`/`Info` interface.
+**amd2, amd_1 and amd_2 complete.** Seven additions, the first two of which are mechanisms that
+ride along with the bound's own work and the rest of which are holes:
+
+1. **Aggressive absorption.** |C[c] - C[p]| has just been computed for every clique the new one
+   touched, and a zero means C[c] lies inside C[p], so that clique is dead. Ordinary absorption
+   kills only what the pivot touched; this kills what any reached vertex touched, at no extra
+   cost.
+
+2. **Hash supervariable detection.** Mass elimination merges a vertex into the pivot. Two vertices
+   can be indistinguishable from each other without either being absorbable into the pivot. AMD
+   hashes (A[u], I[u]), compares within a hash bucket, and merges on an exact match; the hash is
+   a filter, never the decision.
+
+3. **The two-pass degree update**, so every survivor sees the same final degme rather than a
+   shrinking one, which is the one difference that already shows in our output.
+
+4. **Dense row and column detection** by the alpha ratio, with those vertices held out of the
+   ordering and placed last.
+
+5. **`amd_aat`**, forming the pattern of A + A' with the diagonal dropped, and `amd_preprocess`.
+
+6. **`amd_postorder`**, so the output is a postorder of the assembly tree rather than raw
+   elimination order.
+
+7. **`amd_valid`** as an input check, and the `Control`/`Info` interface.
+
+Item 2 makes a candidate stand for several original vertices, exactly as mmd2's items 3 and 5 do,
+so every degree there becomes a weighted count taken from `len(super_members[v])`.
 
 ### What is deliberately excluded
 
@@ -276,16 +299,61 @@ to a tie.
 
 Worth recording, because both were invisible to the checks in place at the time.
 
-**`amd` did not shrink the new element on mass elimination.** When a vertex is mass-eliminated it
-joins the pivot's supervariable, so it stops being outside the new element and must stop
-contributing to `|L|`; `Amd.cpp` does this at `degme -= nvi`. We computed `|L|` once before the
-loop. The effect is nearly invisible: identical results on all four test graphs and on every grid,
-surfacing only on a five-vertex bowtie where a bound came out one too large.
+**amd did not shrink the new clique on mass elimination.** When a vertex is mass-eliminated it
+joins the pivot's supervariable, so it stops being outside the new clique and must stop
+contributing to `|C[p]|`; `Amd.cpp` does this at `degme -= nvi`. We computed `|C[p]|` once before
+the loop. The effect is nearly invisible: identical results on all four test graphs and on every
+grid, surfacing only on a five-vertex bowtie where a bound came out one too large.
 
 **`mmd1.cpp` printed display lines its Python twin did not**, left over from the `md5` file it was
 derived from. This survived because the verification at the time used a `grep` filter narrow
 enough to skip exactly those lines, which is not a test. `make test` exists because of this one:
 it compares whole outputs, and it found the drift immediately.
+
+## Two axes, and where the chain runs through them
+
+Everything below md2 sits in a two-dimensional space, and the ladder walks it in a particular
+way that is worth stating before the layers rather than discovering across them.
+
+**The first axis is representation, and it is what md1 through md5 climb.** md1 materializes fill,
+md2 stops materializing it, md3 merges indistinguishable vertices, md4 stops recomputing degrees
+that did not change, md5 stops scanning for the minimum. Each of those changes what is stored or
+when it is touched. None of them changes what a degree MEANS.
+
+**The second axis is the degree itself.** From md2 on, a degree is the size of a union of an
+explicit adjacency with some cliques, and a union can either be counted or estimated. Counting is
+exact and costs a pass over every source. Estimating decomposes the union, adds the sizes of the
+pieces, and overcounts where they overlap, at a cost of one number per clique. That estimate is
+bound(u), and it is derived in the md2 subsection below, since md2 is where the union it
+decomposes first exists.
+
+**The estimate itself never changes.** One decomposition, written once, unaltered from md2 through
+amd2. md3 changes what a size means, but identically for degree(u) and for bound(u), so the
+relation between them is untouched. md4 adds a cap. md5 does nothing to it at all. So the second
+axis is not four variants of an idea; it is one definition and a question of which layer can use
+it.
+
+**And the answer to that is md4, not md2.** bound(u) decomposes reach(u) against the new clique, so
+it is a statement about the vertices that clique reached and about no others. md2 and md3 repick
+from scratch at every step, so most of what they refresh is outside the bound's domain and would
+have to be counted exactly anyway. md4 is the layer that narrows the refresh set to exactly C[p],
+which is exactly the bound's domain. The bound is inherently incremental, md4 is where the
+algorithm becomes incremental, and those two facts meeting is why amd belongs at the top of the
+chain rather than beside md2.
+
+So the grid is smaller than it first looks: two exact rungs where the estimate is expressible but
+not usable, then a genuine choice from md4 up. Each layer from md2 carries a short subsection
+saying where it stands, and amd1 builds the approximate cell once, at the top, as running code.
+
+**And the axis stops being orthogonal at the top, which is why the fork is real.** mmd and amd are
+not two knobs that happen to be turned separately. They attack the same cost from opposite ends,
+mmd making the refresh rare and amd making it cheap, so their gains overlap rather than add. They
+also interfere: the anchored bound is anchored at ONE new clique, and a batch produces several, so
+the anchoring would have to be redone against their union; and the bound stays tight only when
+degrees are refreshed often, which is exactly what batching gives up. That is measured here rather
+than assumed, and the measurement is in the delta section. So md1 through md5 is one chain, and
+the fork at the top into mmd, which stays exact, and amd, which goes approximate and does not
+batch, is a real division rather than a filing convention.
 
 ## md1: the elimination game
 
@@ -304,6 +372,40 @@ What it does badly is storage. Every fill edge is a real edge in a real set, so 
 grows as the run proceeds, and on a large problem the fill dominates the original structure
 by orders of magnitude. That is the problem md2 exists to solve.
 
+### md1 in set operations
+
+There is only one place set algebra appears at this layer, and it is md1_eliminate. The pick is
+`degree(u) = |A[u]|`, a lookup, and there is nothing to say about it. The elimination is four
+lines:
+
+```
+for u in A[p]:
+    fill(u) = A[p] - A[u] - {u}                what was not already there
+    A[u]    = ( A[u] | fill(u) ) - {p}
+A[p] = {}
+```
+
+`fill(u)` is separated out rather than folded into the union because md1 reports it: the
+difference is the set of new edges, and printing it is what makes the layer legible. The union
+could be written `A[u] = ( A[u] | A[p] ) - {u, p}` in one line, and that is the same thing, but
+then the fill would have to be recovered afterwards by a second difference.
+
+**A[p] appears on the right-hand side of a line that assigns to A[u], and u is in A[p].** That is
+the one hazard in the block. If A[p] were being modified inside the loop the later iterations
+would see a different set from the earlier ones, so the pivot's adjacency is captured once, before
+the loop, and cleared once, after it. Every layer from md2 on does the same thing with the
+reachable set for the same reason.
+
+The code computes the difference without building a set: stamp A[u] with the mark array, then walk
+A[p] and keep whatever is unstamped. Two passes over lists, one stamp and one comparison per
+element, rather than a hash per element. The set view is in the docstring, and md5's header states
+the convention that every layer follows.
+
+**What the four lines cost is the whole argument for md2.** `fill(u)` is materialized, so A[u]
+grows, so the next elimination's difference is taken against a larger set, and the growth
+compounds. The set operations themselves never change from here: md2's eliminator does a union and
+three differences too. What changes is what they are taken over.
+
 ## md2: the quotient graph
 
 The insight is that the fill edges created by one elimination are not independent: they form
@@ -311,10 +413,12 @@ a clique, and a clique of d vertices can be stored as a d-element list instead o
 edges. md2 stores it that way and never materializes fill at all.
 
 The representation splits the neighbor relation in two. A[u] holds the vertices u is still
-explicitly adjacent to; I[u] holds the ids of the cliques that contain u; C[c] holds the
-members of clique c. The true neighborhood is the union, computed on demand by md2_neighbors,
-and George and Liu's reachable-set theorem is the guarantee that this union equals what md1's
-adjacency would have been. Same degrees, same pivots, same order, on every graph.
+explicitly adjacent to; I[u] holds the cliques that contain u; C[c] holds the members of clique c. C
+carries the same double duty A does, bare C being the set of live cliques and C[c] the vertex set of
+one of them, so a clique and its name are the same thing here. The true neighborhood is the union,
+computed on demand by md2_neighbors, and George and Liu's reachable-set theorem is the guarantee
+that this union equals what md1's adjacency would have been. Same degrees, same pivots, same order,
+on every graph.
 
 Two mechanisms keep it from growing. Pruning: when a new clique is formed, any explicit edge
 with both ends inside it is deleted, since the clique now implies it. Absorption: the cliques
@@ -325,6 +429,199 @@ total storage falls monotonically where md1's rises.
 The price is that the degree is no longer a lookup. Every query unions the explicit adjacency
 with every clique the vertex belongs to, and the pivot search does that for every live vertex
 at every step. Making the degree cheap again is what md4 and md5 are for.
+
+### md2 with the exact degree, which is what it does
+
+Every layer from md2 on faces the same choice, since from here a degree is a union rather than a
+lookup, and a union can be counted or estimated. Written out in set operations, one step of md2
+as it stands is:
+
+```
+the pick
+
+for every live u:
+    reach(u) = ( A[u] | C[c] for c in I[u] ) - {u}
+    degree(u) = |reach(u)|
+p = the u minimizing degree(u)
+
+the elimination
+
+C[p] = reach(p)                   absorb into C[p]
+C    = C - I[p]                   reclaim I[p]
+for u in C[p]:
+    A[u] = A[u] - C[p] - {p}      prune
+    I[u] = ( I[u] - I[p] ) | {p}  absorb into C[p] and reclaim I[p]
+```
+
+The union on the second line is the expensive object. It cannot be counted by adding sizes,
+because the sources overlap, so it has to be deduplicated, which is the mark pass. The cost per
+vertex is |A[u]| + sum |C[c]| over c in I[u].
+
+**Absorption is the first line, not the second.** The union in `reach(p)` pulls in every C[c] with
+c in I[p], so each of those cliques is a subset of C[p] the moment C[p] exists. That IS the
+absorption, and it has already happened when the second line runs. The second line only reclaims
+what has become redundant.
+
+**The last line is the first two written on the I side**, which is why its comment repeats them
+verbatim rather than describing it again. The incidence relation is stored twice, once in each
+direction: u is in C[c] exactly when c is in I[u]. So `- I[p]` is the same subtraction as
+`C = C - I[p]`, on the per-vertex side, and `| {p}` is the same statement as `C[p] = reach(p)`,
+read the other way. Four lines, two facts.
+
+That pairing also settles what is optional. The two reclamations go together, `C = C - I[p]` and
+the `- I[p]` beside it: drop both and the algorithm is still correct, only wasteful, since an
+absorbed clique still sitting in I[u] contributes a subset of C[p] to the union and changes no
+degree. Drop only one and `reach` walks a clique that is no longer in C. The `| {p}` half is not
+optional at all, since without it the new clique reaches nobody.
+
+**Pruning is the same idea on the other half of the representation.** An explicit edge with both
+ends inside C[p] is implied by C[p], so dropping it changes no reachable set. Absorption reclaims
+redundant cliques and pruning reclaims redundant edges, and in both cases the line that appears to
+do the work is only freeing what the union already made redundant.
+
+**The new clique is written C[p] and not given a name of its own**, which is a small choice with
+two consequences worth pointing at. The order of the first two elimination lines is now forced,
+and it is the right order: reach(p) reads the cliques in I[p], and the next line deletes them, so
+the new clique is built out of the old ones before they go. And `C[p] = reach(p)` turns out to be
+the whole of what an elimination IS at this layer. The pivot stops being a vertex with a reachable
+set and becomes a clique holding that same set; everything under the loop is bookkeeping, stripping
+what the new clique now implies from the explicit edges and from the incidence lists.
+
+Both readings rest on C carrying the same double duty A does: bare C is the set of live cliques,
+subscripted C[c] is the vertex set of one of them, exactly as bare A is the matrix and A[u] is one
+adjacency. So `C - I[p]` is a difference of two sets of cliques and not an analogy, and the new
+clique sits inside the naming scheme the rest of the file already uses rather than beside it.
+
+That identity is exact here and only here. From md3 on, mass elimination trims the merged vertices
+out in the same call, so the line becomes `C[p] = reach(p) - merged` and the loop runs over the
+trimmed set.
+
+### md2 with an approximate degree, which it can define but not use
+
+The pair above is what md2 computes:
+
+```
+reach(u)  = ( A[u] | C[c] for c in I[u] ) - {u}
+degree(u) = |reach(u)|
+```
+
+and the second line is the expensive one, because the size of a union is not the sum of the sizes
+of its parts. Deduplication is what costs. So: decompose reach(u) into pieces, add their sizes
+anyway, and accept whatever error the overlaps cause. That is the entire idea, and the rest is
+choosing the decomposition well.
+
+**One invariant first**, because it says where an overlap can and cannot be. When clique c is
+formed, every u in C[c] has A[u] = A[u] - C[c], and neither set grows afterwards. So
+
+```
+A[u] & C[c] = {}     for every c in I[u]
+```
+
+The explicit part never overlaps a clique. All overlap is clique against clique.
+
+**The decomposition, anchored at the new clique**, where p is the pivot just eliminated:
+
+```
+reach(u)  = ( A[u] - C[p] ) | ( C[p] - {u} ) | ( C[c] - C[p]  for c in I[u] - {p} )
+bound(u)  = |A[u] - C[p]| + |C[p] - {u}| + sum |C[c] - C[p]|
+```
+
+The first line is an identity, exact, for any u that C[p] reached. The second line is the first
+with the union replaced by a sum, which is one substitution and the only one, so
+
+```
+degree(u) <= bound(u)
+```
+
+with equality exactly when the pieces happen to be disjoint. The first two terms always are: the
+first by the invariant, the second by construction. So the entire error is the overlap between two
+old cliques outside C[p], which is the smallest place the error could have been put, since C[p] is
+the largest region they share and it has been factored out.
+
+bound(u) IS the approximate degree, and AMD is what comes of putting it where degree(u) stood: pick
+the u minimizing bound(u) rather than the u minimizing degree(u), and change nothing else. The
+elimination is untouched, the representation is untouched, and the algorithm is the same algorithm
+reading a different number.
+
+Two caps ride along, and they are a different kind of thing, since they bound the same set from
+outside rather than measuring a decomposition of it:
+
+```
+bound(u) = min( n - k - weight(u),                     nothing exceeds what remains
+                degree_old[u] + |C[p] - {u}|,          it can only grow by the new clique
+                |A[u] - C[p]| + |C[p] - {u}| + sum |C[c] - C[p]| )
+```
+
+k is the number of original vertices eliminated so far, so n - k is what is still live, and the
+weight(u) comes off because reach(u) excludes u and u stands for a whole supervariable. The AMD
+paper writes this cap as n - k, which is the md2 reading where every weight is 1; from md3 on the
+subtraction is needed and the code has it, as `num_left - len(super_members[u])`.
+
+That k is a count of ORIGINAL vertices while the code increments by `1 + len(merged_vertices)`,
+a count of representatives, looks like a units mismatch and is not. An original leaves the live set
+exactly once: it is counted at the step it is merged, or at the step it is chosen as pivot, and if
+it later sits inside some other supervariable's member list it is not counted again. So
+`num_eliminated` really does count originals, and the loop condition `num_eliminated < n` compares
+like with like.
+
+**Why it is cheap** is one property and worth stating separately from why it is correct:
+|C[c] - C[p]| depends on the clique c alone and not on the vertex asking, so it is computed once
+per clique per step and then read once per vertex. The exact degree recomputes a union per vertex.
+
+**And here is what md2 cannot do with any of it.** Look again at the first line: it holds for u in
+C[p], because it puts C[p] - {u} inside reach(u). For a vertex the step never reached, the
+decomposition is not merely loose, it is wrong. So bound(u) covers exactly the vertices the new
+clique reached, and nothing else.
+
+md2 recomputes every live vertex at every step. Most of what it refreshes lies outside C[p] and
+would have to be counted exactly regardless, so the estimate would apply to a shrinking minority of
+the work and save nothing worth having. The layer that narrows the refresh set to exactly C[p] is
+md4, and C[p] is exactly the bound's domain. bound(u) is inherently incremental; md4 is where the
+algorithm becomes incremental; amd sits at the top of the chain because those two facts meet there
+and not earlier.
+
+So md2 is where the estimate can be DEFINED, since it is where the union it decomposes first
+exists, and md4 is where it can be USED. That gap is the reason this subsection is a derivation and
+the md4 one is a decision.
+
+### Fill per elimination, which md1 reports and md2 gives up
+
+md1_eliminate returns its fill edges and the trace prints them. md2_eliminate returns pruned edges
+instead, and the two are not the same quantity. The substitution is worth explaining, because it
+is the first thing the quotient graph costs that is not storage.
+
+**The fill at u has the same shape as md1's, taken against the reachable set:**
+
+```
+fill(u) = ( C[p] - {u} ) - reach_before(u)
+```
+
+and reach_before(u) is the union md2 exists to avoid computing. So reporting fill would mean one
+full reachable-set query per member of C[p], at the moment of elimination, which is exactly the
+operation the layer defers. md1 could report it because its neighborhood was already materialized:
+the difference was a byproduct of a set it had lying around.
+
+**Every pair inside C[p] falls into three classes at md2, where md1 had two.** Explicit before,
+which is pruned; implicit before through some shared clique; and new, which is fill. md1 has no
+third class because it has no third representation, so for md1 "not already an edge" and "new" are
+the same statement. At md2 they are not, and separating them is what costs.
+
+**And the third class is expensive for the reason everything else at md2 is expensive.** Counting
+the pairs inside C[p] that were already implicit means counting the union of the old cliques
+restricted to C[p], which is inclusion-exclusion over overlapping sets. That is the same obstruction
+that makes the exact degree expensive and that the bound above sidesteps by overcounting. Fill and
+degree are hard at md2 for one reason, not two.
+
+**One detail that looks like an opportunity and is not.** At md4 and md5 the refresh already
+computes reach(u) for exactly the members of C[p], so the query seems to be sitting there already.
+It is not: the refresh runs after the clique is installed, so it yields the new reach, and fill
+needs the old one. Getting it would mean a second query per member, before the update, which doubles
+the layer's remaining cost.
+
+**What survives is the aggregate, and it survives intact.** At the moment a vertex is chosen, C[p]
+is the off-diagonal pattern of its column of L, so |C[p]| accumulates nnz(L) at every layer for
+free, exactly as md1's degree does. Total fill is nnz(L) - nnz(tril A) and is reported by every
+layer in the ladder. What md2 gives up is per-step, per-vertex fill. The total never depended on it.
 
 ## md3: mass elimination
 
@@ -373,7 +670,7 @@ only AGAINST THE PIVOT. Two members can be indistinguishable from each other whi
 absorbable into the pivot, and no pivot-relative test finds them. An exhaustive pass over the
 clique would: all pairs, O(d * d) comparisons at O(d) each, so O(d * d * d) per step. That is
 what hashing reduces, bucketing by structure and comparing only within a bucket, which is
-what amd does and what the section on detecting supervariables against each other covers.
+what amd2 does and what the section on detecting supervariables against each other covers.
 
 Five vertices again, and this one is graph7. With adjacency 0:{1,2,4}, 1:{0,4}, 2:{0,3,4},
 3:{2,4}, 4:{0,1,2,3}, md3 orders 1 0 (2 3 4), three steps, the last of which merges 3 and 4
@@ -401,7 +698,7 @@ cliques the PIVOT belonged to and 0 was never in c1. AGGRESSIVE ABSORPTION remov
 whose members lie inside the new one, which deletes c1, leaves I[4] == {c0}, and lets the
 unchanged cheap test fire.
 
-That is exactly what amd does with it. On graph5, amd with aggressive absorption on takes four
+That is exactly what amd2 does with it. On graph5, amd2 with aggressive absorption on takes four
 steps and reports `merged = 4, absorbed = c1`; with it off it takes five and merges nothing,
 behaving like md3. The hash detection reports nothing in either run, so this case is entirely
 about absorption and not about comparison. So there are three ways to recover a missed
@@ -592,7 +889,7 @@ then hold one entry and zero entries below their diagonals, and the closed form 
 The term comes from the AMD literature, where the contrast is with the TRUE degree, which
 does count the internal members. Minimum degree with supervariables uses the external one,
 and the choice is not cosmetic: it changes which pivot is selected, not merely what number is
-printed beside it. Where the weighting first has that effect is amd, whose hash detection
+printed beside it. Where the weighting first has that effect is amd2, whose hash detection
 folds a vertex into a LIVE supervariable, `weight[i] += weight[j]` with i still a candidate.
 Through mmd1 every transfer is into the pivot, so the invariant that a live vertex stands for
 one original vertex holds all the way, and the weighting stays inert.
@@ -657,6 +954,46 @@ column-count identity holds and no fill edge is missed or double counted. md2 an
 such cross-check, since neither materializes fill; computing it would cost a neighbor query
 per neighbor plus a quadratic pair scan, which is work the representation exists to avoid.
 
+### md3 with an approximate degree, where only the counting changes
+
+The four lines from md2, unchanged as text:
+
+```
+reach(u)  = ( A[u] | C[c] for c in I[u] ) - {u}
+degree(u) = |reach(u)|
+
+reach(u)  = ( A[u] - C[p] ) | ( C[p] - {u} ) | ( C[c] - C[p]  for c in I[u] - {p} )
+bound(u)  = |A[u] - C[p]| + |C[p] - {u}| + sum |C[c] - C[p]|
+```
+
+**What changes is what |S| means.** A vertex now stands for a set of original vertices, so every
+size is a weighted count:
+
+```
+|S| = sum of weight(v) over v in S,   where weight(v) = |super_members[v]|
+```
+
+That substitution is uniform. It lands on degree(u) and on bound(u), in the same places, so
+degree(u) <= bound(u) survives it and no term of the decomposition moves.
+
+**Mass elimination touches the anchor, and this is the one place md3 is not merely a substitution.**
+C[p] is no longer reach(p): the vertices the pivot absorbs are trimmed out in the same call, so
+
+```
+C[p] = reach(p) - merged
+```
+
+and both C[p] terms of the bound must use the trimmed set. A merged vertex has joined the pivot's
+supervariable, so it is inside the diagonal block rather than outside it, and counting it in
+|C[p] - {u}| inflates every bound the step produces. `Amd.cpp` does the same thing at
+`degme -= nvi`, and our own version of this was a real bug, recorded in the bug section above.
+
+**Mass elimination itself is indifferent.** A[u] == {} and I[u] == {p} is a structural test that
+never consults a degree, so it fires the same whichever of the two numbers the layer is computing.
+
+md3 also still repicks from scratch, so it is where md2 is: the estimate is definable and not worth
+using. The layer that changes that is md4.
+
 ## md4: maintained degrees
 
 Every layer so far rebuilds a neighbor set for every live vertex at every step, keeps the
@@ -720,6 +1057,51 @@ The display follows the same rule. md4_show prints the stored degree and never r
 so the trace shows what the algorithm believes rather than what is true. An earlier draft
 printed both, as a check on the cache, and the two columns were always equal; the check moved
 out to a test rather than sitting in the output.
+
+### md4 with an approximate degree, where it becomes usable
+
+The same four lines, still unchanged as text:
+
+```
+reach(u)  = ( A[u] | C[c] for c in I[u] ) - {u}
+degree(u) = |reach(u)|
+
+reach(u)  = ( A[u] - C[p] ) | ( C[p] - {u} ) | ( C[c] - C[p]  for c in I[u] - {p} )
+bound(u)  = |A[u] - C[p]| + |C[p] - {u}| + sum |C[c] - C[p]|
+```
+
+**What changes is WHEN they are evaluated, and for whom.** md2 and md3 evaluate the first pair for
+every live u at every step. md4 evaluates it only for u in C[p], because nothing else can have
+changed. Written as the layer sees it:
+
+```
+for u in C[p]:  degrees[u] = degree(u)        md4, exact
+for u in C[p]:  degrees[u] = bound(u)         md4, approximate
+```
+
+and those two loops range over the same set. That is the coincidence the whole placement rests on.
+The second line of the decomposition is a statement about members of C[p] and about no others, so
+at md2 and md3 most of what gets refreshed is outside its domain and has to be counted exactly
+anyway. At md4 the refresh set IS the domain. bound(u) is inherently incremental, md4 is where the
+algorithm becomes incremental, and there is nothing left over.
+
+**A second thing arrives with it.** Of the two caps in the md2 subsection,
+
+```
+degree_old[u] + |C[p] - {u}|
+```
+
+needs degree_old[u], and a cache is what makes a previous degree exist. It is often the tightest of
+the three, since a vertex whose reach barely grew is bounded by what it was plus the new clique. It
+also stays valid when the cached value is itself a bound rather than a degree, which is what makes
+the chain work inductively: degree_old[u] >= degree(u) at every earlier step means it is still an
+upper bound now. Nothing has to be exact anywhere.
+
+**And the costs finally differ.** Both loops walk C[p], but degree(u) unites the members of every
+clique in I[u], per vertex, while bound(u) reads one number per clique, and that number,
+|C[c] - C[p]|, is computed once for the whole step. So md4 is the first layer where the two columns
+are doing measurably different amounts of work rather than the same work on different populations.
+The decomposition is md2's, the counting is md3's, and what md4 contributes is a place to stand.
 
 ## md5: degree buckets
 
@@ -844,6 +1226,39 @@ The run prints both metrics. Degree computations are unchanged from md4, as they
 since this layer touches only how the minimum is found. Bucket probes replace what was an
 n-per-step scan: 12 on graph3, 5 on graph4, 7 on graph6.
 
+### md5 with an approximate degree, where only the filing changes
+
+The same four lines once more, and now a fifth that is the layer:
+
+```
+reach(u)  = ( A[u] | C[c] for c in I[u] ) - {u}
+degree(u) = |reach(u)|
+
+reach(u)  = ( A[u] - C[p] ) | ( C[p] - {u} ) | ( C[c] - C[p]  for c in I[u] - {p} )
+bound(u)  = |A[u] - C[p]| + |C[p] - {u}| + sum |C[c] - C[p]|
+
+for u in C[p]:  refile(u, <the number>)       and the picker takes the head of the
+                                              first non-empty bucket from min_degree
+```
+
+**The layer never looks at where the number came from.** refile takes a value and moves u between
+two buckets; the walk takes the least filed value. Neither operation can tell degree(u) from
+bound(u), so md5 needs no adjustment for the estimate and the estimate needs none for md5.
+
+The three invariants above hold verbatim with "degree" read as "stored value": every live vertex is
+in the bucket matching its stored value, no stored value is stale, and no live vertex has a stored
+value below min_degree. The one requirement is uniformity. min_degree is a lower bound on the
+minimum STORED value, so a mixture, some vertices holding degree(u) and others holding bound(u),
+would break it, since the two are not comparable as estimates of the same thing. Choose one and
+every argument in this section goes through unchanged.
+
+**What the estimate costs, wherever it is used, is the pivot itself.** Every layer in the exact
+chain picks a true minimum-degree vertex, and md5's own tie-break note above is careful that only
+the choice among equals moves. bound(u) gives that up: an overcount can hide the true minimum, so
+the head of the first non-empty bucket may simply not be minimal. That concession belongs to the
+estimate and not to any layer, it becomes payable at md4 where the estimate becomes usable, and
+amd1 is where it is actually paid.
+
 ## mmd1: multiple elimination
 
 Refreshing degrees is the expensive step, so do it less often: eliminate a whole INDEPENDENT
@@ -851,6 +1266,19 @@ SET of least-degree vertices before refreshing anything. Non-adjacent pivots can
 each other's degrees, so every pivot in a batch is still a true minimum-degree vertex when it
 is taken. That is Liu's M in MMD, and it is the first layer whose ordering differs from md1's
 for a reason other than a tie in the same graph state.
+
+**This is the fork, and it is a real one.** md1 through md5 is a single chain because bound(u) is
+one definition that no layer alters, and because the layer that makes it usable, md4, does so
+without any change to itself, as the notes at the end of md2, md3, md4 and md5 set out. At the top
+that independence ends. mmd and amd attack the same cost, the refresh, from opposite ends: mmd
+makes it rare, amd makes it cheap, so their gains overlap rather than add. They also interfere. The
+anchored bound is anchored at ONE new clique, and a batch produces several, so an amd-flavored mmd
+would have to re-anchor against their union and would lose the per-clique reuse that makes the bound
+worth having. And the bound stays tight only when degrees are refreshed often, which is precisely
+what batching gives up: the delta measurement below shows the bound's own failure mode in the exact
+setting, where a wide batch leaves a whole evicted set invisible for a round. So mmd1 and mmd2 stay
+exact and take the batch; amd1 and amd2 stay one pivot per step and take the bound. Combining them
+is a question rather than a step, and it is not one this experiment answers.
 
 Six of the seven functions are md5's with the prefix changed: mmd1_neighbors, mmd1_storage,
 mmd1_eliminate, mmd1_refile and the two display functions. That is the pattern across the
@@ -1190,6 +1618,103 @@ What is still unchecked, to be done later rather than assumed:
   mmd_order drops it and genmmd is static. Ours is computed from the same expression, but that is
   a reading rather than a check.
 
+## amd1: the approximate degree
+
+md5 leaves one expensive thing standing. After each elimination, every reached vertex needs a new
+degree, and getting it means uniting the members of every clique in its list and counting the
+result. mmd1 attacks the frequency of that union. amd1 attacks its price.
+
+bound(u) is derived in the md2 subsection above, which is where the union it decomposes first
+exists, and it becomes usable at md4, where the refresh set narrows to exactly the vertices it
+covers. In brief: reach(u) is decomposed against the new clique, the union is replaced by a sum,
+and what comes out is bound(u), with degree(u) <= bound(u). amd1 picks the u minimizing bound(u)
+and changes nothing else.
+
+**Why that is cheap, which is the whole point and is easy to miss.** |C[c] - C[p]| depends on the
+clique c alone and not on the vertex u. So it is computed once per clique and then read by every
+vertex whose incidence list contains c. The exact degree costs, per vertex, a walk over the members
+of all its cliques; bound(u) costs, per vertex, one addition per clique. Both are counted in the
+trace, and the gap widens with the size of the cliques, which is to say with the fill, which is to
+say exactly where it matters:
+
+```
+              exact would visit   the bound read
+grid 10x10            958              370
+grid 16x16           3980             1503
+grid 22x22           8426             2955
+```
+
+**What is given up, and it is a different kind of loss from mmd1's.** Every layer up to here picks
+a true minimum-degree vertex, and md1 through md5 differ only in how they find one while mmd1
+differs only in how ties fall. amd1 can pick the wrong vertex outright, because an overcounted
+bound can hide the true minimum. It is the first layer whose heuristic changes rather than its
+implementation.
+
+That makes the trace do something the other layers do not need: it prints the exact degree beside
+the bound at every step, and the closing lines count how often the two disagreed. The exact value
+is computed with amd1_exact_degree, which is md5's refresh kept alive for no other purpose. It is
+instrumentation, and a real engine would not carry it.
+
+On small graphs the bound is nearly always tight, 12 loose out of 1748 checks over the seven
+examples and 200 random graphs, and the ordering comes out identical to md5's on all 207. On grids
+it is loose far more often, 798 of 2219 checks at 22 by 22, and the fill still lands within half a
+percent of md5, 4762 against 4773. Both facts are the AMD paper's claim in miniature: the bound is
+wrong often and wrong by little.
+
+**What amd1 does not have.** Everything else. Aggressive absorption and hash supervariable
+detection ride along in the same sweep in the vendored routine and would cost almost nothing here,
+which is exactly why they are held back: this file is one idea, as mmd1 was. They are amd2's pass
+1.
+
+## amd2: the extras
+
+amd1 is the bound and nothing else. amd_1 and amd_2 are the bound plus seven other things, and
+amd2 adds them one pass at a time. The checklist and its vendored references are in the plan
+section above.
+
+### Pass 1: aggressive absorption and hash supervariable detection
+
+The two mechanisms that ride along with the bound. Neither is about the degree, and both are cheap
+only because the bound's own work has already been done.
+
+**Aggressive absorption.** |C[c] - C[p]| has just been computed for every clique the new one
+touched. A zero means C[c] lies entirely inside C[p], so that clique is dead and can be absorbed at
+once. Ordinary absorption, which every layer since md2 has, kills only the cliques the pivot
+touched. This kills cliques that any reached vertex touched, and the quantity it tests was needed
+anyway.
+
+**Hash supervariable detection.** Mass elimination merges a vertex into the pivot, and md3 through
+amd1 can only see pairs where one of them is absorbable into the pivot. Two vertices can be
+indistinguishable from each other with neither being absorbable, and no pivot-relative test will
+ever find them. AMD hashes (A[u], I[u]), compares only within a hash bucket, and merges on an
+exact
+match. The hash is a filter and never the decision, so a collision costs a comparison and not a
+wrong answer. mmd2 reaches the same population through mmdupd's q2h list, so the goal is shared
+and the mechanism is not; the section on detecting supervariables against each other covers both.
+
+**One consequence, and it is the same one mmd2's pairwise merge had.** Hash detection folds a
+vertex into a LIVE one, so from here a member of the new clique can stand for several original
+vertices. The nnz(L) accounting had used len(C[pivot]) for the external degree, which is correct
+exactly while no live vertex stands for more than one original. It is now a weighted sum. Without
+that fix the reported fill was too low on 110 of 207 graphs, and every one of them was a graph
+where a hash merge fired, which is what made it findable: the wrong number was wrong in a pattern.
+
+The mechanisms fire steadily. Over the seven examples and 200 random graphs, 193 aggressive
+absorptions and 198 hash merges. On grids the hash does most of the work, 112 merges against 1
+aggressive absorption at 22 by 22, which says that on a regular mesh the cliques rarely nest but
+the boundary vertices are often twins.
+
+**What pass 1 costs in fill, which is not nothing.** amd2 against amd1: 681 against 657 at 10 by
+10, 2283 against 2175 at 16 by 16, 4898 against 4762 at 22 by 22, and on the 207 small graphs the
+same on 206 and worse on 1. Coarser supervariables mean fewer, larger pivots, so the ordering is
+cheaper to produce and slightly worse. That is the trade the vendored routine also makes, and the
+comparison to make is against the vendored routine rather than against amd1.
+
+Against the vendored amd_order on the seven examples, both layers already match nnz(L) 7 of 7 and
+neither matches the permutation on any, which is the tie-break story the mmd2 section tells at
+more length. So pass 1 does not yet move the acceptance test; it moves the mechanism count, and
+passes 3 through 7 are where the remaining differences live.
+
 ## Why md3 reorders, and what would align it
 
 md1 and md2 are guaranteed to produce the same order on every graph, and the guarantee is
@@ -1268,30 +1793,30 @@ That also names a real gap rather than a defect: the test misses genuine superva
 Catching them needs a second mechanism, comparing vertices against each other rather than
 against the pivot, which is what the next section is about.
 
-## Detecting supervariables against each other, in mmd1 and amd
+## Detecting supervariables against each other, in mmd2 and amd2
 
 md3's test is positional: it asks whether a neighbor u is indistinguishable from the PIVOT,
 in the step that just created the clique. Two vertices can be indistinguishable from each
 other with neither absorbable into the pivot, and no sharpening of a pivot-relative test will
-find them. Both mmd1 and amd carry a second mechanism for exactly that population, and the two
+find them. Both mmd2 and amd2 carry a second mechanism for exactly that population, and the two
 mechanisms are different, which is worth recording because the goal is shared and nothing
 else about them is.
 
-amd hashes. During the pass it is already making over the reached set, it computes a hash of
+amd2 hashes. During the pass it is already making over the reached set, it computes a hash of
 each survivor's structure, buckets by it, and runs an exact comparison only within a bucket:
 
 ```python
-        survivors = [i for i in sorted(L) if not eliminated[i]]
+        survivors = [u for u in pivot_clique if not eliminated[u]]
         by_hash = {}
-        for i in survivors:
-            h = (hash(frozenset(A[i])), hash(frozenset(C[i])))
-            by_hash.setdefault(h, []).append(i)
+        for u in survivors:
+            key = (tuple(sorted(A[u])), tuple(sorted(I[u])))
+            by_hash.setdefault(hash(key), []).append(u)
 ```
 
 then, inside a bucket, `(A[i] - {j}) == (A[j] - {i}) and C[i] == C[j]`. Note that this is the
-structural test, so amd inherits its conservatism: a pair whose reachable sets agree while
-their element lists differ is missed here too, which is one reason aggressive absorption
-travels with the hashing, since removing a contained element is one way such a difference
+structural test, so amd2 inherits its conservatism: a pair whose reachable sets agree while
+their incidence lists differ is missed here too, which is one reason aggressive absorption
+travels with the hashing, since removing a contained clique is one way such a difference
 disappears. graph5 is the extreme case of that: there the absorption alone recovers the
 supervariable and the hashing is not needed at all.
 
@@ -1309,23 +1834,23 @@ cases into a separate list where it merges indistinguishable pairs. Same populat
 different route, and no hashing.
 
 Neither is implemented in our mmd1, which is why the not-implemented list above names the q2h
-path. Our amd does implement the hash detection, along with aggressive absorption, and the
-amd file header calls those out as the two mechanisms beyond md5 that are not about the
+path. Our amd2 does implement the hash detection, along with aggressive absorption, and the
+amd2 file header calls those out as the two mechanisms beyond md5 that are not about the
 degree at all.
 
 Neither mechanism is what its layer is named for, and both are separable from it. mmd1 is
 multiple elimination: eliminate a whole independent set of minimum-degree vertices before
-refreshing any degrees, so one expensive update pass serves many pivots. amd is the
+refreshing any degrees, so one expensive update pass serves many pivots. amd1 is the
 approximate degree: replace the exact size of the union with a bound computable in one pass.
 Those are the ideas. Hash detection, the q2h path and aggressive absorption ride along
 because both layers already sweep the reached set and the information is at hand. The
 independence runs both ways: the approximate degree works with no hashing at all, which is
-what our amd would be with that block deleted, and hash detection could be bolted onto md5
+what amd1 is, and hash detection could be bolted onto md5
 with no approximation anywhere.
 
 The practical consequence is a coarseness ordering. md3, md4 and md5 merge only against the
 pivot, so their supervariables are the finest. mmd1's are at least as coarse as ours and
-sometimes coarser. amd's are coarser again where the hash finds pairs the elimination never
+sometimes coarser. amd2's are coarser again where the hash finds pairs the elimination never
 brings into the same step. Coarser is not automatically better: a supervariable is a
 commitment to eliminate its members consecutively, and while that commitment is fill-free by
 construction, it removes choices the picker would otherwise have had.
@@ -1456,11 +1981,21 @@ than worse.
 
 **The Python moved with it.** A, I and C are lists there too, with their own mark array and tag,
 because the twins are checked by comparing traces and a trace shows the order the structure
-holds. The set algebra that made md2 read as mathematics is gone; that was the price of the
-check, and the check is what catches drift. Tags are threaded through return values, since
-Python has no reference parameters. One sort remains, at construction, because the input is
-given as sets in Python and as ascending literals in C++; it is outside every loop, which is the
-same place `SymFactorEngine` puts its final sort.
+holds. The set algebra that made md2 read as mathematics is gone from the code; that was the
+price of the check, and the check is what catches drift.
+
+**But not from the file.** The set view is what the flat containers cost, and it is worth more
+than the code was, so it is kept in comments. Every place a set operation is computed by stamping
+and compacting now carries the set expression it stands for, as close to the loop as it can sit:
+`reach(u) = ( A[u] | C[c] for c in I[u] ) - {u}` over the neighbor walk, the six lines of set
+algebra that are the eliminator over the eliminator, `filed = live - reached` over mmd's batch,
+`dead = { c : C[c] <= C[p] }` over amd2's aggressive absorption. The reading stays union, difference
+and containment while the code stays flat. md5's header states the convention and every layer
+from md1 up follows it.
+
+Tags are threaded through return values, since Python has no reference parameters. One sort
+remains, at construction, because the input is given as sets in Python and as ascending literals
+in C++; it is outside every loop, which is the same place `SymFactorEngine` puts its final sort.
 
 What is left for the ordering code proper is the shared pool with its garbage collection, and
 the weight array. Both are consequences rather than choices: member lists in a pool can outgrow
@@ -1597,7 +2132,7 @@ as lists of sets, because the algorithm reads as set algebra that way: `md1` tes
 graph[u]`, `md2` said `A[u] & neighbors` and `I[u] -= absorbed` directly. That lasted until the
 goal was stated plainly as a performant ordering engine, at which point the C++ moved to flat
 unsorted vectors with a mark array, and the Python followed so the traces would still match. Both
-sides now hold lists and test membership with a stamp, which is what `mmd1` and `amd` need for
+sides now hold lists and test membership with a stamp, which is what `mmd1` and `amd1` need for
 their speed and what `SymFactorEngine` already does. What was lost is the notation; what was
 gained is that the Python says what the engine does.
 

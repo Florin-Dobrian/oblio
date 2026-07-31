@@ -99,6 +99,17 @@ def md3_neighbors(A, I, C, mark, tag, u):
     cliques always carry. This is George and Liu's reachable set, and it is what
     the elimination graph would hold explicitly.
 
+    In set terms this is one line, and it is worth keeping in view because the code
+    below is that line with the set taken away:
+
+        reach(u) = ( A[u] | C[c] for every c in I[u] ) - {u}
+
+    The mark array IS the set. mark[v] == tag is the membership test, one
+    comparison; mark[v] = tag is the insertion, one store. So the union costs one
+    pass per source rather than a hash per member, and nothing is allocated.
+    Python could write the union directly, and earlier drafts of this file did, but
+    the C++ twin cannot afford it and the two must agree line for line.
+
     One pass per source, with the mark array doing the deduplication, so the cost
     is linear in what is touched. Returns (neighbors, tag): nothing is sorted, and
     the order is the order the sources were walked in.
@@ -124,6 +135,29 @@ def md3_eliminate(A, I, C, mark, tag, eliminated, pivot):
     Returns (neighbors, absorbed_cliques, pruned_edges, merged_vertices, tag): as
     in md2, plus the vertices folded into the pivot by mass elimination. The middle
     three are reported for display; only neighbors is used by the caller.
+
+    Set view of the whole function, in the order the code does it:
+
+        C[pivot] = reach(pivot)                    absorb into C[pivot]
+        C        = C - I[pivot]                    reclaim I[pivot]
+        for u in C[pivot]:
+            A[u] = A[u] - C[pivot] - {pivot}       prune
+            I[u] = ( I[u] - I[pivot] ) | {pivot}   absorb into C[pivot], reclaim I[pivot]
+
+    The new clique is C[pivot] and gets no name of its own, so the first line reads
+    as what an elimination IS: the pivot stops being a vertex with a reachable set
+    and becomes a clique holding that same set. The last line is the first two
+    written on the I side, since u is in C[c] exactly when c is in I[u].
+
+    Three set differences, and not one of them builds a set. Each is a single stamp
+    of the subtrahend followed by one compaction pass over the minuend, which turns
+    |A[u]| * |C[pivot]| comparisons into |A[u]| + |C[pivot]|.
+
+    Mass elimination adds two more lines, and breaks the identity in the first one:
+    from here C[pivot] is reach(pivot) minus what the pivot absorbed.
+
+        merged   = { u in C[pivot] : A[u] == {} and I[u] == {pivot} }
+        C[pivot] = C[pivot] - merged
     """
     neighbors, tag = md3_neighbors(A, I, C, mark, tag, pivot)
     absorbed_cliques = list(I[pivot])
@@ -132,7 +166,9 @@ def md3_eliminate(A, I, C, mark, tag, eliminated, pivot):
     C[pivot] = list(neighbors)      # becomes L_pivot, the column pattern
 
     # Stamp the new clique once, and the absorbed cliques once. Membership is then
-    # a comparison, and both loops below are compactions in place.
+    # a comparison, and both loops below are compactions in place. clique_tag is
+    # the set C[pivot] and absorbed_tag is the set I[pivot], each built in one pass
+    # and then queried for free.
     tag += 1
     clique_tag = tag
     for v in neighbors:
@@ -153,9 +189,9 @@ def md3_eliminate(A, I, C, mark, tag, eliminated, pivot):
                     pruned_edges.append((u, v))
                 continue                # implicit now: delete the explicit copy
             kept.append(v)
-        A[u] = kept
+        A[u] = kept                     # what survives is A[u] - C[pivot] - {pivot}
 
-        kept = [c for c in I[u] if mark[c] != absorbed_tag]   # absorbed are gone
+        kept = [c for c in I[u] if mark[c] != absorbed_tag]   # I[u] - I[pivot]
         kept.append(pivot)              # u joins the new clique, whose id is the pivot
         I[u] = kept
 
@@ -167,13 +203,14 @@ def md3_eliminate(A, I, C, mark, tag, eliminated, pivot):
     # but the new one means u sees exactly what the pivot sees, so eliminating it
     # next would cost no fill. Fold it into the pivot now and strip it from the
     # cliques, since it is no longer a vertex.
+    # merged = { u in C[pivot] : A[u] == {} and I[u] == {pivot} }
     merged_vertices = []
     for u in neighbors:
         if not A[u] and len(I[u]) == 1 and I[u][0] == pivot:
             I[u] = []
             eliminated[u] = True
             merged_vertices.append(u)
-    if merged_vertices:                 # one compaction pass, not a removal each
+    if merged_vertices:                 # C[pivot] - merged, in one compaction pass
         tag += 1
         for u in merged_vertices:
             mark[u] = tag

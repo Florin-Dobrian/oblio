@@ -80,6 +80,17 @@ std::size_t md1Storage(const Graph& A) {
 // Returns (neighbors, fillEdges): the pivot's adjacency at elimination, which is
 // the pattern of its column of L, and the fill edges created among those
 // neighbors, pairs that were not already adjacent.
+//
+// In set terms this is the elimination game itself, three lines:
+//
+//     for u in A[pivot]:
+//         fill(u) = A[pivot] - A[u] - {u}        what was not already there
+//         A[u]    = ( A[u] | fill(u) ) - {pivot}
+//     A[pivot] = {}
+//
+// The loop below is that difference without a set: stamp A[u], then walk A[pivot]
+// and keep whatever is unstamped. Two passes over vectors rather than a hash per
+// element, and A[pivot] is captured before the loop because u is inside it.
 std::pair<std::vector<std::int32_t>, std::vector<std::pair<std::int32_t, std::int32_t>>>
 md1Eliminate(Graph& A, std::vector<std::int32_t>& mark, std::int32_t& tag,
              std::vector<bool>& eliminated, std::int32_t pivot) {
@@ -95,7 +106,7 @@ md1Eliminate(Graph& A, std::vector<std::int32_t>& mark, std::int32_t& tag,
         mark[u] = tag;                      // never adjacent to itself
         mark[pivot] = tag;                  // the pivot is leaving anyway
         for (std::int32_t v : neighbors) {
-            if (mark[v] != tag) {           // a genuinely new edge
+            if (mark[v] != tag) {           // A[pivot] - A[u] - {u, pivot}
                 mark[v] = tag;
                 A[u].push_back(v);
                 if (u < v) fillEdges.push_back({u, v});

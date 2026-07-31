@@ -22,6 +22,15 @@ cmake-build-*/
 .vscode/
 .idea/
 
+# Python (the prototype twins in experiments/ordering; see CLAUDE.md, Tooling).
+# No pyproject.toml and no venv today, the layers being stdlib-only scripts run
+# by a bare python3, but bytecode appears as soon as one is run, and .venv/ would
+# appear if a dependency ever arrives and the folder becomes a uv project.
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
 # clangd compile database (machine-specific: absolute paths, local toolchain).
 # Regenerate with `bear -- make test`; see CLAUDE.md, Tooling / Editor navigation.
 compile_commands.json

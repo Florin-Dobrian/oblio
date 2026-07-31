@@ -27,6 +27,25 @@
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O3 -Wall -Wextra
 
+# The interpreter that runs the Python twins. Bare python3 by default, for two
+# reasons. It is a PATH name rather than a particular tool, so the prerequisite
+# is only that some Python 3 is present, where `uv run` needs uv installed
+# first and then resolves a Python of its own. And it is the same binary PyCharm
+# is pointed at, so the editor and `make test` cannot come apart: one file,
+# moved by one upgrade.
+#
+# `uv run` is a fine override, and it resolves elsewhere rather than badly. uv
+# prefers its own managed interpreters under ~/.local/share/uv/python, which are
+# on a separate upgrade cycle from Homebrew's. Measured on alpamayo and
+# quitaraju, 2026-07-31: uv's 3.14.3 against Homebrew's 3.14.6, and after
+# `uv python upgrade` both reading 3.14.6 while still being different builds,
+# Jul 23 / Clang 22.1.3 against Jun 10 / Clang 21.0.0. Nothing in these layers
+# is sensitive to that, being stdlib only, with no `hash()` reaching any trace
+# and amd2's key arithmetic modulo n.
+#
+#   make test PYTHON="uv run"
+PYTHON   ?= python3
+
 LAYERS = md1 md2 md3 md4 md5 mmd1 mmd2 amd1 amd2
 BINS   = $(addsuffix _cpp,$(LAYERS))
 
@@ -51,7 +70,7 @@ test: all
 	@rc=0; \
 	for L in $(LAYERS); do \
 	  printf '%-6s ' "$$L"; \
-	  python3 $$L.py | tr -d " []{},'" > .$$L.py.out; \
+	  $(PYTHON) $$L.py | tr -d " []{},'" > .$$L.py.out; \
 	  ./$${L}_cpp   | tr -d " []{},'" > .$$L.cpp.out; \
 	  if diff .$$L.py.out .$$L.cpp.out > /dev/null; then \
 	    echo "py and cpp agree"; \

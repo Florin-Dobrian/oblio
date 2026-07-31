@@ -217,13 +217,16 @@ repo root in PyCharm; it is CLion's. The reasoning, and what to do if Python spr
 experiments, is the 2026-07-31 entry in docs/DESIGN_DECISIONS.md.
 
 Setup is one step: File -> Open, select `experiments/ordering/`, trust the project. Confirmed on
-alpamayo: PyCharm asked for nothing else, wrote `experiments/ordering/.idea/`, and changed nothing
-else in the folder, and `git status` listed no new file, since the root `.gitignore`'s `.idea/` has
-no leading slash and so matches at any depth. No venv and no `pyproject.toml`: the layers are
-standalone stdlib-only scripts with no cross-imports, and the Makefile runs them with a bare
-`python3`, so PyCharm wants that same interpreter rather than one of its own. A venv here would put
+alpamayo: PyCharm wrote `experiments/ordering/.idea/` and changed nothing else in the folder, and
+`git status` listed no new file, since the root `.gitignore`'s `.idea/` has no leading slash and so
+matches at any depth. It does then ask for an interpreter, offering to set up a uv environment or a
+custom one. **Take the custom one and select the existing `python3`**, the same one `which python3`
+resolves to in the shell that runs `make`. No venv and no `pyproject.toml`: the layers are
+standalone stdlib-only scripts with no cross-imports, and the `Makefile` runs them with a bare
+`python3`, so there are no dependencies for an environment to hold. A venv here would put
 `make test` and the editor on different interpreters, which would surface as the twins disagreeing
-for a reason that is not the code.
+for a reason that is not the code, and it would drop a `.venv/` that this tree's `.gitignore` does
+not cover.
 
 Moving the root later is two steps, open the new folder and delete the old `.idea/`, and no source
 file, Makefile rule or README reference is affected by it.

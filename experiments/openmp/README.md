@@ -770,14 +770,18 @@ explicitly marks it as on-request and takes it out of reach. If autoremove is wa
 Afterwards, record what the machines are running:
 
 ```
-brew list --versions libomp suite-sparse gcc cmake
+brew list --versions libomp suite-sparse gcc cmake python3
 ```
 
 Matching output across machines is the thing worth having later, when a numeric result
 disagrees between them and the first question is whether the environments are the same.
 
-Two notes specific to this tree. None of Oblio's build depends on Homebrew: the
-compiler is Apple's Clang and the BLAS is Accelerate, both system components. And the
+Two notes specific to this tree. Oblio's own build does not depend on Homebrew, the
+compiler being Apple's Clang and the BLAS Accelerate, both system components. The one
+Homebrew dependency in the tree is the ordering experiment's Python twins, which run
+under `/opt/homebrew/bin/python3`, so that experiment's `make test` is the check that
+pairs with a Python upgrade: it diffs each twin's trace against its C++ counterpart
+character for character, which is sharper for this purpose than a residual. And the
 `suite-sparse` formula is unrelated to the vendored AMD 3.3.4 compiled into `src/`,
 which nothing links against Homebrew's copy.
 

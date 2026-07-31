@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.14)
 project(oblio VERSION 0.1.0 LANGUAGES C CXX)
 # C is enabled (alongside CXX) because the BLAS underscore probe below uses
-# check_c_source_compiles — a bare extern avoids C++ name-mangling of dpotrf_.
-# NOTE: VERSION is a placeholder — reconcile with the version-identity decision
+# check_c_source_compiles, a bare extern avoids C++ name-mangling of dpotrf_.
+# NOTE: VERSION is a placeholder, reconcile with the version-identity decision
 # (oblio 11 vs a fresh 1.0) recorded in docs/DESIGN_DECISIONS.md before first release.
 
 set(CMAKE_CXX_STANDARD 17)
@@ -31,7 +31,7 @@ unset(CMAKE_REQUIRED_LIBRARIES)
 
 # ----- Library ---------------------------------------------------------------
 # Source list matches REPO_MAP src/*.cpp. Amd.cpp and Mmd.cpp hold the ordering
-# implementations that OrderEngine.cpp dispatches to — omitting them link-fails
+# implementations that OrderEngine.cpp dispatches to, and omitting them link-fails
 # on mmd_order / amd_order.
 add_library(oblio STATIC
     src/Amd.cpp
@@ -55,7 +55,7 @@ add_library(oblio STATIC
 )
 
 # Users #include the "oblio/..." headers (namespaced). PUBLIC so tests/examples
-# that link oblio inherit the include path — no separate global include needed.
+# that link oblio inherit the include path, so no separate global include is needed.
 target_include_directories(oblio PUBLIC include)
 target_link_libraries(oblio PUBLIC ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES})
 
@@ -67,17 +67,32 @@ endif()
 enable_testing()
 
 # The suites in tests/. Each is a standalone executable linking oblio.
-foreach(t smoke test_forest test_numfactor test_order test_permutation test_solve test_symfactor)
-    add_executable(${t} tests/${t}.cpp)
+#
+# Globbed rather than listed, deliberately, and against the usual CMake advice.
+# The Makefile discovers them with $(wildcard tests/*.cpp), and an enumerated
+# list here has to be kept in step with it by hand, which is a step nothing
+# detects: both builds succeed, both report passing, and the shorter list is
+# simply a smaller claim. That is not hypothetical, test_pipeline was added and
+# not listed, so ctest ran seven suites of eight and omitted the largest.
+# CONFIGURE_DEPENDS makes the build re-glob when the directory changes, so a new
+# tests/*.cpp file needs no edit here, exactly as it needs none in the Makefile.
+file(GLOB TEST_SRCS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp)
+foreach(src ${TEST_SRCS})
+    get_filename_component(t ${src} NAME_WE)
+    add_executable(${t} ${src})
     target_link_libraries(${t} PRIVATE oblio)
     add_test(NAME ${t} COMMAND ${t})
 endforeach()
 
 # ----- Examples --------------------------------------------------------------
-# Each builds a standalone driver linking oblio. basic.cpp sketches the intended OblioEngine facade,
-# which is not ported and does not compile against the current library, so it is not listed here;
-# add it once that driver exists.
-foreach(e basic pipeline)
-    add_executable(${e} examples/${e}.cpp)
+# Each builds a standalone driver linking oblio. Globbed for the same reason as
+# the tests. Both examples compile against the current library: basic.cpp drives
+# DirectSolver, which is ported, and pipeline.cpp wires the engines by hand. Note
+# that neither is run by anything, here or in the Makefile, which is its own item
+# in docs/TODO.md.
+file(GLOB EXAMPLE_SRCS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/examples/*.cpp)
+foreach(src ${EXAMPLE_SRCS})
+    get_filename_component(e ${src} NAME_WE)
+    add_executable(${e} ${src})
     target_link_libraries(${e} PRIVATE oblio)
 endforeach()

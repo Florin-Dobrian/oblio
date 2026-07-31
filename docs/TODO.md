@@ -1199,6 +1199,46 @@ which catches a crash but not a wrong number. The honest fix is for examples wit
 output to have that output checked. Worth deciding which, rather than drifting into the first
 because it is easier.
 
+### The CMake build had drifted from the Makefile: DONE, 2026-07-31
+
+Recorded as done rather than deleted, because the failure mode is the interesting part and it will
+be available again the moment a second build description is added anywhere.
+
+Two build descriptions covered one tree. The `Makefile` is canonical (CLAUDE.md says so) and
+discovers what it builds, `TEST_SRCS = $(wildcard tests/*.cpp)` and the matching wildcard for
+`examples/`. `CMakeLists.txt` enumerated instead, and the two had come apart in two places.
+
+**`test_pipeline` was missing from the CMake test list.** Its `foreach(t ...)` named seven suites
+where eight were on disk, so `ctest` ran everything except the largest, 48 of the assertions and
+the only suite checking that the phases compose. A CMake build therefore reported green over a
+strictly smaller claim than `make test` did, and nothing said so.
+
+**The examples block and the comment above it contradicted each other.** The comment stated that
+`basic.cpp` sketched a facade that "is not ported and does not compile against the current
+library, so it is not listed here", and the `foreach(e basic pipeline)` on the next line listed it.
+The comment was the stale half: `DirectSolver` is ported, `basic.cpp` compiles and runs, and the
+exclusion it described had been lifted with the prose left behind. That is the corpse-in-place
+pattern already recorded of 10.12 in DESIGN_DECISIONS, a comment still promising behavior the code
+no longer has, and this was our own instance of it.
+
+Neither was a fault in what the library computes, and the `Makefile` path was unaffected, which is
+exactly why it went unnoticed: both builds succeeded, both reported passing, and the record quietly
+stopped being true. The same shape as the testing-specification invariant in CLAUDE.md, without an
+invariant to name it.
+
+**The fix was to glob rather than to patch the list**, `file(GLOB ... CONFIGURE_DEPENDS)` over
+`tests/*.cpp` and `examples/*.cpp` with `get_filename_component` for the target name. This is
+against the usual CMake advice, which prefers explicit lists for reproducible configures, and the
+tradeoff is taken deliberately: an enumerated list is a second inventory to keep in step by hand,
+and hand-maintained agreement between two build files is precisely what failed here. Globbing
+removes the failure mode rather than the symptom, and `CONFIGURE_DEPENDS` makes the build re-glob
+when the directory changes, so a new suite needs no edit in either build file. Verified by
+configuring from clean: eight tests registered, all eight pass under `ctest`, and both examples
+build and run.
+
+**What this does not fix** is that the examples are still built and never run, by either build
+description, which is the entry above.
+
 ### Assert the LDL perturbation branch
 
 The branch runs and nothing checks it, which PORTING_LEDGER now records with measurements. The

@@ -250,6 +250,59 @@ the reading above, and that move is the two steps above and nothing else.
 
 ---
 
+## 2026-07-31, `python3` over `uv` for the Python twins, because nothing here needs resolving
+
+A companion to the entry above and a narrower question: given that Python now runs in this tree,
+which interpreter runs it, in the shell, in the `Makefile`, and in PyCharm. The answer is bare
+`python3` in the two places that matter to the repo, and whatever we like in the shell.
+
+**The trigger for uv is a dependency graph or a pinned version, and this has neither.** uv is a
+resolver and an environment manager: it earns its place where packages must be fetched and pinned,
+where a project is installed or published, or where a Python version has to be held still. The nine
+ordering layers import `sys` and `math`, import nothing from each other, install nothing and publish
+nothing. An environment is a place to put resolved dependencies, so here uv would create one and it
+would be empty. Reach for uv when something needs resolving and skip it when nothing does, which is
+a sharper line than prototype against production: a three-package prototype wants uv immediately,
+and a shipped tool with no dependencies does not want it at all.
+
+**And the absence is a property of these files rather than a stage they will grow out of.** The
+twins exist so that the Python can be read as the specification and the C++ trusted as the
+implementation, with `make test` diffing their traces. A dependency would undercut exactly that. The
+contrast is the data-structures repo, whose `python/` folder carries `pyproject.toml`, a venv, an
+editable install and `ipykernel`, on far less code, because there something genuinely has to be
+resolved.
+
+**Three places, and only two of them are the repo's business.** In the shell, use whichever tool is
+preferred; uv is a fine default there and the repo neither knows nor cares. In the `Makefile`,
+`PYTHON ?= python3`, so `make test` runs under a `PATH` name rather than a particular tool: the
+prerequisite is then only that some Python 3 exists, where `uv run` requires uv installed first and
+then resolves a Python of its own. In PyCharm, decline the offered uv environment and select the
+existing `python3`, which is the same binary the `Makefile` resolves, so an upgrade moves both
+together and a `.venv/` this tree does not ignore is never created.
+
+**What is deliberately not claimed.** Not that uv is less stable, which it is not, since it pins
+exactly where Homebrew's `python3` follows whatever `brew upgrade` last installed. Not that the two
+could produce different traces here, which they cannot: measured on 2026-07-31, uv's managed
+interpreter and Homebrew's differed first in version (3.14.3 against 3.14.6) and then, after
+`uv python upgrade`, only in build (Jul 23 / Clang 22.1.3 against Jun 10 / Clang 21.0.0), and
+nothing in stdlib-only scripts with no `hash()` reaching a trace and an arithmetic key modulo n can
+see either difference. The choice is about how narrow the prerequisite is and about the editor and
+the build agreeing by construction, not about safety. `make test PYTHON="uv run"` is a supported
+override and the `Makefile` documents it.
+
+**Changing later is cheap, and nothing is arranged to make it so.** Should a dependency arrive:
+`uv init` and `uv add` in the experiment folder, point PyCharm's interpreter at the resulting
+`.venv`, and set `PYTHON ?= uv run`, which is a one-word edit to a variable that exists for it. Two
+chores travel along, adding `.venv/` and `__pycache__/` to the root `.gitignore`, which this tree
+lacks because no Python lived here before, and tracking `pyproject.toml`, which is an authored
+language project rather than generated editor state. Nothing else moves: no file imports another, so
+no import path changes, and the README's one `python3 md3.py 3` is a usage example rather than a
+dependency. The genuinely irreversible part is not the tooling but the decision itself, since the
+twins would stop being stdlib-only and the property that makes them readable as a specification is
+what would be spent.
+
+---
+
 ## 2026-07-24, The 2x2 pivot is trivial in the triangular sweeps and the whole cost of the diagonal pass
 
 **Splitting `D` into its own solve pass looked like a small tidiness and turned out to be what keeps

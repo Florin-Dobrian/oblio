@@ -38,7 +38,7 @@ either a reference or a target.
    record in the ledger, then advance.
 2. **Port, then modernize, then verify.** (a) Carry 0.9's algorithm over faithfully,
    human judgment, no tool checks this. (b) Run `clang-tidy --fix` to sweep the
-   mechanical idioms (`modernize-*`: `NULL`→`nullptr`, `typedef`→`using`, …). (c)
+   mechanical idioms (`modernize-*`: `NULL` -> `nullptr`, `typedef` -> `using`, ...). (c)
    Verify output against 0.9, same inputs through both codebases; don't advance a
    unit that hasn't been checked. The machine does the mechanical modernization; the
    human does the correctness verification.
@@ -61,11 +61,11 @@ Conventions (style preferences) are imported below from docs/CODING_RULES.md
   rather than a convention because nothing detects the drift: both files keep compiling, the suite
   keeps passing, and the record quietly stops being true.
 - **`std::vector` is the default container.** Exceptions, each deliberate:
-  fixed-size small blocks (e.g. 2×2 pivots) → `std::array`; non-owning view over a
-  column/block → pointer + length (C++17, no `std::span`), one house convention;
+  fixed-size small blocks (e.g. 2x2 pivots) -> `std::array`; non-owning view over a
+  column/block -> pointer + length (C++17, no `std::span`), one house convention;
   a `std::vector<std::vector<T>>` is a valid port target but **do not flatten** it
   into one buffer with offsets mid-port, that's a layout change (rewrite track).
-- **No signed→unsigned index slips.** An index or offset that was `int` and can go
+- **No signed -> unsigned index slips.** An index or offset that was `int` and can go
   negative must not become `size_t` arithmetic. Unsigned underflow on a descending
   loop is a bug this project has already hit once. Danger spots: descending loops,
   pointer offsets.
@@ -206,6 +206,27 @@ moves into CLion (its debugger, refactoring, inline run buttons); for navigation
 part with no payoff. The lightest middle option, if tab-switching ever grates, is binding `make test`
 to a key as a CLion External Tool, which gives terminal-identical output in a panel without CLion
 owning anything.
+
+### Python prototypes in PyCharm (`experiments/ordering`)
+
+The ordering experiment carries a Python twin per layer, read in PyCharm while the C++ is read in
+CLion. One rule governs the pair: **one IDE per project root, and never two at the same directory.**
+CLion's root is the repo root and PyCharm's is `experiments/ordering/`, so the two `.idea/`
+directories never meet, and CLion already lists that folder under `excludeRoots`. Do not open the
+repo root in PyCharm; it is CLion's. The reasoning, and what to do if Python spreads to other
+experiments, is the 2026-07-31 entry in docs/DESIGN_DECISIONS.md.
+
+Setup is one step: File -> Open, select `experiments/ordering/`, trust the project. Confirmed on
+alpamayo: PyCharm asked for nothing else, wrote `experiments/ordering/.idea/`, and changed nothing
+else in the folder, and `git status` listed no new file, since the root `.gitignore`'s `.idea/` has
+no leading slash and so matches at any depth. No venv and no `pyproject.toml`: the layers are
+standalone stdlib-only scripts with no cross-imports, and the Makefile runs them with a bare
+`python3`, so PyCharm wants that same interpreter rather than one of its own. A venv here would put
+`make test` and the editor on different interpreters, which would surface as the twins disagreeing
+for a reason that is not the code.
+
+Moving the root later is two steps, open the new folder and delete the old `.idea/`, and no source
+file, Makefile rule or README reference is affected by it.
 
 ## Docs
 

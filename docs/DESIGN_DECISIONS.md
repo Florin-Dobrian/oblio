@@ -67,6 +67,189 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-07-31, Project roots are a second map over the tree, laid after the source layout
+
+Oblio is a C++ tree with a Python half in one experiment, and the two are read in different IDEs,
+CLion and PyCharm. Placing them raises a question that looks like a layout question and is not one,
+and getting it right depends on separating two things that are easy to conflate.
+
+**The constraint is one IDE per project root, and that is the whole of it.** A JetBrains IDE claims
+a directory by writing `.idea/` into it, so two IDEs opening the same directory contend over
+`misc.xml` and the module type, and one will quietly reconfigure the other. The rule says nothing
+about languages. Reading it as "one language per folder" is the mistake that follows from it, and it
+is the mistake worth naming, because the fix it suggests is a source reorganization that nothing
+actually requires.
+
+**So there are two independent maps over one tree.** The source layout answers to the code: what
+belongs beside what, what a reader needs in view at once, what a build treats as a unit. The root
+layout answers to the tooling: which directories an IDE is pointed at. Choosing them together, so
+that every language sits in its own folder and every folder is one IDE's root, collapses the two
+into one map and lets the weaker consideration win. The discipline is to lay the sources out for the
+code's reasons and then place roots over whatever layout that produced.
+
+**An IDE project is not a language project, and conflating them is how the second map acquires
+weight it should not have.** An IDE project is editor state: which folder is the root, which
+interpreter, run configurations, code style. It is `.idea/`, it is generated, it is ignored, and no
+build or test ever reads it, so deleting it breaks nothing. A language project is a build and
+dependency declaration: `CMakeLists.txt`, `pyproject.toml`, `build.sbt`, `Cargo.toml`, or a plain
+`Makefile`. It is authored, it is tracked, and it is what actually compiles or resolves imports, so
+deleting it breaks everything. One is a view of the code and the other is part of it.
+
+The two coincide often enough to hide the difference. In the data-structures repo they land on the
+same four folders, `python/` holding both a `pyproject.toml` and an IDE root, which is exactly the
+case that makes them look like one thing. The ordering experiment separates them in both directions
+at once: a language project with no `pyproject.toml`, since the `Makefile` is the thing that builds
+and runs and the Python needs nothing to resolve, and an IDE project at the same folder that does
+nothing but remember where to open files. `compile_commands.json` is the sharpest case of all,
+being neither: generated, ignored, machine-specific, and read only by an indexer, a bridge that
+lets an IDE understand a build it does not run.
+
+The consequence is the one that governs here. **PyCharm needs an IDE project and does not need a
+language project**, because nothing in the experiment imports anything or depends on anything.
+Adding a `pyproject.toml` to satisfy an editor would be answering an IDE question with a build
+artifact, which is the same category error as splitting a folder to satisfy an editor, one map
+reaching into the other.
+
+**Which kind of language project, then, is a second question, and it turns on whether the ecosystem
+is needed rather than on which is nicer.** A `Makefile` is a task runner over a generic dependency
+engine: it knows nothing about the language, resolves no dependencies, and finds no toolchain, so
+everything it does it does because someone wrote the command out. `CMakeLists.txt`,
+`pyproject.toml`, `build.sbt` and `Cargo.toml` are declarations that *other tools read*, which is
+the whole of what they buy. So reach for the ecosystem when something only it provides is actually
+wanted: resolving third-party dependencies, installing or publishing, being consumed by someone
+else's build, or feeding an IDE or a CI that reads that format. A `Makefile` suffices when
+dependencies are absent or vendored, nothing is installed, one toolchain is invoked directly, and
+the work is a few compile-and-link commands plus some run-and-check tasks.
+
+**By that test the experiments are the clean `Makefile` case and should stay there.** No
+dependencies, nothing installed, nothing consumed by anyone. And `make test` in the ordering
+experiment is mostly not compiling at all: it runs nine C++ binaries, runs nine Python scripts,
+strips punctuation from both, and diffs the pairs. That is task running, which is what Make is for,
+and an ecosystem build would express it worse rather than better. The same holds for every other
+experiment, and it is the reason none of them has anything but a `Makefile`.
+
+**Where Oblio proper sits today is both, with the `Makefile` canonical.** The root carries a
+`CMakeLists.txt` that does real work, a `find_package` for BLAS and LAPACK, a
+`check_c_source_compiles` probe for the Fortran underscore convention, a static library target and
+`ctest`, and the `Makefile` beside it that CLAUDE.md names as the single source of truth. That is a
+defensible position for a tree nobody outside consumes, since the `Makefile` is what the
+one-unit-at-a-time loop actually runs, but it is two descriptions of one build and the cost of
+keeping two in step is real and ongoing.
+
+**Where it has to go is CMake primary, and the trigger is already written down under another
+heading.** The moment outside researchers consume the library they need `find_package(Oblio)`,
+install targets and an exported config, and none of that is a `Makefile`'s to give. That is the
+same event that triggers the PolyForm license and filling out CONTRIBUTING.md, so it is one
+milestone rather than three, and the right time to decide whether the `Makefile` stays as a
+convenience wrapper over `cmake --build` or goes. Until then the ordering stands: the `Makefile`
+leads, CMake follows, and the experiments stay out of it entirely.
+
+**Why the ordering experiment is not split by language.** The tempting move is
+`experiments/ordering/cpp/` and `experiments/ordering/python/`, which would give each IDE an
+uncontested root. It would be wrong here, and the reason is what the unit of work is. In the
+data-structures repo the unit is a language: a session is spent writing the Rust versions, and the
+four implementations of a problem never need to see each other, so a folder per language is the
+honest layout there. In this experiment the unit is a *layer*, and a layer is a pair. `md3.py` and
+`md3.cpp` are one artifact expressed twice, and `make test` exists to diff their traces against each
+other. A directory boundary through the middle of that separates precisely the two files whose
+agreement is the point.
+
+**The placement rule: each IDE's root is the smallest directory containing all of that language's
+code, and no directory is the root of two.** Oblio falls out of it without any adjustment, because
+the two languages have different reach. C++ is the product and spans the whole tree, so its root is
+the repo root. Python exists in exactly one folder, so its root is that folder. Broad root for the
+broad language, narrow root for the narrow one, and the two nest rather than collide.
+
+**The axis that decides between nesting and splitting is reach, not importance.** Nesting is
+available exactly when two languages have unequal reach, so that one of them has a proper
+subdirectory to itself. Splitting is forced exactly when their reach is equal, both spanning the
+same directory, since there is then no narrow root to nest inside the broad one. That this
+correlates with a major language and a prototyping one is incidental rather than the rule. If Oblio
+grew a second production language spanning the whole tree, splitting would be forced at the root
+even though C++ would still be the major language; and conversely a prototyping language confined to
+one folder nests whatever its standing.
+
+**The data-structures split is not evidence that tooling should drive layout.** Its four languages
+all reach the repo root, so the rule above forces a split there, but it is also the honest source
+layout on its own merits, for the unit-of-work reason given above. The two considerations agreed,
+which is the comfortable case and probably the common one. What this entry warns against is only the
+case where they disagree, and splitting `ordering/` is exactly that: the source layout has an
+answer, the tooling would prefer a different one, and the tooling is the weaker claim.
+
+**One escape neither repo takes: a single IDE covering both languages.** CLion has a Python plugin
+and IntelliJ Ultimate handles both, which dissolves the constraint outright, since with one IDE
+there is no second `.idea/` to contend for and roots may sit wherever the sources put them. The
+price is
+the native experience in each, which is the reason for running two IDEs in the first place, so this
+is a real option rather than the obvious one. It is recorded because it is what turns same-level
+coexistence from a conflict to route around into a non-problem, and anyone weighing a future split
+should know it is on the table.
+
+**Nesting obliges the outer IDE to exclude the inner folder, and ours already did.** CLion's
+`.idea/misc.xml` lists `experiments/ordering` under `excludeRoots`, along with every other
+experiment and `reference/`, so the two IDEs are not merely avoiding a shared `.idea/`, they are not
+indexing the same files at all. That exclusion was there for its own reasons before this question
+came up, which is a small piece of corroboration for the arrangement rather than a coincidence: an
+experiment is not part of the main build, and the same fact that keeps it out of CLion's index is
+what makes it a clean root for something else.
+
+**Nothing about either root is tracked.** The root `.gitignore` carries `.idea/` with no leading
+slash, so it matches at any depth and covers the experiment's copy as well. `vcs.xml` in particular
+is derivable, the IDE writes it by walking up to find `.git`, so it records what git already knows.
+Worth knowing that this cuts against JetBrains' own convention: the `.idea/.gitignore` they ship,
+present in our tree, ignores `workspace.xml` and `shelf/` on the assumption that the rest of
+`.idea/` is shared by a team. Our outer ignore sits above it and wins, which leaves that file inert.
+For a solo pre-release tree that is the right call, and if part of `.idea/` is ever tracked the
+candidate is `codeStyles/`, which holds real formatting decisions and is the JetBrains counterpart
+to `.clang-format`, not `vcs.xml`.
+
+**What bounds all of this is contiguity, and naming the bound matters more than the arrangement.**
+The narrow root works because Python occupies exactly one folder. What would break it is not Python
+spreading to more experiments, which the next paragraph covers and which costs nothing, but Python
+appearing in places with no common parent short of the repo root: a matrix generator in `tests/`, a
+script in `tools/`, the prototypes here. No narrow directory covers that set, and the choice would
+then be several roots or one root colliding with CLion's. It is a real fork rather than a
+hypothetical one, since a generator for test matrices is exactly the kind of thing this project
+would reach for. When it arrives, the answer is to consolidate the Python rather than to split the
+experiment, for the same reason the split is wrong today.
+
+**Python in more than one experiment simply moves the root up.** The rule gives the smallest
+directory containing all of it, so Python in every experiment puts the root at `experiments/`, and
+Python in three experiments out of ten puts it there too, since no one experiment holds all three.
+Three separate roots is a legitimate departure from the rule rather than what the rule gives, and
+the question deciding it is the one that decided against splitting `ordering/`: whether a unit of
+work spans the three. Prototypes that are standalone and never see each other are honestly three
+roots, each matching the self-contained-folder convention experiments already follow. Anything
+shared between them, a graph generator or a trace-diffing harness, the sort of thing that tends to
+appear by the third prototype, is honestly one root at `experiments/`, and the shared code then has
+somewhere to live. Under one root the non-Python experiments can be marked excluded, one click
+each, so the middle path costs little.
+
+**A root is cheap to move, and that reversibility is the real payoff of keeping the two maps
+separate.** Moving one is two steps: open the new folder, delete the old `.idea/`. The IDE writes a
+fresh `.idea/` on open without being asked, so nothing is created by hand. No source file moves, no
+import breaks, no Makefile rule changes, no README reference goes stale, and git sees nothing at
+all, `.idea/` being generated and ignored. The only care needed is the constraint this entry opened
+with, that the new root is not already some other IDE's.
+
+Set that against the alternative it replaces, because the asymmetry is the point. Had `ordering/`
+been split into `cpp/` and `python/` to give each IDE an uncontested root, changing our mind later
+would mean moving eighteen source files, editing the Makefile's `%_cpp` rule and its test loop,
+rewriting the README's file references, and carrying the git history across the renames. **Root
+decisions are reversible and layout decisions are not**, so a root should be chosen for what is
+convenient now and revisited freely, while a layout should be argued.
+
+What a move does lose is whatever accumulated inside the old `.idea/`: the interpreter setting, run
+configurations, the inspection profile, the code style. Here that is close to empty, the interpreter
+being the system `python3` and the scripts needing no run configuration, and where it is not, those
+are individual XML files that can be copied across rather than rebuilt.
+
+**Where this stands today.** PyCharm's root is `experiments/ordering/`, since that is the only
+Python in the tree. If prototyping spreads to other experiments it moves up to `experiments/`, on
+the reading above, and that move is the two steps above and nothing else.
+
+---
+
 ## 2026-07-24, The 2x2 pivot is trivial in the triangular sweeps and the whole cost of the diagonal pass
 
 **Splitting `D` into its own solve pass looked like a small tidiness and turned out to be what keeps
@@ -1626,7 +1809,7 @@ smell, and easy to misuse in arithmetic. A signed `std::int32_t` gives a clean, 
 `-1`. This also matches (a) the graph code, which already uses `int32_t` vertex IDs with
 `static const int NIL = -1;` so companion arrays like `mate` hold `-1` naturally, and (b)
 the vendored AMD/MMD, which are `int`-based, so `rowIdx` as `int32_t` largely removes the
-`size_t→int` conversion at that boundary. The cost is a ~2.1-billion index cap (int32 vs
+`size_t -> int` conversion at that boundary. The cost is a ~2.1-billion index cap (int32 vs
 size_t's range). Accepted deliberately: cleaner and more agile, and Oblio isn't targeting
 matrices past 2^31 structural indices for now. If that changes, widen the ID type to
 `std::int64_t` in one place.
@@ -1651,12 +1834,12 @@ nothing. The two types reconcile with explicit casts at exactly two crossings:
 `static_cast<std::int32_t>(counter)` when storing a counter into an ID array (the
 narrowing where the 2^31 cap lives), and `static_cast<std::size_t>(id)` when an ID
 subscripts an array (widening; guard against `NIL` first if it could be a sentinel). Casts
-are few and mark the ID↔offset boundary.
+are few and mark the ID <-> offset boundary.
 
 Spelling: `std::int32_t` from `<cstdint>`, `std::size_t` from `<cstddef>`, std-qualified,
 C++ headers, same rule as every other stdlib type. Applied first to `SparseMatrix`
-(`rowIdx`→`int32_t`, `colPtr`→`size_t`); `Permutation` (maps→`int32_t`) and `ElmForest`
-(parent/etc.→`int32_t` with a shared `NIL`) follow. The graph code uses bare `int32_t`;
+(`rowIdx` -> `int32_t`, `colPtr` -> `size_t`); `Permutation` (maps -> `int32_t`) and `ElmForest`
+(parent/etc. -> `int32_t` with a shared `NIL`) follow. The graph code uses bare `int32_t`;
 it's the code to bring in line later, like the matching codebase was for `size_t`.
 
 **Later note (2026-07-15):** the "~2.1-billion index cap" above is really two separate ceilings that
@@ -1666,7 +1849,7 @@ ordering-constraint entry for the distinction.
 
 ## 2026-07-09, Friend grants write access; reads are public
 
-The engine↔data access rule:
+The engine <-> data access rule:
 
 - **`friend` = write access.** An engine befriends exactly the data class(es) it
   *produces/mutates*. There is no public mutation API for those internals, only the
@@ -1678,10 +1861,10 @@ The engine↔data access rule:
 - **This corrects an earlier overstatement** (the friend/BLAS entry below implied
   friend was needed for hot-path reads). The `experiments/friend-access/` study
   measured a *per-element, cross-translation-unit accessor call*, which can't inline,
-  so it blocks vectorization, against direct friend member access; friend won ~6×.
+  so it blocks vectorization, against direct friend member access; friend won ~6x.
   But that gap comes from calling the accessor *per element*, not from using a public
   accessor at all. Two public-accessor patterns match friend's performance exactly:
-  (a) hand BLAS the block via a single `.data()` call, BLAS then owns the O(n³) loop,
+  (a) hand BLAS the block via a single `.data()` call, BLAS then owns the O(n^3) loop,
   so the one call is free; (b) for a hand-written element loop, bind the returned
   container once (`const auto& v = A.val();`) and loop over *that*, one non-inlined
   call total, then a vectorizable loop over contiguous memory. So the hot-path
@@ -1691,7 +1874,7 @@ The engine↔data access rule:
   `friend class OrderEngine` is removed; `OrderEngine` reads A via
   `colPtr()`/`rowIdx()`/`size()` and remains a friend only of `Permutation` (which
   it writes). `ElmForestEngine` already followed this (friend of `ElmForest` only).
-- **Numeric data classes** (`Factors`, …) still befriend their producing engines for
+- **Numeric data classes** (`Factors`, ...) still befriend their producing engines for
   *writes*; their hot-path reads also go through public accessors with the
   bind-once/pointer discipline.
 - **Exposure stance (pragmatic, not purist):** exposing internals read-only is fine;
@@ -1722,10 +1905,10 @@ separate decisions:
 
 **Triangle, full, not lower.** Both 0.9 and 10.12 store A **fully**: 0.9's
 `getNumberOfNonzeroEntries() = size + 2*numOffDiagonals` (each off-diagonal in both
-triangles) and its "storing A within the structure of A+Aᵀ"; 10.12 has `SymmetrizeStrc`
+triangles) and its "storing A within the structure of A+A^T"; 10.12 has `SymmetrizeStrc`
 and its etree reads full per-column neighbor lists. The **PoC diverged**, storing the
 lower triangle only ("stored as lower triangle in CSC"). That divergence is what forced
-every structural consumer to expand lower→full first (the MMD path in `OrderEngine`, the
+every structural consumer to expand lower -> full first (the MMD path in `OrderEngine`, the
 etree in `ElmForestEngine`), and the etree bug where lower-triangle input silently
 produced an empty tree until expansion was added. **The port matches the oracle: A is
 stored fully.** Consequences: structural phases (ordering, elimination forest, symbolic)
@@ -1733,14 +1916,14 @@ read each column's neighbors directly with no expansion (the etree's diagonal
 self-skips via `lc1 < lc2`; MMD just strips the diagonal; AMD ignores it); it's the
 faithful port (lower-triangle was a rewrite of the data structure); and it's the natural
 substrate for a future **unsymmetric extension**, factor the symmetrized structure
-A+Aᵀ while carrying asymmetric values. Cost: ~2× off-diagonal storage for A, and the
+A+A^T while carrying asymmetric values. Cost: ~2x off-diagonal storage for A, and the
 numeric phase carries a redundant triangle. Accepted, matching 0.9/10.12; A is the input
 and is far smaller than the factors, where the real memory lives.
 
 Open for the port: the PoC exposed this as a public `struct` with a `fromCOO` builder
 and a weak `isValid`. The modern `SparseMatrix` keeps the flat-CSC layout but is a
 `class` with `friend` engines and a structural interface; 0.9 is the oracle for the
-COO→CSC assembly details (zero-diagonal insertion, duplicate merging, symmetrization),
+COO -> CSC assembly details (zero-diagonal insertion, duplicate merging, symmetrization),
 10.12 shows which operations the solver actually calls.
 
 ## 2026-07-09, Two layers of modernization: rules prevent, clang-tidy catches
@@ -1749,7 +1932,7 @@ The coding rules and `.clang-tidy` are complementary layers catching different
 failures at different times, not redundant work:
 - **Coding rules** (CODING_RULES + CLAUDE invariants), preventive and broad. They
   shape code as it's written and cover what no tool can judge: port-verbatim
-  discipline, friend→BLAS, when to split a header, `.cpp`, `mFoo`, `std::size_t`.
+  discipline, friend -> BLAS, when to split a header, `.cpp`, `mFoo`, `std::size_t`.
 - **`.clang-tidy` `modernize-*`**, a mechanical safety net, narrow but certain. It
   can't reason about intent, but within scope it catches the idiom slips that get
   through (a stray `NULL`, a `typedef`) and can auto-fix them.
@@ -1758,11 +1941,11 @@ So a `NULL` written by mistake is exactly what the rules *say* and the tool
 *guarantees*, belt and braces, each doing what the other can't.
 
 `modernize-*` is aligned with this project's purpose at the concept level: porting 0.9
-(late-90s C++) forward *is* turning `typedef`→`using`, `NULL`→`nullptr`, raw loops→
+(late-90s C++) forward *is* turning `typedef` -> `using`, `NULL` -> `nullptr`, raw loops ->
 range-for, and so on across old code, exactly what that checkset does. So it can do
 part of the mechanical modernization *for* you on each ported file (`--fix`), leaving
 your attention on the algorithmic faithfulness no tool can verify. Hence the per-unit
-workflow (in CLAUDE.md Process): port faithfully → `clang-tidy --fix` → verify vs 0.9.
+workflow (in CLAUDE.md Process): port faithfully -> `clang-tidy --fix` -> verify vs 0.9.
 
 ## 2026-07-08, `experiments/` convention (runnable design studies)
 
@@ -1789,7 +1972,7 @@ references for those standards.
 The 0.9 design for numeric work, which the port preserves: **an engine reaches the
 data's contiguous block via `friend`, then hands that raw block to BLAS** wherever
 BLAS applies (gemv/gemm/syrk/trsm/potrf, via Accelerate on macOS). Not a new choice,
-this two-step (`friend` → BLAS) is how 0.9 does dense numerics.
+this two-step (`friend` -> BLAS) is how 0.9 does dense numerics.
 
 This *is* supernodal numeric factorization: supernodes are dense blocks embedded in
 the sparse structure, and the numeric phase is a long sequence of dense BLAS calls on
@@ -1805,7 +1988,7 @@ Important distinction, **the supernode blocks live in the factors, not in A.** `
 (the input `Matrix`) is never handed to BLAS block-by-block; it's *read*, its structure
 by the ordering and symbolic phases, its values once when they're scattered into the
 factor. The dense blocks that BLAS operates on are created during factorization and
-stored in `Factors`. So the `friend`→BLAS hot path is specifically a `Factors` /
+stored in `Factors`. So the `friend` -> BLAS hot path is specifically a `Factors` /
 `FactorEngine` story. `A`'s storage (CSC) is chosen for a different reason: cheap,
 cache-friendly *sequential column traversal* by the structural phases, plus being the
 standard interchange format (what AMD/MMD expect). Both `A` and the factors favor flat,
@@ -1823,12 +2006,12 @@ writes (the factor storage), and reads go through the public API.
 Why (performance): the public-operator path is one non-inlined, cross-translation-unit
 call per element (data-class body in its `.cpp`, loop in the engine's), which blocks
 vectorization. Direct `friend` access fetches the raw block pointer once and walks
-contiguous memory, which vectorizes, measured ~6× on Apple Silicon (M4/AppleClang),
-~3× on x86/g++, over the API path. But the raw block should then go to **BLAS**, not a
-hand loop: on the M4, Accelerate's `dgemv` ran the 2000×2000 mat-vec ~6× faster than
-the vectorized hand loop (and ~36× over the API path), because it breaks past a single
+contiguous memory, which vectorizes, measured ~6x on Apple Silicon (M4/AppleClang),
+~3x on x86/g++, over the API path. But the raw block should then go to **BLAS**, not a
+hand loop: on the M4, Accelerate's `dgemv` ran the 2000x2000 mat-vec ~6x faster than
+the vectorized hand loop (and ~36x over the API path), because it breaks past a single
 core's bandwidth ceiling (multithreading + prefetch/blocking) that a hand loop can't.
-The advantage only grows for the compute-bound O(n³) kernels (`dgemm`/`syrk`/`trsm`/
+The advantage only grows for the compute-bound O(n^3) kernels (`dgemm`/`syrk`/`trsm`/
 `dpotrf`) the factorization leans on. So the hand loop is a fallback/baseline; where
 BLAS applies, use it.
 
@@ -1857,13 +2040,13 @@ Why `.cpp`: cross-project consistency. The matching codebase uses `.cpp` (alongs
 world (`.cc` is mainly the Google-style corner). Done now because the tree is still
 scaffold + PoC with no ported units yet, so the rename is at its cheapest.
 
-Blast radius (all mechanical, filename-level, no semantics): `git mv *.cc → *.cpp`
+Blast radius (all mechanical, filename-level, no semantics): `git mv *.cc -> *.cpp`
 across `src/`, `tests/`, `examples/`, `archive/`, `experiments/`; the CMake source and
 executable lists; the manual build glob in CLAUDE.md / README (`src/*.cpp`); `.clang-format`;
 the example `Makefile`s and the build-command comments in the example files. Headers and
 object files are untouched, `#include`s point at `.h`, and `Foo.o` derives from the
 source basename regardless of extension, so no `.o` reference changes. This makes
-the rename strictly safer than the `exp`→`ext` one, which touched `#include`s.
+the rename strictly safer than the `exp` -> `ext` one, which touched `#include`s.
 
 ## 2026-07-08, Explicit instantiation over header-only templates (rationale)
 
@@ -1871,7 +2054,7 @@ Decision (already active in CLAUDE.md; this entry records *why*, which otherwise
 lives only in the `experiments/template-instantiation/` example comments): Val-dependent classes keep a single
 `Val` template, but their definitions live in `.cpp` files with explicit
 instantiation for the supported scalar types, and headers carry declarations plus
-`extern template`. Fuller treatments: `archive/oblio_modernization_notes.md` §"Why
+`extern template`. Fuller treatments: `archive/oblio_modernization_notes.md` section "Why
 explicit instantiation still works" (the Val-surface table) and
 `archive/oblio-new-devlog.md` Session 3 (adoption + the link-failure proof). The
 `_tpl` / `_ext` example files are the compact head-to-head (see naming below).
@@ -1879,7 +2062,7 @@ explicit instantiation still works" (the Val-surface table) and
 Mental model: a template is a recipe, not code, it generates code once a type is
 plugged in. Header-only templates plug in *late and everywhere*: every translation
 unit that includes the header re-runs the recipe for each type it uses, and the
-linker discards the duplicates (N files × 2 types → the same bodies compiled 2N
+linker discards the duplicates (N files x 2 types -> the same bodies compiled 2N
 times). That was the real cost of 0.9's header-heavy templating, not the templates,
 but the repeated late instantiation. Explicit instantiation is "one template,
 applied early, once per type": the recipe runs exactly twice, in one `.cpp`, at
@@ -1928,10 +2111,10 @@ Definition-hiding is the hinge, and it pairs with forcing. The three configurati
 | Case | Available | Approach | Build cost |
 |---|---|---|---|
 | 1 | neither forcing nor suppressing | Inclusion model: all definitions in headers, every TU re-instantiates what it uses, linker merges duplicates. No way to move bodies out and still get symbols. | High (~2N), unavoidable |
-| 2 | forcing only (C++98) | Definition-hiding + forcing: bodies to `.cpp`, declaration-only headers, `template class Foo<double>;` in the `.cpp`. Other TUs see declarations only → can't implicitly instantiate → link the forced symbols. | Low |
+| 2 | forcing only (C++98) | Definition-hiding + forcing: bodies to `.cpp`, declaration-only headers, `template class Foo<double>;` in the `.cpp`. Other TUs see declarations only -> can't implicitly instantiate -> link the forced symbols. | Low |
 | 3 | forcing + suppressing (C++11) | Case 2 still works and stays the choice; *additionally* you may keep bodies in headers and use `extern template` to suppress re-instantiation, needed only when definitions must stay header-visible. | Low |
 
-Key insight: the big jump is **1 → 2, not 2 → 3**. Forcing is what unlocks the whole
+Key insight: the big jump is **1 -> 2, not 2 -> 3**. Forcing is what unlocks the whole
 technique (hide a definition, still guarantee the symbol). Suppressing is the
 incremental step that only adds a second route for the case where you insist on
 header-visible definitions. If you move bodies to the `.cpp` (Oblio does), you never
@@ -1974,12 +2157,12 @@ three ways). File names are `<Class><Variant>` with no separator, e.g.
 Conceptual framing (two axes):
 
 - **Axis 1, where the body lives (implicit vs explicit).** *implicit* = body in
-  the header (`.h`), instantiated implicitly per translation unit → `Implicit`.
+  the header (`.h`), instantiated implicitly per translation unit -> `Implicit`.
   *explicit* = body outside the header, forced in the `.cpp`; header carries
-  signatures only → `PlainExplicit` and `GuardedExplicit`.
+  signatures only -> `PlainExplicit` and `GuardedExplicit`.
 - **Axis 2, applies only within explicit; guarded vs plain.** *plain explicit* =
-  `.cpp` bodies, declaration-only header, nothing more → `PlainExplicit`.
-  *guarded explicit* = same, plus `extern template` in the header → `GuardedExplicit`.
+  `.cpp` bodies, declaration-only header, nothing more -> `PlainExplicit`.
+  *guarded explicit* = same, plus `extern template` in the header -> `GuardedExplicit`.
 
   The three named layers:
   - **implicit**, body in `.h` (`Implicit`)
@@ -2005,7 +2188,7 @@ Selector macros: `OBLIO_TI_IMPLICIT` / `OBLIO_TI_PLAIN_EXPLICIT` /
 `OBLIO_TI_GUARDED_EXPLICIT`.
 
 Naming history: suffixes were once `_tpl`/`_exp`/`_ext`, where `_exp` inaccurately
-labeled the extern-template variant. Renamed in two steps, first `_exp`→`_ext` to
+labeled the extern-template variant. Renamed in two steps, first `_exp` -> `_ext` to
 free `_exp` for the genuine forcing-only variant, then all three to the conceptual
 `Implicit`/`PlainExplicit`/`GuardedExplicit` once the two-axis framing settled.
 
@@ -2033,7 +2216,7 @@ Scope: this is a rename (wrapping/API), not an algorithm change, it's on the
 port-and-modernize track, not the rewrite track. Do it as one deliberate
 mechanical pass **before** porting proper, since it's cross-cutting (every `friend`
 decl, FactorEngine, SolveEngine, tests name `Matrix`) and only gets more expensive
-as code solidifies around the name. **Oracle mapping: 0.9 `Matrix` ↔ modern
+as code solidifies around the name. **Oracle mapping: 0.9 `Matrix` <-> modern
 `SparseMatrix`**, record this so output comparisons against 0.9 stay unambiguous.
 
 ## 2026-07-08, Minimal abstraction; containers are the structure that matters
@@ -2064,13 +2247,13 @@ container discipline *is* the architecture that matters.
 ## 2026-07-07, Align with standard project files; adopt clang tooling
 
 The doc set maps to established conventions rather than being bespoke:
-CODING_RULES.md ≈ a style/conventions guide, DESIGN_DECISIONS.md ≈ a lightweight ADR log
-(single-file variant of the Nygard/ADR pattern), CLAUDE.md ≈ the agent-instructions
+CODING_RULES.md ~ a style/conventions guide, DESIGN_DECISIONS.md ~ a lightweight ADR log
+(single-file variant of the Nygard/ADR pattern), CLAUDE.md ~ the agent-instructions
 file (AGENTS.md is the emerging cross-tool equivalent, if we ever run more than
 Claude Code, keep content in AGENTS.md and make CLAUDE.md a one-line `@AGENTS.md`).
 PORTING_LEDGER.md stays bespoke, it's specific to a port, no standard analog.
 
-Renamed CPP_RULES.md → **CODING_RULES.md** and made it language-general (Rust is a
+Renamed CPP_RULES.md -> **CODING_RULES.md** and made it language-general (Rust is a
 likely future scope), with per-language sections.
 
 Adopted **`.clang-format`** and **`.clang-tidy`** so mechanical rules (`nullptr`,
@@ -2115,7 +2298,7 @@ importing the growing logs.
 
 ## 2026-07-07, Invariants live in CLAUDE.md, not CODING_RULES.md
 
-The C++ **invariants** (port-verbatim, `std::vector` default, no signed→unsigned
+The C++ **invariants** (port-verbatim, `std::vector` default, no signed -> unsigned
 index slips, `.data()` to BLAS) are written directly in CLAUDE.md. Only the
 **conventions** (style preferences) stay in CODING_RULES.md.
 
@@ -2155,7 +2338,7 @@ Candidates:
 - **(a) Fresh port from 0.9** into a new tree, treating the PoC the way 10.12 is
   treated, learn from, don't build on. "Replacing Array gradually" only applies
   to a tree that still has `Array` (0.9 or 10.12), which points here.
-- **(b) Continue the PoC tree**, where Array→vector is already done, in which
+- **(b) Continue the PoC tree**, where Array -> vector is already done, in which
   case the remaining work is different (coverage, finishing, cleanup), and this
   is not really an Array migration.
 

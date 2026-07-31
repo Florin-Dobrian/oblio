@@ -1233,8 +1233,12 @@ tradeoff is taken deliberately: an enumerated list is a second inventory to keep
 and hand-maintained agreement between two build files is precisely what failed here. Globbing
 removes the failure mode rather than the symptom, and `CONFIGURE_DEPENDS` makes the build re-glob
 when the directory changes, so a new suite needs no edit in either build file. Verified by
-configuring from clean: eight tests registered, all eight pass under `ctest`, and both examples
-build and run.
+configuring from clean on alpamayo, against Accelerate:
+
+- BLAS, LAPACK and the underscore convention all detected by probe
+- eight tests registered, `test_pipeline` among them
+- all eight passing under `ctest`
+- both examples building and running
 
 **What this does not fix** is that the examples are still built and never run, by either build
 description, which is the entry above.

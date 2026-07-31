@@ -116,10 +116,15 @@ engine: it knows nothing about the language, resolves no dependencies, and finds
 everything it does it does because someone wrote the command out. `CMakeLists.txt`,
 `pyproject.toml`, `build.sbt` and `Cargo.toml` are declarations that *other tools read*, which is
 the whole of what they buy. So reach for the ecosystem when something only it provides is actually
-wanted: resolving third-party dependencies, installing or publishing, being consumed by someone
-else's build, or feeding an IDE or a CI that reads that format. A `Makefile` suffices when
-dependencies are absent or vendored, nothing is installed, one toolchain is invoked directly, and
-the work is a few compile-and-link commands plus some run-and-check tasks.
+wanted:
+
+- resolving third-party dependencies
+- installing or publishing
+- being consumed by someone else's build
+- feeding an IDE or a CI that reads that format
+
+A `Makefile` suffices when dependencies are absent or vendored, nothing is installed, one toolchain
+is invoked directly, and the work is a few compile-and-link commands plus some run-and-check tasks.
 
 **By that test the experiments are the clean `Makefile` case and should stay there.** No
 dependencies, nothing installed, nothing consumed by anyone. And `make test` in the ordering
@@ -272,13 +277,16 @@ contrast is the data-structures repo, whose `python/` folder carries `pyproject.
 editable install and `ipykernel`, on far less code, because there something genuinely has to be
 resolved.
 
-**Three places, and only two of them are the repo's business.** In the shell, use whichever tool is
-preferred; uv is a fine default there and the repo neither knows nor cares. In the `Makefile`,
-`PYTHON ?= python3`, so `make test` runs under a `PATH` name rather than a particular tool: the
-prerequisite is then only that some Python 3 exists, where `uv run` requires uv installed first and
-then resolves a Python of its own. In PyCharm, decline the offered uv environment and select the
-existing `python3`, which is the same binary the `Makefile` resolves, so an upgrade moves both
-together and a `.venv/` this tree does not ignore is never created.
+**Three places, and only two of them are the repo's business.**
+
+- **The shell.** Whichever tool is preferred; uv is a fine default there and the repo neither knows
+  nor cares.
+- **The `Makefile`.** `PYTHON ?= python3`, so `make test` runs under a `PATH` name rather than a
+  particular tool: the prerequisite is then only that some Python 3 exists, where `uv run` requires
+  uv installed first and then resolves a Python of its own.
+- **PyCharm.** Decline the offered uv environment and select the existing `python3`, which is the
+  same binary the `Makefile` resolves, so an upgrade moves both together and a `.venv/` this tree
+  does not ignore is never created.
 
 **What is deliberately not claimed.** Not that uv is less stable, which it is not, since it pins
 exactly where Homebrew's `python3` follows whatever `brew upgrade` last installed. Not that the two
@@ -290,13 +298,17 @@ see either difference. The choice is about how narrow the prerequisite is and ab
 the build agreeing by construction, not about safety. `make test PYTHON="uv run"` is a supported
 override and the `Makefile` documents it.
 
-**Changing later is cheap, and nothing is arranged to make it so.** Should a dependency arrive:
-`uv init` and `uv add` in the experiment folder, point PyCharm's interpreter at the resulting
-`.venv`, and set `PYTHON ?= uv run`, which is a one-word edit to a variable that exists for it. Two
-chores travel along, adding `.venv/` and `__pycache__/` to the root `.gitignore`, which this tree
-lacks because no Python lived here before, and tracking `pyproject.toml`, which is an authored
-language project rather than generated editor state. Nothing else moves: no file imports another, so
-no import path changes, and the README's one `python3 md3.py 3` is a usage example rather than a
+**Changing later is cheap, and nothing is arranged to make it so.** Should a dependency arrive,
+three steps:
+
+1. `uv init` and `uv add` in the experiment folder.
+2. Point PyCharm's interpreter at the resulting `.venv`.
+3. Set `PYTHON ?= uv run`, a one-word edit to a variable that exists for it.
+
+Two chores travel along. Adding `.venv/` and `__pycache__/` to the root `.gitignore`, which this
+tree lacked until Python arrived, and tracking `pyproject.toml`, which is an authored language
+project rather than generated editor state. Nothing else moves: no file imports another, so no
+import path changes, and the README's one `python3 md3.py 3` is a usage example rather than a
 dependency. The genuinely irreversible part is not the tooling but the decision itself, since the
 twins would stop being stdlib-only and the property that makes them readable as a specification is
 what would be spent.

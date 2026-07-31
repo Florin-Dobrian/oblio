@@ -192,19 +192,23 @@ compile a single file on demand (replaying one entry) but has no working full-bu
 nothing of link steps, the `make test` orchestration, or the target structure, because that lives in
 the Makefile, which CLion does not read. This is the wanted state, not a limitation: the terminal is
 the only thing that compiles, and the two never fight over who owns the build. Even where CLion
-builds *could* be wired in (registering `make` as an external tool, or migrating to CMake), the
-terminal is the better choice on the merits here. The Makefile is the single source of truth and does
-real work a second build description would have to duplicate and keep in sync: the `uname` platform
-branch, the `-w` on the vendored orderers, the guarded explicit-instantiation object layout. And the
-one-unit-at-a-time loop is a terminal loop, reading `PASS`/`FAIL` lines and comparing residuals
-against the 0.9 oracle; the hand-rolled test prints are not a framework CLion's runner would parse
-into a green/red tree, so routing the build through the IDE would cost the tidy output and gain
-nothing. The clean model: CLion is a reading instrument pointed at the code, the terminal is the
-workshop, and the compile database is the one-way bridge that lets the instrument understand what the
-workshop produces without needing to run it. Wiring builds into CLion earns its keep only if the work
-moves into CLion (its debugger, refactoring, inline run buttons); for navigation-only it is a moving
-part with no payoff. The lightest middle option, if tab-switching ever grates, is binding `make test`
-to a key as a CLion External Tool, which gives terminal-identical output in a panel without CLion
+builds *could* be wired in, by registering `make` as an external tool or migrating to CMake, the
+terminal is the better choice on the merits here:
+
+- The Makefile is the single source of truth and does real work a second build description would
+  have to duplicate and keep in sync: the `uname` platform branch, the `-w` on the vendored
+  orderers, the guarded explicit-instantiation object layout.
+- The one-unit-at-a-time loop is a terminal loop, reading `PASS`/`FAIL` lines and comparing
+  residuals against the 0.9 oracle. The hand-rolled test prints are not a framework CLion's runner
+  would parse into a green/red tree, so routing the build through the IDE would cost the tidy
+  output and gain nothing.
+
+The clean model: CLion is a reading instrument pointed at the code, the terminal is the workshop,
+and the compile database is the one-way bridge that lets the instrument understand what the workshop
+produces without needing to run it. Wiring builds into CLion earns its keep only if the work moves
+into CLion (its debugger, refactoring, inline run buttons); for navigation-only it is a moving part
+with no payoff. The lightest middle option, if tab-switching ever grates, is binding `make test` to
+a key as a CLion External Tool, which gives terminal-identical output in a panel without CLion
 owning anything.
 
 ### Python prototypes in PyCharm (`experiments/ordering`)
@@ -216,17 +220,21 @@ directories never meet, and CLion already lists that folder under `excludeRoots`
 repo root in PyCharm; it is CLion's. The reasoning, and what to do if Python spreads to other
 experiments, is the 2026-07-31 entry in docs/DESIGN_DECISIONS.md.
 
-Setup is one step: File -> Open, select `experiments/ordering/`, trust the project. Confirmed on
-alpamayo: PyCharm wrote `experiments/ordering/.idea/` and changed nothing else in the folder, and
-`git status` listed no new file, since the root `.gitignore`'s `.idea/` has no leading slash and so
-matches at any depth. It does then ask for an interpreter, offering to set up a uv environment or a
-custom one. **Take the custom one and select the existing `python3`**, the same one `which python3`
-resolves to in the shell that runs `make`. No venv and no `pyproject.toml`: the layers are
-standalone stdlib-only scripts with no cross-imports, and the `Makefile` runs them with a bare
-`python3`, so there are no dependencies for an environment to hold. A venv here would put
-`make test` and the editor on different interpreters, which would surface as the twins disagreeing
-for a reason that is not the code, and it would drop a `.venv/` that this tree's `.gitignore` does
-not cover.
+Setup, confirmed on alpamayo:
+
+1. File -> Open, select `experiments/ordering/`, trust the project. PyCharm writes
+   `experiments/ordering/.idea/` and changes nothing else in the folder, and `git status` lists no
+   new file, since the root `.gitignore`'s `.idea/` has no leading slash and so matches at any
+   depth.
+2. It then asks for an interpreter, offering to set up a uv environment or a custom one. **Take the
+   custom one and select the existing `python3`**, the same one `which python3` resolves to in the
+   shell that runs `make`.
+
+No venv and no `pyproject.toml`, for three reasons. The layers are standalone stdlib-only scripts
+with no cross-imports, so there are no dependencies for an environment to hold. The `Makefile` runs
+them with a bare `python3`, so a venv would put `make test` and the editor on different
+interpreters, which would surface as the twins disagreeing for a reason that is not the code. And
+it would drop a `.venv/` that this tree's `.gitignore` does not cover.
 
 Moving the root later is two steps, open the new folder and delete the old `.idea/`, and no source
 file, Makefile rule or README reference is affected by it.

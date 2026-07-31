@@ -7,7 +7,7 @@ traversal strategies.
 ## Features
 
 - **Three factorization types**: Cholesky, Static LDL^T (with diagonal perturbation),
-  Dynamic LDL^T (threshold pivoting with 1×1 and 2×2 pivots)
+  Dynamic LDL^T (threshold pivoting with 1x1 and 2x2 pivots)
 - **Three traversal algorithms**: Left-looking, Right-looking, Multifrontal
 - **Ordering**: Natural (identity), MMD (Multiple Minimum Degree), AMD (Approximate Minimum Degree, Davis/Amestoy/Duff)
 - **Single and multiple RHS**: `Vector<Val>` for one RHS, `DenseMatrix<Val>` for
@@ -48,7 +48,17 @@ Multiple right-hand sides (a dense `B`) are not wired yet; see Status.
 
 ## Build
 
-The Makefile compiles the units in `src/` once and links each test or example against them.
+Two builds cover the same sources, and they are not redundant:
+
+- **Makefile**, canonical. What the development loop runs, and when the two disagree it is the one
+  to believe.
+- **CMake**, the release path. Probes for its dependencies rather than assuming them, and is what a
+  consumed library is built and installed through.
+
+Both compile the same `src/`, `tests/` and `examples/`, and both discover what they build by
+wildcard, so a new `tests/*.cpp` file needs no edit in either.
+
+### Makefile
 
 ```bash
 make            # build everything (tests and examples)
@@ -58,8 +68,40 @@ make examples   # build the example programs
 make clean
 ```
 
-To compile a single unit by hand (all sources are flat in `src/`, so `src/*.cpp` catches
-everything):
+Direct and predictable: one compiler invocation per unit, no configure step, no generated
+directory, and nothing to install beyond a compiler and a BLAS. It selects the BLAS by platform,
+branching on `uname` to `-framework Accelerate` on macOS and `-llapack -lblas` elsewhere, and sets
+`-DOBLIO_BLAS_UNDERSCORE` unconditionally. That is an assumption rather than a discovery, correct
+on every platform targeted so far and wrong on a build whose Fortran symbols carry no trailing
+underscore.
+
+What it buys is the development loop. `make test` prints one `PASS`/`FAIL` line per assertion and
+a count, which is what the port is read against, and the Makefile's own header lists the
+inner-loop targets beyond the ones above: building one suite, or compiling the library alone as
+the fastest check that a unit still builds. The experiments under `experiments/` each carry their
+own Makefile for the same reasons, and none of them is part of this build.
+
+### CMake
+
+```bash
+cmake -B build && cmake --build build && ctest --test-dir build
+```
+
+Configures, builds a static `liboblio.a`, and registers each suite with `ctest`. Where the Makefile
+assumes, CMake **detects**: `find_package(BLAS)` and `find_package(LAPACK)` locate the libraries,
+and a `check_c_source_compiles` probe calling `dpotrf_` decides whether to define
+`OBLIO_BLAS_UNDERSCORE`. On macOS that reports Accelerate and the underscore convention; on a
+machine with split reference libraries it finds those instead, with no edit.
+
+The cost is a configure step, a generated `build/` tree, and a second description of the same
+build to keep honest. What it buys beyond detection is the future: install targets and an exported
+config, so that a consumer can write `find_package(Oblio)`, are CMake's to give and not a
+Makefile's. That is why CMake is expected to become the primary build when the library is consumed
+from outside; see the 2026-07-31 entry in `docs/DESIGN_DECISIONS.md`.
+
+### Compiling one unit by hand
+
+Neither build is required. All sources are flat in `src/`, so `src/*.cpp` catches everything:
 
 ```bash
 # macOS (Accelerate provides BLAS/LAPACK):
@@ -71,7 +113,41 @@ g++ -std=c++17 -O3 -DOBLIO_BLAS_UNDERSCORE -Iinclude \
     tests/test_solve.cpp src/*.cpp -lblas -llapack -lm -o test_solve
 ```
 
-CMake is also supported: `cmake -B build && cmake --build build && ctest --test-dir build`.
+### Which to use
+
+- **Makefile, while working.** Faster to invoke, carries the single-unit targets, and is what the
+  porting loop is built around.
+- **CMake, to check the build still configures from nothing**, on a machine whose BLAS the
+  Makefile has not hardcoded, and before anything is released.
+
+Running both occasionally is worth the seconds, since they share no code and a difference between
+them is information.
+
+### Editors
+
+Neither build needs an IDE, and the IDE in use does not build. CLion can attach to this tree two
+ways, and the choice is made by what is opened, not by a setting:
+
+- **Compilation-database project** (current). `bear -- make test` writes a `compile_commands.json`
+  recording what the Makefile actually compiled, flags and all, and CLion indexes from that.
+  Navigation and find-usages resolve through the templates. There is no build button, because the
+  database records what was compiled rather than how to build it.
+- **CMake project.** Opening `CMakeLists.txt` instead lets CLion drive CMake itself, configuring
+  into its own `cmake-build-*/` directory, with working build and run buttons, per-target run
+  configurations and a `ctest` tree.
+
+The database arrangement is the current one, and the terminal stays the only thing that compiles;
+the database is a one-way bridge letting the editor understand a build it never runs. It is
+machine-specific and gitignored, and wants regenerating only when the compile commands change, a
+new source file or a changed flag, not on every edit. The CMake arrangement is declined for now
+because it would be a third configuration of the same sources alongside the two above, because the
+Makefile is canonical and does work a second description would have to duplicate, and because the
+suites print `PASS`/`FAIL` lines rather than a format an IDE runner would parse into a tree. It
+becomes the better choice if the work moves into the IDE, for its debugger and refactoring.
+
+PyCharm is opened separately on `experiments/ordering/`, for the Python prototypes there. The
+rule governing both, one IDE per project root and never two at the same directory, is in
+`docs/DESIGN_DECISIONS.md` (2026-07-31); the setup steps for each are in `CLAUDE.md` under Tooling.
 
 ## Structure
 
@@ -114,13 +190,16 @@ examples/           , usage examples
 ## History
 
 This codebase is a C++17 modernization of Oblio 0.9, a sparse direct solver
-written circa 2003–2005. The algorithmic core, symbolic factorization,
+written circa 2003-2005. The algorithmic core, symbolic factorization,
 numeric factorization kernels, custom BLAS routines, solve engines, is
 ported directly from the 0.9 source, not reimplemented. What is new is the
-wrapping: `enum class` instead of bare enums, a single `Val` template parameter
-instead of separate `*Real.h` / `*Complex.h` file pairs, `std::vector` storage
-instead of hand-rolled arrays, explicit template instantiation for fast builds,
-and a namespaced `include/oblio/` header layout.
+wrapping:
+
+- `enum class` instead of bare enums
+- a single `Val` template parameter instead of separate `*Real.h` / `*Complex.h` file pairs
+- `std::vector` storage instead of hand-rolled arrays
+- explicit template instantiation for fast builds
+- a namespaced `include/oblio/` header layout
 
 Early development attempted to rewrite some algorithms from first principles
 (elimination tree, column counts, supernodal index sets). Every rewrite

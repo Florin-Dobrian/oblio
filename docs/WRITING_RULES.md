@@ -21,9 +21,15 @@ counterpart to CODING_RULES.md.
   `alpha` for the symbol, `<=` for inequalities.
 - **American spelling.** `neighbor`, not `neighbour`; likewise `behavior`,
   `analyze`, `center`, and so on.
-- **Minimal formatting.** Prefer flowing prose to lists. Use bold sparingly, for
-  genuine emphasis or defined terms, not decoration. Add headers only where they
-  aid navigation, not on every paragraph.
+- **Itemize what is enumerable.** Parallel, countable things get a list: options
+  being weighed, alternatives, ordered steps, distinct cases, the fields of a
+  struct. Prose buries exactly what a reader is meant to compare, so a paragraph
+  listing three tradeoffs in sequence is worse than three bullets. Argument still
+  reads as argument: why one option wins, or how a conclusion follows, is
+  reasoning rather than an inventory and stays in prose. The test is whether the
+  items are parallel and countable, not whether the passage is long.
+- **Bold and headers, sparingly.** Bold for genuine emphasis or defined terms, not
+  decoration. Headers only where they aid navigation, not on every paragraph.
 - **Package name is `Oblio`** (capital O) in prose and documentation, matching the
   C++ namespace.
 - **First person plural: always `we`.** Address the reader as `we`, not `you` and

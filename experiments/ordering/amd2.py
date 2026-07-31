@@ -3,7 +3,7 @@
 #
 # amd1 has the idea: the degree bound, computed once per clique and read once per
 # vertex. What it does not have is the rest of what amd_1 and amd_2 do, and this
-# file adds it, one pass at a time. Section 5.13 of
+# file adds it, one pass at a time. All seven are in. Section 5.13 of
 # archive/sparse_factorization.md, plus the vendored routine itself in
 # vendored/vendored_amd.cpp.
 #
@@ -13,16 +13,17 @@
 #      shows it lies inside the new one                                   [done]
 #   2. HASH SUPERVARIABLE DETECTION, which finds vertices indistinguishable
 #      from EACH OTHER rather than from the pivot                         [done]
-#   3. the two-pass degree update, so every survivor sees the same final
-#      degme rather than a shrinking one                                  [todo]
+#   3. the two-pass degree update, scan 1 obtaining |C[c] - C[p]| by
+#      subtraction from a maintained clique degree                        [done]
 #   4. dense row and column detection by the alpha ratio, held out and
-#      placed last                                                        [todo]
-#   5. amd_aat and amd_preprocess, forming the pattern of A + A'          [todo]
-#   6. amd_postorder, so the output is a postorder of the assembly tree    [todo]
-#   7. amd_valid and the Control/Info interface                           [todo]
+#      placed last                                                        [done]
+#   5. amd_aat and amd_preprocess, forming the pattern of A + A'          [done]
+#   6. amd_postorder, so the output is a postorder of the assembly tree    [done]
+#   7. amd_valid and the Control/Info interface                           [done]
 #
-# PASS 1, THE TWO MECHANISMS THAT RIDE ALONG WITH THE BOUND. Neither is about the
-# degree, and both are cheap only because the bound's work has already been done.
+# PASSES 1 AND 2, THE TWO MECHANISMS THAT RIDE ALONG WITH THE BOUND. Neither is
+# about the degree, and both are cheap only because the bound's work has already
+# been done.
 #
 # AGGRESSIVE ABSORPTION. |C[c] - C[p]| has just been computed for every clique c
 # that the new one touched. If it is zero, C[c] lies entirely inside C[p], so that
@@ -42,6 +43,7 @@
 #      python3 amd2.py 3     just the third
 
 # %%
+import math
 import sys
 
 # I[u] cliques that contain u
@@ -113,7 +115,152 @@ def amd2_storage(A, I, C):
             + sum(len(incidence) for incidence in I)
             + sum(len(clique_members) for clique_members in C.values()))
 
-def amd2_neighbors(A, I, C, mark, tag, u):
+# The three statuses amd_valid can return, and the two Control knobs.
+AMD_OK = 0
+AMD_OK_BUT_JUMBLED = 1
+AMD_INVALID = -2
+
+def amd2_valid(n, Ap, Ai):
+    """What amd_valid checks before anything else touches the input: the column
+    pointers start at zero and ascend, and every row index is in range. It is not a
+    yes or no. Unsorted columns and duplicate entries return a THIRD answer,
+    AMD_OK_BUT_JUMBLED, which is not an error but a request: it is what tells
+    amd_order to run amd_preprocess rather than use the pattern directly.
+
+    So pass 7 and pass 5 are one mechanism seen from two sides. The validity check
+    decides whether the conditioning pass is needed, and the conditioning pass
+    exists because the check tolerates what it tolerates.
+
+    For Oblio the whole of this is a constructor invariant. A SparseMatrix is
+    sorted, duplicate free and in range before anything is asked of it, so there is
+    nothing here to decide at ordering time."""
+    if n < 0 or Ap is None or Ai is None:
+        return AMD_INVALID
+    if len(Ap) != n + 1 or Ap[0] != 0 or Ap[n] < 0:
+        return AMD_INVALID
+    result = AMD_OK
+    for j in range(n):
+        if Ap[j] > Ap[j + 1]:                  # pointers must ascend
+            return AMD_INVALID
+        last = -1
+        for p in range(Ap[j], Ap[j + 1]):
+            i = Ai[p]
+            if i < 0 or i >= n:                # row index out of range
+                return AMD_INVALID
+            if i <= last:                      # unsorted, or a duplicate
+                result = AMD_OK_BUT_JUMBLED
+            last = i
+    return result
+
+def amd2_preprocess(n, Ap, Ai):
+    """R, the row form of the pattern of A with duplicates removed.
+
+    Amd.cpp calls this when the input may be unsorted or hold duplicates, since
+    A + A' can be formed from R without either problem. R is the pattern of A
+    transposed, so R + R' is A + A' and nothing is lost by working from it.
+
+    The diagonal is NOT dropped here; amd2_aat deals with it, because it has to
+    count it anyway.
+
+    Set view: R[i] = { j : A(i,j) != 0 }, and flag[i] == j is the membership test
+    that makes the deduplication one comparison rather than a search."""
+    counts = [0] * n
+    flag = [-1] * n
+    for j in range(n):
+        for p in range(Ap[j], Ap[j + 1]):
+            i = Ai[p]
+            if flag[i] != j:                   # i has not appeared in column j yet
+                counts[i] += 1
+                flag[i] = j
+    Rp = [0] * (n + 1)
+    for i in range(n):
+        Rp[i + 1] = Rp[i] + counts[i]
+    position = Rp[:n]                          # where the next entry of row i goes
+    flag = [-1] * n
+    Ri = [0] * Rp[n]
+    for j in range(n):
+        for p in range(Ap[j], Ap[j + 1]):
+            i = Ai[p]
+            if flag[i] != j:
+                Ri[position[i]] = j
+                position[i] += 1
+                flag[i] = j
+    return Rp, Ri
+
+def amd2_aat(n, Ap, Ai, Rp, Ri):
+    """The pattern of A + A' with the diagonal dropped, as adjacency lists, plus
+    the statistics Amd.cpp reports about the input. (Ap, Ai) is the column form and
+    (Rp, Ri) its row form, both free of duplicates, as amd2_preprocess leaves them.
+
+    The ordering is defined on a symmetric structure and a general matrix is not
+    one, so this is where an arbitrary pattern becomes a graph. Two things go: the
+    diagonal, which is a self loop and says nothing about fill, and the distinction
+    between A(i,j) and A(j,i), since either one forces the same elimination.
+
+    The symmetry reported is the vendored definition, with B the strictly
+    triangular parts of A:
+
+        sym = nnz(B & B') / nnz(B),   or 1 when nnz(B) is zero
+
+    Amd.cpp computes it with a two-pointer scan that walks the two triangles
+    together, which needs sorted columns and saves a pass. Ours asks the row form
+    whether the transposed entry exists, one stamp and one comparison, which is
+    what the rest of this file does and works on unsorted input. That is a
+    deviation from the vendored code, and it is stated rather than hidden.
+
+    Returns (A, info) with info = (nz, nzdiag, nzboth, symmetry, nzaat)."""
+    nz = Ap[n]
+    row_mark = [-1] * n                        # row_mark[k] == j: A(j,k) is present
+    num_diagonal = 0
+    num_both = 0
+    A = [[] for _ in range(n)]
+    for j in range(n):
+        for p in range(Rp[j], Rp[j + 1]):      # row j, so the transposed entries
+            row_mark[Ri[p]] = j
+        for p in range(Ap[j], Ap[j + 1]):
+            i = Ai[p]
+            if i == j:                         # a self loop, dropped
+                num_diagonal += 1
+                continue
+            if i > j and row_mark[i] == j:     # A(i,j) below and A(j,i) above
+                num_both += 1
+            A[j].append(i)                     # both directions, deduplicated below
+            A[i].append(j)
+
+    stamp = [-1] * n                           # one pass per list, as everywhere
+    for u in range(n):
+        kept = []
+        for v in A[u]:
+            if stamp[v] != u:
+                stamp[v] = u
+                kept.append(v)
+        A[u] = kept
+
+    symmetry = 1.0 if nz == num_diagonal else (2.0 * num_both) / (nz - num_diagonal)
+    nzaat = sum(len(A[u]) for u in range(n))
+    return A, (nz, num_diagonal, num_both, symmetry, nzaat)
+
+def amd2_order_matrix(n, Ap, Ai, alpha=10.0, aggressive=True):
+    """Order a general sparse matrix given in column form, which is what amd_order
+    takes. The pattern may be unsorted, may hold duplicates, may carry a diagonal
+    and need not be symmetric. Two preprocess passes give the deduplicated row and
+    column forms, amd2_aat turns them into a graph, and the ordering runs on that.
+
+    alpha and aggressive are the whole of amd_order's Control array, AMD_DENSE and
+    AMD_AGGRESSIVE. Everything else it takes is the matrix."""
+    status = amd2_valid(n, Ap, Ai)
+    if status == AMD_INVALID:
+        print("status: invalid input")
+        return []
+    print(f"status: {'ok but jumbled' if status else 'ok'}")
+    Rp, Ri = amd2_preprocess(n, Ap, Ai)         # row form of A
+    Cp, Ci = amd2_preprocess(n, Rp, Ri)         # and back, so the column form is clean
+    A, (nz, num_diagonal, num_both, symmetry, nzaat) = amd2_aat(n, Cp, Ci, Rp, Ri)
+    print(f"n = {n}, nz = {nz}, symmetry = {symmetry:.3f}, "
+          f"nz diagonal = {num_diagonal}, nz(A+A') = {nzaat}")
+    return amd2_minimum_degree([set(row) for row in A], alpha, aggressive)
+
+def amd2_neighbors(A, I, C, eliminated, mark, tag, u):
     """The neighbors of live vertex u: its explicit adjacency A[u] together with
     the members of every clique that contains u, minus u itself, which the
     cliques always carry. This is George and Liu's reachable set, and it is what
@@ -138,24 +285,24 @@ def amd2_neighbors(A, I, C, mark, tag, u):
     neighbors = []
     mark[u] = tag                      # never its own neighbor
     for v in A[u]:
-        if mark[v] != tag:
+        if mark[v] != tag and not eliminated[v]:
             mark[v] = tag
             neighbors.append(v)
     for c in I[u]:
         for v in C[c]:
-            if mark[v] != tag:
+            if mark[v] != tag and not eliminated[v]:
                 mark[v] = tag
                 neighbors.append(v)
     return neighbors, tag
 
-def amd2_exact_degree(A, I, C, super_members, mark, tag, u):
+def amd2_exact_degree(A, I, C, eliminated, super_members, mark, tag, u):
     """The degree md5 would have computed: the union of A[u] with the members of
     every clique in I[u], counted in original vertices. Kept only so the trace can
     show the bound beside the truth and count how often the bound is loose.
 
     Set view: sum of |super_members[v]| over v in reach(u). It is the union the
     bound exists to avoid, so this function is instrumentation and nothing more."""
-    neighbors, tag = amd2_neighbors(A, I, C, mark, tag, u)
+    neighbors, tag = amd2_neighbors(A, I, C, eliminated, mark, tag, u)
     return sum(len(super_members[v]) for v in neighbors), tag
 
 def amd2_eliminate(A, I, C, mark, tag, eliminated, pivot):
@@ -190,7 +337,7 @@ def amd2_eliminate(A, I, C, mark, tag, eliminated, pivot):
         merged   = { u in C[pivot] : A[u] == {} and I[u] == {pivot} }
         C[pivot] = C[pivot] - merged
     """
-    neighbors, tag = amd2_neighbors(A, I, C, mark, tag, pivot)
+    neighbors, tag = amd2_neighbors(A, I, C, eliminated, mark, tag, pivot)
     absorbed_cliques = list(I[pivot])
     for c in absorbed_cliques:
         del C[c]
@@ -280,9 +427,13 @@ def amd2_refile(buckets, filed, degrees, u, new_degree):
     degrees[u] = new_degree
     amd2_file(buckets, filed, new_degree, u)
 
-def amd2_minimum_degree(G):
-    """amd1 plus the mechanisms that ride along with the bound: aggressive
-    absorption and hash supervariable detection."""
+def amd2_minimum_degree(G, alpha=10.0, aggressive=True):
+    """amd1 plus the passes of amd_1 and amd_2, one at a time. See the header.
+
+    alpha and aggressive are amd_order's Control array. alpha is the dense row and
+    column ratio, AMD_DEFAULT_DENSE, with a negative value removing only completely
+    dense rows. aggressive switches aggressive absorption off, which is the only
+    other thing the vendored routine lets a caller change."""
     n = len(G)
     nnz_tril_A = sum(len(G[u]) for u in range(n)) // 2 + n
     # The input is given as sets, so sort once here to match the C++ literals.
@@ -290,12 +441,20 @@ def amd2_minimum_degree(G):
     A = [sorted(adjacency) for adjacency in G]    # explicit vertex neighbors
     I = [[] for _ in range(n)]                 # cliques that contain each vertex
     C = {}                                     # clique id -> member list
-    mark = [-1] * n                            # scratch for membership, with tag
+    # Twice n, because the hash test stamps cliques at c + n so a clique and a
+    # vertex of the same index cannot be confused. Everything else uses the first n.
+    mark = [-1] * (2 * n)                      # scratch for membership, with tag
     tag = 0
     super_members = [[u] for u in range(n)]    # the vertices each pivot stands for
     eliminated = [False] * n
     pivots = []                                # the order over supervariables
     num_eliminated = 0                         # a counter, not a scan of eliminated
+    # Live ORIGINAL vertices, which is not n - num_eliminated. num_eliminated
+    # counts what has left the SELECTION, and a hash merge folds v into a LIVE u,
+    # so v stops being selectable while the vertices it stands for are still live
+    # inside u. The first cap of the bound needs the second reading, so it gets its
+    # own counter: only an elimination and a dense removal reduce it.
+    num_live = n
     nnz_L = 0
 
     # The cache, as in md5, except that from the first elimination it holds a
@@ -304,11 +463,31 @@ def amd2_minimum_degree(G):
     exact = list(degrees)
     num_degree_computations = n
     num_member_visits = 0                      # what an exact refresh would cost
-    num_clique_reads = 0                       # what the bound costs instead
+    num_clique_reads = 0                       # clique reads in the bound itself
+    num_incidence_reads = 0                    # incidence entries scan 1 walks
     num_bound_checks = 0
     num_loose_bounds = 0
     num_absorbed = 0                           # cliques killed aggressively
+    # |C[c]| for every live clique, weighted. Exact, not an estimate, and the
+    # invariants that keep it so are worth stating because they are not obvious:
+    # a live clique never holds an eliminated vertex, since eliminating v absorbs
+    # every clique in I[v]; mass elimination only ever removes a vertex whose
+    # I[u] is {pivot}, so no other clique is touched; and a hash merge folds v
+    # into u where I[u] == I[v], so every clique holding v holds u and its
+    # weighted size does not move.
+    clique_degree = [0] * n
+    hash_bucket = [[] for _ in range(n + 1)]   # Amd.cpp's Head[hval], reused
+    # The assembly tree, for the postorder. parent[c] is the clique that absorbed
+    # c, and front_size[e] is the front e would form, its pivots plus what it
+    # reaches. Amd.cpp keeps the same two in Pe and Elen.
+    parent = [-1] * n
+    front_size = [0] * n
+    is_element = [False] * n
     num_hash_merges = 0                        # pairs found by the hash
+    num_divides = 0                            # AMD_NDIV, one per off-diagonal entry
+    num_multsubs_ldl = 0                       # AMD_NMULTSUBS_LDL
+    num_multsubs_lu = 0                        # AMD_NMULTSUBS_LU
+    front_max = 0                              # AMD_DMAX, the largest front
 
     # The buckets, and min_degree, a LOWER BOUND on the current minimum degree.
     # The search starts at min_degree rather than at 0, so it never looks at
@@ -320,9 +499,48 @@ def amd2_minimum_degree(G):
     # which exists while anything is live.
     buckets = [[] for _ in range(n)]           # buckets[d] holds the live degree-d
     filed = [False] * n                        # whether u is in a bucket at all
+
+    # ---- DENSE ROWS AND COLUMNS, before anything is filed -------------------
+    # A row whose INITIAL degree exceeds the threshold is taken out of the graph
+    # and placed last. One dense row touches nearly everything, so it inflates the
+    # degree of nearly everything, and the ordering spends its effort avoiding a
+    # vertex it cannot avoid. Removing it is cheaper than ordering around it.
+    #
+    # The threshold is the vendored one, dense = alpha * sqrt(n), floored at 16 and
+    # capped at n, with a negative alpha meaning n - 2, which removes only rows
+    # that are completely dense. It is computed from the INITIAL degrees and never
+    # revisited: a vertex that becomes dense later is not caught.
+    if alpha < 0:
+        dense_threshold = n - 2
+    else:
+        dense_threshold = int(alpha * math.sqrt(n))
+    dense_threshold = max(16, dense_threshold)
+    dense_threshold = min(n, dense_threshold)
+    dense_vertices = [u for u in range(n) if degrees[u] > dense_threshold]
+
+    # Amd.cpp sets Nv[i] = 0 and Pe[i] = EMPTY, which leaves the vertex in other
+    # lists while contributing zero weight to every degree. Clearing its own lists
+    # and purging it from the rest is the same statement in our representation,
+    # since a weight of zero and an absence are indistinguishable to every count
+    # this file makes.
+    for u in dense_vertices:
+        A[u] = []
+        I[u] = []
+        super_members[u] = []                  # weight 0, as Nv[i] = 0
+        eliminated[u] = True
+        num_eliminated += 1
+        num_live -= 1                          # it is out of the graph, not merged
+    if dense_vertices:
+        for w in range(n):
+            if not eliminated[w]:
+                A[w] = [v for v in A[w] if not eliminated[v]]
+                degrees[w] = len(A[w])
+                exact[w] = degrees[w]
+
     for u in range(n):
-        amd2_file(buckets, filed, degrees[u], u)
-    min_degree = min(degrees) if n else 0
+        if not eliminated[u]:
+            amd2_file(buckets, filed, degrees[u], u)
+    min_degree = min([degrees[u] for u in range(n) if not eliminated[u]], default=0)
     num_bucket_probes = 0
 
     amd2_show(A, I, C, degrees, exact,
@@ -339,12 +557,16 @@ def amd2_minimum_degree(G):
 
         neighbors, absorbed_cliques, pruned_edges, merged_vertices, tag = amd2_eliminate(
             A, I, C, mark, tag, eliminated, pivot)
+        is_element[pivot] = True
+        for c in absorbed_cliques:             # the absorbed become children of it
+            parent[c] = pivot
         degree = len(neighbors)
         pivots.append(pivot)
         num_eliminated += 1 + len(merged_vertices)
         for u in merged_vertices:              # the pivot now stands for them too
             super_members[pivot] += super_members[u]
             super_members[u] = []
+        num_live -= len(super_members[pivot])  # every original the pivot stands for
 
         amd2_unfile(buckets, filed, degrees[pivot], pivot)   # the pivot has left
         degrees[pivot] = 0
@@ -373,26 +595,40 @@ def amd2_minimum_degree(G):
         for v in pivot_clique:
             mark[v] = in_clique
         degme = sum(len(super_members[v]) for v in pivot_clique)
+        clique_degree[pivot] = degme            # what scan 1 subtracts from
 
-        # |C[c] - C[pivot]| ONCE PER CLIQUE. This is the whole reason the bound is
-        # cheap: the quantity depends on c alone, so every vertex whose incidence
-        # list holds c reads it rather than recomputing it.
+        # ---- SCAN 1, |C[c] - C[pivot]| ONCE PER CLIQUE ---------------------
+        # This is the whole reason the bound is cheap: the quantity depends on c
+        # alone, so every vertex whose incidence list holds c reads it rather than
+        # recomputing it.
+        #
+        # And it is obtained by SUBTRACTION, never by looking at C[c] at all:
+        #
+        #     |C[c] - C[pivot]| = |C[c]| - sum of weight(u) over u in C[c] & C[pivot]
+        #
+        # clique_degree[c] supplies the first term, and the members of C[pivot]
+        # supply the second, since c is in I[u] exactly when u is in C[c]. So the
+        # scan walks the INCIDENCE lists of the new clique's members and pays
+        # sum |I[u]|, where amd1 walked the member lists of every touched clique
+        # and paid sum |C[c]|. mmdupd's scan 1 does the same thing at
+        # `we = Degree[e] + wnvi` then `we -= nvi`.
         touched_cliques = []
+        outside = {}
         tag += 1
         seen_clique = tag
         for u in pivot_clique:
+            weight_u = len(super_members[u])
             for c in I[u]:
-                if c != pivot and mark[c] != seen_clique:
+                if c == pivot:
+                    continue
+                if mark[c] != seen_clique:      # first sighting: start from |C[c]|
                     mark[c] = seen_clique
                     touched_cliques.append(c)
-        outside = {}
-        for c in touched_cliques:
-            total = 0
-            for v in C[c]:
-                if mark[v] != in_clique and not eliminated[v]:
-                    total += len(super_members[v])
-            outside[c] = total
-            num_member_visits += len(C[c])      # what an exact degree pays PER VERTEX
+                    outside[c] = clique_degree[c] - weight_u
+                else:                           # every later member just subtracts
+                    outside[c] -= weight_u
+                num_incidence_reads += 1
+            num_member_visits += sum(len(C[c]) for c in I[u] if c != pivot)
 
         # AGGRESSIVE ABSORPTION. Set view: dead = { c : C[c] <= C[pivot] }, the
         # containment decided by the count already computed for the bound, since
@@ -401,7 +637,8 @@ def amd2_minimum_degree(G):
         # the absorption in the eliminator. Ordinary absorption kills only what the
         # pivot touched; this kills what any reached vertex touched, and it is free
         # because the quantity was computed for the bound anyway.
-        dead_cliques = [c for c in touched_cliques if outside[c] == 0]
+        dead_cliques = ([c for c in touched_cliques if outside[c] == 0]
+                        if aggressive else [])
         for c in dead_cliques:
             del C[c]
         if dead_cliques:
@@ -411,9 +648,11 @@ def amd2_minimum_degree(G):
                 mark[c] = dead_tag
             for u in pivot_clique:
                 I[u] = [c for c in I[u] if mark[c] != dead_tag]   # I[u] - dead
+            for c in dead_cliques:             # aggressive absorption, same tree
+                parent[c] = pivot
             num_absorbed += len(dead_cliques)
 
-        num_left = n - num_eliminated
+        num_left = num_live
         refreshed_vertices = pivot_clique
         for u in refreshed_vertices:
             # bound = |A[u]| + |C[pivot] - {u}| + sum |C[c] - C[pivot]| over the
@@ -430,7 +669,7 @@ def amd2_minimum_degree(G):
             bound = min(bound,
                         num_left - len(super_members[u]),
                         degrees[u] + degme - len(super_members[u]))
-            exact_u, tag = amd2_exact_degree(A, I, C, super_members, mark, tag, u)
+            exact_u, tag = amd2_exact_degree(A, I, C, eliminated, super_members, mark, tag, u)
             exact[u] = exact_u
             num_bound_checks += 1
             if bound > exact_u:
@@ -440,16 +679,33 @@ def amd2_minimum_degree(G):
         # OTHER, which the pivot test cannot see. Hash first so the exact
         # comparison runs only within a bucket; the hash is a filter, never the
         # decision.
+        # The buckets are an array indexed by the hash value, allocated once and
+        # cleared only where it was used, which is Amd.cpp's Head[hval]. A map keyed
+        # by the hash would cost a log per insertion and a node per group, for a
+        # quantity that is already an index into 0 .. n.
         survivors = [u for u in pivot_clique if not eliminated[u]]
-        by_hash = {}
+        used_keys = []
         for u in survivors:
             # The hash stands for the PAIR of sets (A[u], I[u]), so equal sets
             # always collide and unequal ones usually do not. It is a filter and
             # never the decision: a collision costs a comparison, not a wrong merge.
-            key = (tuple(sorted(A[u])), tuple(sorted(I[u])))
-            by_hash.setdefault(hash(key), []).append(u)
+            #
+            # A SUM, because addition has no order and neither do the sets. Sorting
+            # to build a key would be a log factor for nothing; Amd.cpp sums the
+            # indices and reduces modulo n for the same reason.
+            key = 0
+            for v in A[u]:
+                if not eliminated[v]:
+                    key += v + 1
+            for c in I[u]:
+                key += (c + 1) * (n + 1)       # cliques and vertices must not mix
+            k = key % (n + 1)
+            if not hash_bucket[k]:
+                used_keys.append(k)
+            hash_bucket[k].append(u)
         hash_pairs = []
-        for group in by_hash.values():
+        for k in used_keys:
+            group = hash_bucket[k]
             if len(group) < 2:
                 continue
             for x in range(len(group)):
@@ -462,12 +718,45 @@ def amd2_minimum_degree(G):
                         continue
                     # The exact test, which the hash only filters for:
                     #     A[u] - {v} == A[v] - {u}  and  I[u] == I[v]
-                    # This is the one place a set is written out rather than
-                    # stamped, because what is being decided IS set equality and
-                    # the groups it runs on are small. The sorts are how equality
-                    # of two unordered lists is settled; the C++ twin sorts too.
-                    if (sorted(set(A[u]) - {v}) == sorted(set(A[v]) - {u})
-                            and sorted(I[u]) == sorted(I[v])):
+                    # Decided by stamping one side and counting matches on the
+                    # other, as every other membership test in this file is, so it
+                    # costs one pass and no sort.
+                    tag += 1
+                    other = tag
+                    size_v = 0
+                    for w in A[v]:
+                        if w != u and not eliminated[w]:
+                            mark[w] = other
+                            size_v += 1
+                    for c in I[v]:
+                        mark[c + n] = other    # cliques stamped past the vertices
+                        size_v += 1
+                    size_u = 0
+                    same = True
+                    for w in A[u]:
+                        if w == v or eliminated[w]:
+                            continue
+                        size_u += 1
+                        if mark[w] != other:
+                            same = False
+                            break
+                    if same:
+                        for c in I[u]:
+                            size_u += 1
+                            if mark[c + n] != other:
+                                same = False
+                                break
+                    if same and size_u == size_v:
+                        # v is folded into u and left exactly where it lies, with
+                        # a weight of zero, which is Amd.cpp's Nv[v] = 0 and the
+                        # same move the dense prepass makes. Removing it from every
+                        # clique and every adjacency would cost a pass over the
+                        # whole structure per merge, against O(1) for this.
+                        #
+                        # Nothing is lost by leaving it. The merge required
+                        # A[u] - {v} == A[v] - {u}, so every list holding v holds u
+                        # as well: v is redundant wherever it appears, never the
+                        # only way to reach anything. The walks below skip it.
                         super_members[u] += super_members[v]
                         super_members[v] = []
                         amd2_unfile(buckets, filed, degrees[v], v)
@@ -475,12 +764,11 @@ def amd2_minimum_degree(G):
                         I[v] = []
                         eliminated[v] = True
                         num_eliminated += 1
-                        for c in list(C):
-                            C[c] = [w for w in C[c] if w != v]
-                        for w in range(n):
-                            A[w] = [x for x in A[w] if x != v]
                         hash_pairs.append((u, v))
                         num_hash_merges += 1
+
+        for k in used_keys:                    # only what was touched
+            hash_bucket[k].clear()
 
         num_degree_computations += len(refreshed_vertices)
         min_degree = min([min_degree] + [degrees[u] for u in refreshed_vertices
@@ -498,9 +786,26 @@ def amd2_minimum_degree(G):
         # can use the plain count; this file cannot.
         external_degree = sum(len(super_members[v]) for v in C[pivot]
                               if not eliminated[v])
-        nnz_L += (super_size * external_degree
+        # The dense rows were taken out but they still sit below every column of
+        # L, so each one adds an entry to each. Amd.cpp does the same at
+        # r = degme + ndense, which makes nnz(L) an upper bound rather than a
+        # count once anything is dense: a dense row is assumed nonzero everywhere.
+        reach_size = external_degree + len(dense_vertices)
+        nnz_L += (super_size * reach_size
                   + super_size * (super_size - 1) // 2
                   + super_size)
+        front_size[pivot] = super_size + external_degree   # Amd.cpp: nvpiv + degme
+        # Amd.cpp's Info, with f the pivots of this front and r what it reaches.
+        f_pivots = super_size
+        r_reach = reach_size
+        lnz_me = f_pivots * r_reach + (f_pivots - 1) * f_pivots // 2
+        num_divides += lnz_me
+        multsubs = (f_pivots * r_reach * r_reach
+                    + r_reach * (f_pivots - 1) * f_pivots
+                    + (f_pivots - 1) * f_pivots * (2 * f_pivots - 1) // 6)
+        num_multsubs_lu += multsubs
+        num_multsubs_ldl += (multsubs + lnz_me) // 2
+        front_max = max(front_max, f_pivots + r_reach)
 
         absorbed_cliques_text = ", ".join(f"c{c}" for c in absorbed_cliques) if absorbed_cliques else "none"
         pruned_edges_text = ", ".join(f"{u}-{v}" for u, v in pruned_edges) if pruned_edges else "none"
@@ -517,15 +822,96 @@ def amd2_minimum_degree(G):
         amd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
         step += 1
 
-    order = [u for pivot in pivots for u in super_members[pivot]]
+    # ---- THE POSTORDER, in place of raw elimination order -------------------
+    # The elements form the assembly tree, and any postorder of it gives the same
+    # factor: a node is numbered after all its descendants either way, so no fill
+    # moves. What a postorder buys is locality. Children finish before their
+    # parent starts, so the update from a child is consumed while it is still warm,
+    # and a supernode's columns come out contiguous instead of scattered.
+    #
+    # Two details from Amd.cpp, both about which child goes first. The child lists
+    # are built by walking the elements DOWNWARD, so a list comes out ascending.
+    # Then the BIGGEST child by front size is moved to the end, so the largest
+    # subtree is traversed last and the stack of pending updates stays small.
+    child = [-1] * n
+    sibling = [-1] * n
+    for e in range(n - 1, -1, -1):             # downward, so the lists end ascending
+        if is_element[e] and parent[e] != -1:
+            sibling[e] = child[parent[e]]
+            child[parent[e]] = e
+    for e in range(n):
+        if not is_element[e] or child[e] == -1:
+            continue
+        biggest = -1                           # the last maximal one, as Amd.cpp scans
+        biggest_previous = -1
+        previous = -1
+        largest = -1
+        f = child[e]
+        while f != -1:
+            if front_size[f] >= largest:
+                largest = front_size[f]
+                biggest_previous = previous
+                biggest = f
+            previous = f
+            f = sibling[f]
+        if sibling[biggest] != -1:             # already last means nothing to do
+            if biggest_previous == -1:
+                child[e] = sibling[biggest]
+            else:
+                sibling[biggest_previous] = sibling[biggest]
+            sibling[biggest] = -1
+            sibling[previous] = biggest
+
+    postorder = []
+    for root in range(n):                      # roots in index order, as Amd.cpp
+        if not is_element[root] or parent[root] != -1:
+            continue
+        stack = [root]
+        while stack:                           # explicit stack, no recursion
+            e = stack[-1]
+            if child[e] != -1:
+                f = child[e]
+                child[e] = sibling[f]          # each child pushed exactly once
+                stack.append(f)
+            else:
+                postorder.append(e)            # all descendants done, number it
+                stack.pop()
+
+    order = [u for e in postorder for u in super_members[e]]
+    # The dense rows go last, in index order, and Amd.cpp counts the block they
+    # form as completely full, which it is in the worst case and usually is not.
+    if dense_vertices:
+        num_dense = len(dense_vertices)
+        order += dense_vertices
+        nnz_L += num_dense * (num_dense - 1) // 2 + num_dense
+        lnz_dense = num_dense * (num_dense - 1) // 2      # counted completely full
+        num_divides += lnz_dense
+        num_multsubs_lu += (num_dense - 1) * num_dense * (2 * num_dense - 1) // 6
+        num_multsubs_ldl += ((num_dense - 1) * num_dense * (2 * num_dense - 1) // 6
+                             + lnz_dense) // 2
+        front_max = max(front_max, num_dense)
+
     print(f"nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
           f"fill = {nnz_L - nnz_tril_A}")
     print(f"degree computations: {num_degree_computations}, "
           f"bucket probes: {num_bucket_probes}")
     print(f"clique-member visits an exact degree would need: {num_member_visits}")
     print(f"clique reads the bound needed:                    {num_clique_reads}")
+    print(f"incidence entries scan 1 walked:                  {num_incidence_reads}")
     print(f"bound was loose {num_loose_bounds} times out of {num_bound_checks}")
     print(f"aggressively absorbed: {num_absorbed}, hash merges: {num_hash_merges}")
+    print(f"dense threshold: {dense_threshold}, dense rows removed: "
+          f"{len(dense_vertices)}")
+    # The rest of Amd.cpp's Info array, which is a factorization cost PREDICTION
+    # and so belongs to a symbolic phase rather than to an ordering. It is here for
+    # the record: nnz(L) above is AMD_LNZ, computed from the same expression, and
+    # the three below come from the same f and r with no extra structure.
+    #
+    # Two fields are deliberately missing. AMD_MEMORY and AMD_NCMPA report the peak
+    # workspace and the number of garbage collections in the vendored flat pool,
+    # and this file has no pool to compact, so there is nothing to report.
+    print(f"predicted: divides {num_divides}, multiply-subtracts LDL "
+          f"{num_multsubs_ldl}, LU {num_multsubs_lu}, largest front {front_max}")
     print(f"order: {order}")
     return order
 
@@ -659,6 +1045,24 @@ examples = [("graph1", graph1), ("graph2", graph2),
             ("graph5", graph5), ("graph6", graph6),
             ("graph7", graph7)]
 
+# matrix1, the one example given as a MATRIX rather than as a graph, so the input
+# path has something to chew on. Six by six in column form, and deliberately awful:
+# unsymmetric, with a diagonal, with duplicate entries, and with one column whose
+# rows are out of order. amd_order accepts exactly this, and amd2_preprocess and
+# amd2_aat are what turn it into a graph.
+#
+#   column 0: rows 0 1 3          column 3: rows 3 0 2   (unsorted)
+#   column 1: rows 1 2 2          column 4: rows 4 5
+#   column 2: rows 0 2 5          column 5: rows 1 5
+matrix1_n = 6
+matrix1_Ap = [0, 3, 6, 9, 12, 14, 16]
+matrix1_Ai = [0, 1, 3,
+              1, 2, 2,
+              0, 2, 5,
+              3, 0, 2,
+              4, 5,
+              1, 5]
+
 # All of them by default. To run just one, pass its number: python3 amd2.py 3
 selected = int(sys.argv[1]) if len(sys.argv) > 1 else 0
 for number, (name, g) in enumerate(examples, start=1):
@@ -666,4 +1070,9 @@ for number, (name, g) in enumerate(examples, start=1):
         continue
     print(f"=== {name} ===")
     amd2_minimum_degree(g)
+    print()
+
+if not selected or selected == len(examples) + 1:
+    print("=== matrix1 ===")
+    amd2_order_matrix(matrix1_n, matrix1_Ap, matrix1_Ai)
     print()

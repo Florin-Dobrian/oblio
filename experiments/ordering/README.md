@@ -166,10 +166,13 @@ sections 5.11 and 5.13 carry the same lists in prose. In brief:
 - **`mmd1`** lacks the prepass that numbers degree-0 and degree-1 vertices before the main loop, and
   `mmdupd`'s `q2h` merging of vertices indistinguishable *from each other* rather than from the
   pivot. It also files degrees at a different offset and never uses bucket 0.
-- **`amd1`** is the bound and nothing else. It lacks aggressive absorption and hash supervariable
-  detection, which `amd2` now carries, and everything on `amd2`'s remaining list: the two-pass
-  degree update, dense-row handling, the postorder, `amd_aat`, `amd_valid`, the `Control`/`Info`
-  interface and the workspace compression.
+- **`amd1`** is the bound and nothing else. Everything beyond it is `amd2`'s, and `amd2` now
+  carries all seven passes: aggressive absorption, hash supervariable detection, the two-pass
+  degree update, dense-row handling, `amd_aat` and `amd_preprocess`, the postorder, and
+  `amd_valid` with the `Control`/`Info` interface.
+- **Neither carries the workspace pool**, `Iw`, `Pe`, `pfree` and the compaction counted by
+  `ncmpa`, and that one is a decision rather than a gap. The section on it below sets out why a
+  hand-rolled pool is the wrong thing to port.
 
 ## The plan for mmd and amd
 
@@ -240,11 +243,11 @@ ride along with the bound's own work and the rest of which are holes:
    hashes (A[u], I[u]), compares within a hash bucket, and merges on an exact match; the hash is
    a filter, never the decision.
 
-3. **The two-pass degree update**, so every survivor sees the same final degme rather than a
-   shrinking one, which is the one difference that already shows in our output.
+3. **The two-pass degree update**, scan 1 obtaining |C[c] - C[p]| by subtraction from a maintained
+   clique degree rather than by walking the clique's members.
 
 4. **Dense row and column detection** by the alpha ratio, with those vertices held out of the
-   ordering and placed last.
+   ordering and placed last, at the cost of nnz(L) becoming an upper bound once any fire.
 
 5. **`amd_aat`**, forming the pattern of A + A' with the diagonal dropped, and `amd_preprocess`.
 
@@ -1672,7 +1675,7 @@ amd1 is the bound and nothing else. amd_1 and amd_2 are the bound plus seven oth
 amd2 adds them one pass at a time. The checklist and its vendored references are in the plan
 section above.
 
-### Pass 1: aggressive absorption and hash supervariable detection
+### Passes 1 and 2: aggressive absorption and hash supervariable detection
 
 The two mechanisms that ride along with the bound. Neither is about the degree, and both are cheap
 only because the bound's own work has already been done.
@@ -1704,7 +1707,7 @@ absorptions and 198 hash merges. On grids the hash does most of the work, 112 me
 aggressive absorption at 22 by 22, which says that on a regular mesh the cliques rarely nest but
 the boundary vertices are often twins.
 
-**What pass 1 costs in fill, which is not nothing.** amd2 against amd1: 681 against 657 at 10 by
+**What these two cost in fill, which is not nothing.** amd2 against amd1: 681 against 657 at 10 by
 10, 2283 against 2175 at 16 by 16, 4898 against 4762 at 22 by 22, and on the 207 small graphs the
 same on 206 and worse on 1. Coarser supervariables mean fewer, larger pivots, so the ordering is
 cheaper to produce and slightly worse. That is the trade the vendored routine also makes, and the
@@ -1712,8 +1715,408 @@ comparison to make is against the vendored routine rather than against amd1.
 
 Against the vendored amd_order on the seven examples, both layers already match nnz(L) 7 of 7 and
 neither matches the permutation on any, which is the tie-break story the mmd2 section tells at
-more length. So pass 1 does not yet move the acceptance test; it moves the mechanism count, and
-passes 3 through 7 are where the remaining differences live.
+more length. So these two do not move the acceptance test on their own; they move the mechanism
+count. The figures with all seven passes in are at the end of this section.
+
+### Pass 3: the two-pass degree update
+
+The checklist called this "so every survivor sees the same final degme rather than a shrinking
+one", and reading `Amd.cpp` showed that description had it backwards. Worth recording, because the
+correction is the interesting part.
+
+**We were already two-pass, in both senses the phrase could mean.** Scan 1 computes every
+|C[c] - C[p]| before any vertex's bound is formed, and amd1 already did that. And the shrinking
+degme is the VENDORED behavior, not ours: `Amd.cpp` detects mass elimination inside scan 2 and does
+`degme -= nvi` as it goes, so a survivor handled early sees a larger degme than one handled late.
+Our eliminator front-loads mass elimination, so C[p] arrives already trimmed and every survivor
+sees the same number. The vendored file flags its own version as a loss in the comment above that
+line, one that costs analysis quality rather than ordering quality.
+
+**What is actually different is how the per-clique quantity is obtained, and it is a cost
+difference rather than an output difference.** amd1 computes |C[c] - C[p]| by walking the members
+of C[c] and skipping those inside C[p]. Scan 1 never looks at a clique's members at all:
+
+```
+|C[c] - C[p]| = |C[c]| - sum of weight(u) over u in C[c] & C[p]
+```
+
+The first term comes from a maintained clique degree; the second is accumulated by walking the
+INCIDENCE lists of the new clique's members, since c is in I[u] exactly when u is in C[c]. So the
+scan pays sum |I[u]| over u in C[p], where amd1 paid sum |C[c]| over the touched cliques. The
+vendored code is the same two lines, `we = Degree[e] + wnvi` on first sighting and `we -= nvi`
+after.
+
+Measured on grids, with amd1's cost shown for comparison:
+
+```
+            member visits amd1 paid   incidence reads scan 1 pays
+grid 10x10           1626                        351
+grid 16x16           7006                       1427
+grid 22x22          14556                       2810
+```
+
+**The maintained degree is exact, not an estimate, and that is not obvious.** A stale value would
+still leave the bound a bound, since it would only overcount, so the vendored code could afford to
+be sloppy here. Ours is not, and three invariants are the reason. A live clique never holds an
+eliminated vertex, because eliminating v absorbs every clique in I[v]. Mass elimination only
+removes a vertex whose I[u] is exactly {pivot}, so no other clique is touched. And a hash merge
+folds v into u where I[u] == I[v], so every clique holding v also holds u, and the weight moves
+from one member to another without the clique's weighted size changing. Checked against the
+definition with plain sets on 310 graphs including grids, and it holds at every step.
+
+The output is unchanged: same orders, same fill, same looseness. Pass 3 buys cost and nothing else,
+which is what it should buy.
+
+### Pass 4: dense rows and columns
+
+One dense row touches nearly everything, so it inflates the degree of nearly everything, and the
+ordering spends its effort avoiding a vertex that cannot be avoided. AMD takes such rows out before
+it starts and puts them last. The threshold is
+
+```
+dense = min( n, max( 16, alpha * sqrt(n) ) )       alpha < 0 means n - 2
+```
+
+with alpha defaulting to 10, and it is applied to the INITIAL degrees only. A vertex that becomes
+dense later is not caught, which is deliberate: this is a property of the matrix, not of the
+elimination.
+
+**First, a measurement, because it decides how this can be tested at all.** At the default alpha
+the threshold is at least 16, and nothing in our test set comes close: the grids top out at degree
+4, the random graphs at fourteen vertices cannot exceed 13, and the seven examples are smaller
+still. Across the seven examples, 200 random graphs and three grids, the mechanism fires zero
+times and every order and every fill is exactly what pass 3 produced. So alpha is exposed as a
+parameter, as `mmd1` exposes delta, and the pass is exercised with stars and with dense random
+graphs where it does fire.
+
+**Removing a vertex means zero weight, not deletion, in the vendored code.** `Amd.cpp` sets
+`Nv[i] = 0` and `Pe[i] = EMPTY`, so a dense vertex stays in everyone's lists while contributing
+nothing to any degree. In our representation a weight of zero and an absence are indistinguishable
+to every count the file makes, so we clear its own lists, empty its `super_members`, mark it
+eliminated and purge it from the rest. The one visible difference is that our degrees are
+recomputed after the purge while `Amd.cpp` files by the degree it computed before, a transient the
+first refresh corrects in either case.
+
+**And this is where nnz(L) stops being a count.** A dense row was taken out but it still sits below
+every column of L, so `Amd.cpp` uses `r = degme + ndense` for every pivot and then counts the
+trailing block of dense rows as completely full. Both are worst cases. We now do the same, so with
+`ndense > 0` the reported nnz(L) is an upper bound rather than a count: on two disjoint stars of
+thirty vertices it reports 177 against a true 118, since neither centre is actually nonzero in the
+other's columns. Checked on 120 random graphs with the threshold forced low, the reported figure
+was never below the truth.
+
+That is the first place this experiment gives up an exact number, and it is given up on purpose.
+The alternative was to keep the weights and withhold the dense rows from selection only, which
+would have preserved the count and kept the label while doing much less than AMD does. Aligning
+with the vendored routine matters more here than keeping a number we can check.
+
+### Pass 5: amd_aat and amd_preprocess, the input path
+
+Every layer up to here takes a graph: symmetric, no duplicates, no diagonal. `amd_order` takes a
+matrix, which is none of those things, and this pass is the two routines that bridge them.
+
+**It is input conditioning, not a feature for unsymmetric matrices.** Four things happen at once:
+the pattern is symmetrized, the diagonal is dropped, duplicates are removed, and unsorted columns
+are tolerated. Only the first is about symmetry, and the other three apply to a perfectly symmetric
+matrix.
+
+**Dropping the diagonal means dropping it from the GRAPH, not from the matrix.** The matrix keeps
+its diagonal, which the factorization needs whether or not an entry is zero. The graph is a
+different object: an edge i-j says that eliminating one forces fill between the other and its
+neighbors, and a self loop says nothing, since i is not its own neighbor. Left in, it would put u
+inside reach(u) and make every degree one too large. So amd2_aat builds A[u] with u excluded, which
+is the `i == j` case in the code. It is a property of the conversion, not a modification of
+anything.
+
+**For Oblio almost none of this pass is needed, and that is worth stating plainly.** Oblio's rule
+is that a matrix is valid on construction: sorted, no duplicates, a diagonal present even where it
+is zero, and both triangles stored. Those invariants kill the symmetrization, the deduplication and
+the tolerance of unsorted columns outright. What survives is skipping i == j while building
+adjacency, one line inside whatever turns a SparseMatrix into a graph, not a routine worth porting.
+
+The asymmetry is deliberate on both sides. AMD is a library that must take whatever a caller hands
+it, so `amd_order` can assume nothing and pays for two preprocess passes on every call. Oblio owns
+its matrix type and enforces validity once, at construction, which is the right place to pay. Pass
+5 is the price of AMD's generality, and Oblio has already bought its way out of it.
+
+The symmetrization is still worth having correct, and it is agnostic to storage. Checked on 200
+graphs, a full pattern with a diagonal and a lower-triangle pattern with a diagonal produce the
+identical adjacency, both equal to the original graph. Their reported symmetry differs, 1.0 against
+0.0, and that is right rather than a defect: symmetry describes the STORED pattern, and one
+triangle shares nothing with its transpose. `Amd.cpp` reports it the same way, so a 0.0 there means
+half storage rather than trouble.
+
+For genuinely unsymmetric input, ordering A + A' is a heuristic and not a derivation: the LU factors
+of A sit inside the Cholesky factor of A + A' under the usual no-cancellation assumption, so it
+bounds the fill without predicting it. Oblio is a symmetric solver, so that case is AMD's
+generality rather than anything on Oblio's path.
+
+**amd2_preprocess** produces R, the row form of the pattern with duplicates removed, which is the
+pattern of A transposed. `Amd.cpp` calls it whenever the input may be unsorted or duplicated, since
+R + R' is A + A' and R is clean. The deduplication is the usual stamp, `flag[i] == j` meaning row i
+has already appeared in column j.
+
+**amd2_aat** turns the two forms into adjacency lists and reports what the input looked like. Two
+things are dropped: the diagonal, a self loop that says nothing about fill, and the distinction
+between A(i,j) and A(j,i), since either one forces the same elimination. The symmetry it reports is
+the vendored definition, with B the strictly triangular parts:
+
+```
+sym = nnz(B & B') / nnz(B),   or 1 when nnz(B) is zero
+```
+
+**One deliberate deviation.** `Amd.cpp` computes these counts with a two-pointer scan that walks
+the upper and lower triangles together, which saves a pass but needs sorted columns. Ours asks the
+row form whether the transposed entry exists, one stamp and one comparison, which is what every
+other function in the file does and works on unsorted input. Checked against the definition on 400
+random patterns with duplicates: same adjacency, same nz, same nzdiag, same symmetry, same
+nz(A+A').
+
+`matrix1` is the one example given as a matrix rather than a graph, six by six and deliberately
+awful: unsymmetric, with a diagonal, with duplicate entries and with one column whose rows are out
+of order. It reports symmetry 0.222 and is the only example that exercises this path.
+
+### The bug pass 5 found, which had nothing to do with pass 5
+
+Running matrices rather than graphs produced a bound of -1, and tracking it down turned up a defect
+that had been latent since pass 2.
+
+`num_eliminated` was doing two jobs: terminating the loop, and standing in for k in the first cap,
+`n - k - weight(u)`. Those were the same number until hash detection arrived. A hash merge folds v
+into a LIVE u, so v stops being selectable while every vertex it stands for is still live inside u.
+The counter increments; the live count does not change. `n - num_eliminated` then understates what
+remains, the cap comes out too tight, and **the bound can fall below the true degree**, which is
+the one thing it must never do.
+
+Two reasons it stayed hidden. The Python shows a negative bound while the C++ computes the same
+quantity in `std::size_t`, where it wraps to something enormous and `min` quietly discards it, so
+the twins agreed on the ordering and the trace diverged only where the number itself was printed.
+And our own instrumentation counts how often the bound is LOOSE, never how often it is wrong in the
+other direction, so 1748 checks said nothing about it.
+
+The fix is to separate the two readings: `num_eliminated` keeps the selection count, and `num_live`
+counts live original vertices, reduced only by an elimination and by a dense removal, never by a
+hash merge. Re-checked across 210 graphs and 200 matrices: no bound below its exact degree
+anywhere.
+
+### Pass 6: amd_postorder
+
+Every layer so far has emitted its pivots in the order it chose them. `amd_order` does not: it
+builds the assembly tree and emits a postorder of it. The tree is already there and costs nothing
+to record, since a clique's parent is whichever clique absorbed it, which the eliminator already
+reports and aggressive absorption already knows.
+
+**Why this is free in quality terms.** Any postorder of the assembly tree gives the same factor. A
+node is numbered after all of its descendants either way, so no fill moves and nnz(L) cannot
+change. Checked directly: the reported nnz(L) is accumulated during elimination and knows nothing
+about the output order, and it still matches a symbolic factorization of the emitted permutation on
+all 210 test graphs. The permutation itself differs from raw elimination order on 155 of them, so
+the pass is doing work rather than reordering nothing.
+
+**What it buys is locality.** Children finish before their parent starts, so a child's update is
+consumed while it is still warm, and a supernode's columns come out contiguous rather than
+scattered through the ordering. For a multifrontal or supernodal solver that is the difference
+between a stack of pending contribution blocks and a heap of them, which is exactly Oblio's
+concern in `ElmForest`.
+
+**Two details from `Amd.cpp`, both about which child goes first.** The child lists are built by
+walking the elements downward, from n - 1 to 0, so a list comes out ascending. Then the biggest
+child by front size is moved to the END of its list, so the largest subtree is traversed last and
+the stack of pending updates stays as small as possible for as long as possible. Front size is
+`nvpiv + degme`, the pivots plus what they reach, which we already compute for the nnz accounting.
+
+The traversal is an explicit stack rather than recursion, as the vendored `AMD_post_tree` is, and
+for the same reason: the tree can be n deep on a path graph.
+
+One caveat the vendored file states about itself and that applies here too. Mass elimination merges
+vertices into a pivot that were not necessarily adjacent to each other, so the result is not an
+exact elimination tree postorder. It is a postorder of the assembly tree AMD actually built, which
+is what the factorization will follow.
+
+### Pass 7: amd_valid and the Control/Info interface
+
+The last pass, and the one that shows most clearly what `amd_order` has taken on.
+
+**amd_valid is not a yes or no.** It checks that the column pointers start at zero and ascend and
+that every row index is in range, and then returns a THIRD answer for unsorted columns or duplicate
+entries: `AMD_OK_BUT_JUMBLED`, which is not an error but a request. It is what tells `amd_order` to
+run `amd_preprocess` instead of using the pattern directly. So passes 5 and 7 are one mechanism
+seen from two sides: the check tolerates what the conditioning pass exists to fix.
+
+**Control is two knobs**, and that is the whole of it: `AMD_DENSE`, the alpha of pass 4, and
+`AMD_AGGRESSIVE`, which switches aggressive absorption off. Both are now parameters here, which
+makes pass 1 measurable for the first time. Measured, it barely registers: over the seven examples
+and 200 random graphs the fill is identical with it on and off, all 207, and on grids it fires once
+per run and changes nothing. Cheap, and on this test set worth nothing, which is a useful thing to
+know before porting it.
+
+**Info is where the bundling shows.** Fourteen fields in three groups:
+
+- input statistics, `N`, `NZ`, `SYMMETRY`, `NZDIAG`, `NZ_A_PLUS_AT` and `NDENSE`, all of which
+  passes 4 and 5 already print,
+- workspace telemetry, `MEMORY` and `NCMPA`, the peak workspace and the count of garbage
+  collections in the vendored flat pool, which have no meaning here since there is no pool to
+  compact and are deliberately omitted,
+- and a factorization cost PREDICTION: `LNZ`, `NDIV`, `NMULTSUBS_LDL`, `NMULTSUBS_LU` and `DMAX`.
+
+That third group is the fifth thing `amd_order` bundles, and the largest. It predicts the fill and
+the operation counts for both LDL' and LU, plus the largest frontal matrix. Two observations. Our
+nnz(L) turns out to have BEEN `AMD_LNZ` all along, computed from the same expression, so part of
+Info was implemented in pass 4 without being labelled. And `AMD_NDIV` comes out exactly nnz(L)
+minus n on all 207 graphs, which is the internal consistency check the two counts owe each other.
+
+It is also a prediction with two approximations already baked in, an upper bound wherever dense
+rows fired and inexact wherever mass elimination merged non-adjacent vertices. A symbolic phase
+computes the same quantities exactly, from the permuted matrix, which is the argument of the
+section below in miniature.
+
+### Three complexity defects in amd2, and their fixes
+
+Checking whether amd2 matched the vendored asymptotic cost turned up three places where it did not.
+All three were in pass 2, the hash detection, and none was visible in any output.
+
+**Sorting to build the hash key.** The key was `(tuple(sorted(A[u])), tuple(sorted(I[u])))`, and
+the exact test sorted again, so the detection cost O(d log d) per vertex against `Amd.cpp`'s O(d).
+The fix is what the vendored code does: a SUM of the indices, because addition has no order and
+neither do the sets, reduced modulo n. The exact test is now stamp-one-side-and-count-the-other,
+the same membership test as everywhere else in the file, so it costs one pass and no sort.
+
+**Purging the merged vertex, which was the serious one.** On every hash merge the old code ran a
+pass over every live clique and every adjacency list to remove v, which is O(n + total structure)
+per merge against `Amd.cpp`'s O(1). The vendored routine never removes a merged variable from
+anything: it sets `Nv[v] = 0` and leaves it in place, weighing nothing, which is the same move the
+dense prepass makes.
+
+Nothing is lost by leaving it, and the reason is the merge condition itself. The merge required
+A[u] - {v} == A[v] - {u}, so every list holding v holds u as well. v is therefore redundant
+wherever it appears and never the only way to reach anything, so the walks can simply skip it. That
+is one comparison per entry in `amd2_neighbors`, and no asymptotic cost.
+
+The clique degree invariant survives unchanged, which is worth noting since pass 3 depends on it. v
+keeps its slot with weight zero while u's weight grows by v's, and since I[u] == I[v] licensed the
+merge, every clique holding v holds u, so no clique's weighted size moves.
+
+**One bug found while fixing this**, of the kind that produces silence rather than a wrong answer.
+Seeding the hash sum with the vertex's own index makes two distinct vertices unable to collide,
+ever, so the detection quietly stopped firing: 0 merges where there had been hundreds. The fill and
+the permutations all stayed valid, because a missed merge is a missed opportunity and not an error.
+Only the merge counter showed it. A mechanism that can fail silently needs a counter watched, which
+is the same lesson the bound-below-exact bug taught two passes earlier.
+
+Every merge is now verified against the definition on 311 graphs, with the reachable sets computed
+from plain sets so the check shares no state with the test it audits.
+
+**A third, smaller one in the C++ only.** The hash groups were held in a `std::map` keyed by the
+hash value, which costs a log per insertion and a node per group, where the Python used a dict and
+paid neither. `Amd.cpp` uses `Head[hval]`, an array indexed by the hash value, which is the obvious
+structure once the key has already been reduced modulo n. Both twins now use an array of buckets
+allocated once and cleared only where it was used, which removes the log AND the last structural
+difference between the two files.
+
+The per-step cost accounting that settles whether all this adds up to parity with the vendored
+routine is in the complexity section below, since that is where it belongs as a reference.
+
+### Where amd2 lands, with all seven passes in
+
+Against the vendored `amd_order`, on the seven examples: same nnz(L) 7 of 7, same permutation 0 of
+7. On 60 random graphs: same nnz(L) on 54, ours lower on 4, ours higher on 2, and again the
+permutation never matches.
+
+The fill agreement is the meaningful number and it is high. The permutation disagreement is
+expected and says little: both routines now postorder, so a single tie broken differently early on
+reorders whole subtrees downstream, and the six passes that change the ordering all change it in
+ways that compound. mmd2 showed the same pattern for the same reason, and that section works
+through one such tie in detail.
+
+Being lower on 4 and higher on 2 is not a claim to be better. It is the expected spread when two
+implementations of an approximate heuristic break ties differently, and on a test set this small
+the difference is noise rather than signal.
+
+### What Oblio would take from amd2, and what it would leave
+
+The passes are not equally useful to a solver that has its own symbolic phase, and it is worth
+saying which is which while the reasons are fresh rather than rediscovering them at port time.
+
+| pass | what it does | Oblio |
+|---|---|---|
+| 1 | aggressive absorption | probably yes |
+| 2 | hash supervariable detection | probably yes |
+| 3 | scan 1 by subtraction from a maintained clique degree | yes |
+| 4 | dense row and column removal | maybe |
+| 5 | `amd_aat`, `amd_preprocess` | almost nothing |
+| 6 | `amd_postorder` | no |
+| 7 | `amd_valid`, `Control`/`Info` | mostly no |
+
+**Passes 1, 2 and 3 are ordering, and stay.** All three are internal: they change what the ordering
+costs or which pivot it picks, and nothing downstream can do them instead. Pass 3 is unambiguous,
+being pure cost for identical output. Passes 1 and 2 change the ordering, so they are worth having
+but worth measuring first, which is what the fill figures in the earlier subsections are for.
+
+**Pass 4 is a judgment call.** Removing dense rows is an ordering decision and belongs here, but it
+is matrix-dependent and never fires on anything in this test set. Its cost is that nnz(L) becomes
+an upper bound, which matters not at all for Oblio, since `SymbolicEngine` computes the exact
+structure later and never consults an ordering's estimate.
+
+**Pass 5 is almost entirely dissolved by Oblio's invariants**, as the pass 5 subsection sets out.
+What survives is skipping i == j when a matrix becomes a graph.
+
+**Pass 7 splits three ways.** The validity check is a `SparseMatrix` constructor invariant, so it
+does not belong to the ordering at all. Of Control, alpha travels with pass 4 and the aggressive
+switch travels with pass 1, so neither is a separate decision. Of Info, the input statistics are
+free diagnostics worth keeping, the workspace telemetry does not apply, and the cost prediction is
+`SymbolicEngine`'s work done early with worse information.
+
+**Pass 6 is redundant, and this is the clearest case.** Oblio computes the elimination tree in
+`SymbolicEngine` and postorders it in `ElmForest`, after supernode detection, using real front and
+update sizes. Two permutations differing only by a tree postorder yield the same tree up to
+relabeling, so Oblio's phase reconstructs the same forest from either input and AMD's postorder is
+simply redone. Oblio's is also better informed: it runs on the supernodal tree with real sizes,
+where AMD runs on the assembly tree it happened to build and admits, in its own comment, that mass
+elimination makes that not an exact elimination tree postorder. Same idea, better information,
+later stage.
+
+The one thing worth keeping from pass 6 is not code. AMD moves the biggest child last so the stack
+of pending updates stays small, and that is the same stack-minimization argument `ElmForest` makes,
+arrived at independently. Useful as corroboration when tuning that traversal, and nothing more.
+
+### Why the ordering does any of this, and why the answer is that it should not
+
+A full solver has a pipeline: order, elimination forest, symbolic factorization, numeric
+factorization, solve. Each stage takes the previous stage's artifact and produces its own. Several
+of the amd2 passes are the second and third stages done early, inside the first, and the case
+against that is not stylistic.
+
+**The merge is lossy, which is the actual defect.** AMD builds the assembly tree internally, in
+`Pe`, postorders it, returns a permutation and throws the tree away. The work is done and the
+result discarded, with only a side effect kept. A stage boundary that works passes its structure
+forward: the ordering hands over a permutation, the forest hands over a tree, the symbolic phase
+hands over a pattern. AMD does the second stage's work and then declines to emit the second stage's
+output, so the next stage has to do it again from scratch.
+
+**What it does emit is weaker than what the next stage would compute anyway.** Its tree is the
+assembly tree, which mass elimination has made approximate by its own admission, and its nnz(L) is
+an upper bound rather than a count once dense rows appear. So a downstream stage gets two options
+and both are bad: trust an approximation it never asked for, or recompute and waste the work. There
+is no reading of the merge on which it helps.
+
+**The confusion is not incidental either, and this experiment produced an instance of it.** The bug
+in pass 5 was exactly this failure mode in miniature: `num_eliminated` carried two meanings, loop
+termination and the live vertex count, and they diverged silently the moment a third mechanism
+arrived. Merged stages breed shared state with more than one reading, and those readings come apart
+under change. A pipeline where each stage owns its own artifacts does not have that failure mode
+available to it.
+
+**One qualification, and it is about packaging rather than structure.** The layering does exist
+inside SuiteSparse. `amd_2` takes and returns the working arrays, `Pe` among them, so a caller that
+wants the tree can reach it. It is `amd_order`, the convenience wrapper, that conditions the input,
+orders, postorders, estimates the fill and then returns only a permutation. So the criticism lands
+on the entry point that most callers use, not on the algorithm's own decomposition.
+
+For Oblio none of the assumptions behind that wrapper hold. The matrix is valid by construction,
+the elimination forest is a stage, supernode detection is a stage, and the exact fill is known
+downstream. The ordering can stay an ordering: take a graph, return a permutation, and let each
+later stage compute its own artifact with the better information it has. That is the reading the
+catalogue above follows.
 
 ## Why md3 reorders, and what would align it
 
@@ -2002,6 +2405,111 @@ the weight array. Both are consequences rather than choices: member lists in a p
 their slots when a clique grows, which is where AMD's `iwlen`, `pfree` and `ncmpa` come from, and
 once a supervariable's members are a chain rather than a list its size stops being O(1) to read,
 which is where `weight` earns its place.
+
+### The garbage collection, which is not garbage collection
+
+`ncmpa` counts them and the vendored comments call them garbage collections, which is misleading
+enough to be worth a section, since this is the piece our prototypes have not built. The conclusion
+is that they should not build it either, and the reasoning is worth keeping.
+
+**The mechanism.** Every variable-length list lives in one flat array `Iw`: each variable's
+adjacency, each element's pattern, with `Pe[i]` the offset and `Len[i]` the length. A list cannot
+grow in place, since the next list starts immediately after it, so a list that grows is COPIED to
+the end at `pfree` and its old slot becomes a hole. When `pfree` reaches `iwlen` everything live is
+slid down to close the holes. `Amd.cpp` suggests `iwlen = 1.2 * pfree + n`, so the pool starts with
+twenty percent slack and a compaction is what happens when that runs out.
+
+Nothing is reachability-analyzed and nothing is freed. It is defragmentation of a bump allocator,
+and the name is the confusing part.
+
+**Why it exists, which is not a property of the algorithm.** `amd_2` allocates nothing. The caller
+supplies the workspace and the routine promises to fit inside it, which is why `iwlen` is a
+parameter rather than an implementation detail. Every piece of the apparatus follows from that one
+promise: `pfree`, the copy-on-growth, the compaction, `ncmpa`, the `FLIP` encoding that lets the
+sliding pass find object boundaries without a second index. None of it is minimum degree. Remove
+the promise and the whole subsystem evaporates.
+
+A library cannot know its caller's memory situation, so AMD accepted the constraint and paid for
+it. Oblio allocates its own memory and is not buying anything with it.
+
+**What the pool is actually worth, weighed honestly.** Three benefits get claimed for it and they
+do not survive equally.
+
+Contiguity is the weakest, and stating it carelessly overstates it. A vector of vectors is
+contiguous WITHIN each list, and that is what the inner loops walk. The indirection is one pointer
+per list, not one per element, and at a few hundred lists per step it is noise. The pool is not
+rescuing element-level locality, because nothing lost it.
+
+Footprint is real and does not matter here. Three pointers per vector is 24 bytes per list before
+a single edge is stored, so 24n of pure overhead. At n in the millions that is tens of megabytes.
+It is also exactly the kind of cost Oblio spends on purpose elsewhere: the full matrix is kept so
+that the elimination forest can walk a row by reading above the diagonal, and fronts and update
+blocks are rectangles and squares rather than trapezoids and triangles. Spending memory to keep
+loops simple and to hand BLAS the shapes it likes is a deliberate trade, and a solver that makes it
+everywhere else has no reason to refuse it in the ordering.
+
+Allocation churn is the one with a genuine TIME cost. Lists grow constantly here, and a growth that
+goes through the general allocator is a real cost repeated often. That is the argument worth
+taking seriously, and it is not an argument for a hand-rolled pool.
+
+**Because the modern answer is not to write a pool, it is to keep the containers and change the
+allocator.** `std::pmr::vector` over a `monotonic_buffer_resource` gives arena allocation, almost
+no churn and one contiguous region, while the code still reads `A[u].push_back(v)`. The algorithm
+stays visible and the memory strategy becomes a line at construction. That option did not exist when
+`Amd.cpp` was written, and the pool is what a library had to do without it.
+
+**The general principle, which this is a case of.** Explicit memory management moves attention from
+the algorithm to bookkeeping, and the bookkeeping then needs its own encodings, its own invariants
+and its own bugs. Containers exist to stop that happening. Compilers, standards and allocators keep
+closing constant-factor gaps, and `pmr` is one of those gaps already closed, so a hand-rolled pool
+buys less every year while costing the same to read forever. Human time is the scarce resource, and
+a design that spends it on `FLIP` tricks to save memory nobody is short of has the trade backwards.
+
+Explicit management earns its place where the interface demands a fixed budget, which is AMD's
+case, or where the footprint is the binding constraint, which is nobody's case here.
+
+**One property worth appreciating anyway.** The pool can only shrink in aggregate over a run,
+because absorption destroys more than elimination creates: an eliminated clique's pattern replaces
+all the patterns it swallowed. So the compaction reclaims space the algorithm's own progress keeps
+making available, and `ncmpa` stays small for exactly that reason. It is a collector for a heap
+that mostly empties itself, which is a pleasing thing to have built and a poor reason to build one.
+
+**What this means for the ordering engine.** Keep per-list containers, put them on an arena if
+measurement says allocation is showing up, and do not port `Iw`, `Pe`, `pfree` or `ncmpa`. The one
+consequence to keep in view is that `qsize` becomes necessary only if members ever become a chain
+through a shared pool. With per-list containers a supervariable's size stays O(1) to read and the
+array stays redundant, which is what the measurement in this experiment already showed.
+
+### amd2 against Amd.cpp, step by step
+
+The table is the reference version of the argument above, for the completed amd2. It counts only
+what a production version would run, so `amd2_exact_degree` is left out: it computes the union the
+bound exists to avoid, once per refreshed vertex, and exists only so the trace can print the exact
+degree beside the bound.
+
+| step | cost | Amd.cpp |
+|---|---|---|
+| pick from the buckets | O(1) plus the walk, amortized | the same |
+| build the new clique | \|A[p]\| + sum \|C[c]\| over c in I[p] | the same |
+| prune and absorb | sum over C[p] of \|A[u]\| + \|I[u]\| | the same |
+| scan 1 | sum over C[p] of \|I[u]\| | the same |
+| aggressive absorption | sum over C[p] of \|I[u]\| | the same |
+| the bound | sum over C[p] of \|A[u]\| + \|I[u]\| | the same |
+| hash and compare | sum over C[p] of \|A[u]\| + \|I[u]\|, plus the within-bucket pairs | the same |
+| refile, clique degree | O(1) | the same |
+
+No sorts remain anywhere except one at construction in the matrix path, outside every loop, which
+is where the graph path already sorts its input. No ordered containers remain. Every membership
+test is a stamp and a comparison, every list edit is a compaction in place, and every per-clique
+quantity is read rather than recomputed.
+
+So the core is at parity as far as this reading goes. What is NOT at parity is everything the
+prototypes deliberately do not have: the flat pool and its compaction, which the section on garbage
+collection argues against porting, and the per-list allocation our containers pay instead.
+
+Three defects had to be fixed to get here, all in pass 2 and all invisible in the output: sorting
+to build the hash key, purging a merged vertex from the whole structure, and holding the hash
+groups in an ordered map. The amd2 section works through each.
 
 ### Two things the seven examples were hiding
 

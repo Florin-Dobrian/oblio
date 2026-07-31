@@ -75,6 +75,11 @@ branching on `uname` to `-framework Accelerate` on macOS and `-llapack -lblas` e
 on every platform targeted so far and wrong on a build whose Fortran symbols carry no trailing
 underscore.
 
+It builds in place: `.o` files land beside their sources in `src/`, and test binaries in the repo
+root with a `_cpp` suffix, all of them gitignored. There is no library, only objects linked
+directly into each executable. Nothing to remove but the files themselves, which is what
+`make clean` does.
+
 What it buys is the development loop. `make test` prints one `PASS`/`FAIL` line per assertion and
 a count, which is what the port is read against, and the Makefile's own header lists the
 inner-loop targets beyond the ones above: building one suite, or compiling the library alone as
@@ -92,6 +97,17 @@ assumes, CMake **detects**: `find_package(BLAS)` and `find_package(LAPACK)` loca
 and a `check_c_source_compiles` probe calling `dpotrf_` decides whether to define
 `OBLIO_BLAS_UNDERSCORE`. On macOS that reports Accelerate and the underscore convention; on a
 machine with split reference libraries it finds those instead, with no edit.
+
+Two structural differences follow from that, beyond detection. It builds **out of source**, with
+everything under `build/`, so the source tree stays clean and `rm -rf build` is a complete reset,
+where the Makefile leaves `.o` files among the sources. And it produces a real **library target**,
+`liboblio.a`, which each suite links against, where the Makefile links the objects into every
+executable. Neither matters much for eight test binaries; both matter for anything installed.
+
+It is also more portable than the Makefile, in the sense that matters for a consumer rather than
+for a developer here. The Makefile defaults to `g++` and branches on `uname`, both overridable but
+both written out by hand; CMake picks up whatever compiler and generator the host offers, including
+Ninja, MSVC and Xcode, none of which this project has needed.
 
 The cost is a configure step, a generated `build/` tree, and a second description of the same
 build to keep honest. What it buys beyond detection is the future: install targets and an exported
@@ -119,6 +135,16 @@ g++ -std=c++17 -O3 -DOBLIO_BLAS_UNDERSCORE -Iinclude \
   porting loop is built around.
 - **CMake, to check the build still configures from nothing**, on a machine whose BLAS the
   Makefile has not hardcoded, and before anything is released.
+
+The division is not a capability gap. CMake builds single pieces perfectly well,
+`cmake --build build --target test_order` and `ctest -R test_order`. It is that Make is a better
+task runner and a thinner layer, which is what a tight edit-compile-check loop wants: no configure
+step in the way, the exact compiler line visible rather than a progress percentage, and arbitrary
+shell where a target is really a task rather than an artifact. `make objs`, compiling the library
+alone as a fast syntax check, is that shape, and so is the trace-diffing `make test` in
+`experiments/ordering`. CMake is the better build *description*, which is what a released library
+wants. Neither subsumes the other, which is why both are kept here and why a project without a
+porting loop would reasonably keep only one.
 
 Running both occasionally is worth the seconds, since they share no code and a difference between
 them is information.

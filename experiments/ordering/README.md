@@ -1604,22 +1604,8 @@ On grids, mmd2 against mmd1: 624 against 636 at 10 by 10, 2078 against 2088 at 1
 against 4684 at 22 by 22, with the mechanisms firing steadily, 108 pair merges and 285 outmatched
 markings on the largest.
 
-What is still unchecked, to be done later rather than assumed:
-
-- **Scaling on grids.** The complexity claim, that mmd2 performs the same operations at the same
-  cost as genmmd, rests on a reading of both codes rather than on a measurement. The check is a
-  grid family of growing size with operation counts plotted against n, and it is cheap now that
-  mmd2 is complete.
-- **delta beyond the batch limit.** The vendored mmdupd also uses `mdeg + delta` in its tag
-  window. That belongs to the excluded machinery, so the omission is consistent, but it is the
-  one place our reading of delta is narrower than theirs and it has not been shown to be
-  harmless.
-- **Larger and more structured graphs.** Everything measured here is at most a few hundred
-  vertices. The q2h share, the pair merge count and the outmatched count all grew with size on
-  grids, so the behavior at real problem sizes is extrapolation.
-- **ncsub against the vendored value.** It cannot be compared through the public interface, since
-  mmd_order drops it and genmmd is static. Ours is computed from the same expression, but that is
-  a reading rather than a check.
+What is still unchecked about mmd2 is listed with everything else, in the section on open items
+near the end.
 
 ## amd1: the approximate degree
 
@@ -2643,6 +2629,54 @@ unsorted vectors with a mark array, and the Python followed so the traces would 
 sides now hold lists and test membership with a stamp, which is what `mmd1` and `amd1` need for
 their speed and what `SymFactorEngine` already does. What was lost is the notation; what was
 gained is that the Python says what the engine does.
+
+## What is still unchecked
+
+Collected in one place, because several of these were noticed at different points and would
+otherwise be scattered through the sections that produced them. None is a known defect. Each is a
+claim resting on a reading rather than on a measurement, or a mechanism exercised too narrowly to
+be trusted at size.
+
+**Scaling on grids, for both branches.** The complexity claims, that mmd2 matches genmmd and that
+amd2 matches Amd.cpp, rest on counting operations in both codes and comparing the expressions. The
+table in the complexity section is that accounting, not a measurement. The check is a grid family
+of growing size with the counters plotted against n, and it is cheap now that both are complete.
+
+**Everything measured is small.** At most 484 vertices, and mostly far less. The q2h share, the
+pair merge count, the outmatched count and the looseness of the bound all moved with size on grids,
+so the behavior at real problem sizes is extrapolation from a short line.
+
+**delta beyond the batch limit.** The vendored mmdupd also uses `mdeg + delta` in its tag window.
+That belongs to machinery we excluded, so the omission is consistent, but it is the one place our
+reading of delta is narrower than theirs and it has not been shown to be harmless.
+
+**ncsub against the vendored value.** It cannot be compared through the public interface, since
+mmd_order drops it and genmmd is static. Ours comes from the same expression, which is a reading
+rather than a check.
+
+**Aggressive absorption measures at zero benefit.** Identical fill with it on and off across all
+207 small graphs, and on grids it fires once per run and changes nothing. That is a real result on
+this test set and no result at all about larger ones, where cliques nest more often. It is the
+first thing to measure rather than the first thing to port.
+
+**The dense path is only exercised with alpha forced.** At the default the threshold is never
+reached by anything here, so stars and dense random graphs with alpha at 1 or -1 are the only
+evidence that the pass works. Its interaction with the other passes at a realistic threshold is
+untested.
+
+**nnz(L) stops being checkable once dense rows fire.** It becomes an upper bound, deliberately,
+following Amd.cpp. On graphs where no dense row appears it is still verified against a symbolic
+factorization, which is every graph in the test set at the default alpha, so the oracle covers the
+default path and nothing else.
+
+**Timing either amd file measures the wrong thing.** `amd*_exact_degree` computes the union the
+bound exists to avoid, once per refreshed vertex, so it dominates. It is instrumentation and would
+not ship, but any timing run needs it removed first.
+
+**The seven examples plus random graphs are not a structured test set.** No mesh from a real
+problem, no banded matrix, no matrix with a natural supernodal structure. Two of this session's
+findings came from graphs added specifically because the existing set hid something, which is
+evidence the set is still thin rather than evidence it is now sufficient.
 
 ## Related
 

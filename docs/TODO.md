@@ -147,11 +147,22 @@ structural, which four negative results and a cycle-level profile establish betw
   pass out of the shared eliminator and into each driver, so each can do its own work in one visit.
   Note that plain loop fusion was tried and buys nothing; the work has to be genuinely merged.
 
-  **Repriced 2026-08-01.** After the day's three passes AMD1 sits at 1.49x the vendored routine's
-  cycles and 1.23x its useful cycles, so the gap is now roughly half work and half stalling. This
-  item attacks the work half alone, and its ceiling is therefore about a fifth of AMD1 rather than
-  the two fifths the 86 percent figure implied. It remains the largest single item; it is no longer
-  the whole answer, and the other half is stalling, which nothing here has yet gone after.
+  **Built and falsified, 2026-08-01.** It is `AMD1B`, with `AMD2B` the same transformation on the
+  other AMD driver. Both merge the work exactly as described, both are permutation-identical to
+  their originals, and both are about four and one percent slower at 140x140 while being about 20
+  percent faster at 32x32. The visits were never the cost.
+  A comparative profile against the vendored routine, the first taken here, puts the gap at 46
+  percent data stalls, 27 percent work and 17 percent branch mispredicts, so work was the third
+  component rather than the first. **The item is closed as a negative result**, and the 86 percent
+  figure above was a misreading of what useful-cycle percentage measures.
+
+  A second hypothesis followed from the same profile and also failed: narrowing `QuotientGraph`'s
+  six `std::size_t` arrays halved their footprint and cut simulated D1 misses 17 percent, and
+  measured nothing on alpamayo. Reverted. **AMD1's remaining gap, nearer 1.6x than 1.46x once the
+  vendored routine's `AMD_aat` and `AMD_postorder` are excluded, is unexplained.** What is left is
+  unexamined rather than unlikely: the doubled branch mispredicts, `Buckets`, and the possibility
+  that a dozen separate arrays cost through the prefetcher and the TLB rather than through cache
+  misses. The next step is a new instrument, not another idea.
 - **Absorption and hash detection are not the difference.** On a grid they fire identically for the
   vendored routine and for our AMD2: 1 clique absorbed, 2488 merges.
 
@@ -169,15 +180,18 @@ and the fill is unchanged everywhere. `benchmarks/ordering/README.md` has the nu
 of `archive/sparse_factorization.md` the argument. Nothing is left to put on an arena, so `pmr` is
 retired without having been written.
 
-That leaves the driver restructuring as the whole of what is measured and outstanding. **The two
-allocation sites it exposed are done, 2026-08-01**: AMD2's `hashGroup` became `hashHead` and
+**Nothing measured remains outstanding.** The driver restructuring, which was the last item, was
+built as `AMD1B` and is not faster; see the bullet above. **The two allocation sites it exposed are
+done, 2026-08-01**: AMD2's `hashGroup` became `hashHead` and
 `hashNext`, and `QuotientGraph::eliminate` returns its `merged` list from a member scratch.
 Allocations per ordering at 140x140 fell from about 30000 on every branch to under 110, so
 fine-grained allocation is closed here.
 
-**Five passes landed the same day**, all but the first from Time Profiler traces rather than from
-reasoning: the shared adjacency and incidence run, hoisting loop bounds where the compiler could
-not, the boolean flag arrays off `std::vector<bool>`, and the two allocation sites above. alpamayo
+**Six passes landed the same day, two variants were built and kept as negatives, and one change was
+built and reverted**, all but the first from
+Time Profiler traces rather than from reasoning: the shared adjacency and incidence run, hoisting
+loop bounds where the compiler could not, the boolean flag arrays off `std::vector<bool>`, and the
+two allocation sites above. alpamayo
 at 140x140 went from MMD1 2.98x, MMD2 1.97x, AMD1 1.90x and AMD2 3.00x to **2.40x, 1.42x, 1.50x and
 2.47x**, fill unchanged digit for digit throughout. `benchmarks/ordering/README.md` has the numbers
 and DESIGN_DECISIONS the reasoning.
@@ -187,10 +201,36 @@ having landed in the 1 to 4 percent band against 1.7 to 4 percent of drift. That
 how the remaining items get judged, not a reason to stop: the Time Profiler line is the instrument
 from here, and it is what settled three of the five passes.
 
-**Still unlooked-at, and now visible in the traces.** The graph constructor is 3 to 4 percent of
-MMD2 and mostly first touch, which no loop rewriting and no reduction in allocation count reaches.
-`Buckets::file` and `unfile` are about 7 percent of MMD2 between them and have never been examined.
-Neither is large enough to reach for before the driver restructuring.
+**Still unlooked-at.** The graph constructor is 3 to 4 percent of MMD2 and mostly first touch,
+which no loop rewriting and no reduction in allocation count reaches. `Buckets::file` and `unfile`
+are about 7 percent of MMD2 between them and have never been examined. AMD1's branch mispredicts
+more than doubled its vendored counterpart's and are 17 percent of its gap, and nothing has looked
+at why. None of these has a measurement behind it saying it would pay, which after two falsified
+hypotheses in one afternoon is the state worth being honest about: **the next ordering item should
+begin with an instrument rather than an idea.**
+
+**Widening the test set is now the strongest item on this page**, ahead of any of them. Every
+number in `benchmarks/ordering` and `benchmarks/pipeline` comes from grid Laplacians, and AMD2
+measures worst of the four while carrying the mechanisms the vendored routine is built on, which is
+exactly the result most likely to reverse on a matrix with real supernodal structure.
+
+**And `benchmarks/pipeline` has reframed what any of it is worth, 2026-08-01.** It measures the
+phases against each other rather than one phase against itself, and it corrects two guesses in
+opposite directions. Analysis is 27 to 40 percent of one analyze-plus-factor and the ordering is
+half of that, so optimizing it was worth the day; but **fill differences among orderings that are
+all roughly good do not propagate into factorization time**, 19 percent of fill spread producing 5
+percent of factor spread with no visible correlation. So the MMD fill gap, which this file and the
+ordering README both treat as a cost, is nearly free on grids, and **MMD rather than AMD is the
+ordering to beat**. Break-even against the vendored AMD at 140x140 is about three factorizations
+for AMD1 and AMD1B, five for MMD2, and twenty-seven and seventy for AMD2 and AMD2B.
+
+Two items for other parts of the tree fell out of it. **Multifrontal measures about twice as fast
+as left-looking** on every ordering and every size here, which `docs/ARCHITECTURE.md` describes as
+an unmeasured trade; it is measured now for Cholesky on grids, where fronts are fat by
+construction, and the thin-front case it predicts to go the other way is still untested. And
+**right-looking is anomalously slow on the vendored AMD specifically**, 8.85 ms against
+left-looking's 7.59 at 140x140, where the two agree within noise on all eight other orderings.
+Reproduced at 100x100, unexplained, small enough to be one permutation's artifact.
 
 **The alignment discipline, while both exist.** `experiments/ordering`'s `make test` now diffs each
 ported prototype against the production driver extracted from it, on the same seven graphs, by

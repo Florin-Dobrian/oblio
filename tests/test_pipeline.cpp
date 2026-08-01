@@ -737,7 +737,8 @@ int main() {
         int    reachedOrder = 0;
         for (OrderMethod om : {OrderMethod::Natural, OrderMethod::MMD, OrderMethod::MMD1,
                                OrderMethod::MMD2, OrderMethod::AMD, OrderMethod::AMD1,
-                               OrderMethod::AMD2}) {
+                               OrderMethod::AMD2, OrderMethod::AMD1B,
+                               OrderMethod::AMD2B}) {
             DirectSolver<double> solver(om, Factorization::Cholesky, Traversal::LeftLooking);
             if (!solver.analyze(A) || !solver.factor(A) || !solver.solve(b, x))
                 continue;
@@ -745,9 +746,9 @@ int main() {
             worstOrder = std::max(worstOrder, solver.relativeResidual(A, b, x));
         }
 
-        ck(reachedOrder == 7, "OrderMethod       : all seven orderings reached");
-        ck(reachedOrder == 7 && worstOrder < tol,
-           with("OrderMethod       : worst residual over all seven", worstOrder));
+        ck(reachedOrder == 9, "OrderMethod       : all nine orderings reached");
+        ck(reachedOrder == 9 && worstOrder < tol,
+           with("OrderMethod       : worst residual over all nine", worstOrder));
 
         // The multifrontal child ordering is computed during analyze, so the traversal has to be
         // known by then. Switching between left- and right-looking reads the same forest and must

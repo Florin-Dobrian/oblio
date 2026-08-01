@@ -1,6 +1,17 @@
 # Benchmarks
 
-Timing and profiling work, one self-contained folder per subject. `ordering/` is the first.
+Timing and profiling work, one self-contained folder per subject.
+
+- **`ordering/`** measures one phase against itself: what each ordering method costs and how much
+  it fills.
+- **`pipeline/`** measures the phases against each other: what share of a solve the ordering is,
+  and after how many factorizations a slower-analyzing ordering pays for itself.
+
+The second exists because the first cannot answer whether its own subject matters, and the answer
+was not the expected one twice over. Ordering turns out to be a quarter of a one-shot solve rather
+than a fraction of a percent, so it is worth optimizing; and the fill differences among orderings
+that are all roughly good turn out not to propagate into factorization time at all, so the fill
+column is nearly flat in its effect. Both are in `pipeline/README.md`.
 
 **A benchmark is not an experiment.** The studies under `experiments/` are frozen: each answers one
 question with a measurement and is not maintained afterwards. These run against the current tree

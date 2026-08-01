@@ -104,6 +104,8 @@ int main(int argc, char** argv) {
         {"MMD2", OrderMethod::MMD2},
         {"AMD",  OrderMethod::AMD},  {"AMD1", OrderMethod::AMD1},
         {"AMD2", OrderMethod::AMD2},
+        {"AMD1B", OrderMethod::AMD1B},
+        {"AMD2B", OrderMethod::AMD2B},
     };
 
     std::printf("%-12s %8s", "grid", "n");

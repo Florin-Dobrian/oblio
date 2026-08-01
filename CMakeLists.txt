@@ -36,7 +36,9 @@ unset(CMAKE_REQUIRED_LIBRARIES)
 add_library(oblio STATIC
     src/Amd.cpp
     src/Amd1.cpp
+    src/Amd1B.cpp
     src/Amd2.cpp
+    src/Amd2B.cpp
     src/BlasLapack.cpp
     src/DirectSolver.cpp
     src/ElmForestEngine.cpp

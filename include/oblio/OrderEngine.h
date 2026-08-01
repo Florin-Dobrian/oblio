@@ -9,6 +9,13 @@
 //   AMD,     Approximate Minimum Degree (SuiteSparse 3.3.4, BSD-3)
 //   AMD1,    Approximate Minimum Degree, Oblio's own, the bound alone (src/Amd1.cpp)
 //   AMD2,    AMD1 plus aggressive absorption and hash detection (src/Amd2.cpp)
+//   AMD1B,   AMD1's ordering with the eliminator and the first scan fused (src/Amd1B.cpp)
+//   AMD2B,   the same fusion applied to AMD2 (src/Amd2B.cpp)
+//
+// The trailing B is a different axis from the trailing digit. A digit means a different
+// ordering: AMD2 has mechanisms AMD1 lacks, so their permutations and their fill differ and
+// both are correct. A B means the same ordering computed on a different schedule, so AMD1B
+// must return exactly AMD1's permutation and a difference is a defect in one of them.
 //
 // Two lineages sit behind those names. MMD and AMD are vendored, self-contained codes
 // operating on raw int CSC arrays (src/Mmd.cpp, src/Amd.cpp). MMD1 and AMD1 are ours,
@@ -27,7 +34,7 @@
 
 namespace Oblio {
 
-enum class OrderMethod { Natural, MMD, MMD1, MMD2, AMD, AMD1, AMD2 };
+enum class OrderMethod { Natural, MMD, MMD1, MMD2, AMD, AMD1, AMD2, AMD1B, AMD2B };
 
 class OrderEngine {
 public:
@@ -80,6 +87,14 @@ private:
                    const std::vector<std::size_t>&  colPtr,
                    const std::vector<std::int32_t>& rowIdx,
                    Permutation& p) const;
+    bool orderAMD1B(std::size_t size,
+                    const std::vector<std::size_t>&  colPtr,
+                    const std::vector<std::int32_t>& rowIdx,
+                    Permutation& p) const;
+    bool orderAMD2B(std::size_t size,
+                    const std::vector<std::size_t>&  colPtr,
+                    const std::vector<std::int32_t>& rowIdx,
+                    Permutation& p) const;
 };
 
 extern template bool OrderEngine::compute(const SparseMatrix<double>&, Permutation&) const;

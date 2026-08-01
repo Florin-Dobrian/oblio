@@ -377,6 +377,128 @@ always had. Note that closing it does not close *memory*: the `std::vector<bool>
 about initialization rather than allocation, and the graph constructor is still 3 to 4 percent of
 MMD2 and mostly first touch of fresh pages, which no reduction in allocation count reaches.
 
+## AMD1B, and the diagnosis it falsified, 2026-08-01
+
+The largest item on the ordering list since 2026-07-31 was this: the vendored `amd_2` prunes a
+vertex, accumulates its degree and builds its hash in one visit per element, where AMD1 visits each
+element of `A[u]` twice and each element of `I[u]` three times. 557568 element visits against
+266892 on a 100x100 grid. It was called the driver restructuring, and it was expected to be worth a
+fifth of AMD1.
+
+**AMD1B is that change, built.** `QuotientGraph::eliminate` split into a private
+`beginElimination` and `finishElimination` with the prune loop between them, and a second public
+overload taking an `ApproximateScan` that folds the driver's first scan into the prune. `A[u]`
+falls to one visit and `I[u]` to two, which is what `amd_2` costs; the bound cannot be folded
+further, because `outside[c]` is complete only after every member of `C[p]` has been seen, which is
+why the vendored routine has two scans as well.
+
+**It is not faster.** alpamayo, 140x140: AMD1B 1.93 ms against AMD1's 1.84, five percent slower,
+and one to two percent faster at the three smaller sizes. Fill identical at every size, permutation
+identical on 136 graphs.
+
+**So the three-visit diagnosis was wrong**, and it had been cited three times before being tested.
+The visits were never the cost: a second pass over a list still in L1 is a load and a compare, and
+the per-element work the merge saves is a test and a copy that were cheap to begin with. This is
+the same lesson as the loop-fusion negative already in `../README.md`, and the distinction drawn
+there, that fusion removes loop setup while merging removes work, turns out not to have been the
+thing that mattered.
+
+## Where AMD1's gap actually is, and two hypotheses that failed, 2026-08-01
+
+The first comparative profile in this folder: the vendored AMD and AMD1 through the same binary,
+3000 orderings of a 140x140 grid on alpamayo.
+
+```
+                    AMD (vendored)        AMD1
+cycles                  15.03 G          22.49 G       1.50x
+useful                   8.58 G  57.1%   10.58 G  47.1%
+instruction processing   2.27 G  15.1%    5.71 G  25.4%   waiting on data
+instruction delivery     3.10 G  20.6%    3.85 G  17.1%   waiting on instructions
+discarded                1.04 G   6.9%    2.27 G  10.1%   branch mispredicts
+```
+
+**Both stall heavily, and on opposite things.** The vendored routine wastes 43 percent of its
+cycles and ours 53, so this is a memory-bound problem for everyone. Their dominant waste is the
+front end, which is what one 1800-line function does to an instruction cache; ours is the back end,
+waiting on data.
+
+Splitting the 7.46 G gap by where it goes:
+
+```
+data stalls        +3.44 G    46%
+useful work        +2.00 G    27%
+branch mispredicts +1.23 G    17%
+front end          +0.75 G    10%
+```
+
+**Work is the third-largest component, not the first.** AMD1B attacked it and gained nothing, which
+is consistent.
+
+**The second hypothesis, and it failed too.** Data stalls being the largest component, the obvious
+lever was footprint: `QuotientGraph` holds six `std::size_t` arrays read in the innermost loops,
+940 KB at n = 19600 where `int32_t` would need 470. Narrowed as an experiment, cachegrind reported
+**D1 misses down 17 percent and last-level misses down 13, with the instruction count flat.** On
+alpamayo it measured nothing at all, and if anything slightly slower, with both vendored controls
+sitting still. Reverted; `std::size_t` for a position stands, and the convention now has a
+measurement behind it rather than only a rule.
+
+**Which retires cache simulation for this question.** Cachegrind was wrong three times in one
+afternoon and in three different directions: it reported zero for the loop-bound hoist, which was
+worth 3.5 percent; 8.5 percent for an allocation change worth about 1.5; and a large improvement in
+the exact quantity being targeted here, worth zero. Instruction counts transferred faithfully all
+day. **Cache behavior did not transfer even comparatively**, which is what Apple Silicon's much
+larger caches and more aggressive prefetching would predict, and is worth knowing before the next
+person reaches for it.
+
+**So AMD1's 1.46x is unexplained.** Two hypotheses with good counter evidence have been built and
+falsified. What is left is unexamined rather than unlikely, and none of it is more than a guess:
+the branch mispredicts, which more than doubled and are 17 percent of the gap; `Buckets`, which has
+never been profiled; and the possibility that a dozen separate arrays cost through the prefetcher
+and the TLB rather than through cache misses, which is exactly what cachegrind cannot model and
+what CPU Counters reports only in aggregate. **The next step is a new instrument, not a fourth
+idea.**
+
+One correction to the headline while we are here. The vendored run's 3.67 s includes `AMD_aat` at
+139 ms and `AMD_postorder` at 154 ms, neither of which we do: we take the pattern directly and
+`ElmForestEngine` does its own postorder. The comparable part is about 3.3 s, so **the true gap is
+nearer 1.6x than 1.46x.**
+
+## AMD2B, and a pattern both B variants share, 2026-08-01
+
+The same fusion applied to AMD2, added for the oracle rather than for speed: AMD2 carries an
+absorption pass and a hash pass that AMD1 does not, so it has more places to go quietly wrong, and
+`AMD2B == AMD2` guards all of them at once. 136 graphs, zero mismatches, fill identical at every
+size.
+
+**alpamayo, milliseconds, best of three:**
+
+```
+grid        AMD1    AMD1B          AMD2    AMD2B
+ 32x32      0.20     0.16  -20%    0.35     0.28  -20%
+ 64x64      0.56     0.54   -4%    0.93     0.85   -9%
+100x100     1.01     0.97   -4%    1.61     1.56   -3%
+140x140     1.86     1.94   +4%    3.06     3.10   +1%
+```
+
+**Both pairs show the same shape: the fusion helps at small n and stops helping, or hurts, at
+large n.** Two independent instances of one pattern is worth more than either alone, and it points
+at a mechanism rather than at noise.
+
+**The likely mechanism, and it is uncomfortable.** The fusion is not free of memory: it adds
+`explicitPart`, an array of size n that the prune writes and the bound reads, 156 KB at n = 19600.
+At small n everything is resident and the saved visits are pure gain; at large n the new array is
+another stream competing with the dozen already there. That is consistent with the comparative
+profile above, which found AMD1's largest gap component to be data stalls, and it means **the
+fusion trades element visits for footprint, which is the wrong direction for the branch's actual
+constraint.**
+
+It is a hypothesis, not a finding. What would test it is removing `explicitPart` and accepting one
+more walk of `A[u]`, which is a third variant nobody has asked for. Recorded rather than pursued.
+
+**Both B variants are kept**, on the oracle and on the seam being reusable, not on speed. Their
+collapse condition, written before either was built, was that a B variant replaces its original
+when permutation-identical and faster; neither is faster, so neither fires.
+
 ## Results
 
 **alpamayo (Apple Silicon), macOS, Apple Clang, Accelerate, 2026-07-31.** Ordering time in

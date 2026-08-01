@@ -67,6 +67,81 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-08-01, The B suffix, a seam, and two hypotheses built and falsified
+
+The largest measured item on the ordering list was AMD1's three visits per element against the
+vendored routine's one. It was built, it works, it is not faster, and the diagnosis behind it was
+wrong. Recording that fully, because a reversed conclusion is worth more than a confirmed one and
+because the seam it required is reusable.
+
+**The naming axis, which is new and needs stating once.** A trailing digit means a different
+ordering: AMD2 has mechanisms AMD1 lacks, so their permutations and their fill legitimately differ.
+A trailing B means the **same ordering computed differently**, so AMD1B must return exactly AMD1's
+permutation and any difference is a defect in one of them. Two axes, one enum, and a reader six
+months out cannot tell them apart without being told, which is why `OrderEngine.h`, `Amd1B.h` and
+`TESTING_SPECIFICATION.md` all say it.
+
+That buys an oracle the digit pairs cannot have. AMD1 against AMD2 can only be compared on fill;
+AMD1 against AMD1B must agree entry for entry, on both maps. It is the strongest check in the
+ordering suite: 136 graphs and seven assertions, zero mismatches.
+
+**The seam, and why it is not the template it was designed as.** Option C was a
+`template <class Scan> eliminate(pivot, Scan&)`, and it collides with the CLAUDE.md invariant that
+template definitions live in `.cpp`: the definition must be visible where it is instantiated, so
+either it moves to a header or the shared core includes its drivers. Reading the rule's own
+rationale settled it rather than leaving it to taste. That entry argues entirely about the `Val`
+axis, a closed set of scalar types and the build cost of scattered instantiation, and reaches
+nothing about a function templated on a caller-supplied policy type. **The invariant as written is
+broader than its own rationale**, which is a genuine gap, and the right response was not to widen
+the rule under pressure from a change that did not need it.
+
+So: a non-template overload taking an `ApproximateScan` struct by reference, with `eliminate` split
+into private `beginElimination` and `finishElimination` so the half-eliminated state never escapes.
+No template, no friendship, one parameter. If a future variant needs a real policy point, the
+invariant should be narrowed on its own merits first.
+
+**The result. AMD1B is five percent slower at 140x140** and one to two percent faster at the three
+smaller sizes, with identical fill and identical permutations. The visits were never the cost.
+
+**And the second hypothesis failed the same way.** A comparative profile, the first in this
+project, put AMD1's gap at 46 percent data stalls, 27 percent work and 17 percent branch
+mispredicts. Work being third explains AMD1B. Data stalls being first pointed at footprint, so the
+six `std::size_t` arrays in `QuotientGraph` were narrowed to `int32_t` as an experiment: cachegrind
+reported D1 misses down 17 percent with instructions flat, and alpamayo reported nothing, with both
+vendored controls unmoved. Reverted. **`std::size_t` for a position stands, and now has a
+measurement behind it rather than only a rule.**
+
+**What this says about instruments.** Cachegrind was wrong three times in one afternoon in three
+directions, and cache simulation on a different machine does not transfer even comparatively, where
+instruction counts did. More generally, every one of today's five successful changes came from
+reading a trace and fixing the top line, and every failure came from reasoning ahead of one. Two
+elaborate hypotheses with good counter evidence were built and falsified in an afternoon; that is
+cheap and is the point of the infrastructure, but the ratio is worth remembering before the next
+one.
+
+**AMD2B followed, and is the more useful of the pair despite being the easier to write.** The seam
+was built, so applying it to AMD2 was driver work: three places it could have differed were checked
+rather than assumed, and none does (AMD2's scan 1 is textually AMD1's, absorption runs after the
+elimination and touches only incidence lists, and the hash merges run after the bound). It is worth
+having because AMD2 carries two mechanisms AMD1 does not, so `AMD2B == AMD2` guards an absorption
+pass and a hash comparison that nothing else in the suite checks entry for entry.
+
+**And the pair shows a pattern neither alone would establish.** Both are faster at small n, about 20
+percent at 32x32, and both lose that advantage as n grows, ending at plus 4 and plus 1 percent at
+140x140. The likely mechanism is that the fusion is not free of memory: it adds `explicitPart`, an
+array of size n, 156 KB at n = 19600, which is another stream competing with the dozen already
+there. **The fusion trades element visits for footprint, which is the wrong direction for a branch
+whose largest gap component is data stalls.** Hypothesis, not finding; testing it would mean a third
+variant nobody wants.
+
+**Whether they stay.** The collapse condition was written before either was built: a B variant
+replaces its original when permutation-identical and faster. Neither is faster, so neither fires and
+the tree carries two implementations of each of two orderings. Kept anyway, as measured negatives in
+the shape `experiments/` keeps its rejected ideas, and because the seam and the oracles are worth
+more than the duplication costs. Revisit when someone needs those files to be simpler.
+
+---
+
 ## 2026-08-01, Fine-grained allocation in the ordering is closed, and all four sites had one cause
 
 Two last sites, both small: AMD2's hash buckets were a vector per bucket over n + 1, constructed and

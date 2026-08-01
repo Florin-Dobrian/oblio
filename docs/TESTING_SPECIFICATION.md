@@ -17,13 +17,13 @@ file first, but CLAUDE.md is where it lives.
 
 `make test` builds and runs every suite. Each suite is a standalone binary that prints one line per
 assertion and a count, and returns nonzero on any failure. Suites are discovered by wildcard, so a
-new `tests/*.cpp` file needs no Makefile change. Totals today: **213 assertions across 8 suites**.
+new `tests/*.cpp` file needs no Makefile change. Totals today: **241 assertions across 8 suites**.
 
 | suite | assertions | what it establishes |
 |---|---|---|
 | `smoke` | 5 | the tree builds and the basic objects work |
 | `test_permutation` | 11 | the index map and its composition |
-| `test_order` | 49 | all five non-trivial orderings produce valid permutations |
+| `test_order` | 77 | the eight orderings are valid, and each B pair reproduces its original |
 | `test_forest` | 29 | elimination forest, supernodes, amalgamation, multifrontal child order |
 | `test_symfactor` | 29 | supernodal index sets against a dense oracle |
 | `test_numfactor` | 18 | the numeric factor, by oracle and by reconstruction |
@@ -80,9 +80,26 @@ composition against direct application and the inverse against the identity.
 
 ### test_order, 49 assertions
 
-Seven matrices, each checked for structural symmetry and then ordered by all six non-trivial
-methods, AMD, AMD1, AMD2, MMD, MMD1 and MMD2, with the result checked for validity as a permutation. Matrices: a 6x6 arrow, tridiagonals at
-n = 1, 2, 10 and 100, a 5x5 diagonal, and a complex arrow.
+Seven matrices, each checked for structural symmetry and then ordered by all eight non-trivial
+methods, AMD, AMD1, AMD1B, AMD2, AMD2B, MMD, MMD1 and MMD2, with the result checked for validity as
+a permutation. Matrices: a 6x6 arrow, tridiagonals at n = 1, 2, 10 and 100, a 5x5 diagonal, and a
+complex arrow.
+
+**Fourteen further assertions compare each B variant against its original entry for entry**, seven
+for AMD1B against AMD1 and seven for AMD2B against AMD2, and they are the strongest oracle in this
+suite. Every other pair of orderings here can only be checked for validity, because each is a
+different ordering and their permutations legitimately differ. A B variant is its original on a
+different schedule, so an identical permutation is a requirement rather than a coincidence, and a
+difference is a defect in one of the two. Both maps are compared, `oldToNew` and `newToOld`.
+
+The AMD2 pair is the more valuable of the two, though it was the easier to add. AMD2 carries an
+absorption pass that kills cliques and a hash pass that folds one live vertex into another, so it
+has more places to go quietly wrong than AMD1 does, and an identity check guards all of them at
+once.
+
+The distinction the suffixes carry is worth restating here because the test depends on it: a
+trailing digit means a different ordering (AMD2 has mechanisms AMD1 lacks), a trailing B means the
+same ordering computed differently.
 
 The orderings are checked for *validity*, not against 0.9's output, and not for quality. Nothing
 asserts that any method reduces fill, ours included: each is a new ordering rather
@@ -324,7 +341,7 @@ error, and it is why the count is asserted separately from the residual: a silen
 combination would otherwise leave the worst residual looking perfect.
 
 **Two assertions cover the ordering methods**, on the same tier 0 matrix and through the same
-facade: that all seven are reached, and that the worst residual over them is at machine precision.
+facade: that all nine are reached, and that the worst residual over them is at machine precision.
 Validity, which `test_order` checks, says a permutation is well formed; it does not say the rest of
 the pipeline can use it. This is the assertion that says so, and it is what a new ordering method
 has to pass before it counts as working. Fill is not asserted here either.

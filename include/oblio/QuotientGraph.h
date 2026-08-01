@@ -131,6 +131,21 @@ private:
     std::vector<std::uint8_t> mFiled;  // whether u is in a bucket at all, 0 or 1
 };
 
+// What an approximate-degree driver accumulates while the eliminator is already walking the lists,
+// handed to the second `eliminate` overload so that the walk serves both. The members are the
+// driver's own arrays, held by reference: the graph fills them and owns none of them.
+//
+// `tag` is the only member that moves, and the driver sets it before each elimination, exactly as
+// it would before its own scan. The rest are bound once and reused for the whole ordering.
+struct ApproximateScan {
+    std::vector<std::size_t>&       explicitPart;    // per vertex, sum of weight over the pruned A[u]
+    std::vector<std::size_t>&       outside;         // per clique, |C[c] - C[p]| weighted
+    const std::vector<std::size_t>& cliqueDegree;    // per clique, |C[c]| weighted
+    std::vector<std::int32_t>&      touchedCliques;  // the cliques this step reached, once each
+    std::vector<std::int32_t>&      mark;            // the driver's membership scratch
+    std::int32_t                    tag;             // its stamp for this elimination
+};
+
 // The quotient graph itself: the three lists above, the liveness flags, and the supervariable
 // members that mass elimination grows. A driver owns one of these, picks a pivot, calls
 // eliminate, and refreshes whatever the elimination reached.
@@ -233,6 +248,31 @@ public:
     // each is a stamp of the subtrahend and one compaction pass over the minuend.
     const std::vector<std::int32_t>& eliminate(std::int32_t pivot);
 
+    // The same elimination, with an approximate-degree driver's first scan folded into it.
+    //
+    // Why the two are one call rather than two loops. An approximate degree decomposes reach(u)
+    // instead of forming it, so its driver walks exactly the lists the prune has just walked:
+    // A[u] to sum the weights of what survived, I[u] to subtract this vertex's weight from each
+    // clique's outside count. Run afterwards, that is a second and third visit to every element,
+    // which is where AMD1 spends what the vendored routine does not: 483677 element visits against
+    // 216662 on a 100x100 grid. Folded in, A[u] is visited once and I[u] twice, which is what
+    // `amd_2`'s two scans cost.
+    //
+    // It cannot be folded further, and the reason is a property of the bound rather than of the
+    // code: `outside[c]` is complete only once every member of C[p] has been seen, so the sum over
+    // I[u] that the bound needs is a second pass by construction. `amd_2` has two scans for the
+    // same reason.
+    //
+    // Two things make the fusion sound, and neither is obvious. The scan now runs over the
+    // UNTRIMMED C[p], where the driver ran it over the trimmed one, and the difference is the
+    // mass-eliminated vertices; they contribute nothing, since the merge test requires
+    // I[u] == {pivot} and the scan skips the pivot. And the weights summed over A[u] are read
+    // before mass elimination could change any of them, which is safe because the prune has
+    // already removed every member of C[p] from A[u] and mass elimination merges only members of
+    // C[p]. Neither would survive reordering the phases.
+    const std::vector<std::int32_t>& eliminate(std::int32_t pivot, ApproximateScan& scan);
+
+
     // Fold v into u, the two having been found indistinguishable from EACH OTHER rather than
     // from a pivot. Unlike mass elimination, which merges into a vertex that is being eliminated
     // in the same breath, this merges into one that stays live, so u carries v's weight onward.
@@ -263,6 +303,13 @@ public:
     std::vector<std::int32_t> order(const std::vector<std::int32_t>& pivots) const;
 
 private:
+    // The head and tail of an elimination, shared by the two overloads above and private because
+    // between them the graph is half eliminated: the clique is written and stamped but the reached
+    // vertices still name the pivot as a variable. Nothing outside may observe that state, which is
+    // why the seam is two private calls rather than a public begin and end.
+    void beginElimination(std::int32_t pivot, std::int32_t& inClique, std::int32_t& absorbed);
+    const std::vector<std::int32_t>& finishElimination(std::int32_t pivot);
+
     // A[u] and I[u] share one run, and one array holds every run end to end. The two lists are
     // the SOURCES of reach(u), one per explicit neighbor and one per clique, and their number is
     // conserved: each elimination that reaches u replaces at least one source with the new

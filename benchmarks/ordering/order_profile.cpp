@@ -29,7 +29,9 @@
 // profile the one whose gap is being investigated rather than an average of both.
 
 #include "oblio/Amd1.h"
+#include "oblio/Amd1B.h"
 #include "oblio/Amd2.h"
+#include "oblio/Amd2B.h"
 #include "oblio/Mmd1.h"
 #include "oblio/Mmd2.h"
 #include "oblio/OrderEngine.h"
@@ -95,6 +97,8 @@ int main(int argc, char** argv) {
         if      (method == "mmd1") sum += orderMmd1(colPtr, rowIdx).size();
         else if (method == "amd1") sum += orderAmd1(colPtr, rowIdx).size();
         else if (method == "amd2") sum += orderAmd2(colPtr, rowIdx).size();
+        else if (method == "amd1b") sum += orderAmd1B(colPtr, rowIdx).size();
+        else if (method == "amd2b") sum += orderAmd2B(colPtr, rowIdx).size();
         else if (method == "mmd2") sum += orderMmd2(colPtr, rowIdx).size();
         else if (vendored) { Permutation p; engine.compute(A, p); sum += p.size(); }
     }

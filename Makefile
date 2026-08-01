@@ -39,7 +39,9 @@ OBLIO_SRCS = \
   src/Mmd1.cpp \
   src/Mmd2.cpp \
   src/Amd1.cpp \
+  src/Amd1B.cpp \
   src/Amd2.cpp \
+  src/Amd2B.cpp \
   src/ElmForestEngine.cpp \
   src/SymFactorEngine.cpp \
   src/BlasLapack.cpp \

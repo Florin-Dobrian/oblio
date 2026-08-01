@@ -2,7 +2,9 @@
 #include "oblio/Mmd1.h"
 #include "oblio/Mmd2.h"
 #include "oblio/Amd1.h"
+#include "oblio/Amd1B.h"
 #include "oblio/Amd2.h"
+#include "oblio/Amd2B.h"
 
 #include <vector>
 
@@ -41,6 +43,8 @@ bool OrderEngine::compute(const std::vector<std::size_t>&  colPtr,
         case OrderMethod::AMD:     return orderAMD(size, colPtr, rowIdx, p);
         case OrderMethod::AMD1:    return orderAMD1(size, colPtr, rowIdx, p);
         case OrderMethod::AMD2:    return orderAMD2(size, colPtr, rowIdx, p);
+        case OrderMethod::AMD1B:   return orderAMD1B(size, colPtr, rowIdx, p);
+        case OrderMethod::AMD2B:   return orderAMD2B(size, colPtr, rowIdx, p);
     }
     return false;   // unreachable: every enumerator is named above, which is what -Wall checks
 }
@@ -193,6 +197,42 @@ bool OrderEngine::orderAMD2(std::size_t size,
     if (size == 0) return true;
 
     const std::vector<std::int32_t> order = orderAmd2(colPtr, rowIdx);
+    if (order.size() != size) return false;
+
+    for (std::size_t k = 0; k < size; ++k) {
+        p.mNewToOld[k]        = order[k];
+        p.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
+    }
+    return true;
+}
+
+bool OrderEngine::orderAMD1B(std::size_t size,
+                            const std::vector<std::size_t>&  colPtr,
+                            const std::vector<std::int32_t>& rowIdx,
+                            Permutation& p) const {
+    p.mOldToNew.assign(size, 0);
+    p.mNewToOld.assign(size, 0);
+    if (size == 0) return true;
+
+    const std::vector<std::int32_t> order = orderAmd1B(colPtr, rowIdx);
+    if (order.size() != size) return false;
+
+    for (std::size_t k = 0; k < size; ++k) {
+        p.mNewToOld[k]        = order[k];
+        p.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
+    }
+    return true;
+}
+
+bool OrderEngine::orderAMD2B(std::size_t size,
+                            const std::vector<std::size_t>&  colPtr,
+                            const std::vector<std::int32_t>& rowIdx,
+                            Permutation& p) const {
+    p.mOldToNew.assign(size, 0);
+    p.mNewToOld.assign(size, 0);
+    if (size == 0) return true;
+
+    const std::vector<std::int32_t> order = orderAmd2B(colPtr, rowIdx);
     if (order.size() != size) return false;
 
     for (std::size_t k = 0; k < size; ++k) {

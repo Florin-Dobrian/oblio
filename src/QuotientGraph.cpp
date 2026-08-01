@@ -153,7 +153,8 @@ void QuotientGraph::number(std::int32_t u) {
     mLiveMerges    = true;   // a numbered vertex lingers in lists, so the walks must filter
 }
 
-const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pivot) {
+void QuotientGraph::beginElimination(std::int32_t pivot,
+                                     std::int32_t& inClique, std::int32_t& absorbed) {
     // Fill the scratch, then copy it into the clique. Swapping instead would save the copy and
     // cost more than it saves: the scratch would come back empty every time and grow again from
     // nothing at the next pivot, several reallocations apiece, where keeping it lets its capacity
@@ -180,11 +181,18 @@ const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pivot) {
     // then queried for free by the two compaction passes below. Clique ids and vertex ids share
     // one space, so one mark array serves both, the tags keeping them apart.
     ++mTag;
-    const std::int32_t inClique = mTag;
+    inClique = mTag;
     for (std::int32_t v : reached) mMark[v] = inClique;
     ++mTag;
-    const std::int32_t absorbed = mTag;
+    absorbed = mTag;
     for (std::size_t i = 0; i < absorbedSize; ++i) mMark[absorbedCliques[i]] = absorbed;
+}
+
+const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pivot) {
+    std::int32_t inClique = NIL;
+    std::int32_t absorbed = NIL;
+    beginElimination(pivot, inClique, absorbed);
+    const std::vector<std::int32_t>& reached = mReached;
 
     // Both lists are compacted in place rather than rebuilt into a scratch and swapped. Every
     // pass here only ever removes, so the survivors can be written over the entries already read,
@@ -219,6 +227,61 @@ const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pivot) {
         source[write++]   = pivot;                     // u joins the new clique, id = pivot
         mIncidenceSize[u] = write - kept;
     }
+
+    return finishElimination(pivot);
+}
+
+// The same prune, with the driver's first scan folded into the two loops. The header carries the
+// argument for why this is one call and why it cannot be folded further; the loops below are the
+// plain ones with an accumulation added on each survivor, and nothing else differs.
+const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pivot,
+                                                         ApproximateScan& scan) {
+    std::int32_t inClique = NIL;
+    std::int32_t absorbed = NIL;
+    beginElimination(pivot, inClique, absorbed);
+    const std::vector<std::int32_t>& reached = mReached;
+
+    for (std::int32_t u : reached) {
+        const std::size_t weightU       = mWeight[u];
+        std::int32_t*     source        = mSource.data() + mSourcePtr[u];
+        const std::size_t adjacencySize = mAdjacencySize[u];
+        std::size_t       kept          = 0;
+        std::size_t       explicitPart  = 0;
+        for (std::size_t k = 0; k < adjacencySize; ++k) {
+            const std::int32_t v = source[k];
+            if (v == pivot) continue;
+            if (mMark[v] == inClique) continue;
+            if (mLiveMerges && mEliminated[v] != 0) continue;
+            source[kept++] = v;
+            explicitPart += mWeight[v];                // the bound's explicit term, in this visit
+        }
+        mAdjacencySize[u]       = kept;
+        scan.explicitPart[u]    = explicitPart;
+
+        const std::size_t incidenceSize = mIncidenceSize[u];
+        std::size_t       write         = kept;
+        for (std::size_t i = 0; i < incidenceSize; ++i) {
+            const std::int32_t c = source[adjacencySize + i];
+            if (mMark[c] == absorbed) continue;
+            source[write++] = c;
+            if (c == pivot) continue;                  // the new clique subtracts from nothing
+            if (scan.mark[c] != scan.tag) {            // first sighting: start from |C[c]|
+                scan.mark[c] = scan.tag;
+                scan.touchedCliques.push_back(c);
+                scan.outside[c] = scan.cliqueDegree[c] - weightU;
+            } else {
+                scan.outside[c] -= weightU;
+            }
+        }
+        source[write++]   = pivot;
+        mIncidenceSize[u] = write - kept;
+    }
+
+    return finishElimination(pivot);
+}
+
+const std::vector<std::int32_t>& QuotientGraph::finishElimination(std::int32_t pivot) {
+    const std::vector<std::int32_t>& reached = mReached;
 
     // Mass elimination. u is indistinguishable from the pivot when the two had the same closed
     // neighborhood before the step, equivalently when everything u can still reach now lies

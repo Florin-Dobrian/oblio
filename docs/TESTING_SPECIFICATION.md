@@ -17,18 +17,23 @@ file first, but CLAUDE.md is where it lives.
 
 `make test` builds and runs every suite. Each suite is a standalone binary that prints one line per
 assertion and a count, and returns nonzero on any failure. Suites are discovered by wildcard, so a
-new `tests/*.cpp` file needs no Makefile change. Totals today: **153 assertions across 8 suites**.
+new `tests/*.cpp` file needs no Makefile change. Totals today: **213 assertions across 8 suites**.
 
 | suite | assertions | what it establishes |
 |---|---|---|
 | `smoke` | 5 | the tree builds and the basic objects work |
 | `test_permutation` | 11 | the index map and its composition |
-| `test_order` | 21 | AMD and MMD produce valid permutations |
+| `test_order` | 49 | all five non-trivial orderings produce valid permutations |
 | `test_forest` | 29 | elimination forest, supernodes, amalgamation, multifrontal child order |
 | `test_symfactor` | 29 | supernodal index sets against a dense oracle |
 | `test_numfactor` | 18 | the numeric factor, by oracle and by reconstruction |
 | `test_solve` | 14 | the solve step, by residual |
-| `test_pipeline` | 48 | whole-pipeline combinations, by residual |
+| `test_pipeline` | 58 | whole-pipeline combinations, by residual |
+
+The counts in this table had drifted from the suite before MMD1 was added, `test_pipeline` reading
+48 against 56 on disk and the total reading 153 against 183. They are corrected here rather than
+left, since a stale count is exactly the kind of quiet untruth the invariant above exists to
+prevent.
 
 ## A note on the word dynamic
 
@@ -73,14 +78,22 @@ inverse it gives the identity, it is order sensitive in both directions, it is n
 identity on either side is neutral, and a size mismatch is refused. A random sweep of 500 checks
 composition against direct application and the inverse against the identity.
 
-### test_order, 21 assertions
+### test_order, 49 assertions
 
-Seven matrices, each checked for structural symmetry and then ordered by AMD and by MMD, with the
-result checked for validity as a permutation. Matrices: a 6x6 arrow, tridiagonals at n = 1, 2, 10
-and 100, a 5x5 diagonal, and a complex arrow.
+Seven matrices, each checked for structural symmetry and then ordered by all six non-trivial
+methods, AMD, AMD1, AMD2, MMD, MMD1 and MMD2, with the result checked for validity as a permutation. Matrices: a 6x6 arrow, tridiagonals at
+n = 1, 2, 10 and 100, a 5x5 diagonal, and a complex arrow.
 
 The orderings are checked for *validity*, not against 0.9's output, and not for quality. Nothing
-asserts that AMD or MMD reduces fill.
+asserts that any method reduces fill, ours included: each is a new ordering rather
+than a reimplementation of a vendored one, so agreement with MMD or AMD is not a property to
+assert. Fill
+is measured in `experiments/ordering` instead.
+
+Three of the seven matrices are inputs the prototypes in that experiment have never seen, and they
+are the ones worth watching when a driver changes: the 5x5 diagonal is n isolated vertices, so every
+degree is zero and nothing ever merges, and the tridiagonals at n = 1 and n = 2 are a single vertex
+and a single edge. The experiment's seven graphs are all connected and none is trivial.
 
 ### test_forest, 29 assertions
 
@@ -165,7 +178,7 @@ storages: real Cholesky, real static LDL^T, complex Cholesky and complex LDL^H a
 input, and complex LDL^T against complex-symmetric input. A 10x10 grid is checked separately in both
 storages. All are ordered by AMD.
 
-### test_pipeline, 48 assertions
+### test_pipeline, 58 assertions
 
 Added 2026-07-19, with slice 2 of dynamic LDL. Where `test_numfactor` checks the factor against an
 oracle and `test_solve` checks the solve, this suite checks that the phases *compose*, for a given
@@ -309,6 +322,12 @@ printed "not implemented" long after it was implemented. Nothing caught it becau
 built by `make` and never run. The `reached == 15` assertion is the guard against that shape of
 error, and it is why the count is asserted separately from the residual: a silently skipped
 combination would otherwise leave the worst residual looking perfect.
+
+**Two assertions cover the ordering methods**, on the same tier 0 matrix and through the same
+facade: that all seven are reached, and that the worst residual over them is at machine precision.
+Validity, which `test_order` checks, says a permutation is well formed; it does not say the rest of
+the pipeline can use it. This is the assertion that says so, and it is what a new ordering method
+has to pass before it counts as working. Fill is not asserted here either.
 
 Five further assertions cover the one thing the facade decides that the by-hand caller does not: the
 multifrontal child ordering is computed during `analyze`, not during `factor`, so `DirectSolver` has

@@ -1,14 +1,21 @@
 #pragma once
 
-// OrderEngine.h — computes a fill-reducing permutation of a SparseMatrix.
+// OrderEngine.h, computes a fill-reducing permutation of a SparseMatrix.
 //
-//   Natural — identity (no reordering)
-//   MMD     — Multiple Minimum Degree (Liu/Sparspak, via 0.9)
-//   AMD     — Approximate Minimum Degree (SuiteSparse 3.3.4, BSD-3)
+//   Natural, identity (no reordering)
+//   MMD,     Multiple Minimum Degree (Liu/Sparspak, via 0.9)
+//   MMD1,    Multiple Minimum Degree, Oblio's own, the batch alone (src/Mmd1.cpp)
+//   MMD2,    MMD1 plus the prepass, q2h refresh, pair merging and outmatched marking
+//   AMD,     Approximate Minimum Degree (SuiteSparse 3.3.4, BSD-3)
+//   AMD1,    Approximate Minimum Degree, Oblio's own, the bound alone (src/Amd1.cpp)
+//   AMD2,    AMD1 plus aggressive absorption and hash detection (src/Amd2.cpp)
 //
-// The MMD/AMD algorithms are vendored, self-contained codes operating on raw int
-// CSC arrays (src/Mmd.cpp, src/Amd.cpp); this engine is the seam that reads the
-// matrix structure and fills the Permutation. Returns true on success.
+// Two lineages sit behind those names. MMD and AMD are vendored, self-contained codes
+// operating on raw int CSC arrays (src/Mmd.cpp, src/Amd.cpp). MMD1 and AMD1 are ours,
+// built over the shared quotient graph in src/QuotientGraph.cpp, and each carries the
+// base algorithm without its vendored counterpart's later refinements, so they order
+// differently and are not drop-in replacements. Either way this engine is the seam that
+// reads the matrix structure and fills the Permutation. Returns true on success.
 
 #include "oblio/SparseMatrix.h"
 #include "oblio/Permutation.h"
@@ -20,7 +27,7 @@
 
 namespace Oblio {
 
-enum class OrderMethod { Natural, MMD, AMD };
+enum class OrderMethod { Natural, MMD, MMD1, MMD2, AMD, AMD1, AMD2 };
 
 class OrderEngine {
 public:
@@ -53,10 +60,26 @@ private:
                   const std::vector<std::size_t>&  colPtr,
                   const std::vector<std::int32_t>& rowIdx,
                   Permutation& p) const;
+    bool orderMMD1(std::size_t size,
+                   const std::vector<std::size_t>&  colPtr,
+                   const std::vector<std::int32_t>& rowIdx,
+                   Permutation& p) const;
+    bool orderMMD2(std::size_t size,
+                   const std::vector<std::size_t>&  colPtr,
+                   const std::vector<std::int32_t>& rowIdx,
+                   Permutation& p) const;
     bool orderAMD(std::size_t size,
                   const std::vector<std::size_t>&  colPtr,
                   const std::vector<std::int32_t>& rowIdx,
                   Permutation& p) const;
+    bool orderAMD1(std::size_t size,
+                   const std::vector<std::size_t>&  colPtr,
+                   const std::vector<std::int32_t>& rowIdx,
+                   Permutation& p) const;
+    bool orderAMD2(std::size_t size,
+                   const std::vector<std::size_t>&  colPtr,
+                   const std::vector<std::int32_t>& rowIdx,
+                   Permutation& p) const;
 };
 
 extern template bool OrderEngine::compute(const SparseMatrix<double>&, Permutation&) const;

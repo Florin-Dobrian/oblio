@@ -1,8 +1,10 @@
 # ordering experiment - the minimum degree family, built up one mechanism at a time.
 # Reference/teaching only; not part of the main Oblio build.
 #
-#   make        build every C++ prototype
-#   make test   build them, run each, and check the C++ agrees with its Python twin
+#   make          build every C++ prototype
+#   make test     build them, run each, check the C++ agrees with its Python twin, and check
+#                 each ported layer agrees with the production driver extracted from it
+#   make production   the production drivers on these graphs, linked from ../../src
 #   make clean
 #
 # Each layer exists twice, as <name>.py and <name>.cpp, and the two are written to
@@ -27,6 +29,15 @@
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O3 -Wall -Wextra
 
+# Only the production check links Oblio, whose sources call BLAS. Accelerate on macOS, the system
+# BLAS elsewhere.
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+    BLAS_LIBS ?= -framework Accelerate
+else
+    BLAS_LIBS ?= -lblas -llapack -lm
+endif
+
 # The interpreter that runs the Python twins. Bare python3 by default, for two
 # reasons. It is a PATH name rather than a particular tool, so the prerequisite
 # is only that some Python 3 is present, where `uv run` needs uv installed
@@ -49,7 +60,28 @@ PYTHON   ?= python3
 LAYERS = md1 md2 md3 md4 md5 mmd1 mmd2 amd1 amd2
 BINS   = $(addsuffix _cpp,$(LAYERS))
 
-.PHONY: all test vendored clean
+# The layers that have been pulled into the main tree, and so have a production driver to be
+# checked against. Grows as the extraction proceeds; empty would simply skip that check.
+# Layers checked by permutation, and layers checked by fill. AMD2 is in the second group
+# because production skips the postorder the prototype ends with, so the permutations
+# legitimately differ while the fill does not.
+#
+# The prototype's matrix1 is dropped from the comparison. It is the one example given as a matrix
+# rather than a graph, unsymmetric with duplicates and an unsorted column, and it exists to
+# exercise amd2Aat and amd2Preprocess. Production has no input conditioning on purpose, Oblio's
+# matrices being clean by construction, so there is nothing on this side to compare it against.
+PORTED      = mmd1 mmd2 amd1
+PORTED_FILL = amd2
+
+# The production sources those drivers need, linked directly rather than copied. A copy is right
+# for the vendored routines, which are not ours to edit, and wrong here: the point of this check
+# is to notice when production and prototype come apart.
+# The fill check runs Oblio's symbolic factorization, so the whole library is linked. The
+# two vendored orderers compile with warnings off, as everywhere else.
+PROD_VENDOR = ../../src/Amd.cpp ../../src/Mmd.cpp
+PROD_SRCS   = $(filter-out $(PROD_VENDOR),$(wildcard ../../src/*.cpp))
+
+.PHONY: all test production vendored clean
 
 all: $(BINS)
 
@@ -66,7 +98,7 @@ all: $(BINS)
 # agree, which is what the check is for.
 #
 # Temp files rather than process substitution, so this runs under /bin/sh.
-test: all
+test: all production_cpp
 	@rc=0; \
 	for L in $(LAYERS); do \
 	  printf '%-6s ' "$$L"; \
@@ -79,7 +111,38 @@ test: all
 	  fi; \
 	  rm -f .$$L.py.out .$$L.cpp.out; \
 	done; \
+	for L in $(PORTED); do \
+	  printf '%-6s ' "$$L"; \
+	  ./$${L}_cpp     | grep -E '^===|^order:' > .$$L.proto.out; \
+	  ./production_cpp $$L | grep -E '^===|^order:' > .$$L.prod.out; \
+	  if diff .$$L.proto.out .$$L.prod.out > /dev/null; then \
+	    echo "prototype and production agree"; \
+	  else \
+	    echo "DIFFER"; rc=1; \
+	  fi; \
+	  rm -f .$$L.proto.out .$$L.prod.out; \
+	done; \
+	for L in $(PORTED_FILL); do \
+	  printf '%-6s ' "$$L"; \
+	  ./$${L}_cpp | sed '/=== matrix1 ===/,$$d' | grep -E '^===|^nnz\(L\)' > .$$L.proto.out; \
+	  ./production_cpp $$L | grep -E '^===|^nnz\(L\)' > .$$L.prod.out; \
+	  if diff .$$L.proto.out .$$L.prod.out > /dev/null; then \
+	    echo "prototype and production agree on fill"; \
+	  else \
+	    echo "DIFFER"; rc=1; \
+	  fi; \
+	  rm -f .$$L.proto.out .$$L.prod.out; \
+	done; \
 	exit $$rc
+
+# Oblio's own ordering drivers, run on the same graphs as the prototypes. The mirror image of
+# vendored_cpp: that one runs what we are reading against, this one runs what we extracted.
+production_cpp: production.cpp $(PROD_SRCS) $(PROD_VENDOR)
+	$(CXX) $(CXXFLAGS) -I../../include -DOBLIO_BLAS_UNDERSCORE -w -c $(PROD_VENDOR)
+	$(CXX) $(CXXFLAGS) -I../../include -DOBLIO_BLAS_UNDERSCORE production.cpp $(PROD_SRCS) \
+	  Amd.o Mmd.o $(BLAS_LIBS) -o $@
+
+production: production_cpp
 
 # The vendored routines, built separately: they are not layers and have no Python
 # twin. vendored/vendored_mmd.cpp and vendored/vendored_amd.cpp are copies of
@@ -92,4 +155,4 @@ vendored_cpp: vendored.cpp vendored/vendored_mmd.cpp vendored/vendored_amd.cpp
 vendored: vendored_cpp
 
 clean:
-	rm -f $(BINS) vendored_cpp
+	rm -f $(BINS) vendored_cpp production_cpp Amd.o Mmd.o

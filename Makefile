@@ -35,6 +35,11 @@ OBLIO_SRCS = \
   src/SparseMatrix.cpp \
   src/Permutation.cpp \
   src/OrderEngine.cpp \
+  src/QuotientGraph.cpp \
+  src/Mmd1.cpp \
+  src/Mmd2.cpp \
+  src/Amd1.cpp \
+  src/Amd2.cpp \
   src/ElmForestEngine.cpp \
   src/SymFactorEngine.cpp \
   src/BlasLapack.cpp \

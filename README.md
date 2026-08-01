@@ -9,7 +9,10 @@ traversal strategies.
 - **Three factorization types**: Cholesky, Static LDL^T (with diagonal perturbation),
   Dynamic LDL^T (threshold pivoting with 1x1 and 2x2 pivots)
 - **Three traversal algorithms**: Left-looking, Right-looking, Multifrontal
-- **Ordering**: Natural (identity), MMD (Multiple Minimum Degree), AMD (Approximate Minimum Degree, Davis/Amestoy/Duff)
+- **Ordering**: Natural (identity), MMD (Multiple Minimum Degree), AMD (Approximate Minimum
+  Degree, Davis/Amestoy/Duff), and Oblio's own minimum-degree implementations: MMD1 and AMD1,
+  the base algorithms, and MMD2 and AMD2, which add the mechanisms their vendored counterparts
+  carry. Ours are not drop-in replacements for the vendored pair and order differently
 - **Single and multiple RHS**: `Vector<Val>` for one RHS, `DenseMatrix<Val>` for
   batched solves using per-supernode BLAS (`dtrsm` + `dgemm`)
 - **Scalar types**: `double`, `std::complex<double>` (via explicit instantiation).
@@ -199,18 +202,25 @@ include/oblio/      , public headers (declarations only)
 src/                , method bodies + explicit instantiations (flat layout)
   Amd.cpp           , AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
   Mmd.cpp           , MMD ordering (Sparspak/Liu, via Oblio 0.9)
-tests/              , test suites (148 tests; see docs/TESTING_SPECIFICATION.md)
+  QuotientGraph.cpp , the representation Oblio's own orderings run on, and its degree buckets
+  Mmd1.cpp          , MMD1 ordering (ours, over QuotientGraph)
+  Mmd2.cpp          , MMD2 ordering (ours, MMD1 plus prepass, q2h refresh, merging)
+  Amd1.cpp          , AMD1 ordering (ours, over QuotientGraph)
+  Amd2.cpp          , AMD2 ordering (ours, AMD1 plus absorption and hash detection)
+tests/              , test suites (213 tests; see docs/TESTING_SPECIFICATION.md)
   smoke.cpp                    5,  quick end-to-end sanity
-  test_order.cpp              21,  ordering (Natural, MMD, AMD)
+  test_order.cpp              49,  ordering (Natural, MMD, MMD1, MMD2, AMD, AMD1, AMD2)
   test_permutation.cpp        11,  permutation maps
-  test_forest.cpp             23,  elimination forest and supernodes
+  test_forest.cpp             29,  elimination forest and supernodes
   test_symfactor.cpp          29,  symbolic factorization
-  test_numfactor.cpp          16,  numeric factorization
+  test_numfactor.cpp          18,  numeric factorization
   test_solve.cpp              14,  the solve step, residual at machine precision
-  test_pipeline.cpp           29,  whole-pipeline combinations, by residual
+  test_pipeline.cpp           58,  whole-pipeline combinations, by residual
 examples/           , usage examples
   pipeline.cpp      , the pipeline by hand, every factorization / traversal / ordering
   basic.cpp         , the same solve through the DirectSolver facade
+benchmarks/         , timing and profiling against the current tree (see benchmarks/README.md)
+  ordering/         , what each ordering method costs, in time and in fill
 ```
 
 ## History
@@ -264,7 +274,7 @@ Done:
 - [x] Namespaced headers (`include/oblio/`), explicit instantiation throughout
 - [x] Validated against Oblio 0.9 as oracle; end-to-end residual at machine precision
 - [x] `DirectSolver<Val>`, the top-level analyze / factor / solve driver
-- [x] 183 tests across 8 suites
+- [x] 213 tests across 8 suites
 - [x] Dynamic LDL, threshold 1x1 / 2x2 pivots: all three traversals, delayed columns and all, at
       machine precision. Non-root supernodes follow Ashcraft, Grimes and Lewis (1998) Figure 3.4
       with the Figure 3.3 acceptance test; roots, which cannot delay, use bounded Bunch-Kaufman

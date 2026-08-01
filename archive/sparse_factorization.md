@@ -3230,6 +3230,52 @@ is stored. The absorbed cliques are deleted, which bounds how many can accumulat
 pruned of everything the new clique now implies, which is what makes each explicit list shrink
 monotonically. The result is identical to 5.1's, pivot for pivot.
 
+**The two lists together never outgrow the one they came from.** `A_i` only shrinks and `C_i` can
+grow, so the loop above reads as saying nothing about the pair. It says a good deal:
+
+```
+|A_i| + |C_i|  <=  deg(i)      at every point in the run,
+```
+
+where `deg(i)` is `i`'s degree in the original graph. Initially `C_i` is empty and `A_i` is the
+whole of `i`'s neighborhood, so the two sides are equal. The refresh loop is the only place either
+list changes, and it runs over `i` in `L` alone, so one such `i` is the whole of the argument.
+There `C_i` gains exactly one clique, the new one, and `i` reached `L` in one of exactly two ways:
+
+- **`i` is in `A_p`.** Then `p` is in `A_i`, the relation being symmetric, and `A_i = A_i \ {p}`
+  removes it. One out for the one in.
+- **`i` is in `L_c` for some `c` in `C_p`.** Then `c` is in `C_i`, and `c` is among the absorbed,
+  so `C_i \ absorbed` takes it out before the new clique goes in. `C_i` does not grow at all.
+
+Both can hold at once, in which case the sum strictly falls. It never rises, so the initial value
+bounds it forever.
+
+**What is conserved is the number of SOURCES.** `neighbors(i)` is a union over `|A_i| + |C_i|`
+sets, one per explicit neighbor and one per clique, and that count is what the inequality bounds.
+Each elimination that reaches `i` replaces at least one of those sources with the new clique: the
+explicit neighbor `p` in the first case, the absorbed clique `c` in the second. Nothing
+manufactures a source. Read that way the bound is not a calculation to be checked but a
+restatement of what an elimination is, which is why it holds whatever the lists are made of. It
+is a fact about the quotient graph and not about any encoding of it.
+
+**The later mechanisms leave it alone**, which is worth stating since every layer above this one
+adds something. Mass elimination (5.5) merges `i` into the pivot and empties both of `i`'s lists.
+Detecting two live vertices as indistinguishable (5.13) folds one into the other and empties the
+folded one's lists, adding nothing to the survivor's. Numbering a vertex without eliminating it
+(5.11) touches no list at all. Aggressive absorption destroys cliques. Every one of them either
+destroys sources or empties a list, and none creates a source, so the bound survives the whole
+ladder.
+
+**Measured, and it comes out tight.** Instrumented over our four orderings on grid Laplacians at
+32, 64 and 140 a side, on random graphs at three densities, on a star and on a path, the largest
+`|A_i| + |C_i|` observed equals `deg(i)` on nearly every graph and exceeds it on none. Tightness
+is the expected shape: the first case above trades one for one, so a vertex whose reaches are all
+of that kind sits at the bound the whole way.
+
+What follows from this for storage is not a matter for this section, but it is the reason the
+bound is worth stating rather than merely true. 5.15 takes it up, where the vendored codes are
+read.
+
 ### 5.4 A worked example: the quotient graph
 
 Take the smallest graph that fills, a 4-cycle:
@@ -5557,15 +5603,20 @@ function. It is worth being exact about where that goes.
 - the approximate degree bound, and the `|L_e \ L|` computation that makes it cheap
 - supervariable hashing, and the pattern comparison that confirms a match
 - mass elimination
+- **a vertex's two lists held as one set, sized once from its original degree and never grown**,
+  which the conservation argument of 5.3 is what permits
 
 **Archaeological, and would evaporate in a modern encoding:**
 
-- **One flat `int` array** (`Iw`) holding every adjacency list, every element pattern, and the
-  free space, interleaved, indexed by offsets in a second array. This is a Fortran constraint: no
-  dynamic allocation, no structs, one workspace handed in by the caller.
+- **One flat `int` array** (`Iw`) holding every list end to end, with the element patterns and the
+  free space interleaved among them, indexed by offsets in a second array. The Fortran constraint
+  is real: no dynamic allocation, no structs, one workspace handed in by the caller. What is
+  archaeological is the shared *pool*, not the fact that one vertex's own lists sit together in one
+  run of it, and the next subsection separates the two.
 - **A garbage collector**, several hundred lines, to compact that array when absorbed lists have
-  left it full of holes. This exists *only because of the flat array*. Give each vertex its own
-  vector and there is nothing to collect.
+  left it full of holes. This exists *only because of the shared pool*, and specifically because
+  the element patterns grow inside it. Give each object its own storage and there is nothing to
+  collect.
 - **Parallel arrays instead of a record**: `Pe`, `Len`, `Nv`, `Elen`, `Degree`, `W`, `Head`,
   `Next`, `Last`, all indexed by vertex, all conceptually fields of one struct. A COMMON block,
   transliterated.
@@ -5579,6 +5630,45 @@ fifty years old. Only the first is worth preserving. A legible version keeps eve
 and loses every item in the second list, and the honest expectation is that it lands at a few
 hundred lines and can be read.
 
+**One line above used to sit on the wrong list, and the mistake is instructive.** This section
+originally filed the whole of `Iw` under archaeology, on the reading that a flat workspace is what
+a language without allocation forces and that giving each vertex its own container disposes of it.
+That is right about the pool and wrong about the run. A vertex's `A_i` and `C_i` share one block
+because 5.3 says they can, and no encoding is required to notice it: the sum is bounded whether
+the lists are Python sets, C++ vectors or one Fortran array. Both codes take the trick, and it is
+the reason neither ever grows a vertex's block.
+
+The two arrived together, which is why they looked alike. `Iw` is the answer to two different
+questions at once, and only one of them is about Fortran. Where does a vertex's source set live,
+which the bound answers for any language; and where do the element patterns live, which genuinely
+grow, since a clique's members are its pivot's reach and nothing in the pivot's own degree bounds
+that. The pool, the free-space cursor, the copy on growth and the compaction all serve the second
+question. The first needs none of them.
+
+**The two codes take the trick differently**, and the difference is a real choice rather than
+another accident of encoding:
+
+| | a vertex's sources | telling a variable from an element |
+|---|---|---|
+| MMD (`mmdelm`) | one undifferentiated run | look the entry up, `qsize[nb] != 0` |
+| AMD (`amd_2`) | one run, elements first | `Elen[i]`, the position of the boundary |
+
+MMD does not distinguish the two kinds at all. A vertex's run holds live neighbors and dead ones
+mixed together, and an entry names an element exactly when the vertex it names has been
+eliminated, which is a lookup rather than a position. AMD splits the run and records where. The
+refresh is the same shape in both: compact the survivors from the start of the run with the write
+cursor trailing the read one, then write the new element immediately after them, in the same pass
+and the same block. `mmdelm` does it in five lines and stops at the run's original end, which is
+the bound of 5.3 being relied on without being stated.
+
+Neither code says why it is entitled to any of this. The entitlement is not in either text, and it
+is not in the AMD paper; it is a property of the quotient graph that both authors evidently saw
+and neither wrote down, and its absence is most of why the trick reads as memory management.
+
+So a modern version inherits the shared run and declines the pool, and the one thing it still
+chooses is MMD's lookup against AMD's boundary. That is a cost question rather than a matter of
+style: a boundary costs one number per vertex, and a lookup costs a load per entry read.
+
 MMD sits at a different point on both axes, and the contrast is instructive. Its inherent core is
 if anything lighter: it keeps the quotient graph and mass elimination but drops the two subtlest
 mechanisms above, the approximate degree bound and supervariable hashing, because it computes the
@@ -5590,7 +5680,11 @@ labels, the pointer decrement that fakes one-based indexing, sentinel-tagged sta
 hoisted to a function's top only to dodge a goto crossing their initialization. The one
 archaeological burden it escapes is the garbage collector: MMD compacts each adjacency list in
 place as it eliminates, so it needs no separate compaction pass, and that absence is most of why it
-is a couple hundred lines rather than two thousand. Between a simpler algorithm to keep and a
+is a couple hundred lines rather than two thousand. That compaction is the trick above rather than
+a thrift, and it is worth reading `mmdelm` for it: the survivors are written back over the entries
+already read, the new element goes in behind them, and the run's original end is never passed.
+What MMD escapes is not the need to compact but the need to compact *across* vertices, which is
+the pool's problem and not a vertex's. Between a simpler algorithm to keep and a
 shorter, if denser, text to replace, MMD is the more approachable of the two to rewrite first.
 
 The risk, which is real: a rewrite must produce **the same permutation**, or the fill changes and

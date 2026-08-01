@@ -669,6 +669,51 @@ std::vector<std::int32_t> mmd1MinimumDegree(const Graph& G, std::int32_t delta =
     return order;
 }
 
+// A square grid graph, four-neighbor, for running the counters at a size the seven examples
+// cannot reach. It is here rather than among them because it is not an example: nothing about it
+// illustrates a mechanism, and its trace is far too long to read. The grid mode below discards the
+// trace and prints only the closing counter lines, which is what a comparison between layers wants.
+static Graph gridGraph(int side) {
+    const int n = side * side;
+    Graph graph(n);
+    for (int r = 0; r < side; ++r)
+        for (int c = 0; c < side; ++c) {
+            const int u = r * side + c;
+            if (r > 0)        graph[u].push_back(u - side);
+            if (c > 0)        graph[u].push_back(u - 1);
+            if (c + 1 < side) graph[u].push_back(u + 1);
+            if (r + 1 < side) graph[u].push_back(u + side);
+        }
+    return graph;
+}
+
+// Keep the trace's summary lines and discard everything else, as it is written rather than
+// afterwards. A grid trace is far too large to hold: every step prints the whole quotient graph,
+// so at n = 10000 the captured text runs to gigabytes and the process dies holding it. This
+// filters line by line instead, keeping only what the whitelist names, so the memory is one line.
+class CounterSink : public std::streambuf {
+public:
+    explicit CounterSink(std::vector<std::string> keys) : mKeys(std::move(keys)) {}
+
+protected:
+    int overflow(int ch) override {
+        if (ch == traits_type::eof()) return traits_type::not_eof(ch);
+        const char c = static_cast<char>(ch);
+        if (c != '\n') { mLine.push_back(c); return ch; }
+        for (const std::string& key : mKeys)
+            if (mLine.rfind(key, 0) == 0) { mKept.push_back(mLine); break; }
+        mLine.clear();
+        return ch;
+    }
+
+public:
+    const std::vector<std::string>& kept() const { return mKept; }
+
+private:
+    std::vector<std::string> mKeys;
+    std::vector<std::string> mKept;
+    std::string              mLine;
+};
 void run(const std::string& name, const Graph& G) {
     std::cout << "=== " << name << " ===\n";
     mmd1MinimumDegree(G);
@@ -676,6 +721,20 @@ void run(const std::string& name, const Graph& G) {
 }
 
 int main(int argc, char** argv) {
+    // Grid mode: one square grid, the trace discarded, the counters kept.
+    //
+    //   ./mmd1_cpp grid 22
+    if (argc > 2 && std::string(argv[1]) == "grid") {
+        const int side = std::atoi(argv[2]);
+        std::cout << "=== grid " << side << "x" << side << " (n = " << side * side << ") ===\n";
+        CounterSink sink({"nnz(L)", "degree computations"});
+        std::streambuf* saved = std::cout.rdbuf(&sink);
+        mmd1MinimumDegree(gridGraph(side));
+        std::cout.rdbuf(saved);
+        for (const std::string& line : sink.kept()) std::cout << line << "\n";
+        return 0;
+    }
+
     // The same three graphs as md1 and md2.
     //
     //   graph1, a 4-cycle: eliminating any vertex forces its two neighbors

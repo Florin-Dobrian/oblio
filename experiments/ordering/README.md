@@ -137,6 +137,30 @@ seemed the worse trade.
 Each prototype also takes an example number, `python3 md3.py 3` or `./md3_cpp 3`, and runs every
 example when given none.
 
+Once a layer has been pulled into the main tree it gains a second check, against the production
+driver extracted from it:
+
+```
+make production       builds production_cpp, linking ../../src
+./production_cpp mmd1        MMD1 on all seven graphs
+./production_cpp amd2        AMD2, reporting nnz(L) rather than the order
+./production_cpp mmd1 3      just the third
+```
+
+`make test` runs it for every layer named in the Makefile's `PORTED` list, `mmd1` and `amd1`, and
+requires the order lines to agree with the prototype's. `PORTED_FILL` names the layers checked by
+nnz(L) instead, `amd2` today: production skips the postorder that prototype ends with, since
+`ElmForestEngine` does that work itself, so the two permutations legitimately differ while the fill
+does not. That check runs Oblio's own symbolic factorization, which is why the target links the
+whole library. The prototype's `matrix1` is left out of it, being the example that exists to
+exercise `amd2Aat` and `amd2Preprocess`, which production has no counterpart to. It links `../../src/QuotientGraph.cpp` and
+`../../src/Mmd1.cpp` directly rather than copying them, which is the opposite of what the vendored
+target does and deliberately so: a copy is right for code that is not ours to edit and wrong for
+code being actively changed at both ends, since noticing when the two come apart is the whole point.
+The harness feeds each graph as a full-symmetric CSC with the diagonal present, which is what a
+`SparseMatrix` holds, so the production path under check includes `buildGraph` dropping the
+diagonal rather than only the driver.
+
 The vendored routines have their own target, since they are not layers and have no Python twin:
 
 ```
@@ -291,12 +315,96 @@ insertion history differs, and reproducing that exactly would mean reproducing t
 them. So the permutations still differ, and exact equality stays a possible later mode rather
 than the acceptance test.
 
+**What the tie-break is worth, measured 2026-07-31, and it is more than expected.** On small
+graphs ties are few and the fill agrees with the vendored routine on 7 of 7 examples and 59 of 60
+random graphs. On a grid nearly every live vertex has the same degree, so a tie decides almost
+every pick, and the effect compounds. Four filing orders of the same algorithm, against the
+vendored MMD, counting nnz(L) through Oblio's own symbolic factorization:
+
+```
+                              32x32     64x64   100x100   140x140
+vendored MMD                  11822     63219    186835    412921
+ours, as it stands            11972     71709    223806    492921
+initial buckets descending    12093     67109    194505    443997
+refresh order reversed        12570     73184    213784    504177
+both                          12074     71487    218989    513689
+```
+
+Two things follow, and the second matters more.
+
+**The gap to the vendored routine is a tie-break artifact, not a missing mechanism.** At 140x140
+the four orders span 443997 to 513689, a 16 percent spread, which is the size of the whole gap. So
+nothing is wrong with what we compute: MMD1 and MMD2 are choosing differently among equally
+minimal vertices, and on a regular mesh that choice is nearly the entire ordering.
+
+**And no order among these is right.** Filing the initial buckets in descending vertex order beats
+ours at three sizes out of four and loses at the fourth, which is what an arbitrary choice looks
+like when it is measured rather than reasoned about. So the code is unchanged: adopting a rule that
+wins on three grids would be adopting an unproven heuristic, which is what this experiment
+otherwise declines to do. Reproducing the vendored fill exactly would mean reproducing its
+insertion history, which the paragraph above explains is coupled to `mmdupd`'s q2h and qxh walks
+rather than separable from them.
+
 The test is `vendored.cpp`, which links `vendored/vendored_mmd.cpp` and
 `vendored/vendored_amd.cpp`, copies of `src/Mmd.cpp` and `src/Amd.cpp` that are never edited, and
 runs both routines on the same seven graphs, printing permutations in our format. mmd2 and amd2
 are accepted when every feature above is present and exercised, nnz(L) matches the vendored
 routine on the seven graphs and on random ones, and every remaining order difference is traceable
 to a tie.
+
+## Grid mode, and what the missing features are actually worth
+
+Every prototype takes an example number; `mmd1`, `mmd2`, `amd1` and `amd2` also take a grid:
+
+```
+./amd1_cpp grid 22        one 22x22 grid Laplacian, counters only
+```
+
+The trace is discarded as it is written rather than afterwards, a filtering streambuf keeping only
+the closing counter lines, because at n = 10000 a full trace runs to gigabytes and a process
+holding it is killed. The grid is not an eighth example: nothing about it illustrates a mechanism
+and its trace is unreadable. It exists so the counters can be read at a size the seven cannot
+reach.
+
+**Why it was added.** `benchmarks/ordering` shows our production MMD1 and AMD1 running about 4.5x
+and 3.4x slower than the vendored routines. Two explanations were available and they call for
+opposite work: our per-list allocation against their flat array, or the mechanisms these layers do
+not yet have. Counters separate them, in units no allocator can move.
+
+**Measured on a 100x100 grid, n = 10000.** The number that matters per branch is the dominant
+inner quantity, not the refresh count.
+
+```
+                          mmd1      mmd2         amd1      amd2
+degree computations      37240     23157        64413     56105
+clique-member visits         .         .       272646         .      what amd1 pays per vertex
+incidence entries            .         .            .     74281      what amd2 pays instead
+nnz(L)                  223806    217102       201856    212496
+```
+
+**For AMD the gap is mostly algorithmic, and pass 3 is the whole of it.** `amd1` obtains
+`|C[c] - C[p]|` by walking each touched clique's members; `amd2` obtains it by subtraction from a
+maintained clique degree, walking incidence lists instead. That is 272646 elements against 74281,
+a factor of 3.7, against a measured speed gap of 3.4. So porting pass 3 into AMD1 should close most
+of it, and the earlier subsection records that the pass is output-neutral: same orders, same fill,
+same looseness. Cost and nothing else.
+
+**For MMD the gap is mostly ours.** `mmd2` refreshes 1.6 times less often, and its `q2h` shortcut
+also makes many of the remaining refreshes cheaper, which nothing here counts, so 1.6x is a lower
+bound on the mechanism's worth. Against a 4.5x speed gap that leaves a large remainder, and the
+remainder is per-list allocation and pointer chasing.
+
+**And one finding that was not what we expected.** MMD1's fill runs about 19 percent above the
+vendored MMD at 100x100, and completing the algorithm barely moves it: `mmd2` gives 217102 against
+`mmd1`'s 223806, where the vendored routine gives 186835. So three points of nineteen are the
+missing features and sixteen are something else, which can only be the insertion history inside a
+degree bucket, since that is the one thing our filing does not reproduce and the tie-break section
+above says will differ. Minimum degree being famously sensitive to ties, a systematic 16 percent is
+a great deal to attribute to one, and it is worth confirming rather than assuming.
+
+The AMD side has no such problem: `amd1` at 201856 is *better* than the vendored 206332, and
+`amd2` at 212496 is worse than both, which is the coarser-supervariables cost the pass 1 and 2
+subsection already measured on small graphs.
 
 ## Two bugs this found, both ours
 
@@ -2386,11 +2494,11 @@ Tags are threaded through return values, since Python has no reference parameter
 remains, at construction, because the input is given as sets in Python and as ascending literals
 in C++; it is outside every loop, which is the same place `SymFactorEngine` puts its final sort.
 
-What is left for the ordering code proper is the shared pool with its garbage collection, and
-the weight array. Both are consequences rather than choices: member lists in a pool can outgrow
-their slots when a clique grows, which is where AMD's `iwlen`, `pfree` and `ncmpa` come from, and
-once a supervariable's members are a chain rather than a list its size stops being O(1) to read,
-which is where `weight` earns its place.
+What is left for the ordering code proper is the weight array, and it is a consequence rather than
+a choice: once a supervariable's members are a chain rather than a list its size stops being O(1)
+to read, which is where `weight` earns its place. The shared pool is not on that list, and used to
+be: see the correction at the end of the next subsection, where the part of `Iw` that is algorithm
+rather than Fortran is separated from the part that is not.
 
 ### The garbage collection, which is not garbage collection
 
@@ -2460,11 +2568,23 @@ all the patterns it swallowed. So the compaction reclaims space the algorithm's 
 making available, and `ncmpa` stays small for exactly that reason. It is a collector for a heap
 that mostly empties itself, which is a pleasing thing to have built and a poor reason to build one.
 
-**What this means for the ordering engine.** Keep per-list containers, put them on an arena if
-measurement says allocation is showing up, and do not port `Iw`, `Pe`, `pfree` or `ncmpa`. The one
-consequence to keep in view is that `qsize` becomes necessary only if members ever become a chain
-through a shared pool. With per-list containers a supervariable's size stays O(1) to read and the
-array stays redundant, which is what the measurement in this experiment already showed.
+**What this means for the ordering engine.** Do not port `Iw`, `Pe`, `pfree` or `ncmpa`. The one
+consequence to keep in view is that `qsize` becomes necessary only if members ever become a chain,
+which they since have, so production carries a weight array where these prototypes do not.
+
+**Superseded in part, 2026-08-01.** This section used to end by recommending per-list containers on
+an arena, `std::pmr` over a monotonic buffer, if measurement showed allocation mattering. It did
+matter, and the answer turned out not to be an allocator. `A[u]` and `I[u]` are the two kinds of
+source of `reach(u)`, an elimination destroys one for each it creates, and so their sum never
+exceeds `u`'s original degree: the pair fits in one block sized once from the pattern, and there is
+nothing left to allocate per list or to put on an arena. Section 5.3 of
+`archive/sparse_factorization.md` carries the argument and 5.15 records that both vendored codes
+rely on it. The rest of this section stands: the compaction really is an artifact of a fixed
+caller-supplied workspace, and it really should not be ported. What was wrong was reading the whole
+of `Iw` that way, when only the pool around a vertex's block is archaeology.
+
+The prototypes are unchanged and keep their per-vertex containers, which is right for files whose
+job is to read as the algorithm. The engine took the block.
 
 ### amd2 against Amd.cpp, step by step
 

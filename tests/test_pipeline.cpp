@@ -727,6 +727,28 @@ int main() {
         ck(reached == 15 && worst < tol,
            with("DirectSolver      : worst residual over all fifteen", worst));
 
+        // Every ordering method, on the same matrix and through the same facade. An ordering can
+        // be a valid permutation and still be one the rest of the pipeline cannot use, which is
+        // the failure test_order's validity check cannot see, so what is asserted here is that a
+        // factorization comes out the other end at machine precision. Fill is not asserted, for
+        // any method: no ordering in this suite is checked for quality, and MMD1 is not held to
+        // the vendored routines' output, being a different ordering rather than a copy of one.
+        double worstOrder   = 0.0;
+        int    reachedOrder = 0;
+        for (OrderMethod om : {OrderMethod::Natural, OrderMethod::MMD, OrderMethod::MMD1,
+                               OrderMethod::MMD2, OrderMethod::AMD, OrderMethod::AMD1,
+                               OrderMethod::AMD2}) {
+            DirectSolver<double> solver(om, Factorization::Cholesky, Traversal::LeftLooking);
+            if (!solver.analyze(A) || !solver.factor(A) || !solver.solve(b, x))
+                continue;
+            ++reachedOrder;
+            worstOrder = std::max(worstOrder, solver.relativeResidual(A, b, x));
+        }
+
+        ck(reachedOrder == 7, "OrderMethod       : all seven orderings reached");
+        ck(reachedOrder == 7 && worstOrder < tol,
+           with("OrderMethod       : worst residual over all seven", worstOrder));
+
         // The multifrontal child ordering is computed during analyze, so the traversal has to be
         // known by then. Switching between left- and right-looking reads the same forest and must
         // not throw the analysis away; switching into or out of multifrontal must, because the

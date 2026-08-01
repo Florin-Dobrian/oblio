@@ -1,0 +1,189 @@
+// production.cpp -- run Oblio's own ordering drivers on the prototypes' graphs.
+//
+// The mirror image of vendored.cpp. That one runs the routines we are reading against and
+// prints their permutations in our format; this one runs the routines we pulled out of these
+// prototypes, so that "production still says what the prototype says" is a diff rather than a
+// judgement. `make test` compares the order lines of each pair.
+//
+// It links ../../src directly rather than a copy, deliberately and unlike vendored.cpp: a copy
+// is right for code that is not ours to edit and wrong for code we are actively changing, since
+// the whole point here is to notice when the two come apart.
+//
+// The graphs are given as adjacency lists, as the prototypes give them, and then built into a
+// full-symmetric CSC with the diagonal present, which is what a SparseMatrix holds and what
+// OrderEngine hands down. So the CSC overload is what runs, and buildGraph's dropping of the
+// diagonal is under the same check as everything else.
+//
+// Build:  make production   (the sources are the two under ../../src, plus this file)
+// Run:    ./production_cpp mmd1
+//         ./production_cpp amd1
+//         ./production_cpp mmd1 3      just the third example
+
+#include "oblio/Amd1.h"
+#include "oblio/Amd2.h"
+#include "oblio/ElmForest.h"
+#include "oblio/ElmForestEngine.h"
+#include "oblio/Mmd1.h"
+#include "oblio/Mmd2.h"
+#include "oblio/Permutation.h"
+#include "oblio/SparseMatrix.h"
+#include "oblio/SymFactor.h"
+#include "oblio/SymFactorEngine.h"
+
+#include <cstdint>
+#include <cstdlib>
+#include <iostream>
+#include <string>
+#include <vector>
+
+// The prototypes' own shape for a graph. The production side no longer has a type for it:
+// QuotientGraph is built from a matrix pattern directly, its adjacency being one flat array
+// rather than a list per vertex, so the conversion below is the whole of the difference.
+using Graph = std::vector<std::vector<std::int32_t>>;
+
+// Adjacency lists to full-symmetric CSC with a structurally present diagonal, which is the
+// input Oblio's own matrices satisfy by construction.
+static void toCsc(const Graph& graph,
+                  std::vector<std::size_t>& colPtr, std::vector<std::int32_t>& rowIdx) {
+    const std::int32_t size = static_cast<std::int32_t>(graph.size());
+    colPtr.assign(graph.size() + 1, 0);
+    rowIdx.clear();
+    for (std::int32_t aj = 0; aj < size; ++aj) {
+        bool diagonalWritten = false;
+        for (std::int32_t ai : graph[aj]) {
+            if (!diagonalWritten && ai > aj) { rowIdx.push_back(aj); diagonalWritten = true; }
+            rowIdx.push_back(ai);
+        }
+        if (!diagonalWritten) rowIdx.push_back(aj);
+        colPtr[aj + 1] = rowIdx.size();
+    }
+}
+
+static void printOrder(const std::vector<std::int32_t>& order) {
+    std::cout << "order: [";
+    for (std::size_t k = 0; k < order.size(); ++k)
+        std::cout << (k == 0 ? "" : ", ") << order[k];
+    std::cout << "]\n";
+}
+
+// nnz(L) under an ordering, through Oblio's own symbolic factorization, printed in the format the
+// prototypes print it in so that the two can be diffed.
+//
+// This is what AMD2 is checked by rather than its permutation, and the reason is deliberate: the
+// prototype's last act is a postorder of the assembly tree, which production skips because
+// ElmForestEngine does that work itself. A postorder relabels an elimination tree without changing
+// it, so the two permutations differ and the fill does not. Weaker than an exact match, and still
+// enough to catch a wrong bound, a bad absorption or a merge that should not have happened.
+static void printFill(const std::vector<std::size_t>&  colPtr,
+                      const std::vector<std::int32_t>& rowIdx,
+                      const std::vector<std::int32_t>& order) {
+    const std::size_t size = colPtr.size() - 1;
+    std::vector<double> val(rowIdx.size(), 1.0);
+    for (std::size_t aj = 0; aj < size; ++aj)                 // a diagonal that cannot cancel
+        for (std::size_t cp = colPtr[aj]; cp < colPtr[aj + 1]; ++cp)
+            if (rowIdx[cp] == static_cast<std::int32_t>(aj)) val[cp] = 100.0;
+    const Oblio::SparseMatrix<double> A(size, colPtr, rowIdx, val);
+
+    Oblio::Permutation p;
+    std::vector<std::int32_t> newToOld(order.begin(), order.end());
+    p.setNewToOld(newToOld);
+
+    const Oblio::ElmForestEngine fe;
+    Oblio::ElmForest ef;
+    const Oblio::SymFactorEngine se;
+    Oblio::SymFactor sf;
+    if (!fe.compute(A, p, ef) || !se.compute(A, p, ef, sf)) { std::cout << "FAILED\n"; return; }
+
+    std::size_t nnzL = 0;
+    for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(sf.snodeSize()); ++kk) {
+        const std::size_t front = sf.frontSize(kk), update = sf.updateSize(kk);
+        nnzL += front * (front + 1) / 2 + front * update;
+    }
+    const std::size_t nnzTrilA = (rowIdx.size() - size) / 2 + size;
+    std::cout << "nnz(L) = " << nnzL << " against nnz(tril A) = " << nnzTrilA
+              << ", fill = " << (nnzL - nnzTrilA) << "\n";
+}
+
+static void run(const std::string& layer, const std::string& name, const Graph& graph) {
+    std::cout << "=== " << name << " ===\n";
+    std::vector<std::size_t>  colPtr;
+    std::vector<std::int32_t> rowIdx;
+    toCsc(graph, colPtr, rowIdx);
+    if (layer == "mmd1") printOrder(Oblio::orderMmd1(colPtr, rowIdx));
+    if (layer == "amd1") printOrder(Oblio::orderAmd1(colPtr, rowIdx));
+    if (layer == "mmd2") printOrder(Oblio::orderMmd2(colPtr, rowIdx));
+    if (layer == "amd2") printFill(colPtr, rowIdx, Oblio::orderAmd2(colPtr, rowIdx));
+    std::cout << "\n";
+}
+
+int main(int argc, char** argv) {
+    // The prototypes' seven graphs, copied as vendored.cpp copies them. What each one is for is
+    // documented in the prototype that introduced it and in the README.
+    Graph graph1 = {
+        {1, 3}, {0, 2}, {1, 3}, {0, 2},
+    };
+    Graph graph2 = {
+        {1, 2}, {0, 3}, {0, 4}, {1, 4, 5}, {2, 3, 5}, {3, 4},
+    };
+    Graph graph3 = {
+        {1, 3, 8},        // 0
+        {0, 2, 6, 8},     // 1
+        {1, 3, 5},        // 2
+        {0, 2, 4},        // 3
+        {3, 5},           // 4
+        {2, 4, 6, 9},     // 5
+        {1, 5, 7, 10},    // 6
+        {6, 8},           // 7
+        {0, 1, 7, 9},     // 8
+        {5, 8, 10},       // 9
+        {6, 9, 11},       // 10
+        {10},             // 11
+    };
+    Graph graph4 = {
+        {2, 3, 4, 7},     // 0
+        {3, 4, 6, 7},     // 1
+        {0, 3, 5},        // 2
+        {0, 1, 2, 6, 7},  // 3
+        {0, 1, 5},        // 4
+        {2, 4, 6},        // 5
+        {1, 3, 5},        // 6
+        {0, 1, 3},        // 7
+    };
+    Graph graph5 = {
+        {3, 4},           // 0
+        {2, 4},           // 1
+        {1},              // 2
+        {0},              // 3
+        {0, 1},           // 4
+    };
+    Graph graph6 = {
+        {2, 3, 4},        // 0
+        {3},              // 1
+        {0, 3, 4, 5},     // 2
+        {0, 1, 2, 4},     // 3
+        {0, 2, 3},        // 4
+        {2},              // 5
+    };
+    Graph graph7 = {
+        {1, 2, 4},        // 0
+        {0, 4},           // 1
+        {0, 3, 4},        // 2
+        {2, 4},           // 3
+        {0, 1, 2, 3},     // 4
+    };
+
+    std::vector<std::pair<std::string, Graph>> examples = {
+        {"graph1", graph1}, {"graph2", graph2},
+        {"graph3", graph3}, {"graph4", graph4},
+        {"graph5", graph5}, {"graph6", graph6},
+        {"graph7", graph7},
+    };
+
+    const std::string layer = (argc > 1) ? argv[1] : "mmd1";
+    const int selected      = (argc > 2) ? std::atoi(argv[2]) : 0;
+    for (int number = 1; number <= static_cast<int>(examples.size()); ++number) {
+        if (selected != 0 && number != selected) continue;
+        run(layer, examples[number - 1].first, examples[number - 1].second);
+    }
+    return 0;
+}

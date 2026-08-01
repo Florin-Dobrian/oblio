@@ -103,6 +103,107 @@ rather than one at a time. Trigger: before anyone outside this effort runs the s
 
 ## Capability
 
+### Replace the vendored orderings with Oblio's own
+
+`OrderEngine` offers two lineages. MMD and AMD are vendored; MMD1, AMD1 and AMD2 are ours, built
+from the matching prototypes over the shared `QuotientGraph`. The intent is to keep both lineages
+while ours develop, and to deprecate the vendored pair only once they can replace it. Nothing is
+deprecated yet and the vendored routines remain the default.
+
+What ours do not yet have, and each is a step rather than a question:
+
+- **MMD1 is the idea, not the whole of `genmmd`.** Missing: the prepass numbering degree-0 and
+  degree-1 vertices, `mmdupd`'s `q2h` path with its merging of vertices indistinguishable from each
+  other rather than from the pivot, outmatched marking, and MMD's filing convention. The `mmd2`
+  prototype has all six and is where each comes from.
+- **AMD1 is the bound alone; AMD2 adds absorption and hash detection.** Not ported, deliberately:
+  the postorder, which `ElmForestEngine` does itself, and the input conditioning, which Oblio's
+  matrices make unnecessary. On grids AMD2 is 5 percent worse on fill than AMD1 and about twice its
+  time, so it does not yet justify itself; whether it does on a problem with real supernodal
+  structure is a question the test set cannot currently answer.
+- **MMD2 has landed** (2026-08-01), with the prepass, the filing convention, the q2h refresh,
+  pairwise merging and outmatched marking. It is 30 percent faster than MMD1 and takes the MMD
+  branch to about 1.8x the vendored routine.
+- **None of ours handles a dense row**, which the vendored AMD does through `amd_preprocess` and
+  the `AMD_DENSE` control, so a matrix with a hub row will order worse under ours and nothing will say
+  why.
+- **None of ours tolerates duplicate entries**, where the vendored AMD cleans them in `amd_preprocess`.
+  That is not new work but a case of the unchecked precondition already recorded under "Validate the
+  input matrix": Oblio's matrices are valid by construction, and it stops holding the moment anyone
+  else calls the solver.
+
+Cost, and the diagnosis, measured on grid Laplacians. Fill is within about two percent of the
+vendored routines throughout. Run time at n = 19600 is MMD1 at 2.7x MMD and AMD1 at 1.9x AMD, after
+a day of structural work that took both from roughly 10x and 4x. What remains is **not**
+structural, which four negative results and a cycle-level profile establish between them
+(`benchmarks/README.md` for the method, `benchmarks/ordering/README.md` for the numbers):
+
+- **MMD1 does three times the work at identical efficiency**, 42.2 percent useful cycles against
+  the vendored 43.0. Nothing about layout, allocation or locality will touch it. MMD2's mechanisms
+  are the whole answer, which makes that port the single largest item on this list.
+- **AMD1's gap is 86 percent work and 14 percent stalling.** Its extra work is that the vendored
+  scan 2 prunes a vertex, accumulates its degree and builds its hash in one visit per element where
+  ours visits three times: prune, scan 1, bound. Closing that means moving the per-reached-vertex
+  pass out of the shared eliminator and into each driver, so each can do its own work in one visit.
+  Note that plain loop fusion was tried and buys nothing; the work has to be genuinely merged.
+
+  **Repriced 2026-08-01.** After the day's three passes AMD1 sits at 1.49x the vendored routine's
+  cycles and 1.23x its useful cycles, so the gap is now roughly half work and half stalling. This
+  item attacks the work half alone, and its ceiling is therefore about a fifth of AMD1 rather than
+  the two fifths the 86 percent figure implied. It remains the largest single item; it is no longer
+  the whole answer, and the other half is stalling, which nothing here has yet gone after.
+- **Absorption and hash detection are not the difference.** On a grid they fire identically for the
+  vendored routine and for our AMD2: 1 clique absorbed, 2488 merges.
+
+Ordered by measured value, with MMD2 now done: the driver restructuring next, then AMD's one-visit
+scan on top of it. Both branches now sit near 1.4x to 1.5x and have the same remaining character,
+neither missing a mechanism, both visiting elements more often than the vendored scan does.
+
+**The allocation question is closed, 2026-08-01, and not the way this entry expected.** It used to
+end by pricing the allocator and the incidence layout at perhaps a fifth of AMD1 and recommending
+`std::pmr` over a monotonic buffer. What the layout wanted was not an allocator: `A[u]` and `I[u]`
+are the two kinds of source of `reach(u)`, an elimination destroys one for each it creates, and so
+the pair fits in one block sized once from the pattern and never grown. Allocations at 140x140 went
+from 31915 to 2457 for MMD1 and 32256 to 2760 for AMD1, time fell 6 to 18 percent across the four,
+and the fill is unchanged everywhere. `benchmarks/ordering/README.md` has the numbers, section 5.3
+of `archive/sparse_factorization.md` the argument. Nothing is left to put on an arena, so `pmr` is
+retired without having been written.
+
+That leaves the driver restructuring as the whole of what is measured and outstanding. **The two
+allocation sites it exposed are done, 2026-08-01**: AMD2's `hashGroup` became `hashHead` and
+`hashNext`, and `QuotientGraph::eliminate` returns its `merged` list from a member scratch.
+Allocations per ordering at 140x140 fell from about 30000 on every branch to under 110, so
+fine-grained allocation is closed here.
+
+**Five passes landed the same day**, all but the first from Time Profiler traces rather than from
+reasoning: the shared adjacency and incidence run, hoisting loop bounds where the compiler could
+not, the boolean flag arrays off `std::vector<bool>`, and the two allocation sites above. alpamayo
+at 140x140 went from MMD1 2.98x, MMD2 1.97x, AMD1 1.90x and AMD2 3.00x to **2.40x, 1.42x, 1.50x and
+2.47x**, fill unchanged digit for digit throughout. `benchmarks/ordering/README.md` has the numbers
+and DESIGN_DECISIONS the reasoning.
+
+**And `make run` can no longer decide anything below about 5 percent**, the last several decisions
+having landed in the 1 to 4 percent band against 1.7 to 4 percent of drift. That is a constraint on
+how the remaining items get judged, not a reason to stop: the Time Profiler line is the instrument
+from here, and it is what settled three of the five passes.
+
+**Still unlooked-at, and now visible in the traces.** The graph constructor is 3 to 4 percent of
+MMD2 and mostly first touch, which no loop rewriting and no reduction in allocation count reaches.
+`Buckets::file` and `unfile` are about 7 percent of MMD2 between them and have never been examined.
+Neither is large enough to reach for before the driver restructuring.
+
+**The alignment discipline, while both exist.** `experiments/ordering`'s `make test` now diffs each
+ported prototype against the production driver extracted from it, on the same seven graphs, by
+linking `../../src` directly rather than a copy. `PORTED` in that Makefile lists the layers checked by
+permutation, `mmd1` and `amd1`, and `PORTED_FILL` those checked by nnz(L), `amd2`, which cannot be
+checked by permutation because production skips the postorder its prototype ends with. A layer
+joins one of the two when its driver lands.
+
+Trigger for the deprecation itself: ours matching the vendored routines' mechanisms, not their
+permutations, plus a fill comparison on something larger than a grid. The seven examples and small
+random graphs are not a structured test set, which the experiment's own open-items section says.
+
+
 ### Complex Hermitian dynamic LDL: DONE, 2026-07-19
 
 Recorded here as done rather than deleted, because it is the one factorization in the library with

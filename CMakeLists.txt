@@ -35,16 +35,21 @@ unset(CMAKE_REQUIRED_LIBRARIES)
 # on mmd_order / amd_order.
 add_library(oblio STATIC
     src/Amd.cpp
+    src/Amd1.cpp
+    src/Amd2.cpp
     src/BlasLapack.cpp
     src/DirectSolver.cpp
     src/ElmForestEngine.cpp
     src/Mmd.cpp
+    src/Mmd1.cpp
+    src/Mmd2.cpp
     src/MultiplyEngine.cpp
     src/NumFactorDynamic.cpp
     src/NumFactorEngine.cpp
     src/NumFactorStatic.cpp
     src/OrderEngine.cpp
     src/Permutation.cpp
+    src/QuotientGraph.cpp
     src/SolveEngine.cpp
     src/SparseMatrix.cpp
     src/SymFactorEngine.cpp

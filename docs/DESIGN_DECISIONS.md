@@ -67,6 +67,318 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-08-01, Fine-grained allocation in the ordering is closed, and all four sites had one cause
+
+Two last sites, both small: AMD2's hash buckets were a vector per bucket over n + 1, constructed and
+destroyed per ordering, and `QuotientGraph::eliminate` returned its `merged` list by value. The
+buckets are now `hashHead` and `hashNext`, the idiom `Buckets` already carries and `Amd.cpp` uses
+for the same job, and `merged` is a member scratch returned by const reference. Allocations per
+ordering at 140x140 went from 31915, 29499, 32256 and 46351 to 70, 105, 62 and 56. Measured on
+alpamayo at about 4 percent for AMD2 and 1.5 for the two MMDs once a 2 percent drift is removed, and
+nothing for AMD1, which had already stopped being allocation-bound.
+
+**The pattern is the entry, not the two sites.** Four things were fixed today and all four had the
+same origin: `I[u]` as a vector per vertex, `std::vector<bool>` for the flag arrays, `hashGroup` as a
+vector per bucket, `merged` returned by value. **Every one is a data structure that crossed from the
+prototypes into production along with the logic**, and the prototypes are right to hold all four that
+way, since their job is to read as the algorithm and they order one graph per run. The production
+drivers were extracted from them and kept the shapes past the conditions that justified them.
+
+So the lesson is not that we allocate too much. It is that **extracting a driver from a teaching
+implementation carries its containers as well as its algorithm**, and the containers are exactly the
+part that should not survive the move. Worth one deliberate pass the next time a prototype becomes
+production, asking of each container whether the algorithm needs it or the reader did. All four of
+these were found one accident at a time instead.
+
+**Two hazards that came out of the same day and generalize.** A container swapped for a chain can be
+a tie-break change in disguise: a head-pushed hash chain reverses each bucket, and the bucket order
+decides which of two indistinguishable vertices absorbs the other, so the first version moved four
+permutations. Filling in reverse restores them, and the only thing that caught it was diffing 76
+orderings against the previous tree. And a cache simulation on another machine over-predicted once
+and under-predicted once in the same afternoon, so it is worth having to decide whether a change is
+worth trying on the target, and worth nothing as an estimate of what it will buy.
+
+**What is not closed.** Coarse allocation remains and is fine, being a handful of whole arrays per
+ordering, which is what the forest and the symbolic factorization have always had. Memory is not
+closed either: the `std::vector<bool>` result was about initialization rather than allocation, and
+the constructor's first touch is still 3 to 4 percent of MMD2 and is not reachable by allocating
+less.
+
+---
+
+## 2026-08-01, Two micro-optimizations in the ordering, and both mechanisms were mis-guessed first
+
+Follow-ons to the shared-run entry below, both found by reading a Time Profiler trace rather than by
+reasoning, and both worth recording for the same reason: the change was right and the explanation we
+brought to it was wrong, twice.
+
+**Hoisting the loop bounds.** `for (i = 0; i < qg.incidenceSize(u); ++i)` re-loads the bound every
+iteration, because the loop bodies store through arrays the compiler cannot prove disjoint from the
+size vector. The accessor showed as 300 ms of self time in an inlined one-liner. Hoisted, AMD1 fell
+6.31 s to 6.09 s.
+
+The refinement is the part worth keeping: **hoist where the loop is long, leave it where the loop is
+short or exits early.** Hoisting everywhere made AMD2 2.3 percent worse and MMD2 3.2 percent worse,
+in loops that exit on the first mismatch or that run over at most two elements by construction.
+Eight sites decline the hoist and say so.
+
+Also: `g++` at `-O3` performs this hoist itself, so a Linux measurement reports zero. Apple Clang
+does not. **A negative result on one toolchain is not a result about another**, which the gprof
+entry in `benchmarks/README.md` already said about profilers and is now said about optimizers.
+
+**The boolean flags off `std::vector<bool>`.** Three arrays, `QuotientGraph::mEliminated`,
+`Buckets::mFiled` and `Mmd2`'s `outmatched`, moved to `std::vector<std::uint8_t>`. Measured on
+alpamayo at 140x140, the four branches gained 8 to 12 percent against controls that drifted 3, so
+call it 5 to 9.
+
+**The mechanism is construction, not access**, and the obvious story is wrong. A `std::vector<bool>`
+of n false is built bit by bit through the proxy machinery; a byte vector of n zeros is a `memset`.
+Two agreeing traces put the graph constructor at 710 ms before and about 186 ms after, with the flag
+reads moving by less than the noise. Both arrays are constructed once per ordering, so the saving is
+per construction and nearly uniform across branches, which is exactly the pattern the timings showed
+and which the access story cannot explain.
+
+The spelling is `std::uint8_t` rather than `char`, since the tree pins fixed-width types from
+`<cstdint>` and writes no bare fundamental type for storage. There was no precedent to follow: the
+only other small-value array in the tree is `NumFactorDynamic::mPivotType`, which is a
+`std::vector<std::int32_t>`.
+
+Three `std::vector<bool>` remain, in `ElmForestEngine` and `Permutation`, and stay: none is
+constructed per ordering or read per element. The prototypes in `experiments/ordering` keep the
+packed form too, and correctly, since they construct one graph per run.
+
+**One number elsewhere is now suspect.** The 2026-07-31 entry credits `mLiveMerges` with about a
+quarter of MMD1's time for skipping the `mEliminated[v]` load. That was measured against the packed
+array, and the read cost has since measured as noise, so the flag is probably worth much less than
+recorded. It still skips a load and a branch and should stay; the number should not be re-quoted
+without re-measuring.
+
+**And the two passes bought efficiency where the shared run bought work.** CPU Counters on AMD1 at
+three points: 29.50 G cycles at 49.02 percent useful on 2026-07-31, 25.93 G at 43.27 after the
+shared run, 22.49 G at 47.05 after these two. The dip in the middle was deleting allocator
+bookkeeping, which is high-IPC work, so the remainder was a harder mixture; these two put 3.8 points
+back. A timing table cannot tell those apart and this instrument can, which is the whole argument
+for it in `benchmarks/README.md`.
+
+The consequence is a work item being repriced. AMD1 against the vendored routine went from 1.95x
+cycles and 1.68x useful cycles to 1.49x and 1.23x, so its remaining gap is now roughly half work and
+half stalling where it was 86 percent work. The driver restructuring removes two of three visits per
+element and so attacks the work half alone: its ceiling is now about a fifth of AMD1 rather than the
+two fifths it looked like that morning. Still the largest item on the list, and no longer the whole
+answer.
+
+**And the instrument is spent.** Four of the last five decisions landed in the 1 to 4 percent band
+against 1.7 to 4 percent of drift between runs. Below roughly 5 percent, `make run` cannot decide
+anything, and the Time Profiler line is what settled both changes above.
+
+---
+
+## 2026-08-01, A vertex's two lists share one block, because their sum is conserved
+
+The ordering's last per-list allocation was `I[u]`, one `std::vector` per vertex, and a Time
+Profiler trace put its `push_back` in `eliminate` at 1.12 s of `amd1`'s 7.08 s, the largest single
+line in the program. The change that was written down for it was an arena, on the reading that
+`A[u]` only shrinks and `C[c]` is written once while `I[u]` genuinely grows.
+
+**`I[u]` does not grow, once it is not looked at alone.** `A[u]` and `I[u]` are the two kinds of
+*source* that `reach(u)` is a union over, one per explicit neighbor and one per clique, and each
+elimination that reaches `u` replaces at least one source with the new clique rather than adding
+one. Where `u` was reached through `A[pivot]`, the prune drops `pivot` from `A[u]`; where it was
+reached through a clique, that clique is absorbed and leaves `I[u]`. So
+
+```
+|A[u]| + |I[u]| <= the off-diagonal entries in u's column of A
+```
+
+for the whole run, the pair fits in one block sized once from the pattern, and nothing grows,
+moves or is reclaimed. Every later mechanism preserves it: mass elimination, live merging and
+numbering all empty a list or destroy a clique, and none creates a source.
+
+**Both vendored routines already do it, differently, and neither says why.** MMD holds a vertex's
+sources as one undifferentiated run and tells a variable from an element by looking the entry up;
+AMD splits the run and records the boundary in `Elen`. We took AMD's shape, since MMD's costs a
+load per entry read and that is exactly the load `mLiveMerges` exists to avoid paying. The order
+within our run is forced rather than chosen: the prune compacts the adjacency and then the
+incidence, and only adjacency-first keeps the write cursor behind the read one.
+
+**The correction this forced is worth more than the change.** Section 5.15 of
+`archive/sparse_factorization.md` had filed the whole of `Iw` under archaeology, alongside the
+compaction, on the grounds that a flat workspace is what a language without allocation forces. That
+is right about the pool and wrong about the run. `Iw` answers two questions at once and only one is
+about Fortran: where a vertex's sources live, which the bound settles for any language, and where
+the element patterns live, which genuinely grow and are what the pool, `pfree` and `ncmpa` exist
+for. The lemma is now 5.3 and the reading of the two codes is 5.15.
+
+**A general hazard, and the reason this sat unclaimed.** A flat workspace forces the question at
+the first line of code, since a run that can be outgrown needs a copy and a compaction, so both
+authors had to answer it before writing anything. A `std::vector` grows silently, so the question
+their encoding put first, ours never raised. That is a real cost of the better encoding rather than
+an anecdote about `I[u]`, and it is worth expecting again.
+
+**Measured, alpamayo, 2026-08-01.** Allocations at 140x140 fell from 31915 to 2457 (MMD1) and
+32256 to 2760 (AMD1); time fell 6 to 18 percent, MMD2 reaching 1.58x the vendored MMD, which is the
+closest any of ours has come and the first time the MMD branch has passed the AMD branch. Every
+permutation is bit-identical to before, checked over 76 orderings, and every fill figure is
+unchanged on two machines. `benchmarks/ordering/README.md` carries the numbers.
+
+**And the two tables disagree again**, 92 percent fewer allocations for 12 percent less time on
+AMD1, which is the third time in this work that allocation counts have not predicted time. What
+paid was removing a line from the innermost loop, not removing mallocs, and even that came in under
+what the trace attributed to it. AMD's remaining gap is work rather than memory, as the cycle
+profile said before this change and says after it, so the driver restructuring is unaffected.
+
+**What is retired without having been built.** `std::pmr` over a monotonic buffer, recommended in
+`experiments/ordering`'s garbage-collection section and in TODO, as the answer to per-list
+allocation in the ordering. There is no longer a per-list allocation to redirect.
+
+---
+
+## 2026-08-01, MMD2 needed less of the core than expected, and one sizing bug it exposed
+
+MMD2 is MMD1 plus the four things genmmd does around the batch: the prepass, the filing
+convention, the element-by-element q2h refresh, and pairwise merging with outmatched marking. A
+seventh ordering method, beside MMD1 rather than replacing it.
+
+**The eliminator did not change after all.** The expectation since the first hour of this work was
+that `mmd2_eliminate`'s `bwd[rn] = 0`, clearing the outmatched flag for everything a new clique
+reaches, would force a second eliminator or a flag through the shared one. It did not: nothing
+inside the eliminator reads that flag, and the driver already walks the new clique immediately
+afterwards to evict it from the buckets. So the clear lives in the driver, on a flag the driver
+owns, and the shared core kept its shape.
+
+What the core did need was smaller: a weighted reachable size, since pairwise merging makes a LIVE
+vertex stand for several originals; a `number` operation for the prepass, which marks a vertex
+without forming a clique or pruning anything; and the prune skipping vertices numbered that way,
+which linger in the adjacency by design.
+
+**A one-line sizing bug the prepass exposed.** `Buckets` indexed its heads by degree and its links
+by vertex from one size. Every branch until now filed a vertex under its degree, at most n - 1, so
+one array served both. MMD files under degree plus one, which reaches n, and on a one-vertex matrix
+that is an out-of-bounds write in the constructor's first filing. Caught by `test_order`'s n = 1
+tridiagonal, which is exactly the edge case the specification says to watch, and which the
+experiment's seven graphs cannot reach.
+
+**It is the one prediction of the day that paid.** The cycle profile had said MMD1's gap was work
+rather than efficiency, 42.2 percent useful cycles against the vendored 43.0, so the mechanisms
+were where the time was. MMD2 came in 30 percent faster than MMD1 at 140x140, taking the MMD branch
+from about 2.6x the vendored routine to 1.8x. Fill moves either way with the tie-breaks and is not
+the point.
+
+---
+
+## 2026-07-31, AMD2 takes two of AMD's mechanisms and not its postorder, and live merging changes the core
+
+AMD1 is the bound alone. AMD2 adds the two mechanisms that make the vendored routine what it is,
+both acting on the reached set the bound was just computed over: aggressive absorption, which kills
+a clique that scan 1 shows lies wholly inside the new one, and hash supervariable detection, which
+finds vertices indistinguishable from each other rather than from the pivot. It is a sixth ordering
+method beside the others, not a replacement for AMD1, so any difference between them stays
+measurable.
+
+**The postorder is not ported, and that costs the exact harness check.** `Amd.cpp` and the `amd2`
+prototype both end by returning a postorder of the assembly tree they build while eliminating.
+`ElmForestEngine` builds its own forest from the permuted matrix and orders it, so this would be
+work done twice and then overwritten. A postorder relabels an elimination tree without changing it,
+so skipping it moves the permutation and not the fill, which means production AMD2 cannot be
+diffed against its prototype by permutation. The harness therefore checks it by nnz(L) instead,
+through Oblio's own symbolic factorization, and the prototype's `matrix1` example is excluded
+because it exists to exercise the input conditioning we deliberately do not have.
+
+**Live merging is the first thing to change the shared core rather than a driver.** Everything
+before it merged only into the pivot, which is eliminated in the same breath, so no eliminated
+vertex could linger in a live clique. A hash merge folds one live vertex into another and leaves it
+where it lies at weight zero, since purging it from every clique that names it would cost a pass
+over the structure per merge and buy nothing, the merge test having established that it is
+redundant wherever it appears. `QuotientGraph::merge` is that operation, and the reachable set now
+has to skip dead vertices, which is what `amd2Neighbors` does and `amd1Neighbors` does not.
+
+**And that filter had to be made conditional, on measurement.** Adding it unconditionally cost MMD1
+about a quarter of its time, the exact refresh being its hot loop and the check being a load per
+element for a case that branch can never produce. A flag set by the first live merge, hoisted into
+a local, short-circuits the condition so the load never happens until a merge has actually
+occurred. Same correctness, no cost to the branches that cannot need it.
+
+**What AMD2 buys, measured on grids: not obviously anything yet.** Its fill is about 5 percent worse
+than AMD1's (487111 against 455472 at 140x140), which is the coarser-supervariable cost the
+experiment already measured on small graphs, and it runs about twice AMD1's time, the hash pass and
+the filter both being new work. It refreshes fewer degrees, which is what it was meant to buy, and
+on a grid that does not pay for itself. Whether it pays on a problem with real supernodal structure
+is exactly the question the thin test set cannot answer, and is now the strongest argument for
+widening it.
+
+---
+
+## 2026-07-31, Oblio's own orderings sit over a shared quotient graph, and the drivers return an order
+
+The ordering experiment has run far enough that the prototypes can start becoming production code.
+The plan is two parallel orderings beside the vendored pair, `MMD1` and `AMD1`, built from the
+`mmd1` and `amd1` layers, kept aligned with those prototypes while both continue to develop, and
+deprecating the vendored routines only once they can replace them. This entry records the shape
+those first two steps settled on. Both have landed, MMD1 first and AMD1 over the same seam, which
+needed three accessors on the quotient graph that an exact degree has no use for (the adjacency,
+the incidence list and the supervariable weight) and a refile on the buckets, and nothing else.
+
+**One core, two drivers.** `Cliques`, `Buckets`, `Neighbors`, `Eliminate` and `Refile` are
+byte-identical between `mmd1.cpp` and `amd1.cpp`, the duplication being deliberate in an experiment
+where each layer must read standalone. That reason does not survive the move, so production has one
+`QuotientGraph` unit holding the adjacency, incidence and clique lists, the degree buckets, the
+reachable-set query, the eliminator and the CSC-to-adjacency builder, with the drivers holding only
+what the two algorithms actually disagree about: a batch loop with eviction against one pivot per
+step with the bound.
+
+**The eliminator stays a plain member rather than a policy point.** `mmd2` changes it, clearing the
+outmatched flag for everything a new clique reaches, which is `mmdelm`'s `bwd[rn] = 0` and the first
+change to that function since md2. A second eliminator beside the first will be the right answer
+when it arrives. What is declined now is a parameter or a virtual on the strength of a divergence we
+can describe but have not written: one extra function beside its sibling is cheaper than a seam
+guessed at in advance.
+
+**The write grant stays with the engine.** `Permutation` declares `friend class OrderEngine`, and
+the rule elsewhere in this file is that an object is filled by exactly one engine. So the drivers
+return a `std::vector<std::int32_t>` elimination order and `OrderEngine::orderMMD1` writes the two
+maps from it, exactly as `orderAMD` already does with the vendored `P`. Making the drivers
+first-class fillers would have meant granting friendship to functions that are not engines, and
+would have cost the property that a driver can be called without a `Permutation` in hand, which is
+what lets the experiment check production against the prototype directly.
+
+**The dispatch became a switch, and it had to.** `OrderEngine::compute` was an if-chain ending in an
+unguarded fall-through to MMD, so a new enumerator would have become MMD silently and produced a
+valid permutation that nothing in the suite would have questioned. It is now a switch naming every
+enumerator with no `default`, which is the house rule and is what makes the next enumerator safe.
+The diagonal-stripping rebuild moved down into `orderMMD` with it: that is the vendored routine's
+requirement alone, AMD symmetrizing internally and MMD1 skipping `i == j` while building its own
+adjacency, and it was in the shared path only because MMD happened to be the fall-through.
+
+**What did not come across.** The printing, the counters, and `nnzL`. The last is not instrumentation
+in the way the others are, being the column-count identity computed from quantities the elimination
+already holds, but nothing downstream would read it: `SymFactorEngine` computes the exact structure
+later and never consults an ordering's estimate, which is the same argument the experiment's README
+makes against AMD's `Info` block. It is a few adds to restore if a use ever appears.
+
+**One defect did not come across.** `amd1` allocates and zeroes its per-clique array inside the
+pivot loop, which is O(n) per step and O(n * n) over the run in bookkeeping alone, independent of
+the graph, and would have swamped the very cost the bound exists to save. It is hoisted in
+production and in the prototype alike, the step clearing only what it wrote, with the prototype's
+trace unchanged to the character. The Python twin never had it, its own array being a dict over the
+cliques the step touched, which is already the right shape.
+
+**What these two are not.** Each carries its idea and not the whole of its vendored counterpart.
+MMD1 has no prepass, no `q2h` merging of vertices indistinguishable from each other, no outmatched
+marking, and our filing convention rather than MMD's. AMD1 is the bound and nothing else: no
+aggressive absorption, no hash detection, no dense-row removal, no postorder. So they are different
+orderings rather than reimplementations, and nothing asserts that they agree with anything.
+
+Measured on grid Laplacians through the same pipeline, nnz(L) lands within about two percent of the
+vendored routines throughout (at 32 by 32: MMD1 11972 against MMD's 11822, AMD1 12074 against AMD's
+11900), which is the two-sided noise the experiment predicts for a heuristic whose ties fall
+differently. Ordering time is five to ten times theirs, on per-list allocation rather than on any
+asymptotic difference: across a 20-fold size range both grow very close to linearly in n. Those
+numbers are the honest starting point rather than a target, and the allocation question is the one
+the experiment's garbage-collection section already anticipated, keep the containers and change the
+allocator.
+
+---
+
 ## 2026-07-31, Project roots are a second map over the tree, laid after the source layout
 
 Oblio is a C++ tree with a Python half in one experiment, and the two are read in different IDEs,

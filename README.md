@@ -9,10 +9,12 @@ traversal strategies.
 - **Three factorization types**: Cholesky, Static LDL^T (with diagonal perturbation),
   Dynamic LDL^T (threshold pivoting with 1x1 and 2x2 pivots)
 - **Three traversal algorithms**: Left-looking, Right-looking, Multifrontal
-- **Ordering**: Natural (identity), MMD (Multiple Minimum Degree), AMD (Approximate Minimum
-  Degree, Davis/Amestoy/Duff), and Oblio's own minimum-degree implementations: MMD1 and AMD1,
-  the base algorithms, and MMD2 and AMD2, which add the mechanisms their vendored counterparts
-  carry. Ours are not drop-in replacements for the vendored pair and order differently
+- **Ordering**, nine methods: Natural (identity), the vendored MMD (Multiple Minimum Degree) and
+  AMD (Approximate Minimum Degree, Davis/Amestoy/Duff), and Oblio's own, built over a shared
+  quotient graph: MMD1 and AMD1, the base algorithms; MMD2 and AMD2, which add the mechanisms
+  their vendored counterparts carry; and AMD1B and AMD2B, which are AMD1 and AMD2 computed on a
+  different schedule and return the same permutations. Ours are not drop-in replacements for the
+  vendored pair and order differently
 - **Single and multiple RHS**: `Vector<Val>` for one RHS, `DenseMatrix<Val>` for
   batched solves using per-supernode BLAS (`dtrsm` + `dgemm`)
 - **Scalar types**: `double`, `std::complex<double>` (via explicit instantiation).
@@ -186,30 +188,32 @@ include/oblio/      , public headers (declarations only)
   SparseMatrix.h    , sparse symmetric matrix (CSC)
   Vector.h          , dense vector (one right-hand side)
   Permutation.h     , bidirectional index map (oldToNew / newToOld)
-  OrderEngine.h     , fill-reducing ordering (Natural, MMD, AMD)
+  OrderEngine.h     , fill-reducing ordering, the nine methods below behind one enum
+  QuotientGraph.h   , the representation Oblio's own orderings run on, and its degree buckets
+  Mmd1.h  Mmd2.h    , Oblio's own MMD orderings
+  Amd1.h  Amd2.h    , Oblio's own AMD orderings
+  Amd1B.h Amd2B.h   , the same two orderings on a fused eliminator schedule (see below)
   ElmForest.h       , elimination forest and supernodes (data)
   ElmForestEngine.h , builds the elimination forest
   SymFactor.h       , symbolic factor: supernodal index structure (data)
   SymFactorEngine.h , computes the symbolic factorization
   NumFactorStatic.h , numeric factor, flat per-supernode storage (data)
   NumFactorDynamic.h, numeric factor, vector-of-vectors storage (data)
-  NumFactorEngine.h , computes the numeric factorization (Cholesky, static LDL)
-  UpdateBlock.h     , temporary update block used during numeric factorization
+  NumFactorEngine.h , computes the numeric factorization (Cholesky, static and dynamic LDL)
+  UpdateBlock.h     , one supernode's update to one ancestor, for the looking traversals
+  UpdateMatrix.h    , one supernode's whole contribution block, for multifrontal
   BlasLapack.h      , operation-named BLAS/LAPACK wrappers and custom kernels
   MultiplyEngine.h  , sparse matrix-vector product and residual
   SolveEngine.h     , triangular solves and right-hand-side permutation
   DirectSolver.h    , the whole pipeline behind one object (analyze / factor / solve)
 src/                , method bodies + explicit instantiations (flat layout)
+                      One .cpp per header, plus the vendored orderings, which have none:
   Amd.cpp           , AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
   Mmd.cpp           , MMD ordering (Sparspak/Liu, via Oblio 0.9)
-  QuotientGraph.cpp , the representation Oblio's own orderings run on, and its degree buckets
-  Mmd1.cpp          , MMD1 ordering (ours, over QuotientGraph)
-  Mmd2.cpp          , MMD2 ordering (ours, MMD1 plus prepass, q2h refresh, merging)
-  Amd1.cpp          , AMD1 ordering (ours, over QuotientGraph)
-  Amd2.cpp          , AMD2 ordering (ours, AMD1 plus absorption and hash detection)
-tests/              , test suites (213 tests; see docs/TESTING_SPECIFICATION.md)
+tests/              , test suites (241 assertions; see docs/TESTING_SPECIFICATION.md)
   smoke.cpp                    5,  quick end-to-end sanity
-  test_order.cpp              49,  ordering (Natural, MMD, MMD1, MMD2, AMD, AMD1, AMD2)
+  test_order.cpp              77,  the eight non-trivial orderings, and each B pair against its
+                                   original entry for entry
   test_permutation.cpp        11,  permutation maps
   test_forest.cpp             29,  elimination forest and supernodes
   test_symfactor.cpp          29,  symbolic factorization
@@ -219,9 +223,23 @@ tests/              , test suites (213 tests; see docs/TESTING_SPECIFICATION.md)
 examples/           , usage examples
   pipeline.cpp      , the pipeline by hand, every factorization / traversal / ordering
   basic.cpp         , the same solve through the DirectSolver facade
-benchmarks/         , timing and profiling against the current tree (see benchmarks/README.md)
-  ordering/         , what each ordering method costs, in time and in fill
+benchmarks/         , timing against the current tree, and expected to keep compiling as it moves
+  ordering/         , one phase against itself: what each ordering costs, in time and in fill
+  pipeline/         , the phases against each other: what share of a solve the ordering is, and
+                      after how many factorizations a slower-analyzing ordering pays for itself
+experiments/        , frozen design studies, each answering one question with a measurement
+  ordering/         , the minimum-degree family rebuilt one mechanism at a time, in C++ and Python
+  storage-options/  , flat against vector-of-vectors, and the accessor that spans both
+  template-instantiation/, three ways to instantiate a Val-templated class
+  friend-access/    , the access pattern the numeric kernels use
+  openmp/           , how much parallelism Accelerate already supplies, and what is left
 ```
+
+**On the ordering names.** A trailing digit means a different ordering: MMD2 has mechanisms MMD1
+lacks, so their permutations and their fill legitimately differ and both are correct. A trailing B
+means the same ordering computed on a different schedule, so AMD1B must return exactly AMD1's
+permutation and a difference is a defect in one of them. The two axes share one enum, which is why
+they are spelled out here and in `include/oblio/OrderEngine.h`.
 
 ## History
 
@@ -266,7 +284,9 @@ intermediates and exposes the analyze / factor / solve phases (see `examples/bas
 
 Done:
 
-- [x] MMD and AMD ordering (AMD from SuiteSparse 3.3.4; MMD via Oblio 0.9)
+- [x] MMD and AMD ordering, vendored (AMD from SuiteSparse 3.3.4; MMD via Oblio 0.9)
+- [x] Oblio's own minimum-degree orderings over a shared quotient graph: MMD1, MMD2, AMD1,
+      AMD2, and the AMD1B and AMD2B schedule variants
 - [x] Supernodal symbolic factorization (elimination forest + symbolic factor, ported from 0.9)
 - [x] Cholesky and static LDL, both LDL^T and LDL^H, left-looking and right-looking
 - [x] Single-RHS triangular solve (`Vector`)
@@ -274,7 +294,7 @@ Done:
 - [x] Namespaced headers (`include/oblio/`), explicit instantiation throughout
 - [x] Validated against Oblio 0.9 as oracle; end-to-end residual at machine precision
 - [x] `DirectSolver<Val>`, the top-level analyze / factor / solve driver
-- [x] 213 tests across 8 suites
+- [x] 241 assertions across 8 suites
 - [x] Dynamic LDL, threshold 1x1 / 2x2 pivots: all three traversals, delayed columns and all, at
       machine precision. Non-root supernodes follow Ashcraft, Grimes and Lewis (1998) Figure 3.4
       with the Figure 3.3 acceptance test; roots, which cannot delay, use bounded Bunch-Kaufman

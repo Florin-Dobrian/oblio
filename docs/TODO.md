@@ -1108,6 +1108,81 @@ is the same front-size question named here.
 
 ## Structure
 
+### Three ordering questions left open on 2026-08-01, all deliberately
+
+Raised at the end of the ordering optimization work and parked rather than decided, each with the
+reasoning that got them to that point so they can be picked up cold.
+
+**1. The prototypes and production have diverged in encoding, and the alignment check does not see
+it.** `experiments/ordering`'s `make test` compares four ported layers against production on the
+same seven graphs, three by permutation and `amd2` by fill, and all four still agree. That check is
+about what is computed, and it was never about how. What has diverged is everything else:
+production now shares one run between `A[u]` and `I[u]`, holds its flags as `std::uint8_t`, chains
+its hash buckets, and splits the eliminator in two, where the prototypes keep a container per list.
+That divergence is correct, since a prototype's job is to read as the algorithm and it orders one
+graph per run.
+
+What is arguably missing is not the layout but the **fact behind it**: the conservation lemma of
+section 5.3, `|A[u]| + |I[u]| <= deg(u)`, which is why the sharing is possible and which both
+vendored codes rely on without stating. A prototype that teaches the algorithm should teach that.
+The cheap form is to assert and display it rather than to restructure: track `max(|A[u]| + |I[u]|)`
+against `deg(u)` per layer, print it as a closing counter, and let the traces keep matching. It is
+one line per twin, it costs no readability, and it would catch a future mechanism that broke the
+bound before production silently overran a run. Measured, the bound comes out tight on nearly every
+graph, so the printed maximum is usually exactly `deg(u)`, which is evidence rather than an
+assertion nobody reads.
+
+Not proposed: restructuring `A` and `I` into one list in the prototypes, for the readability reason
+above; and nothing for `C[c]`, whose arena has no lemma behind it, being bounded by nnz(L) rather
+than by anything local.
+
+Also worth knowing: `AMD1B` and `AMD2B` have no prototype and are not in `PORTED`, being a
+re-schedule rather than a layer. Their oracle is `AMD1B == AMD1` in `test_order`, which is stronger
+than the experiment could give them. So the experiment covers six of the nine production orderings,
+and the other three are covered elsewhere.
+
+**2. The nnz cap is enforced for everyone and needed by two methods.** `SparseMatrix`'s constructor
+calls `checkIndexRange(mNnz, ...)` and throws before any ordering is chosen. The 2026-07-15 entry in
+DESIGN_DECISIONS explains why, and that explanation is now partly wrong: it says the cap comes from
+"the ordering handoff," as though there were one. There are nine paths and only two have it. The
+vendored `orderMMD` and `orderAMD` narrow `nnz` to `int` at `OrderEngine.cpp` lines 88 and 155, for
+`amd_order` and `mmd_order`, which are the `int`-based builds. **Ours impose nothing**: they take
+`colPtr` and `rowIdx` directly, `QuotientGraph` holds every position as `std::size_t`, and its only
+`int32_t` values are vertex indices, capped by `n` rather than by nnz.
+
+So a matrix with more than 2^31 nonzeros is representable, orderable by six of the nine methods and
+factorable, and `SparseMatrix` refuses to construct it anyway. Three ways out: move the check into
+the two vendored orderings, so "supported" becomes a per-method fact, which is what it is; leave it
+and correct the DESIGN_DECISIONS sentence, which costs nothing today since 2^31 nonzeros in A is a
+matrix whose factor fits no machine we have; or let it go when the vendored pair goes, which the
+Capability section already contemplates. The sentence in DESIGN_DECISIONS should be corrected either
+way, and that is the only part with any urgency.
+
+**3. Whether to reduce the number of arrays the inner loops touch, and what it could possibly be
+worth.** The comparative profile of 2026-08-01 put AMD1 at 1.87 times the vendored routine's D1
+misses for the same work, and the natural story is that `amd_2` walks one array where we walk about
+a dozen. **That story is unconfirmed.** The one hypothesis derived from it, halving the footprint of
+the six `std::size_t` arrays, cut simulated misses 17 percent and measured nothing on alpamayo, and
+was reverted. Their front-end stall is also worse than ours, 20.6 percent against 17.1, which is
+their encoding showing up in the same counters.
+
+**The ceiling is now known and it is small.** `benchmarks/pipeline` says analysis is about 40 percent
+of one analyze-plus-factor and ordering about half of analysis, so closing AMD1's entire 1.46x to
+parity would buy roughly 7 percent of a one-shot solve and nothing of a repeated one. A single flat
+pool with sentinels and a compaction pass is not an acceptable coding model for that, and
+constraining variable types for locality alone was already tried and reverted.
+
+The version worth testing, if any is, costs nothing in coding model. **`mSourcePtr[u]`,
+`mAdjacencySize[u]` and `mIncidenceSize[u]` are always read together for the same `u`** and live in
+three arrays, so one vertex's descriptor touches three cache lines where one struct would touch one.
+That is ordinary data-oriented layout rather than a pool: no encoding, no sentinels, no compaction,
+and arguably more readable, since a vertex's descriptor becomes a named thing instead of three
+parallel arrays a reader keeps in step by hand. The same may apply to `mCliquePtr` and
+`mCliqueSize`. A couple of hours, revertible the way the `size_t` experiment was, and worth doing
+only if 7 percent of a one-shot solve is worth it.
+
+### Two extractions in the dynamic factorization code
+
 Two extractions are available in the dynamic factorization code, recorded here in enough detail to
 be picked up cold. Both are refactors of working, tested code: 143 assertions cover this path,
 including tier 1 and tier 2 matrices that exercise both pivot selections and both traversals, so

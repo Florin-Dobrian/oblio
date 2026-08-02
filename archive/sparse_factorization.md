@@ -5645,29 +5645,64 @@ grow, since a clique's members are its pivot's reach and nothing in the pivot's 
 that. The pool, the free-space cursor, the copy on growth and the compaction all serve the second
 question. The first needs none of them.
 
-**The two codes take the trick differently**, and the difference is a real choice rather than
-another accident of encoding:
+**The three codes make two separate choices**, and they are worth keeping apart, because the
+obvious framing merges them. One choice is the LAYOUT: are the two kinds of source segregated
+within the run, and if so which comes first. The other is the BOOKKEEPING: given the layout, how
+does a reader tell which kind an entry is. Ours is in the table because both choices are still
+live, not because this section is about the port.
 
-| | a vertex's sources | telling a variable from an element |
-|---|---|---|
-| MMD (`mmdelm`) | one undifferentiated run | look the entry up, `qsize[nb] != 0` |
-| AMD (`amd_2`) | one run, elements first | `Elen[i]`, the position of the boundary |
+| | layout | total | split | classify an entry by |
+|---|---|---|---|---|
+| MMD (`mmdelm`) | variables first | `fwd[rn]` | not kept | `invp[nb] < 0`, per entry |
+| AMD (`amd_2`) | elements first | `Len[i]` | `Elen[i]` | position |
+| ours (`QuotientGraph`) | variables first | the sum | `mAdjacencySize[u]` | position |
 
-MMD does not distinguish the two kinds at all. A vertex's run holds live neighbors and dead ones
-mixed together, and an entry names an element exactly when the vertex it names has been
-eliminated, which is a lookup rather than a position. AMD splits the run and records where. The
-refresh is the same shape in both: compact the survivors from the start of the run with the write
-cursor trailing the read one, then write the new element immediately after them, in the same pass
-and the same block. `mmdelm` does it in five lines and stops at the run's original end, which is
-the bound of 5.3 being relied on without being stated.
+**Ours and MMD have the same layout.** In both, the only writes into a vertex's run are the
+initial adjacency, which is all variables; the compaction, which preserves relative order; and the
+append of the new element at the tail. Variables are never added and elements are only ever
+appended, so variables precede elements as an emergent invariant with nothing enforcing it. The
+entire difference between the two is that we record where the split is and MMD does not.
 
-Neither code says why it is entitled to any of this. The entitlement is not in either text, and it
-is not in the AMD paper; it is a property of the quotient graph that both authors evidently saw
-and neither wrote down, and its absence is most of why the trick reads as memory management.
+**MMD recovers the kind by indirection**, testing `invp[nb] < 0` for each entry: `invp` is the
+inverse permutation, `genmmd` writes `invp[mn] = -num` when it numbers a pivot, and the sign bit is
+spare until then. So MMD adds no array for this; it reads one it must produce anyway. That array is
+carrying four jobs at once, the output permutation, the liveness flag, the forward link of the
+degree lists, and the adjacency length of a live reached vertex (`fwd[rn] = nq + 1`), which is a
+density of purpose worth admiring and not worth imitating.
 
-So a modern version inherits the shared run and declines the pool, and the one thing it still
-chooses is MMD's lookup against AMD's boundary. That is a cost question rather than a matter of
-style: a boundary costs one number per vertex, and a lookup costs a load per entry read.
+**And MMD could keep the split, the others could drop it.** Nothing about an exact degree forbids a
+boundary, and nothing about an approximate one requires it: AMD already carries a liveness flag of
+its own (`Elen[e] < EMPTY` marks an element) and simply does not classify entries with it. These are
+two codes making different choices, not two algorithms forcing them.
+
+What the layout does decide is which bookkeeping is even applicable. Segregated, a boundary is
+sufficient and no per-entry test is needed. Interleaved, a boundary would be meaningless. A third
+combination, segregated but classified per entry, is dominated: segregation is exactly what makes
+the boundary cheap, and a scan for the sign change recovers only what the boundary already says,
+while still needing the total separately, since the trailing slots hold stale entries rather than a
+sentinel.
+
+Neither vendored code says why it is entitled to any of this. The entitlement is not in either
+text, and it is not in the AMD paper; it is a property of the quotient graph that both authors
+evidently saw and neither wrote down, and its absence is most of why the trick reads as memory
+management.
+
+**We took the boundary, and which is faster is not measured.** The counting favors it, one read per
+list against one per entry, and it is the same load our own code goes out of its way to avoid
+elsewhere: the reachable-set walk tests `mEliminated[v]` only when `mLiveMerges` is set, because
+setting it unconditionally costs about a quarter of MMD1's time. But MMD's loads land in `invp`,
+which the degree lists have already threaded, so they may be warm rather than cold, and a scattered
+read that hits is not the load that flag measured. On 2026-08-01 the one memory-shaped hypothesis
+about this code that was actually tested had the simulated counters and the machine disagree
+outright. So: a defensible choice, not a demonstrated one.
+
+The order within the run differs from AMD's, variables first where `amd_2` puts elements first
+(`Iw[Pe[i] .. Pe[i] + Elen[i] - 1]` is its element list, per its own comment). For us that is
+forced rather than chosen: the prune compacts the variables and then the elements in two passes,
+and the variables shrink by at least what the elements gain, so writing the elements last always
+trails the read cursor, where the other order would have the element write land on a variable not
+yet read. Why AMD's order is safe under its own structure is a question about its `scan2` that this
+section does not answer.
 
 MMD sits at a different point on both axes, and the contrast is instructive. Its inherent core is
 if anything lighter: it keeps the quotient graph and mass elimination but drops the two subtlest

@@ -269,12 +269,22 @@ for the whole run, the pair fits in one block sized once from the pattern, and n
 moves or is reclaimed. Every later mechanism preserves it: mass elimination, live merging and
 numbering all empty a list or destroy a clique, and none creates a source.
 
-**Both vendored routines already do it, differently, and neither says why.** MMD holds a vertex's
-sources as one undifferentiated run and tells a variable from an element by looking the entry up;
-AMD splits the run and records the boundary in `Elen`. We took AMD's shape, since MMD's costs a
-load per entry read and that is exactly the load `mLiveMerges` exists to avoid paying. The order
-within our run is forced rather than chosen: the prune compacts the adjacency and then the
-incidence, and only adjacency-first keeps the write cursor behind the read one.
+**Both vendored routines already do it, differently, and neither says why.** They differ on two
+separate choices, which the first version of this entry merged. The LAYOUT: MMD puts variables
+first and elements last, as we do, and AMD puts elements first. The BOOKKEEPING: AMD records the
+split in `Elen`, we record it in `mAdjacencySize`, and MMD records no split at all, recovering the
+kind per entry from `invp[nb] < 0`, the sign of the inverse permutation it must produce anyway.
+
+**Neither choice is forced by its algorithm**, which was the other thing the first version implied.
+MMD could keep a boundary and AMD could classify per entry; AMD even carries a liveness flag
+already, `Elen[e] < EMPTY`, and declines to use it that way. We took the boundary on the counting,
+one read per list against one per entry, and on the precedent that `mLiveMerges` exists precisely
+to avoid a per-entry liveness load. **Which is actually faster here is not measured**, and MMD's
+loads land in an array the degree lists have already threaded, so they may be warm. Section 5.15
+carries the full comparison.
+
+The order within our run is forced rather than chosen: the prune compacts the adjacency and then
+the incidence in two passes, and only adjacency-first keeps the write cursor behind the read one.
 
 **The correction this forced is worth more than the change.** Section 5.15 of
 `archive/sparse_factorization.md` had filed the whole of `Iw` under archaeology, alongside the

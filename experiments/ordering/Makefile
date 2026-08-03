@@ -57,7 +57,11 @@ endif
 #   make test PYTHON="uv run"
 PYTHON   ?= python3
 
-LAYERS = md1 md2 md3 md4 md5 mmd1 mmd2 amd1 amd2
+# The main ladder, then the three md2 alternatives. Those four together are the square described
+# in the README section "Zooming in on md2": exact against bounded on one axis, recomputed against
+# maintained on the other. They are not rungs and nothing is extracted from them, so they never
+# join PORTED below; their oracle is each other and their own twins.
+LAYERS = md1 md2 md3 md4 md5 mmd1 mmd2 amd1 amd2 mdm2 mda2 mdam2
 BINS   = $(addsuffix _cpp,$(LAYERS))
 
 # The layers that have been pulled into the main tree, and so have a production driver to be

@@ -2798,6 +2798,237 @@ problem, no banded matrix, no matrix with a natural supernodal structure. Two of
 findings came from graphs added specifically because the existing set hid something, which is
 evidence the set is still thin rather than evidence it is now sufficient.
 
+## Zooming in on md2: four ways to pick a pivot
+
+The ladder from md1 to md5 changes one thing per rung, and by md5 four ideas have accumulated. Two
+of them are independent of each other and get entangled by the order they arrive in: **whether the
+degree is exact or bounded**, which the ladder introduces at amd1, and **whether it is recomputed
+or maintained**, which arrives at md4 alongside mass elimination and supervariables.
+
+They are separable, and separating them at the earliest layer where both are expressible gives four
+files rather than two rungs:
+
+```
+                        recomputed            maintained
+exact degree            md2                   mdm2
+bounded                 mda2                  mdam2
+```
+
+Each neighbor in that square differs from its partner in exactly one thing, so any difference in
+order or in fill is attributable to that thing alone. md2 is the earliest layer where the square
+exists at all: md1 has no cliques, so there is nothing to bound and nothing to maintain.
+
+**Where each file spends its work, per step.** `n` is the vertex count, `live` the number not yet
+eliminated, and `|C[pivot]|` the size of the clique this step forms. Every picker walks all `n`
+slots and skips the eliminated, so the SCAN is `O(n)` in all four; what changes is how many of those
+slots cost real work and what that work is.
+
+md2, exact and recomputed:
+
+```
+picker      md2_neighbors(u) for every live u        O(n) scan, O(live) unions
+eliminate   md2_neighbors(pivot)                     1 union, becomes C[pivot]
+```
+
+mdm2, exact and maintained:
+
+```
+picker      read the cached degrees array            O(n) scan, no set work
+eliminate   mdm2_neighbors(pivot)                    1 union, becomes C[pivot]
+refresh     mdm2_neighbors(u) for u in C[pivot]      O(|C[pivot]|) unions, after
+```
+
+mda2, bounded and recomputed:
+
+```
+picker      mda2_bound(u) for every live u           O(n) scan, O(live) additions
+                                                     PIVOT-FREE bound
+eliminate   mda2_neighbors(pivot)                    1 union, becomes C[pivot]
+```
+
+mdam2, bounded and maintained:
+
+```
+picker      read the cached bounds array             O(n) scan, no set work
+eliminate   mdam2_neighbors(pivot)                   1 union, becomes C[pivot]
+refresh     mdam2_bound(u) for u in C[pivot]         O(|C[pivot]|) additions, after
+                                                     bound AGAINST C[pivot]
+```
+
+Read down the right column and the two axes are the two words that change: `live` becomes
+`|C[pivot]|` going right, and `unions` becomes `additions` going down. The `O(n)` scan is in every
+box and is what the third axis removes.
+
+**The two bounded boxes do not add the same things.** Same count of additions, different numbers
+added. The two bounds differ in their third term and nowhere else:
+
+```
+PIVOT-FREE            sum over c in I[u]              of ( |C[c]| - 1 )
+AGAINST C[pivot]      sum over c in I[u], c != pivot, of |C[c] - C[pivot]|
+```
+
+**The second is strictly the better bound**, and it is one line of set algebra. `u` is one member of
+`C[pivot]`, so `|C[c]| - 1` is `|C[c] - {u}|`, and `{u}` is a subset of `C[pivot]`, so removing
+`C[pivot]` removes at least as much:
+
+```
+|C[c] - C[pivot]|   <=   |C[c] - {u}|   =   |C[c]| - 1
+```
+
+**And the gap is exactly the double counting the new clique creates.** Every vertex in
+`C[c] & C[pivot]` other than `u` is already counted by the middle term `|C[pivot] - {u}|`; the
+pivot-free form counts it a second time and the other form does not. On a graph doing any real
+filling that is most of the overcount, since a vertex reached through two cliques is usually reached
+through the new one as well.
+
+Neither removes all of it. Both still double count a vertex lying in two of `I[u]`'s cliques
+OUTSIDE `C[pivot]`, which is the residual the approximation is named for and what graph4 exhibits.
+
+**Term by term, and this is the other angle on the same pair.** Written as the code computes them:
+
+```
+PIVOT-FREE          bound(u) = |A[u]|                              -> len(A[u])
+                             + sum over c in I[u] of ( |C[c]| - 1 ) -> sum of len(C[c]) - 1
+
+AGAINST C[pivot]    bound(u) = |A[u] - C[pivot]|                    -> len(A[u])
+                             + |C[pivot] - {u}|                     -> len(C[pivot]) - 1
+                             + sum over c in I[u], c != pivot,
+                                          of |C[c] - C[pivot]|      -> sum of outside[c]
+```
+
+**The pivot-free form has two terms, not three**, because there is no designated clique to separate
+out: where `u` belongs to the new clique, it is simply one more `c` in the sum. And the first term
+is `len(A[u])` in both, for the same reason, that the eliminator has already pruned `C[pivot]` out
+of `A[u]`.
+
+**The difference is one array.** `|C[c]| - 1` is a length read straight off `C[c]`, so the
+pivot-free form precomputes nothing and stores nothing. `|C[c] - C[pivot]|` is a subtraction, held
+in an `outside[]` array indexed by clique id, computed once per step and read by every member of
+the group whose incidence list names that clique.
+
+So **the tighter bound is cheap but not free**, which is worth stating plainly: it costs one pass
+over the group's incidence lists per step, `sum over u in C[pivot] of |I[u]|`, to fill `outside[]`.
+The pivot-free bound costs nothing at all beyond the additions it shares with the other. That is a
+real price for a better number, and it is small because the number is shared: without the sharing it
+would be an intersection per vertex, which is the union cost the whole approximation exists to
+avoid.
+
+The pivot-free form exists in this ladder for one reason only, that mda2 recomputes and so has no
+group to state the other against.
+
+**The eliminator's line is identical in all four**, and that is not an incidental symmetry. The new
+clique IS the reachable set, so forming it needs the members and not a count, and no approximation
+can help. One union per pivot is the floor, and every idea in the square is about the other calls.
+
+**The two axes cut different things, and they multiply.** One reduces HOW MANY vertices are worked
+on, the other reduces WHAT EACH ONE COSTS:
+
+```
+                        recomputed              maintained
+exact            n unions per step      |C[pivot]| unions per step
+bounded          n additions            |C[pivot]| additions
+```
+
+Neither is a refinement of the other, and each is worth having alone. That is what mdm2 and mda2
+show separately and mdam2 shows together.
+
+**The second axis is not a constant factor**, and this is the part most easily lost. The exact side
+costs, per vertex,
+
+```
+|A[u]| + sum over c in I[u] of |C[c]|          proportional to the MEMBERS of every clique
+```
+
+and the bounded side costs
+
+```
+|A[u]| + |I[u]|                                proportional to the COUNT of cliques
+```
+
+So the ratio between them is the average clique size, which grows with fill. The approximation is
+cheapest to skip on a sparse graph with tiny cliques and pays most on exactly the matrices where the
+ordering is expensive. Section 5.13 of `archive/sparse_factorization.md` makes the same point from
+the reuse side: `|C[c] - C[pivot]|` depends on the clique and not on the vertex, so one number
+serves every vertex naming it, where a union cannot be decomposed that way at all.
+
+**A third axis exists and this square does not touch it: the SCAN.** All four files find the minimum
+by walking an array of length n and skipping the eliminated, so the scan is `n` in every box, even in
+mdm2 and mdam2 where the *work* has fallen to `|C[pivot]|`. Maintained degrees remove the work, not
+the walk. Removing the walk is degree buckets, which is md5, and it is a third independent idea:
+file each live vertex under its degree and read the minimum off the front. Extended that way the
+square would be a cube, and **amd1 sits at its bounded, maintained and bucketed corner.**
+
+That is a statement about these three axes and nothing more. amd1 is md5 plus the bound, so it also
+carries what the md ladder accumulated below md5, supervariables and mass elimination from md3; and
+it carries none of the extras, aggressive absorption and hash supervariable detection, which arrive
+only at amd2. What the cube does say is that the bound is not the whole of amd1's advantage over
+md2: two of its three axes were already in place at md5, and the bound is the third.
+
+**The two axes are not independent in one direction**, which is the finding this square was built to
+expose. The bound is
+
+```
+reach(u)  = ( A[u] | C[c] for every c in I[u] ) - {u}
+degree(u) = |reach(u)|
+
+bound(u)  = |A[u] - C[pivot]|
+          + |C[pivot] - {u}|
+          + sum over c in I[u], c != pivot, of |C[c] - C[pivot]|
+```
+
+and it is stated against `C[pivot]`, which is what ties it to the other axis. A recomputing picker
+must produce a number for every live vertex at every step, including vertices this elimination never
+touched, and for such a vertex `C[pivot]` is not among `I[u]`'s cliques and there is no group to
+state the bound against. So md2's column gets a weaker form,
+
+```
+bound(u) = |A[u]| + sum over c in I[u] of ( |C[c]| - 1 )
+```
+
+which needs no designated clique. Its terms are exact for two reasons that are md2's doing rather
+than the bound's: `u` is in every `C[c]` with `c` in `I[u]`, so `|C[c] - {u}|` is `|C[c]| - 1` with
+no test; and `A[u]` is disjoint from all of them, because joining `c` pruned `C[c]` out of `A[u]` and
+`A[u]` only ever shrinks after. So its only overcount is one vertex lying in two cliques of `I[u]`.
+It is looser than the bound above, which removes the whole of `C[pivot]` from each other clique
+rather than just `{u}`.
+
+**Maintenance buys two things, not one**, and they arrive together because they follow from the same
+fact: the refresh set narrows from every live vertex to the members of `C[pivot]`.
+
+1. **Fewer vertices worked on**, `|C[pivot]|` instead of all the live ones. This is the obvious one
+   and it is what md4 is introduced for.
+2. **The tighter bound becomes expressible.** Every vertex being worked on is now a member of
+   `C[pivot]`, so a bound stated against `C[pivot]` applies to all of them.
+
+The second also makes that bound CHEAP rather than merely tighter, which is a third thing hiding
+inside it. `|C[c] - C[pivot]|` is one number per clique shared by the whole refresh group, obtained
+by walking `C[pivot]`'s members and decrementing a counter per clique in each one's incidence list.
+No clique is opened, and the cost is `sum over u in C[pivot] of |I[u]|` for the entire group. A
+recomputing picker has no group, so even if it could state the bound it would have to intersect
+cliques per vertex, which is the union cost the bound exists to avoid.
+
+The second goody is easy to miss because md4 and md5 do not use it. They compute exact degrees, so
+the tighter bound is available to them and simply never taken; it is taken at amd1, which is md5
+with the picker minimizing `bound(u)` instead of `degree(u)` and nothing else changed.
+
+**Which fixes a rule for the whole approximate branch.** A layer in the recomputing column gets the
+pivot-free bound because it can have no other. A layer in the maintained column gets the bound
+against `C[pivot]`. So `mda2` is the only file in the ladder that uses the pivot-free form, and
+`mdam2`, and any later `mda4` or `mda5`, use the tight one. The two bounds belong to the two columns
+rather than to two stages of a progression.
+
+**And there is a timing consequence.** In md2 and mda2 the degree work happens in the picker, before
+the elimination. In mdm2 and mdam2 it happens in a refresh phase after it, because `C[pivot]` does
+not exist until the eliminator has formed it. So the maintained pair have three phases where the
+recomputing pair have two, and a printed number for an untouched vertex is a cached value from
+whenever it was last refreshed rather than something computed for the display.
+
+**Results so far.** mda2 against md2 across the seven examples: the order differs on graph3 and
+graph4 and `nnz(L)` differs on none. On graph4 one pivot was chosen at a bound of 6 against a true
+degree of 3. That is the same shape as the supervariable result in 5.5, permutation differing and
+fill not, and a stronger version of it, since mda2 uses the weakest bound in the square with nothing
+to fall back on. Seven graphs is not evidence, and mdm2 and mdam2 are not written yet.
+
 ## Related
 
 - `archive/sparse_factorization.md` section 5, the prose, pseudocode and worked examples.

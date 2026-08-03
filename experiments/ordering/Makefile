@@ -61,21 +61,23 @@ PYTHON   ?= python3
 # in the README section "Zooming in on md2": exact against bounded on one axis, recomputed against
 # maintained on the other. They are not rungs and nothing is extracted from them, so they never
 # join PORTED below; their oracle is each other and their own twins.
-LAYERS = md1 md2 md3 md4 md5 mmd1 mmd2 amd1 amd2 mdm2 mda2 mdam2
+LAYERS = md1 md2 md3 md4 md5 mmd1 mmd2 amd1 amd2 amd3 mdm2 mda2 mdam2
 BINS   = $(addsuffix _cpp,$(LAYERS))
 
 # The layers that have been pulled into the main tree, and so have a production driver to be
 # checked against. Grows as the extraction proceeds; empty would simply skip that check.
-# Layers checked by permutation, and layers checked by fill. AMD2 is in the second group
-# because production skips the postorder the prototype ends with, so the permutations
-# legitimately differ while the fill does not.
+# Layers checked by permutation, and layers checked by fill. PORTED_FILL is empty and the weaker
+# check exists only in case a future layer needs it: amd2 was in it until the postorder moved to
+# amd3, and every ported layer now matches production entry for entry.
 #
-# The prototype's matrix1 is dropped from the comparison. It is the one example given as a matrix
-# rather than a graph, unsymmetric with duplicates and an unsorted column, and it exists to
-# exercise amd2Aat and amd2Preprocess. Production has no input conditioning on purpose, Oblio's
-# matrices being clean by construction, so there is nothing on this side to compare it against.
-PORTED      = mmd1 mmd2 amd1
-PORTED_FILL = amd2
+# amd3 is not here at all and is not expected to be. Its four items are input conditioning, the
+# postorder and a control interface, none of which Oblio has or wants, so there is no production
+# counterpart to compare it against. Its oracle is its own C++ twin. That is also why the
+# prototype's matrix1 has nothing to compare against on this side: it is the one example given as
+# a matrix rather than a graph, unsymmetric with duplicates and an unsorted column, and it exists
+# to exercise amd3Aat and amd3Preprocess.
+PORTED      = mmd1 mmd2 amd1 amd2
+PORTED_FILL =
 
 # The production sources those drivers need, linked directly rather than copied. A copy is right
 # for the vendored routines, which are not ours to edit, and wrong here: the point of this check

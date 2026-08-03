@@ -66,44 +66,6 @@ static void printOrder(const std::vector<std::int32_t>& order) {
     std::cout << "]\n";
 }
 
-// nnz(L) under an ordering, through Oblio's own symbolic factorization, printed in the format the
-// prototypes print it in so that the two can be diffed.
-//
-// This is what AMD2 is checked by rather than its permutation, and the reason is deliberate: the
-// prototype's last act is a postorder of the assembly tree, which production skips because
-// ElmForestEngine does that work itself. A postorder relabels an elimination tree without changing
-// it, so the two permutations differ and the fill does not. Weaker than an exact match, and still
-// enough to catch a wrong bound, a bad absorption or a merge that should not have happened.
-static void printFill(const std::vector<std::size_t>&  colPtr,
-                      const std::vector<std::int32_t>& rowIdx,
-                      const std::vector<std::int32_t>& order) {
-    const std::size_t size = colPtr.size() - 1;
-    std::vector<double> val(rowIdx.size(), 1.0);
-    for (std::size_t aj = 0; aj < size; ++aj)                 // a diagonal that cannot cancel
-        for (std::size_t cp = colPtr[aj]; cp < colPtr[aj + 1]; ++cp)
-            if (rowIdx[cp] == static_cast<std::int32_t>(aj)) val[cp] = 100.0;
-    const Oblio::SparseMatrix<double> A(size, colPtr, rowIdx, val);
-
-    Oblio::Permutation p;
-    std::vector<std::int32_t> newToOld(order.begin(), order.end());
-    p.setNewToOld(newToOld);
-
-    const Oblio::ElmForestEngine fe;
-    Oblio::ElmForest ef;
-    const Oblio::SymFactorEngine se;
-    Oblio::SymFactor sf;
-    if (!fe.compute(A, p, ef) || !se.compute(A, p, ef, sf)) { std::cout << "FAILED\n"; return; }
-
-    std::size_t nnzL = 0;
-    for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(sf.snodeSize()); ++kk) {
-        const std::size_t front = sf.frontSize(kk), update = sf.updateSize(kk);
-        nnzL += front * (front + 1) / 2 + front * update;
-    }
-    const std::size_t nnzTrilA = (rowIdx.size() - size) / 2 + size;
-    std::cout << "nnz(L) = " << nnzL << " against nnz(tril A) = " << nnzTrilA
-              << ", fill = " << (nnzL - nnzTrilA) << "\n";
-}
-
 static void run(const std::string& layer, const std::string& name, const Graph& graph) {
     std::cout << "=== " << name << " ===\n";
     std::vector<std::size_t>  colPtr;
@@ -112,7 +74,7 @@ static void run(const std::string& layer, const std::string& name, const Graph& 
     if (layer == "mmd1") printOrder(Oblio::orderMmd1(colPtr, rowIdx));
     if (layer == "amd1") printOrder(Oblio::orderAmd1(colPtr, rowIdx));
     if (layer == "mmd2") printOrder(Oblio::orderMmd2(colPtr, rowIdx));
-    if (layer == "amd2") printFill(colPtr, rowIdx, Oblio::orderAmd2(colPtr, rowIdx));
+    if (layer == "amd2") printOrder(Oblio::orderAmd2(colPtr, rowIdx));
     std::cout << "\n";
 }
 

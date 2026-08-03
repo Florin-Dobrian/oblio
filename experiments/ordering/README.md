@@ -153,7 +153,7 @@ nnz(L) instead, `amd2` today: production skips the postorder that prototype ends
 `ElmForestEngine` does that work itself, so the two permutations legitimately differ while the fill
 does not. That check runs Oblio's own symbolic factorization, which is why the target links the
 whole library. The prototype's `matrix1` is left out of it, being the example that exists to
-exercise `amd2Aat` and `amd2Preprocess`, which production has no counterpart to. It links `../../src/QuotientGraph.cpp` and
+exercise `amd3Aat` and `amd3Preprocess`, which production has no counterpart to. It links `../../src/QuotientGraph.cpp` and
 `../../src/Mmd1.cpp` directly rather than copying them, which is the opposite of what the vendored
 target does and deliberately so: a copy is right for code that is not ours to edit and wrong for
 code being actively changed at both ends, since noticing when the two come apart is the whole point.
@@ -1973,7 +1973,7 @@ matrix.
 its diagonal, which the factorization needs whether or not an entry is zero. The graph is a
 different object: an edge i-j says that eliminating one forces fill between the other and its
 neighbors, and a self loop says nothing, since i is not its own neighbor. Left in, it would put u
-inside reach(u) and make every degree one too large. So amd2_aat builds A[u] with u excluded, which
+inside reach(u) and make every degree one too large. So amd3_aat builds A[u] with u excluded, which
 is the `i == j` case in the code. It is a property of the conversion, not a modification of
 anything.
 
@@ -2000,12 +2000,12 @@ of A sit inside the Cholesky factor of A + A' under the usual no-cancellation as
 bounds the fill without predicting it. Oblio is a symmetric solver, so that case is AMD's
 generality rather than anything on Oblio's path.
 
-**amd2_preprocess** produces R, the row form of the pattern with duplicates removed, which is the
+**amd3_preprocess** produces R, the row form of the pattern with duplicates removed, which is the
 pattern of A transposed. `Amd.cpp` calls it whenever the input may be unsorted or duplicated, since
 R + R' is A + A' and R is clean. The deduplication is the usual stamp, `flag[i] == j` meaning row i
 has already appeared in column j.
 
-**amd2_aat** turns the two forms into adjacency lists and reports what the input looked like. Two
+**amd3_aat** turns the two forms into adjacency lists and reports what the input looked like. Two
 things are dropped: the diagonal, a self loop that says nothing about fill, and the distinction
 between A(i,j) and A(j,i), since either one forces the same elimination. The symmetry it reports is
 the vendored definition, with B the strictly triangular parts:
@@ -3162,6 +3162,371 @@ mda2 uses the weakest bound in the square with nothing to fall back on.
 
 Seven graphs is not evidence. What the square does establish is that the two axes are separable and
 that the bounds differ in a way that is visible on graphs this small.
+
+## Supervariable detection in production: how AMD does it, and how MMD does it
+
+The section "Detecting supervariables against each other, in mmd2 and amd2" above describes the
+mechanism as the PROTOTYPES write it, with Python tuples and `sorted`. This one describes what
+`src/Amd2.cpp` and the vendored `genmmd` actually do, which is a different implementation of the
+same idea and worth having written down beside the code rather than only beside the teaching
+version.
+
+Both find the same population: pairs of live vertices that have become indistinguishable from EACH
+OTHER without either being indistinguishable from the pivot. Mass elimination, which every layer
+from md3 up carries, finds only the pivot-relative case. What follows is two entirely different
+routes to the rest.
+
+### AMD: hash, then compare exactly
+
+Three phases, all over the members of the new clique, in `src/Amd2.cpp`.
+
+**What the mechanism means, before how it is done.** The specification is one loop:
+
+```
+for every pair (u, v) in C[p]:
+    if A[u] - {v} == A[v] - {u} and I[u] == I[v]:
+        merge v into u
+```
+
+That is `|C[p]|^2 / 2` pairs, and it is what the hash is an implementation of rather than a change
+to.
+
+**And it is the same test mass elimination makes, on a different pair.** Inside the eliminator the
+question is whether `u` is indistinguishable from the PIVOT; here it is whether `u` is
+indistinguishable from another member `v`. Both pairs are drawn from `C[p]`.
+
+What makes the two look so unlike in code is that **the pivot version does not have to be run as a
+set comparison.** Its test is
+
+```
+A[u] == {} and I[u] == {p}
+```
+
+two length checks and one entry. The reason is that the prune has already done the subtraction:
+immediately before the test the eliminator has computed
+
+```
+A[u] = A[u] - C[p] - {p}
+I[u] = ( I[u] - I[p] ) | {p}
+```
+
+so "everything u can still reach lies inside C[p]" is literally "A[u] is empty and I[u] names only
+the new clique". The symmetric form `A[u] - {p} == A[p] - {u} and I[u] == I[p]` is what it MEANS,
+and the prune has already reduced it to a two-field check. No such reduction exists for a pair,
+since nothing has subtracted `A[v]` from `A[u]`, so those sets have to be compared directly.
+
+```
+              pair       test                                 cost
+mass          (p, u)     A[u] == {} and I[u] == {p}           O(1) after the prune
+hash          (u, v)     A[u] - {v} == A[v] - {u},            |A| + |I| per pair
+                         I[u] == I[v]
+```
+
+**And the cheap version is also the conservative one.** graph5 is the case: vertex 4 has nothing
+explicit left but belongs to c1 as well as to the new clique, so `I[u] == {p}` fails even though
+everything 4 reaches lies inside `C[p]`, and the exact test would have merged it. That is one
+reason aggressive absorption travels with the hashing, since removing a contained clique is one way
+such a difference disappears.
+
+The hash partitions `C[p]` so that any pair which WOULD pass the test lands in the same bucket,
+which makes the pairs in different buckets skippable without changing the outcome. **It is a pruning
+of the pair enumeration, not a different question.** If the key spread badly and put everything in
+one bucket, the result would be identical and the cost would be the specification's; if it spread
+perfectly, the result would still be identical and the cost would be linear.
+
+As implemented:
+
+```
+INPUT   C[p], the clique this elimination formed
+
+# pass 1: one key per vertex, |C[p]| keys, no pairs
+bucket = empty map from hash value to list
+for u in C[p], u live:
+    key = sum over v in A[u], v live, of (v + 1)
+        + (n + 1) * sum over c in I[u] of (c + 1)
+    bucket[key mod (n + 1)].append(u)
+
+# pass 2: pairs, but only inside a bucket
+for each nonempty bucket B:
+    for each pair (u, v) in B, u before v:
+        if u dead or v dead: continue
+        if A[u] - {v} == A[v] - {u} and I[u] == I[v]:
+            merge v into u
+```
+
+Pass 1 costs the sum of `|A[u]| + |I[u]|` over `C[p]`. Pass 2 costs the sum of squared bucket sizes,
+where the specification costs `|C[p]|^2`; that ratio is the whole saving. The two liveness guards in
+the pair loop are not decoration: `u` may have been merged away by an earlier pair in the same
+bucket, and so may `v`.
+
+**The key, at the level of what it must satisfy.**
+
+```
+key(u)  = sum over v in A[u] of (v + 1)  +  (n + 1) * sum over c in I[u] of (c + 1)
+hash(u) = key(u) mod (n + 1)
+```
+
+- **A SUM, because the sets are unordered.** The map has to be invariant under permutation of each
+  list. A sum is; a concatenation is not. Any symmetric function would do and the sum is the
+  cheapest.
+- **`+ 1`, because vertex 0 must contribute.** Otherwise `{0, 5}` and `{5}` are indistinguishable.
+- **The stride `n + 1`, so a vertex and a clique of the same index cannot cancel.** Write the key in
+  base `n + 1`: the adjacency sum is the low digit and the incidence sum the high one. The two
+  halves are not fully separable, since the low sum can exceed `n + 1`, but a SINGLE vertex `v` and
+  a SINGLE clique `c` of the same index contribute `v + 1` against `(v + 1)(n + 1)`, so moving an
+  element from `A[u]` to `I[u]` cannot leave the key unchanged. Those are exactly the pairs that
+  must be told apart.
+
+**And the property that licenses all of it is one-directional:**
+
+```
+A[u] = A[v] and I[u] = I[v]   =>   key(u) = key(v)   =>   hash(u) = hash(v)
+```
+
+Both implications are trivial, equal multisets having equal sums and equal integers equal residues.
+The converse fails freely, since `mod (n + 1)` maps a range of size `O(n^2)` onto `n + 1` values. So
+collisions are common by construction, a false positive costs one exact comparison, and a false
+negative cannot occur. **That is why the key can be this crude** with no avalanche and no attempt at
+uniformity, which a general-purpose hash would need and this one does not.
+
+**1. Build a key and file the vertex.** For each live `u` in `C[p]`:
+
+```
+key  = sum over live v in A[u]  of  ( v + 1 )
+     + sum over c in I[u]       of  ( c + 1 ) * ( size + 1 )
+hash = key % ( size + 1 )
+```
+
+then push `u` onto the chain at `hashHead[hash]`, recording the hash in `usedKeys` the first time
+it is seen so the next step visits only the buckets this step touched.
+
+The sum, the `+ 1` and the stride are the key's design, argued above. One further decision belongs
+to the implementation alone.
+
+**The chain is filled in REVERSE**, iterating `C[p]` from its last member to its first. A chain
+pushed at the head comes out reversed, and the order within a bucket decides which of two
+indistinguishable vertices absorbs the other, so filling forward is a tie-break change wearing a
+data-structure change's clothes. It moved the permutation on four of the test graphs before the
+loop was turned around. Same hazard the degree buckets carry.
+
+**2. Compare, exactly, every pair within a bucket.** The test is
+
+```
+A[u] - {v} == A[v] - {u}    and    I[u] == I[v]
+```
+
+and it is decided by the mark scheme rather than by sorting, like every other membership test in
+this code. Stamp all of `v`'s entries with a fresh tag, counting them into `sizeV`; then walk `u`'s
+entries, checking each is stamped and counting them into `sizeU`. The sets are equal exactly when
+every one of `u`'s entries was stamped and `sizeU == sizeV`. One pass each, no allocation, and an
+early exit on the first mismatch.
+
+The removal of `v` from `A[u]` and of `u` from `A[v]` is not a detail: indistinguishable vertices
+are adjacent to each other, so without it no pair would ever match.
+
+`mark` is sized `2 * size` for this pass, with cliques stamped at `c + size`. That is the same
+separation the key's stride achieves, done a second time and for the same reason: a vertex and a
+clique of the same index must not be confused.
+
+**One elimination uses the mark-and-tag scheme in three different contexts**, which is worth listing
+in one place because the array and the counter are shared and the questions are not:
+
+```
+eliminator      inClique, absorbed        membership of C[p] and of I[p]
+absorption      dead_tag                  membership of the dead-clique set
+hash            other                     the exact set comparison
+```
+
+**The hash's use is the unusual one, in two ways.** It stamps BOTH vertices and cliques under one
+tag, which is why `mark` is `2n` long in this file and nowhere else; the eliminator gets away with a
+single range because a clique's id IS a vertex and only one kind is ever live under a given tag.
+
+And it is the only place where the mark answers EQUALITY OF TWO SETS rather than membership in one.
+The scheme does not do equality directly, so it is built from two membership passes and a count:
+stamp all of `v`, then walk `u` checking each entry is stamped and counting as it goes, then compare
+the counts. Membership catches anything in `u` that is not in `v`; the counts catch anything in `v`
+that is not in `u`. Neither test alone would do. That is the same construction the union at md2
+uses, one stamp of one side and one pass over the other, put to a different question, and it is why
+the exact test costs `|A| + |I|` rather than a sort.
+
+**3. Merge.** `qg.merge(u, v)` folds `v` into `u`: `v`'s weight moves to `u`, `v`'s lists are
+emptied, and `v` is marked eliminated. From then on `v` is invisible to every walk.
+
+**The two mechanisms differ in their TARGET, and the difference is total rather than incidental.**
+Both draw from the same set, `C[p]`, the clique the elimination just formed, whose members are the
+vertices the pivot reached. The pivot is not one of them, since `reach` excludes the vertex it is
+computed for.
+
+- **Mass elimination always folds into the PIVOT.** Its test is that `u`'s whole remaining reach
+  lies inside the new clique, which is a statement about the pivot, so the pivot is the only target
+  the test can have. The merged vertex leaves the graph with the pivot in the same step.
+- **The hash never folds into the pivot.** It compares pairs drawn from `C[p]`, and the pivot is not
+  a member of its own clique, so both vertices are live and neither is the pivot. The survivor stays
+  in the graph as a candidate, carrying the combined weight.
+
+That is also why the note above about degrees applies only to the hash. After a mass merge there is
+nothing to keep, the target being eliminated in the same step; after a hash merge the target is
+still a live candidate and needs a usable degree, which is the one it already has.
+
+A worked case, graph1 under amd1 and amd2, where the two mechanisms reach the same partition by
+different routes:
+
+```
+amd1   step 0   pivot 3   merged -                    supervariables  {3}  {2} {1} {0}
+       step 1   pivot 2   merged 1, 0  into 2  MASS   supervariables  {3}  {2,1,0}
+
+amd2   step 0   pivot 3   merged 2     into 0  HASH   supervariables  {3}  {0,2}  {1}
+       step 1   pivot 0   merged 1     into 0  MASS   supervariables  {3}  {0,2,1}
+```
+
+Note amd2's first step: the target is 0 while the pivot is 3. Two pivots either way, the same two
+vertices merged away, the same fill, and the same fundamental supernode partition, one singleton and
+one group of three. amd2 moves one merge earlier and takes it out of the later step, with no gain
+and no loss on a graph this small. graph3 is where the hash finds a pair mass elimination cannot,
+and there amd2 finishes in ten pivots against amd1's eleven.
+
+**And no degree is recomputed afterwards**, which is worth stating because it is the first thing a
+reader checks. `u` keeps the degree the bound pass wrote a few lines earlier, and it is still
+correct: an external degree excludes `u`'s own supervariable, the two vertices were adjacent to
+each other, and `v` leaves the graph entirely, so `u`'s reachable set is exactly what it was. What
+the merge changes is `u`'s WEIGHT, and the buckets are keyed on degree. Every other member of
+`C[p]` is unaffected as well, since `v` was in `C[p]` and its weight has moved to `u`, so the
+weighted `|C[p]|` is unchanged and with it the middle term of their bounds. The order of the three
+passes is therefore bound-then-hash and never the reverse.
+
+**What it costs.** A key is `|A[u]| + |I[u]|` per member of `C[p]`. A comparison is the same again
+per pair tested. The bucket loop is quadratic in bucket size, which is what the key's construction
+works to avoid, and it is also why AMD2's tag counter has no clean quadratic bound (see item 4 of
+the ordering questions in `docs/TODO.md`).
+
+**And it is opportunistic rather than exhaustive.** The pass runs over the reached set at each
+step, so it finds pairs that are indistinguishable AT THAT MOMENT and both present. A pair that
+becomes indistinguishable later and is never in a reached set together again is not found. That is
+a different kind of miss from a collision, and AMD accepts it too.
+
+### MMD: no hash, because it is not asking the same question
+
+`genmmd` finds SOME of the same population without any of the above, and the tempting summary, that
+an exact degree hands you the answer for free, is wrong. It is worth stating carefully, because the
+free-lunch reading is the one a reader arrives at.
+
+**A union walk computes `reach(u)`, never `reach(v)`.** So it cannot on its own conclude that `u`
+and `v` are indistinguishable: that needs both sets, and only one of them is being built.
+
+What it CAN conclude is narrower, and the code says exactly when. Our own `Mmd2.cpp`, in the middle
+of computing `reach(u)`:
+
+```cpp
+if (mark[v] == elementTag) {                                   // v is in the new element too
+    if (qg.adjacencySize(v) + qg.incidenceSize(v) - 1 == 1)    // and v has no OTHER source
+        qg.merge(u, v);                                        // identical reach
+    else
+        outmatched[v] = 1;                                     // v reaches more, never minimal first
+}
+```
+
+The walk found `v` through one of `u`'s own sources, so `v` is in the new element AND in that same
+other source. The second line then checks that `v` has no source `u` lacks. **Only then is
+`reach(v)` fully determined by what the walk has already seen**, and only then can the merge be
+made without computing anything more.
+
+And this runs only for a q2h vertex, one with exactly two sources, which is what put `u` on that
+list. So the population is: pairs where both vertices have exactly two sources and both sources
+coincide. `genmmd` does the same thing by a different route, stashing each reached vertex's pruned
+adjacency count as `fwd[rn] = nq + 1` and routing the `nq == 1` cases into its own q2h list.
+
+**So MMD is not avoiding the hash by being cleverer. It is avoiding it by not asking.**
+
+```
+MMD    pairs where both have exactly two sources, both shared
+       free, a by-product of a union it must compute anyway
+       cannot generalize: the walk gives reach(u) and never reach(v)
+
+AMD    any pair in C[p]
+       a key per vertex, an exact comparison per colliding pair
+       must go looking, because a bound never opens a clique
+```
+
+**AMD's mechanism does strictly more work because it answers a strictly harder question.** Its
+degree is a bound computed by decomposition, so it never opens a clique and never sees which other
+vertices share `u`'s sources; it has to go looking, looking at every pair is quadratic, and the
+filter is the hash. That AMD finds strictly more is the capability difference, and the cost of the
+hash is what that capability costs.
+
+**Which is the same trade as the degree itself, one level up.** MMD pays a full union and gets
+detection thrown in; AMD pays a cheap bound and then pays again for detection. Whether the total
+comes out ahead is not decidable by reasoning, and the measurement has been unkind to the
+intuition: our AMD2 carries both of AMD's mechanisms, fires the hash 2488 times across the test set
+against aggressive absorption's 1, and still fills 7 percent worse and orders 65 percent slower
+than our AMD1, which has neither. Every matrix behind those numbers is a grid, which is where a
+tie-break decides almost every pick.
+
+Section 5.5 of `archive/sparse_factorization.md` states the same fork in one place, since a reader
+meeting supervariables there would otherwise take hashing to be the definition rather than one of
+two routes.
+
+## What each file is, and what it adds
+
+The layers below md5 are a line, each rung adding one idea, and the section headings above describe
+them in order. From md5 the ladder forks, and from there the names carry two suffix conventions at
+once, which is easy to lose track of. This table is the inventory.
+
+```
+name     where         base or extras   what it adds
+------------------------------------------------------------------------------------------
+mmd1     experiment    base             N/A
+mmd2     experiment    extras           the q2h path, outmatching
+amd1     experiment    base             N/A
+amd2     experiment    extras           aggressive absorption, hash supervariable detection
+amd3     experiment    extras           dense rows by the alpha ratio, amd3_aat and
+                                        amd3_preprocess forming A + A', the postorder,
+                                        amd3_valid and the Control/Info interface
+
+Mmd1     production    base             N/A
+Mmd2     production    extras           the q2h path, outmatching
+Amd1     production    base             N/A
+Amd2     production    extras           aggressive absorption, hash supervariable detection
+Amd1B    production    base             N/A
+Amd2B    production    extras           aggressive absorption, hash supervariable detection
+```
+
+**"Base" is base for its BRANCH, not bare.** Every file in the table sits on md5, so all of them
+already carry supervariables, mass elimination, maintained degrees and degree buckets. A base file
+adds its branch's one idea and nothing else: multiple elimination for the MMD branch, the
+approximate degree for the AMD branch.
+
+**A trailing digit and a trailing B are different axes.** A digit means a DIFFERENT ORDERING: mmd2
+has mechanisms mmd1 lacks, so their permutations and their fill legitimately differ and both are
+correct. A B means the SAME ORDERING computed on a different schedule, so Amd1B must return exactly
+Amd1's permutation and a difference is a defect in one of them. That is why the B rows repeat their
+counterpart's extras rather than adding anything: they carry the same mechanisms and change only
+when the work is done, folding the driver's first scan into the eliminator's walk. They have no
+prototype, being a re-schedule rather than a layer, and their oracle is the identity check in
+`tests/test_order.cpp` rather than a Python twin.
+
+**amd3 is a third rung on the AMD branch and has no production counterpart.** Its four items are
+not ordering ideas: three are input conditioning and output ordering that Oblio does elsewhere or
+does not need, and the fourth is a control interface Oblio has no equivalent of. So it is checked
+against its own C++ twin and against nothing else, and it is not expected ever to be ported.
+
+That split is what lets **amd2 be checked by PERMUTATION** rather than by fill. Before it, the
+experiment's amd2 ended with a postorder that production does not do, so the two could only be
+compared on `nnz(L)`. With the postorder moved to amd3, every ported layer is on the strong oracle
+and `PORTED_FILL` in the Makefile is empty.
+
+**One thing amd2 takes from amd3 rather than from amd1**, and it is not optional. A hash merge
+leaves the merged vertex in place with weight zero rather than removing it from every list, so every
+walk has to skip eliminated vertices. amd1 has no such vertices and its core functions take no
+`eliminated` argument; amd2's do. That is the prototype's version of what production calls live
+merges, and it is why amd2 is amd1 plus two mechanisms AND a liveness-aware core.
+
+**What the extras are.** For MMD: the q2h path finds vertices with exactly two sources and merges
+indistinguishable pairs as a by-product of the exact-degree union; outmatching withholds a vertex
+that reaches strictly more than another until an elimination puts it back in the running. For AMD:
+aggressive absorption kills a clique whose members all lie inside the new one, free because
+`outside[c] == 0` is already computed for the bound; hash supervariable detection finds pairs
+indistinguishable from each other rather than from the pivot. The section above walks the AMD pair
+in detail and contrasts it with the MMD route.
 
 ## Related
 

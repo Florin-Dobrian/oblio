@@ -258,6 +258,20 @@ std::vector<std::int32_t> orderAmd2B(const std::vector<std::size_t>&  colPtr,
                     }
                     if (!same || sizeU != sizeV) continue;
 
+                    // The TARGET is a live vertex and never the pivot, which is the whole
+                    // difference from mass elimination. Both draw from C[p], the clique this
+                    // step formed, and the pivot is not a member of its own clique. So mass
+                    // elimination folds into a vertex that is leaving; this folds into one that
+                    // stays, carrying the combined weight and still a candidate.
+                    //
+                    // No degree is recomputed after a merge, and nothing here is stale as a
+                    // result. u keeps the degree the bound wrote a few lines above, which is
+                    // still correct: an external degree excludes u's own supervariable, the two
+                    // were adjacent to each other, and v leaves the graph entirely, so u's
+                    // reachable set is exactly what it was. What changes is u's WEIGHT, and the
+                    // buckets are keyed on degree. Every other member of C[p] is unaffected too,
+                    // since v was in C[p] and its weight has moved to u, so |C[p]| weighted is
+                    // unchanged and so is the middle term of their bounds.
                     buckets.unfile(degrees[v], v);
                     qg.merge(u, v);                 // v folded into u, left where it lies
                     ++numEliminated;                // out of the count, not out of the graph

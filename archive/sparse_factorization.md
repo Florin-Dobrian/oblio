@@ -3780,17 +3780,21 @@ two live vertices, and how you compare them is decided by what the degree comput
 looks at.
 
 - An **exact** degree unites, so computing it walks every member of every clique containing `i`.
-  While counting, it can see that some other vertex `j` arrived through the same sources, and if
-  `j` has no third source the two see identical sets. **The comparison is a by-product of the
-  count**: no candidate selection, no key, no bucket. `genmmd` does exactly this, and only for
-  vertices with exactly two sources, which is a restricted class of merges.
+  That walk computes `reach(i)` and NEVER `reach(j)`, so on its own it cannot conclude the two are
+  indistinguishable, which needs both sets. What it can conclude is narrower: having found `j`
+  through one of `i`'s own sources, if `j` has no source `i` lacks then `reach(j)` is fully
+  determined by what the walk has already seen, and the merge follows with no further work. That
+  condition holds only for vertices with exactly two sources, both shared, which is what `genmmd`
+  checks and is a restricted class of merges. **So the exact degree does not hand over the general
+  answer; it hands over a special case, free.**
 - An **approximate** degree decomposes, so it never opens a clique at all. It sees one number per
   clique, not members, and therefore knows nothing about which other vertices share `i`'s sources.
   It has to go looking; all pairs is quadratic; so it needs a filter, and the filter is the hash.
   `amd_2` does this, over any pair in the reached set, which finds strictly more.
 
-So the approximate route is cheaper per step and needs extra machinery bolted on, while the exact
-route is dearer per step and gets the detection thrown in. **Which total comes out ahead is not
+So the approximate route is cheaper per step and needs extra machinery to find any pair at all,
+while the exact route is dearer per step and gets a restricted class of pairs thrown in. The
+machinery is not waste: it buys a strictly larger population. **Which total comes out ahead is not
 decidable by reasoning**, and measurement has been unkind to the intuition: our AMD2 carries both
 of AMD's mechanisms and fires the hash 2488 times across the test set, and still fills 7 percent
 worse and orders 65 percent slower than our AMD1, which has neither. See

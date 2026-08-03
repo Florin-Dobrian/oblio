@@ -1108,7 +1108,7 @@ is the same front-size question named here.
 
 ## Structure
 
-### Three ordering questions left open on 2026-08-01, all deliberately
+### Four ordering questions left open on 2026-08-01, all deliberately
 
 Raised at the end of the ordering optimization work and parked rather than decided, each with the
 reasoning that got them to that point so they can be picked up cold.
@@ -1180,6 +1180,70 @@ and arguably more readable, since a vertex's descriptor becomes a named thing in
 parallel arrays a reader keeps in step by hand. The same may apply to `mCliquePtr` and
 `mCliqueSize`. A couple of hours, revertible the way the `size_t` experiment was, and worth doing
 only if 7 percent of a one-shot solve is worth it.
+
+**4. The mark-and-tag counters are `std::int32_t` with no guard, and both references have one.**
+The mark array is how every set operation in the ordering is done: a set is a number, membership is
+`mMark[v] == mTag`, insertion is one store, and nothing is ever cleared because the next set uses a
+larger number and every older stamp is then stale. It is the tool, and it is what makes each pass
+linear in what it touches instead of quadratic.
+
+**The counter is the one quantity in the ordering bounded by neither `n` nor nnz.** It counts sets
+built, and the rate depends on the layer: about `3n` on the AMD branch, but `nnz(L)` on the MMD
+branch, since `reachableSize` burns one per refreshed vertex per elimination. AMD2's own driver tag
+is worse still, advancing once per pair tested inside a hash bucket, which has no clean quadratic
+bound at all and is `O(n^3)` in the worst case.
+
+At `int32` that is a real ceiling and it is crossed silently: signed overflow is undefined
+behavior, in practice the counter wraps negative, `mMark[v] == mTag` starts matching stale stamps,
+and the ordering comes out wrong with nothing reported. Two billion comparisons is a couple of
+seconds of work, so this is inside runs we already do, and `mTag` on the MMD branch overflows at
+roughly `n = 716 million`, well inside the `2^31 - 1` dimension that `SparseMatrix` advertises.
+
+**Both vendored routines carry a guard and we dropped it in the port.** `genmmd` line 42 and AMD's
+`clear_flag` do the same thing: when the counter nears its ceiling, sweep the mark array clearing
+stale stamps, reset the counter to a small value, and continue. Neither returns an error; the
+matrix is ordered correctly and the only cost is one `O(n)` pass. The trigger is at the ceiling and
+not anywhere convenient, because the counter's range IS the amortization: sweeping every pivot
+would be `n^2`, which is exactly the cost the stamp scheme exists to avoid.
+
+**Three fixes, and the first is the one to take.**
+
+- **Keep `int32` and port the sweep.** Bounds the counter by construction and needs no premise
+  about how long a run can be. The sweep costs one `O(n)` pass per `2^31` increments, which
+  amortizes to `n / 2^31` per query, nothing, and in practice never fires at all. The trigger must
+  sit at the counter's ceiling and nowhere convenient: sweeping per pivot would be `n^2`, exactly
+  the cost the stamp scheme exists to avoid. Preserve whatever sentinel the array uses for a
+  permanent state, as `genmmd` preserves `maxint` and AMD preserves zero.
+- **Widen to `std::size_t`**, which `mMark` must follow, since it stores tag values. No branch, no
+  sweep, no sentinel rule. But correct by an argument about achievable run lengths rather than by
+  construction: `2^64` is reachable in principle, at `n` around 2.6 million on AMD2's cubic bound,
+  and unreachable in practice only because every increment is a comparison actually executed, so
+  exhausting the type means executing `2^64` comparisons, centuries of machine time. Sound, and a
+  premise rather than a proof. It also doubles `mMark`, the hottest array in the ordering.
+- **Stamp with a composite entity instead of a counter**, `(pivot, u)` in md1's shape or
+  `(pivot, which-of-three)` in md2's, in two arrays. Bounded by `n` rather than by work, so `int32`
+  is safe permanently with no guard. Rejected on two counts: the query costs two loads and two
+  compares in the innermost loop where the others cost one, and correctness rests on the pair never
+  repeating, which is a property of the current loop structure rather than of the scheme. Batch the
+  eliminations, refresh a vertex twice, or add any mechanism that revisits, and it breaks silently.
+  A counter is unique by construction and survives restructuring.
+
+Not `size_t` plus the sweep: the sweep would be dead code guarding an unreachable case.
+
+**And the general rule this turns on**, worth keeping because the tree already contains both forms.
+A mark array needs its stamp to be unique over the array's lifetime, and there are two ways to get
+that. Stamp with an ENTITY that is provably unique, which is free in range and as fast as anything,
+but rests on a proof that lives in the loop structure and is written down nowhere:
+`SymFactorEngine` stamps with `kk`, the supernode index, and is safe because each supernode's index
+set is built exactly once in order. Or stamp with a COUNTER, which is unique by construction and
+survives any restructuring, at the price of being bounded by work rather than by problem size and
+so needing either a sweep or a width. The ordering cannot use the first form: a vertex's reachable
+set is rebuilt at every elimination that touches it, so the vertex names the vertex and not the
+occasion, and md2 has three sets live at once besides.
+
+The counters are five, not one: `QuotientGraph`'s `mMark` and `mTag`, plus the drivers' own in
+`Mmd2`, `Amd1` and `Amd2`. `Amd2` sizes its mark at `2 * size`, since it stamps cliques at
+`c + size`; widening changes the element type and not the length.
 
 ### Two extractions in the dynamic factorization code
 

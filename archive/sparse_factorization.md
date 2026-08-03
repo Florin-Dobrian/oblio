@@ -3697,9 +3697,10 @@ Two vertices with **identical neighborhoods** will have equal degree at every st
 chosen at the same moment, and will fill in identically. They can be merged and eliminated
 together.
 
-They are detected by **hashing** the pattern (`A_i` and `E_i` together) and then comparing
-candidates within a bucket, since a hash collision is not a match. A merged vertex is a
-**supervariable**, and it carries a weight: how many original vertices it stands for.
+They can be detected by **hashing** the pattern (`A_i` and `E_i` together) and then comparing
+candidates within a bucket, since a hash collision is not a match. That is one of two routes, and
+which one a code takes follows from its degree; see the note at the end of this section. A merged
+vertex is a **supervariable**, and it carries a weight: how many original vertices it stands for.
 
 This is not a marginal optimization. Real matrices are full of indistinguishable vertices,
 especially after a few eliminations have merged their neighborhoods, and supervariables are
@@ -3767,6 +3768,34 @@ on nine of them and `nnz(L)` was identical on all fourteen. The merge is not mer
 appears to be free: a merged vertex creates no fill when eliminated next, so promoting it ahead of
 whatever the degree would have picked cannot cost anything. Measured rather than proved, and on
 prototypes rather than production code, but the result is clean enough to state.
+
+**How they are detected depends on the degree, and that is not obvious from here.** The hashing
+above is one route, and it is the one an APPROXIMATE degree is forced into. The two families end up
+doing genuinely different things, which is worth stating in one place even though it needs 5.11 and
+5.13 to be fully understood.
+
+Mass elimination is the part both get free, since it asks only whether `A_i` is empty and `C_i` is
+exactly the new clique, which the eliminator already knows. Everything beyond it means comparing
+two live vertices, and how you compare them is decided by what the degree computation already
+looks at.
+
+- An **exact** degree unites, so computing it walks every member of every clique containing `i`.
+  While counting, it can see that some other vertex `j` arrived through the same sources, and if
+  `j` has no third source the two see identical sets. **The comparison is a by-product of the
+  count**: no candidate selection, no key, no bucket. `genmmd` does exactly this, and only for
+  vertices with exactly two sources, which is a restricted class of merges.
+- An **approximate** degree decomposes, so it never opens a clique at all. It sees one number per
+  clique, not members, and therefore knows nothing about which other vertices share `i`'s sources.
+  It has to go looking; all pairs is quadratic; so it needs a filter, and the filter is the hash.
+  `amd_2` does this, over any pair in the reached set, which finds strictly more.
+
+So the approximate route is cheaper per step and needs extra machinery bolted on, while the exact
+route is dearer per step and gets the detection thrown in. **Which total comes out ahead is not
+decidable by reasoning**, and measurement has been unkind to the intuition: our AMD2 carries both
+of AMD's mechanisms and fires the hash 2488 times across the test set, and still fills 7 percent
+worse and orders 65 percent slower than our AMD1, which has neither. See
+`benchmarks/ordering/README.md`, and note that every matrix there is a grid, which is where a
+tie-break decides almost every pick.
 
 ### 5.6 A worked example: supervariables
 
@@ -5196,6 +5225,29 @@ which is why one answer serves every vertex that touches it. The cost per vertex
 walk over its elements' members to one addition per element. That is the entire speed argument,
 and it says where the gain lands: the ratio between the two grows with element size, which is to
 say with fill, which is to say precisely where the ordering is expensive.
+
+**The clique walk is not avoided, only the repetition of it.** This is easy to misread, because the
+argument above can sound as though the approximate degree never opens an element at all. It opens
+exactly one: the eliminator has to form `L` itself, and forming it means walking `A_p` and the
+members of every element in `E_p`. Both families pay that, once per pivot, and neither can avoid
+it. What differs is what happens afterwards, per vertex in `L`:
+
+```
+                        per pivot                        then per vertex i in L
+exact          |A_p| + sum |L_e| over e in E_p    |A_i| + sum |L_e| over e in E_i
+approximate    |A_p| + sum |L_e| over e in E_p    |A_i| + |E_i|
+```
+
+The first column is identical for both; the whole difference is the second. There the exact degree
+walks the members of `i`'s elements again, and the approximate degree reads one number per element
+and never opens it. So the saving is
+not that elements go unvisited; it is that **an element's members are visited once per pivot rather
+than once per pivot per vertex that names it.** An element with 50 members touched by 50 vertices is
+walked once instead of fifty times, and the ratio is the element's size, which is the fill.
+
+Our own code shows the split cleanly: `Amd1.cpp` calls `clique()` exactly once, for the pivot's own
+members, and never for any other; `Mmd2.cpp` calls it three times, because its refresh unites over
+each refreshed vertex's elements.
 
 **The other two terms are the brake**, and they are easy to read past as bookkeeping. Both are
 exact and both are cheap: `n - k` counts what is left to eliminate, and `degree_old[i] + |L \ i|`

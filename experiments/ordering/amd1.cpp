@@ -360,7 +360,7 @@ amd1Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
     const std::vector<std::int32_t> absorbedCliques = I[pivot];
     for (std::int32_t c : absorbedCliques)
         C.erase(c);
-    C.create(pivot, neighbors);     // becomes L_pivot, the column pattern
+    C.create(pivot, neighbors);     // becomes the column pattern of the pivot
 
     // Stamp the new clique once, and the absorbed cliques once. Membership is then
     // a comparison, and both loops below are compactions in place. cliqueTag is the
@@ -472,6 +472,7 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
     std::size_t numDegreeComputations = n;
     std::size_t numMemberVisits = 0;              // what an exact refresh would cost
     std::size_t numCliqueReads = 0;               // what the bound costs instead
+    // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     std::size_t numBoundChecks = 0;
     std::size_t numLooseBounds = 0;
 
@@ -498,6 +499,8 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
     // which is already the right shape.
     std::vector<std::size_t> outside(n, 0);
 
+    // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+    // is the whole reason they exist; nothing downstream reads it.
     amd1Show(A, I, C, degrees, exact,
              "start: every edge explicit, no clique yet, degrees exact", &eliminated);
     amd1ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
@@ -587,6 +590,8 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
             }
             bound = std::min(bound, numLeft - superMembers[u].size());
             bound = std::min(bound, degrees[u] + degme - superMembers[u].size());
+            // NOT PRODUCTION: instrumentation. This computes the very union the bound exists to
+            // avoid, and its only purpose is to show the truth beside the estimate.
             exact[u] = amd1ExactDegree(A, I, C, superMembers, mark, tag, u);
             ++numBoundChecks;
             if (bound > exact[u]) ++numLooseBounds;
@@ -654,6 +659,8 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
               << ", pruned edges: " << prunedEdgesText.str()
               << ", merged vertices: " << mergedVerticesText.str()
               << ", refreshed: " << refreshedVerticesText.str();
+        // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        // is the whole reason they exist; nothing downstream reads it.
         amd1Show(A, I, C, degrees, exact, title.str(), &eliminated);
         amd1ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
         ++step;
@@ -670,6 +677,7 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
               << numMemberVisits << "\n";
     std::cout << "clique reads the bound needed:                    "
               << numCliqueReads << "\n";
+    // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     std::cout << "bound was loose " << numLooseBounds << " times out of "
               << numBoundChecks << "\n";
     std::cout << "order: [";

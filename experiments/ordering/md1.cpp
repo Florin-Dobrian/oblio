@@ -140,6 +140,8 @@ std::vector<std::int32_t> md1MinimumDegree(const Graph& G) {
     std::size_t totalFill = 0;
     std::size_t degreeSum = 0;     // sum of pivot degrees == sum of column counts of L
 
+    // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+    // is the whole reason they exist; nothing downstream reads it.
     md1Show(A, "start: every edge explicit, no fill yet", &eliminated);
     for (std::int32_t step = 0; step < static_cast<std::int32_t>(n); ++step) {
         std::int32_t pivot = NIL;
@@ -167,6 +169,8 @@ std::vector<std::int32_t> md1MinimumDegree(const Graph& G) {
         title << "step " << step << ": eliminate " << pivot << " (degree " << degree
               << "), fill edges: " << fillEdgesText.str()
               << ", fill so far: " << totalFill;
+        // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        // is the whole reason they exist; nothing downstream reads it.
         md1Show(A, title.str(), &eliminated);
     }
 

@@ -97,6 +97,8 @@ def md1_minimum_degree(G):
     total_fill = 0
     degree_sum = 0                # sum of pivot degrees == sum of column counts of L
 
+    # NOT PRODUCTION: display only. The trace is what makes these files teachable and
+    # is the whole reason they exist; nothing downstream reads it.
     md1_show(A, "start: every edge explicit, no fill yet", eliminated=eliminated)
     for step in range(n):
         pivot = min((u for u in range(n) if not eliminated[u]), key=lambda u: len(A[u]))
@@ -107,6 +109,8 @@ def md1_minimum_degree(G):
         degree_sum += degree
 
         fill_edges_text = ", ".join(f"{u}-{v}" for u, v in fill_edges) if fill_edges else "none"
+        # NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        # is the whole reason they exist; nothing downstream reads it.
         md1_show(A,
              (f"step {step}: eliminate {pivot} (degree {degree}), "
               f"fill edges: {fill_edges_text}, fill so far: {total_fill}"),

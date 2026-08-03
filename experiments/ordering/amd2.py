@@ -341,7 +341,7 @@ def amd2_eliminate(A, I, C, mark, tag, eliminated, pivot):
     absorbed_cliques = list(I[pivot])
     for c in absorbed_cliques:
         del C[c]
-    C[pivot] = list(neighbors)      # becomes L_pivot, the column pattern
+    C[pivot] = list(neighbors)      # becomes the column pattern of the pivot
 
     # Stamp the new clique once, and the absorbed cliques once. Membership is then
     # a comparison, and both loops below are compactions in place. clique_tag is
@@ -465,6 +465,7 @@ def amd2_minimum_degree(G, alpha=10.0, aggressive=True):
     num_member_visits = 0                      # what an exact refresh would cost
     num_clique_reads = 0                       # clique reads in the bound itself
     num_incidence_reads = 0                    # incidence entries scan 1 walks
+    # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     num_bound_checks = 0
     num_loose_bounds = 0
     num_absorbed = 0                           # cliques killed aggressively
@@ -543,6 +544,8 @@ def amd2_minimum_degree(G, alpha=10.0, aggressive=True):
     min_degree = min([degrees[u] for u in range(n) if not eliminated[u]], default=0)
     num_bucket_probes = 0
 
+    # NOT PRODUCTION: display only. The trace is what makes these files teachable and
+    # is the whole reason they exist; nothing downstream reads it.
     amd2_show(A, I, C, degrees, exact,
               "start: every edge explicit, no clique yet, degrees exact",
               eliminated=eliminated)
@@ -669,6 +672,8 @@ def amd2_minimum_degree(G, alpha=10.0, aggressive=True):
             bound = min(bound,
                         num_left - len(super_members[u]),
                         degrees[u] + degme - len(super_members[u]))
+            # NOT PRODUCTION: instrumentation. This computes the very union the bound exists to
+            # avoid, and its only purpose is to show the truth beside the estimate.
             exact_u, tag = amd2_exact_degree(A, I, C, eliminated, super_members, mark, tag, u)
             exact[u] = exact_u
             num_bound_checks += 1
@@ -811,6 +816,8 @@ def amd2_minimum_degree(G, alpha=10.0, aggressive=True):
         pruned_edges_text = ", ".join(f"{u}-{v}" for u, v in pruned_edges) if pruned_edges else "none"
         merged_vertices_text = ", ".join(str(u) for u in merged_vertices) if merged_vertices else "none"
         refreshed_vertices_text = ", ".join(str(u) for u in refreshed_vertices) if refreshed_vertices else "none"
+        # NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        # is the whole reason they exist; nothing downstream reads it.
         amd2_show(A, I, C, degrees, exact,
                   (f"step {step}: eliminate {pivot} (degree {degree}, size {super_size}, "
                   f"external degree {external_degree}), "
@@ -819,6 +826,8 @@ def amd2_minimum_degree(G, alpha=10.0, aggressive=True):
                   f"merged vertices: {merged_vertices_text}, "
                   f"refreshed: {refreshed_vertices_text}"),
                  eliminated=eliminated)
+        # NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        # is the whole reason they exist; nothing downstream reads it.
         amd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
         step += 1
 
@@ -898,6 +907,7 @@ def amd2_minimum_degree(G, alpha=10.0, aggressive=True):
     print(f"clique-member visits an exact degree would need: {num_member_visits}")
     print(f"clique reads the bound needed:                    {num_clique_reads}")
     print(f"incidence entries scan 1 walked:                  {num_incidence_reads}")
+    # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     print(f"bound was loose {num_loose_bounds} times out of {num_bound_checks}")
     print(f"aggressively absorbed: {num_absorbed}, hash merges: {num_hash_merges}")
     print(f"dense threshold: {dense_threshold}, dense rows removed: "

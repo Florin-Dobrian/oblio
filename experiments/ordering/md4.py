@@ -162,7 +162,7 @@ def md4_eliminate(A, I, C, mark, tag, eliminated, pivot):
     absorbed_cliques = list(I[pivot])
     for c in absorbed_cliques:
         del C[c]
-    C[pivot] = list(neighbors)      # becomes L_pivot, the column pattern
+    C[pivot] = list(neighbors)      # becomes the column pattern of the pivot
 
     # Stamp the new clique once, and the absorbed cliques once. Membership is then
     # a comparison, and both loops below are compactions in place. clique_tag is
@@ -243,6 +243,8 @@ def md4_minimum_degree(G):
     degrees = [len(A[u]) for u in range(n)]
     num_degree_computations = n
 
+    # NOT PRODUCTION: display only. The trace is what makes these files teachable and
+    # is the whole reason they exist; nothing downstream reads it.
     md4_show(A, I, C, degrees, "start: every edge explicit, no clique yet",
              eliminated=eliminated)
     md4_show_state(degrees, super_members, eliminated, pivots)
@@ -290,6 +292,8 @@ def md4_minimum_degree(G):
         pruned_edges_text = ", ".join(f"{u}-{v}" for u, v in pruned_edges) if pruned_edges else "none"
         merged_vertices_text = ", ".join(str(u) for u in merged_vertices) if merged_vertices else "none"
         refreshed_vertices_text = ", ".join(str(u) for u in refreshed_vertices) if refreshed_vertices else "none"
+        # NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        # is the whole reason they exist; nothing downstream reads it.
         md4_show(A, I, C, degrees,
                  (f"step {step}: eliminate {pivot} (degree {degree}, size {super_size}, "
                   f"external degree {external_degree}), "
@@ -298,6 +302,8 @@ def md4_minimum_degree(G):
                   f"merged vertices: {merged_vertices_text}, "
                   f"refreshed: {refreshed_vertices_text}"),
                  eliminated=eliminated)
+        # NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        # is the whole reason they exist; nothing downstream reads it.
         md4_show_state(degrees, super_members, eliminated, pivots)
         step += 1
 

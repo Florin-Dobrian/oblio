@@ -341,7 +341,7 @@ md5Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
     const std::vector<std::int32_t> absorbedCliques = I[pivot];
     for (std::int32_t c : absorbedCliques)
         C.erase(c);
-    C.create(pivot, neighbors);     // becomes L_pivot, the column pattern
+    C.create(pivot, neighbors);     // becomes the column pattern of the pivot
 
     // Stamp the new clique once, and the absorbed cliques once. Membership is then
     // a comparison, and both loops below are compactions in place. cliqueTag is the
@@ -463,6 +463,8 @@ std::vector<std::int32_t> md5MinimumDegree(const Graph& G) {
     std::size_t minDegree = n > 0 ? *std::min_element(degrees.begin(), degrees.end()) : 0;
     std::size_t numBucketProbes = 0;
 
+    // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+    // is the whole reason they exist; nothing downstream reads it.
     md5Show(A, I, C, degrees, "start: every edge explicit, no clique yet", &eliminated);
     md5ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
     int step = 0;
@@ -560,6 +562,8 @@ std::vector<std::int32_t> md5MinimumDegree(const Graph& G) {
               << ", pruned edges: " << prunedEdgesText.str()
               << ", merged vertices: " << mergedVerticesText.str()
               << ", refreshed: " << refreshedVerticesText.str();
+        // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        // is the whole reason they exist; nothing downstream reads it.
         md5Show(A, I, C, degrees, title.str(), &eliminated);
         md5ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
         ++step;

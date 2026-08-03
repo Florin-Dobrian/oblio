@@ -1212,8 +1212,21 @@ would be `n^2`, which is exactly the cost the stamp scheme exists to avoid.
   about how long a run can be. The sweep costs one `O(n)` pass per `2^31` increments, which
   amortizes to `n / 2^31` per query, nothing, and in practice never fires at all. The trigger must
   sit at the counter's ceiling and nowhere convenient: sweeping per pivot would be `n^2`, exactly
-  the cost the stamp scheme exists to avoid. Preserve whatever sentinel the array uses for a
-  permanent state, as `genmmd` preserves `maxint` and AMD preserves zero.
+  the cost the stamp scheme exists to avoid.
+
+  **And ours can be simpler than either reference, which is worth knowing before copying one.**
+  `genmmd` sweeps `if (marker[i] < maxint) marker[i] = 0` and restarts at `tag = 1`; AMD sweeps
+  `if (W[x] != 0) W[x] = 1` and restarts at `wflg = 2`. Both are selective because both park a
+  permanent state in the same array, `maxint` for a dead vertex and zero for an absorbed element,
+  and neither can rest at its own sentinel. **Ours carries nothing but tags.** So the sweep is an
+  unconditional fill back to the state the constructor left: `mark` to `NIL`, `tag` to 0, after
+  which the invariant is identical to the one at startup and there is no second resting pair to
+  reason about. AMD's `wbig = Int_MAX_VAL - n` headroom is likewise not needed, since it exists
+  because `W[e]` can hold `wflg + size`, and ours holds only tags.
+
+  The one open detail is where the guard goes: at every `++tag` site, which is seven in
+  `QuotientGraph` plus the drivers' own, or once inside a small `nextTag()`. Presumably the
+  second, and it is a decision for when the code is written rather than now.
 - **Widen to `std::size_t`**, which `mMark` must follow, since it stores tag values. No branch, no
   sweep, no sentinel rule. But correct by an argument about achievable run lengths rather than by
   construction: `2^64` is reachable in principle, at `n` around 2.6 million on AMD2's cubic bound,

@@ -85,9 +85,12 @@ import sys
 
 def mda2_show(A, I, C, mark, tag, title=None, eliminated=None):
     """Print a quotient graph: adjacency, incidence, cliques, in the order the
-    structure holds them. Prints bound and degree side by side, the second being
-    what the first is approximating. Returns the advanced tag, since the degree it
-    prints is recomputed through mda2_neighbors."""
+    structure holds them, with the bound and the exact degree side by side.
+
+    The degree IS recomputed here, through mda2_neighbors, which costs the very
+    union the bound exists to avoid. It is here to be looked at and appears nowhere
+    in the picker, which is why the tag advances and why this function returns
+    it."""
     n = len(A)
     width = len(str(max(n - 1, 0)))
     alive_vertices = [u for u in range(n) if eliminated is None or not eliminated[u]]
@@ -105,7 +108,8 @@ def mda2_show(A, I, C, mark, tag, title=None, eliminated=None):
     for u in alive_vertices:
         adjacency_text = " ".join(f"{v:>{width}}" for v in A[u])
         incidence_text = " ".join(f"c{c}" for c in I[u])
-        degree, tag = mda2_exact_degree(A, I, C, mark, tag, u)
+        neighbors, tag = mda2_neighbors(A, I, C, mark, tag, u)
+        degree = len(neighbors)
         bound = mda2_bound(A, I, C, u)
         if bound > degree:
             loose += 1
@@ -155,15 +159,6 @@ def mda2_neighbors(A, I, C, mark, tag, u):
                 neighbors.append(v)
     return neighbors, tag
 
-def mda2_exact_degree(A, I, C, mark, tag, u):
-    """|reach(u)|, the number the bound is approximating.
-
-    Here to be looked at and for no other reason. Computing it costs the union the
-    bound exists to avoid, so a layer that used it would be md2 with extra steps.
-    It appears in the trace beside the bound and nowhere in the picker."""
-    neighbors, tag = mda2_neighbors(A, I, C, mark, tag, u)
-    return len(neighbors), tag
-
 def mda2_bound(A, I, C, u):
     """An upper bound on |reach(u)|, computed without forming reach(u).
 
@@ -201,7 +196,13 @@ def mda2_bound(A, I, C, u):
     return len(A[u]) + sum(len(C[c]) - 1 for c in I[u])
 
 def mda2_eliminate(A, I, C, mark, tag, eliminated, pivot):
-    """Turn the pivot into a clique. md2's eliminator, unchanged.
+    """Turn the pivot into a clique.
+
+    Returns (neighbors, absorbed_cliques, pruned_edges, tag): the pivot's neighbor
+    set, which becomes the clique and the pattern of its column of L; the cliques
+    that the new one swallows; the explicit edges the new clique makes redundant;
+    and the advanced tag. The middle two are reported for display; only neighbors
+    is used by the caller.
 
     Set view of the whole function, in the order the code does it:
 
@@ -211,11 +212,23 @@ def mda2_eliminate(A, I, C, mark, tag, eliminated, pivot):
             A[u] = A[u] - C[pivot] - {pivot}       prune
             I[u] = ( I[u] - I[pivot] ) | {pivot}   absorb into C[pivot], reclaim I[pivot]
 
-    The eliminator still unites, and has to: the new clique IS the reachable set,
-    so there is nothing here to approximate. Bounding the degree buys nothing at
-    this call and everything at the picker's, which is the asymmetry the whole
-    approximate branch rests on. One union per pivot either way; the exact branch
-    pays another per live vertex per step."""
+    The new clique is C[pivot] and gets no name of its own, so the first line reads
+    as what an elimination IS: the pivot stops being a vertex with a reachable set
+    and becomes a clique holding that same set. The last line is the first two
+    written on the I side, since u is in C[c] exactly when c is in I[u].
+
+    Three set differences, and not one of them builds a set. Each is a single stamp
+    of the subtrahend followed by one compaction pass over the minuend, which turns
+    |A[u]| * |C[pivot]| comparisons into |A[u]| + |C[pivot]|.
+
+    This file bounds the degree and this function is untouched by that, which is
+    worth saying here rather than only in the header. The new clique IS the
+    reachable set, so forming it needs the members and not a count and there is
+    nothing to approximate. The approximation buys nothing at this call and
+    everything at the picker's, which is the asymmetry the whole bounded branch
+    rests on: one union per pivot either way, and the exact branch pays another per
+    vertex it refreshes.
+    """
     neighbors, tag = mda2_neighbors(A, I, C, mark, tag, pivot)
     absorbed_cliques = list(I[pivot])
     for c in absorbed_cliques:
@@ -223,7 +236,9 @@ def mda2_eliminate(A, I, C, mark, tag, eliminated, pivot):
     C[pivot] = list(neighbors)      # becomes the column pattern of the pivot
 
     # Stamp the new clique once, and the absorbed cliques once. Membership is then
-    # a comparison, and both loops below are compactions in place.
+    # a comparison, and both loops below are compactions in place. clique_tag is
+    # the set C[pivot] and absorbed_tag is the set I[pivot], each built in one pass
+    # and then queried for free.
     tag += 1
     clique_tag = tag
     for v in neighbors:
@@ -273,8 +288,11 @@ def mda2_minimum_degree(G):
     eliminated = [False] * n
     order = []
     degree_sum = 0
+    # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     loose_picks = 0
 
+    # NOT PRODUCTION: display only. The trace is what makes these files teachable and
+    # is the whole reason they exist; nothing downstream reads it.
     tag = mda2_show(A, I, C, mark, tag, "start: every edge explicit, no clique yet",
                     eliminated=eliminated)
     for step in range(n):
@@ -282,20 +300,24 @@ def mda2_minimum_degree(G):
         for u in range(n):                 # no tag advances here: the bound reads lengths
             if eliminated[u]:
                 continue
-            candidate = mda2_bound(A, I, C, u)
-            if pivot == -1 or candidate < best:
-                pivot, best = u, candidate
-        exact, tag = mda2_exact_degree(A, I, C, mark, tag, pivot)
-        if best > exact:                   # the pivot was chosen on a loose number
-            loose_picks += 1
+            candidate_bound = mda2_bound(A, I, C, u)
+            if pivot == -1 or candidate_bound < best:
+                pivot, best = u, candidate_bound
         neighbors, absorbed_cliques, pruned_edges, tag = mda2_eliminate(
             A, I, C, mark, tag, eliminated, pivot)
         degree = len(neighbors)
+        # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
+        # No union is needed for it: the eliminator has just formed reach(pivot) as
+        # the new clique, so degree IS the pivot's exact degree, free of charge.
+        if best > degree:
+            loose_picks += 1
         order.append(pivot)
         degree_sum += degree
 
         absorbed_cliques_text = ", ".join(f"c{c}" for c in absorbed_cliques) if absorbed_cliques else "none"
         pruned_edges_text = ", ".join(f"{u}-{v}" for u, v in pruned_edges) if pruned_edges else "none"
+        # NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        # is the whole reason they exist; nothing downstream reads it.
         tag = mda2_show(A, I, C, mark, tag,
                         (f"step {step}: eliminate {pivot} (bound {best}, degree {degree}), "
                          f"absorbed cliques: {absorbed_cliques_text}, "
@@ -305,6 +327,7 @@ def mda2_minimum_degree(G):
     nnz_L = degree_sum + n
     print(f"nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
           f"fill = {nnz_L - nnz_tril_A}")
+    # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     print(f"loose picks = {loose_picks} of {n}")
     print(f"order: {order}")
     return order

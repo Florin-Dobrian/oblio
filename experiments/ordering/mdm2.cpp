@@ -244,7 +244,7 @@ mdm2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
     const std::vector<std::int32_t> absorbedCliques = I[pivot];
     for (std::int32_t c : absorbedCliques)
         C.erase(c);
-    C.create(pivot, neighbors);     // becomes L_pivot, the column pattern
+    C.create(pivot, neighbors);     // becomes the column pattern of the pivot
 
     // Stamp the new clique once, and the absorbed cliques once. Membership is then
     // a comparison, and both loops below are compactions in place. cliqueTag is the
@@ -304,6 +304,8 @@ std::vector<std::int32_t> mdm2MinimumDegree(const Graph& G) {
     std::vector<std::size_t> degrees(n);
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) degrees[u] = A[u].size();
 
+    // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+    // is the whole reason they exist; nothing downstream reads it.
     mdm2Show(A, I, C, degrees, "start: every edge explicit, no clique yet", &eliminated);
     for (std::int32_t step = 0; step < static_cast<std::int32_t>(n); ++step) {
         std::int32_t pivot = NIL;          // O(n) scan of cached integers, no set work
@@ -346,6 +348,8 @@ std::vector<std::int32_t> mdm2MinimumDegree(const Graph& G) {
         title << "step " << step << ": eliminate " << pivot << " (degree " << degree
               << "), absorbed cliques: " << absorbedCliquesText.str()
               << ", pruned edges: " << prunedEdgesText.str();
+        // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        // is the whole reason they exist; nothing downstream reads it.
         mdm2Show(A, I, C, degrees, title.str(), &eliminated);
     }
 

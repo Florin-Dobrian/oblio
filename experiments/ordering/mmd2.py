@@ -271,7 +271,7 @@ def mmd2_eliminate(A, I, C, mark, tag, eliminated, outmatched, pivot):
     absorbed_cliques = list(I[pivot])
     for c in absorbed_cliques:
         del C[c]
-    C[pivot] = list(neighbors)      # becomes L_pivot, the column pattern
+    C[pivot] = list(neighbors)      # becomes the column pattern of the pivot
 
     # Stamp the new clique once, and the absorbed cliques once. Membership is then
     # a comparison, and both loops below are compactions in place. clique_tag is
@@ -407,6 +407,8 @@ def mmd2_minimum_degree(G, delta=0):
     outmatched_count = 0                       # vertices withheld rather than refiled
     touched_round = [-1] * n                   # the round in which u was last evicted
 
+    # NOT PRODUCTION: display only. The trace is what makes these files teachable and
+    # is the whole reason they exist; nothing downstream reads it.
     mmd2_show(A, I, C, degrees, "start: every edge explicit, no clique yet",
               eliminated=eliminated)
     mmd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
@@ -427,6 +429,8 @@ def mmd2_minimum_degree(G, delta=0):
         num_eliminated += 1
     if prepass_vertices:
         prepass_text = ", ".join(str(u) for u in prepass_vertices)
+        # NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        # is the whole reason they exist; nothing downstream reads it.
         mmd2_show(A, I, C, degrees,
                   f"prepass: numbered {len(prepass_vertices)}: {prepass_text}",
                   eliminated=eliminated)
@@ -606,6 +610,8 @@ def mmd2_minimum_degree(G, delta=0):
 
         batch_text = ", ".join(str(u) for u in batch)
         refreshed_vertices_text = ", ".join(str(u) for u in refreshed_vertices) if refreshed_vertices else "none"
+        # NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        # is the whole reason they exist; nothing downstream reads it.
         mmd2_show(A, I, C, degrees,
                   (f"round {num_rounds - 1} done: batch of {len(batch)}: {batch_text}, "
                    f"refreshed: {refreshed_vertices_text}"),

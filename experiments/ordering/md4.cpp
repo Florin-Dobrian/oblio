@@ -271,7 +271,7 @@ md4Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
     const std::vector<std::int32_t> absorbedCliques = I[pivot];
     for (std::int32_t c : absorbedCliques)
         C.erase(c);
-    C.create(pivot, neighbors);     // becomes L_pivot, the column pattern
+    C.create(pivot, neighbors);     // becomes the column pattern of the pivot
 
     // Stamp the new clique once, and the absorbed cliques once. Membership is then
     // a comparison, and both loops below are compactions in place. cliqueTag is the
@@ -363,6 +363,8 @@ std::vector<std::int32_t> md4MinimumDegree(const Graph& G) {
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) degrees[u] = A[u].size();
     std::size_t numDegreeComputations = n;
 
+    // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+    // is the whole reason they exist; nothing downstream reads it.
     md4Show(A, I, C, degrees, "start: every edge explicit, no clique yet", &eliminated);
     md4ShowState(degrees, superMembers, eliminated, pivots);
     int step = 0;
@@ -454,6 +456,8 @@ std::vector<std::int32_t> md4MinimumDegree(const Graph& G) {
               << ", pruned edges: " << prunedEdgesText.str()
               << ", merged vertices: " << mergedVerticesText.str()
               << ", refreshed: " << refreshedVerticesText.str();
+        // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        // is the whole reason they exist; nothing downstream reads it.
         md4Show(A, I, C, degrees, title.str(), &eliminated);
         md4ShowState(degrees, superMembers, eliminated, pivots);
         ++step;

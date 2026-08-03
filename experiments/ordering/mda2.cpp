@@ -268,6 +268,14 @@ std::vector<std::int32_t> mda2Neighbors(const Graph& A, const Graph& I, const Cl
 // Three set differences, and not one of them builds a set. Each is a single stamp
 // of the subtrahend followed by one compaction pass over the minuend, which turns
 // |A[u]| * |C[pivot]| comparisons into |A[u]| + |C[pivot]|.
+//
+// This file bounds the degree and this function is untouched by that, which is
+// worth saying here rather than only in the header. The new clique IS the
+// reachable set, so forming it needs the members and not a count and there is
+// nothing to approximate. The approximation buys nothing at this call and
+// everything at the picker's, which is the asymmetry the whole bounded branch
+// rests on: one union per pivot either way, and the exact branch pays another per
+// vertex it refreshes.
 std::tuple<std::vector<std::int32_t>, std::vector<std::int32_t>,
            std::vector<std::pair<std::int32_t, std::int32_t>>>
 mda2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
@@ -276,7 +284,7 @@ mda2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
     const std::vector<std::int32_t> absorbedCliques = I[pivot];
     for (std::int32_t c : absorbedCliques)
         C.erase(c);
-    C.create(pivot, neighbors);     // becomes L_pivot, the column pattern
+    C.create(pivot, neighbors);     // becomes the column pattern of the pivot
 
     // Stamp the new clique once, and the absorbed cliques once. Membership is then
     // a comparison, and both loops below are compactions in place. cliqueTag is the
@@ -330,21 +338,27 @@ std::vector<std::int32_t> mda2MinimumDegree(const Graph& G) {
     std::vector<bool> eliminated(n, false);
     std::vector<std::int32_t> order;
     std::size_t degreeSum = 0;
+    // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     std::size_t loosePicks = 0;
 
+    // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+    // is the whole reason they exist; nothing downstream reads it.
     mda2Show(A, I, C, mark, tag, "start: every edge explicit, no clique yet", &eliminated);
     for (std::int32_t step = 0; step < static_cast<std::int32_t>(n); ++step) {
         std::int32_t pivot = NIL;          // O(n) scan, O(live) additions, no unions
         std::size_t best = 0;
         for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) {
             if (eliminated[u]) continue;
-            std::size_t candidate = mda2Bound(A, I, C, u);
-            if (pivot == NIL || candidate < best) { pivot = u; best = candidate; }
+            std::size_t candidateBound = mda2Bound(A, I, C, u);
+            if (pivot == NIL || candidateBound < best) { pivot = u; best = candidateBound; }
         }
-        if (best > mda2Neighbors(A, I, C, mark, tag, pivot).size()) ++loosePicks;
         auto [neighbors, absorbedCliques, prunedEdges] =
             mda2Eliminate(A, I, C, eliminated, mark, tag, pivot);
         std::size_t degree = neighbors.size();
+        // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
+        // No union is needed for it: the eliminator has just formed reach(pivot) as
+        // the new clique, so degree IS the pivot's exact degree, free of charge.
+        if (best > degree) ++loosePicks;
         order.push_back(pivot);
         degreeSum += degree;
 
@@ -373,12 +387,15 @@ std::vector<std::int32_t> mda2MinimumDegree(const Graph& G) {
               << ", degree " << degree
               << "), absorbed cliques: " << absorbedCliquesText.str()
               << ", pruned edges: " << prunedEdgesText.str();
+        // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        // is the whole reason they exist; nothing downstream reads it.
         mda2Show(A, I, C, mark, tag, title.str(), &eliminated);
     }
 
     std::size_t nnzL = degreeSum + n;
     std::cout << "nnz(L) = " << nnzL << " against nnz(tril A) = " << nnzTrilA
               << ", fill = " << (nnzL - nnzTrilA) << "\n";
+    // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     std::cout << "loose picks = " << loosePicks << " of " << n << "\n";
     std::cout << "order: [";
     for (std::size_t k = 0; k < order.size(); ++k)

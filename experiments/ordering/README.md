@@ -622,7 +622,9 @@ anyway, and accept whatever error the overlaps cause. That is the entire idea, a
 choosing the decomposition well.
 
 **One invariant first**, because it says where an overlap can and cannot be. When clique c is
-formed, every u in C[c] has A[u] = A[u] - C[c], and neither set grows afterwards. So
+formed, that is when the vertex c is eliminated, every u in C[c] has
+A[u] = A[u] - C[c] (equivalently, A[u] = A[u] - C[p] - {p}, which is how the prune above writes
+it, since at that moment c IS the pivot p), and neither set grows afterwards. So
 
 ```
 A[u] & C[c] = {}     for every c in I[u]
@@ -637,8 +639,61 @@ reach(u)  = ( A[u] - C[p] ) | ( C[p] - {u} ) | ( C[c] - C[p]  for c in I[u] - {p
 bound(u)  = |A[u] - C[p]| + |C[p] - {u}| + sum |C[c] - C[p]|
 ```
 
-The first line is an identity, exact, for any u that C[p] reached. The second line is the first
-with the union replaced by a sum, which is one substitution and the only one, so
+**Where the first line comes from**, since it is not obvious. The precondition is that u is a
+member of C[p], so p is in I[u], and that is what lets C[p] be pulled out as a term of its own.
+Four steps, and only the third does any work.
+
+Start:
+
+```
+reach(u) = ( A[u] | C[c] for c in I[u] ) - {u}
+```
+
+**1. Split off the new clique.** p is in I[u], so C[p] is one of the C[c]:
+
+```
+reach(u) = ( A[u] | C[p] | C[c] for c in I[u] - {p} ) - {u}
+```
+
+**2. Distribute the removal of u.** Nothing subtle:
+
+```
+reach(u) = ( A[u] - {u} ) | ( C[p] - {u} ) | ( C[c] - {u}  for c in I[u] - {p} )
+```
+
+and A[u] - {u} is A[u], since a vertex is never its own explicit neighbor. The middle term is
+already in its final form.
+
+**3. Replace C[c] - {u} by C[c] - C[p], which is the whole trick.** Removing more from each old
+clique, and the union is unchanged. Both directions:
+
+```
+C[c] - C[p]  is a subset of  C[c] - {u}     because u is in C[p], so nothing new is lost
+```
+
+and for the other direction, take any x in C[c] - {u}:
+
+```
+x in C[p]        ->  x is in C[p] - {u}, which is ALREADY the second term
+x not in C[p]    ->  x is in C[c] - C[p], the third term
+```
+
+Either way x is still in the union, so nothing is lost. **The whole of C[c] & C[p] can be
+subtracted from every old clique, because the middle term already covers it**, and that is the
+entire reason the decomposition is anchored at C[p] rather than anywhere else.
+
+**4. Replace A[u] by A[u] - C[p], and this one changes nothing.** By the invariant above,
+A[u] & C[p] = {} already, since p is in I[u]. It is written as a subtraction only to make the three
+terms VISIBLY disjoint, which is what the next line needs.
+
+**Result.**
+
+```
+reach(u) = ( A[u] - C[p] ) | ( C[p] - {u} ) | ( C[c] - C[p]  for c in I[u] - {p} )
+```
+
+That is the first line, and it is an identity, exact, for any u that C[p] reached. The second
+line is the first with the union replaced by a sum, which is one substitution and the only one, so
 
 ```
 degree(u) <= bound(u)
@@ -2851,13 +2906,68 @@ mdam2, bounded and maintained:
 ```
 picker      read the cached bounds array             O(n) scan, no set work
 eliminate   mdam2_neighbors(pivot)                   1 union, becomes C[pivot]
-refresh     mdam2_bound(u) for u in C[pivot]         O(|C[pivot]|) additions, after
+refresh     mdam2_refresh_bounds(C[pivot])           O(|C[pivot]|) additions, after
                                                      bound AGAINST C[pivot]
 ```
 
 Read down the right column and the two axes are the two words that change: `live` becomes
 `|C[pivot]|` going right, and `unions` becomes `additions` going down. The `O(n)` scan is in every
 box and is what the third axis removes.
+
+**What each box actually costs, per step.** The right column above says the shape; this says the
+work, with `live` the number of vertices not yet eliminated:
+
+```
+md2      sum over live  of ( |A[u]| + sum over c in I[u] of |C[c]| )   a union per vertex
+mdm2     sum over C[p]  of ( |A[u]| + sum over c in I[u] of |C[c]| )   the same union, fewer of them
+mda2     sum over live  of ( 1 + |I[u]| )                             lengths, one pass
+mdam2    3 * sum over C[p] of |I[u]|                                  lengths, three passes
+```
+
+Four things to read off that, and the third and fourth are easy to get backwards.
+
+**The exact pair differ only in how many.** md2 and mdm2 compute the identical quantity by the
+identical means; maintenance changes the SET of vertices it is computed for and nothing about the
+computation. That is the whole of what the first axis does on the exact side.
+
+**mda2 already captures the whole of the second axis.** Per vertex:
+
+```
+exact reach(u)   |A[u]| + sum over c in I[u] of |C[c]|      walks every member of every clique
+mda2 bound(u)    1      + |I[u]|                            reads lengths
+```
+
+The bound's cost is proportional to the NUMBER of cliques in I[u], where the union is proportional
+to their MEMBERS. Note the leading `1` rather than `|A[u]|`: the bound needs `len(A[u])`, a size, so
+it does not walk the adjacency either. So the bound is nowhere near the price of the union, and it
+does not need maintenance to be cheap.
+
+**And mdam2's bound costs MORE per vertex than mda2's, not less.** Per vertex:
+
+```
+mda2    len(A[u]) + one length read per clique      ~ |I[u]|,   one pass
+mdam2   three passes over I[u], plus outside[]      ~ 3|I[u]|
+```
+
+Both sum one number per clique in I[u]; the difference is where that number comes from. mda2 reads
+`len(C[c])` straight off the clique, available immediately. mdam2 needs `|C[c] - C[p]|`, which
+exists nowhere and has to be MANUFACTURED: one pass to set `outside[c] = len(C[c])`, a second to
+subtract the overlap with C[p], and only then can a third read it. So each clique is touched three
+times instead of once, and the extra work is not the summing but the building.
+
+The three passes are three phases with real barriers between them: every clique must be initialized
+before any member decrements it, and every decrement must be done before any sum is read, since a
+clique can be named by a member appearing later in the group.
+
+**And the reason to pay it** is that the manufactured number is smaller, so the bound is tighter,
+and the manufacturing is SHARED. `outside[c]` is built once for the whole group even though it is
+read once per member: a clique named by ten members of C[p] costs ten decrements in total, not ten
+per member.
+
+**So mdam2 wins on the count of vertices and loses on the cost of each.** It pays a constant factor
+for a better number, and it pays it on a small group. That is the interaction the square exists to
+expose: on the exact side maintenance is purely a reduction, and on the bounded side it is a trade,
+slightly worse per vertex in exchange for a tighter bound and far fewer vertices.
 
 **The two bounded boxes do not add the same things.** Same count of additions, different numbers
 added. The two bounds differ in their third term and nowhere else:

@@ -427,7 +427,7 @@ mmd2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
     const std::vector<std::int32_t> absorbedCliques = I[pivot];
     for (std::int32_t c : absorbedCliques)
         C.erase(c);
-    C.create(pivot, neighbors);     // becomes L_pivot, the column pattern
+    C.create(pivot, neighbors);     // becomes the column pattern of the pivot
 
     // Stamp the new clique once, and the absorbed cliques once. Membership is then
     // a comparison, and both loops below are compactions in place. cliqueTag is the
@@ -559,6 +559,8 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
     std::size_t outmatchedCount = 0;              // withheld rather than refiled
     std::vector<std::int32_t> touchedRound(n, NIL);  // the round u was last evicted in
 
+    // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+    // is the whole reason they exist; nothing downstream reads it.
     mmd2Show(A, I, C, degrees, "start: every edge explicit, no clique yet", &eliminated);
     mmd2ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
 
@@ -586,6 +588,8 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
             prepassText << (k == 0 ? "" : ", ") << prepassVertices[k];
         std::ostringstream title;
         title << "prepass: numbered " << prepassVertices.size() << ": " << prepassText.str();
+        // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        // is the whole reason they exist; nothing downstream reads it.
         mmd2Show(A, I, C, degrees, title.str(), &eliminated);
         mmd2ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
     }
@@ -835,6 +839,8 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
         std::ostringstream title;
         title << "round " << (numRounds - 1) << " done: batch of " << batch.size() << ": "
               << batchText.str() << ", refreshed: " << refreshedVerticesText.str();
+        // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        // is the whole reason they exist; nothing downstream reads it.
         mmd2Show(A, I, C, degrees, title.str(), &eliminated);
         mmd2ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
     }

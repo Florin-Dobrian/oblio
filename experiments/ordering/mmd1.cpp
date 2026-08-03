@@ -379,7 +379,7 @@ mmd1Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
     const std::vector<std::int32_t> absorbedCliques = I[pivot];
     for (std::int32_t c : absorbedCliques)
         C.erase(c);
-    C.create(pivot, neighbors);     // becomes L_pivot, the column pattern
+    C.create(pivot, neighbors);     // becomes the column pattern of the pivot
 
     // Stamp the new clique once, and the absorbed cliques once. Membership is then
     // a comparison, and both loops below are compactions in place. cliqueTag is the
@@ -500,6 +500,8 @@ std::vector<std::int32_t> mmd1MinimumDegree(const Graph& G, std::int32_t delta =
     std::size_t numRounds = 0;                    // batches, the metric this layer adds
     std::vector<std::int32_t> touchedRound(n, NIL);  // the round u was last evicted in
 
+    // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+    // is the whole reason they exist; nothing downstream reads it.
     mmd1Show(A, I, C, degrees, "start: every edge explicit, no clique yet", &eliminated);
     mmd1ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
     while (numEliminated < n) {
@@ -650,6 +652,8 @@ std::vector<std::int32_t> mmd1MinimumDegree(const Graph& G, std::int32_t delta =
         std::ostringstream title;
         title << "round " << (numRounds - 1) << " done: batch of " << batch.size() << ": "
               << batchText.str() << ", refreshed: " << refreshedVerticesText.str();
+        // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        // is the whole reason they exist; nothing downstream reads it.
         mmd1Show(A, I, C, degrees, title.str(), &eliminated);
         mmd1ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
     }

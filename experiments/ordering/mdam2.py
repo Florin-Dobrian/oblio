@@ -142,7 +142,8 @@ def mdam2_show(A, I, C, bounds, mark, tag, title=None, eliminated=None):
     for u in alive_vertices:
         adjacency_text = " ".join(f"{v:>{width}}" for v in A[u])
         incidence_text = " ".join(f"c{c}" for c in I[u])
-        degree, tag = mdam2_exact_degree(A, I, C, mark, tag, u)
+        neighbors, tag = mdam2_neighbors(A, I, C, mark, tag, u)
+        degree = len(neighbors)
         if bounds[u] > degree:
             loose += 1
         print(f"  {u:>{width}}: {{{adjacency_text}}} {{{incidence_text}}} "
@@ -197,15 +198,6 @@ def mdam2_neighbors(A, I, C, mark, tag, u):
                 mark[v] = tag
                 neighbors.append(v)
     return neighbors, tag
-
-def mdam2_exact_degree(A, I, C, mark, tag, u):
-    """|reach(u)|, the number the bound is approximating.
-
-    Here to be looked at and for no other reason. It costs the union the bound
-    exists to avoid, so a layer that used it would be mdm2 with extra steps. It
-    appears in the trace beside the bound and nowhere in the picker."""
-    neighbors, tag = mdam2_neighbors(A, I, C, mark, tag, u)
-    return len(neighbors), tag
 
 def mdam2_refresh_bounds(A, I, C, bounds, outside, mark, tag, pivot, clique):
     """Recompute the bound for every member of the new clique, and for nobody else.
@@ -283,12 +275,20 @@ def mdam2_eliminate(A, I, C, mark, tag, eliminated, pivot):
     Three set differences, and not one of them builds a set. Each is a single stamp
     of the subtrahend followed by one compaction pass over the minuend, which turns
     |A[u]| * |C[pivot]| comparisons into |A[u]| + |C[pivot]|.
+
+    This file bounds the degree and this function is untouched by that, which is
+    worth saying here rather than only in the header. The new clique IS the
+    reachable set, so forming it needs the members and not a count and there is
+    nothing to approximate. The approximation buys nothing at this call and
+    everything at the picker's, which is the asymmetry the whole bounded branch
+    rests on: one union per pivot either way, and the exact branch pays another per
+    vertex it refreshes.
     """
     neighbors, tag = mdam2_neighbors(A, I, C, mark, tag, pivot)
     absorbed_cliques = list(I[pivot])
     for c in absorbed_cliques:
         del C[c]
-    C[pivot] = list(neighbors)      # becomes L_pivot, the column pattern
+    C[pivot] = list(neighbors)      # becomes the column pattern of the pivot
 
     # Stamp the new clique once, and the absorbed cliques once. Membership is then
     # a comparison, and both loops below are compactions in place. clique_tag is
@@ -348,6 +348,7 @@ def mdam2_minimum_degree(G):
     eliminated = [False] * n
     order = []
     degree_sum = 0
+    # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     loose_picks = 0
 
     # No clique yet, so the bound's third term is empty and the first bounds are
@@ -355,6 +356,8 @@ def mdam2_minimum_degree(G):
     bounds = [len(A[u]) for u in range(n)]
     outside = [0] * n                      # |C[c] - C[pivot]|, one slot per clique id
 
+    # NOT PRODUCTION: display only. The trace is what makes these files teachable and
+    # is the whole reason they exist; nothing downstream reads it.
     tag = mdam2_show(A, I, C, bounds, mark, tag,
                      "start: every edge explicit, no clique yet", eliminated=eliminated)
     for step in range(n):
@@ -365,12 +368,14 @@ def mdam2_minimum_degree(G):
             if pivot == -1 or bounds[u] < bounds[pivot]:
                 pivot = u
         picked = bounds[pivot]
-        exact, tag = mdam2_exact_degree(A, I, C, mark, tag, pivot)
-        if picked > exact:                 # the pivot was chosen on a loose number
-            loose_picks += 1
         neighbors, absorbed_cliques, pruned_edges, tag = mdam2_eliminate(
             A, I, C, mark, tag, eliminated, pivot)
         degree = len(neighbors)
+        # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
+        # No union is needed for it: the eliminator has just formed reach(pivot) as
+        # the new clique, so degree IS the pivot's exact degree, free of charge.
+        if picked > degree:
+            loose_picks += 1
         order.append(pivot)
         degree_sum += degree
 
@@ -381,6 +386,8 @@ def mdam2_minimum_degree(G):
 
         absorbed_cliques_text = ", ".join(f"c{c}" for c in absorbed_cliques) if absorbed_cliques else "none"
         pruned_edges_text = ", ".join(f"{u}-{v}" for u, v in pruned_edges) if pruned_edges else "none"
+        # NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        # is the whole reason they exist; nothing downstream reads it.
         tag = mdam2_show(A, I, C, bounds, mark, tag,
                          (f"step {step}: eliminate {pivot} (bound {picked}, degree {degree}), "
                           f"absorbed cliques: {absorbed_cliques_text}, "
@@ -390,6 +397,7 @@ def mdam2_minimum_degree(G):
     nnz_L = degree_sum + n
     print(f"nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
           f"fill = {nnz_L - nnz_tril_A}")
+    # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     print(f"loose picks = {loose_picks} of {n}")
     print(f"order: {order}")
     return order

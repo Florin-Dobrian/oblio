@@ -169,7 +169,7 @@ def mdm2_eliminate(A, I, C, mark, tag, eliminated, pivot):
     absorbed_cliques = list(I[pivot])
     for c in absorbed_cliques:
         del C[c]
-    C[pivot] = list(neighbors)      # becomes L_pivot, the column pattern
+    C[pivot] = list(neighbors)      # becomes the column pattern of the pivot
 
     # Stamp the new clique once, and the absorbed cliques once. Membership is then
     # a comparison, and both loops below are compactions in place. clique_tag is
@@ -229,6 +229,8 @@ def mdm2_minimum_degree(G):
     # first degrees need no union at all.
     degrees = [len(A[u]) for u in range(n)]
 
+    # NOT PRODUCTION: display only. The trace is what makes these files teachable and
+    # is the whole reason they exist; nothing downstream reads it.
     mdm2_show(A, I, C, degrees, "start: every edge explicit, no clique yet",
               eliminated=eliminated)
     for step in range(n):
@@ -255,6 +257,8 @@ def mdm2_minimum_degree(G):
 
         absorbed_cliques_text = ", ".join(f"c{c}" for c in absorbed_cliques) if absorbed_cliques else "none"
         pruned_edges_text = ", ".join(f"{u}-{v}" for u, v in pruned_edges) if pruned_edges else "none"
+        # NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        # is the whole reason they exist; nothing downstream reads it.
         mdm2_show(A, I, C, degrees,
                   (f"step {step}: eliminate {pivot} (degree {degree}), "
                    f"absorbed cliques: {absorbed_cliques_text}, "

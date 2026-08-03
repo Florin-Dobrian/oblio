@@ -268,7 +268,7 @@ md3Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
     const std::vector<std::int32_t> absorbedCliques = I[pivot];
     for (std::int32_t c : absorbedCliques)
         C.erase(c);
-    C.create(pivot, neighbors);     // becomes L_pivot, the column pattern
+    C.create(pivot, neighbors);     // becomes the column pattern of the pivot
 
     // Stamp the new clique once, and the absorbed cliques once. Membership is then
     // a comparison, and both loops below are compactions in place. cliqueTag is the
@@ -354,6 +354,8 @@ std::vector<std::int32_t> md3MinimumDegree(const Graph& G) {
     std::size_t numEliminated = 0;                // a counter, not a scan of eliminated
     std::size_t nnzL = 0;
 
+    // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+    // is the whole reason they exist; nothing downstream reads it.
     md3Show(A, I, C, mark, tag, "start: every edge explicit, no clique yet", &eliminated);
     md3ShowState(superMembers, eliminated, pivots);
     int step = 0;
@@ -422,6 +424,8 @@ std::vector<std::int32_t> md3MinimumDegree(const Graph& G) {
               << "), absorbed cliques: " << absorbedCliquesText.str()
               << ", pruned edges: " << prunedEdgesText.str()
               << ", merged vertices: " << mergedVerticesText.str();
+        // NOT PRODUCTION: display only. The trace is what makes these files teachable and
+        // is the whole reason they exist; nothing downstream reads it.
         md3Show(A, I, C, mark, tag, title.str(), &eliminated);
         md3ShowState(superMembers, eliminated, pivots);
         ++step;

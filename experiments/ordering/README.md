@@ -3023,11 +3023,35 @@ not exist until the eliminator has formed it. So the maintained pair have three 
 recomputing pair have two, and a printed number for an untouched vertex is a cached value from
 whenever it was last refreshed rather than something computed for the display.
 
-**Results so far.** mda2 against md2 across the seven examples: the order differs on graph3 and
-graph4 and `nnz(L)` differs on none. On graph4 one pivot was chosen at a bound of 6 against a true
-degree of 3. That is the same shape as the supervariable result in 5.5, permutation differing and
-fill not, and a stronger version of it, since mda2 uses the weakest bound in the square with nothing
-to fall back on. Seven graphs is not evidence, and mdm2 and mdam2 are not written yet.
+**Results.** All four files run over the seven examples, each Python twin agreeing with its C++ twin
+byte for byte:
+
+```
+          order against md2      loose picks, graph3    loose picks, graph4
+mdm2      same on all seven      exact                  exact
+mda2      differs on 3 and 4     4 of 12                2 of 8
+mdam2     differs on 4           0 of 12                1 of 8
+```
+
+**`nnz(L)` is identical in all four boxes on all seven graphs.**
+
+**mdm2 reproducing md2 exactly is the check that it is correct**, not a finding: maintaining a
+number must not change it. If those two ever diverged, the refresh set would be wrong.
+
+**The two bounded boxes are the finding, and they separate cleanly.** mda2's pivot-free bound goes
+loose four times on graph3 and reorders; mdam2's bound against `C[pivot]` is never loose there at
+all and reproduces md2's order exactly. **The tighter bound recovers what the looser one loses**,
+which is the comparison of the two forms showing up as a result rather than as an argument. graph4
+stays loose once even for the tighter bound, and that is the residual the approximation is named
+for, two cliques of `I[u]` overlapping outside `C[pivot]`, which is what that graph was added to
+exhibit.
+
+**And the fill column says the reordering costs nothing here.** That is the same shape as the
+supervariable result in 5.5, permutation differing and fill not, and a stronger version of it, since
+mda2 uses the weakest bound in the square with nothing to fall back on.
+
+Seven graphs is not evidence. What the square does establish is that the two axes are separable and
+that the bounds differ in a way that is visible on graphs this small.
 
 ## Related
 

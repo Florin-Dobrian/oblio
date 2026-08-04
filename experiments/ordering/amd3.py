@@ -488,6 +488,7 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
     # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     num_bound_checks = 0
     num_loose_bounds = 0
+    num_bounds_below_exact = 0             # an invariant, not a measurement
     num_absorbed = 0                           # cliques killed aggressively
     # |C[c]| for every live clique, weighted. Exact, not an estimate, and the
     # invariants that keep it so are worth stating because they are not obvious:
@@ -699,6 +700,15 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
             num_bound_checks += 1
             if bound > exact_u:
                 num_loose_bounds += 1
+            # The other direction, which is not a quality signal but an INVARIANT. A bound
+            # may exceed the degree by any amount and still be a bound; falling below it is
+            # the one thing it must never do, since the picker would then be told a vertex is
+            # cheaper than it is. Counted because it was not: the layer measured looseness
+            # only, and a cap taken from the wrong counter drove this negative 22 times on a
+            # 10 by 10 grid while every example stayed green. Anything but zero here is a
+            # defect. See the amd2 subsection of README.md.
+            if bound < exact_u:
+                num_bounds_below_exact += 1
             amd3_refile(buckets, filed, degrees, u, bound)
         # HASH SUPERVARIABLE DETECTION. Vertices indistinguishable from EACH
         # OTHER, which the pivot test cannot see. Hash first so the exact
@@ -928,6 +938,8 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
     print(f"clique reads the bound needed:                    {num_clique_reads}")
     print(f"incidence entries scan 1 walked:                  {num_incidence_reads}")
     # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
+    print(f"bound below exact {num_bounds_below_exact} times, "
+          f"which must be zero")
     print(f"bound was loose {num_loose_bounds} times out of {num_bound_checks}")
     print(f"aggressively absorbed: {num_absorbed}, hash merges: {num_hash_merges}")
     print(f"dense threshold: {dense_threshold}, dense rows removed: "
@@ -1070,6 +1082,53 @@ graph7 = [
     {0, 1, 2, 3},     # 4
 ]
 
+# A square grid graph, four-neighbor, for running the counters at a size the seven examples
+# cannot reach. It is here rather than among them because it is not an example: nothing about it
+# illustrates a mechanism and its trace is far too long to read. The grid mode below discards the
+# trace and keeps only the closing lines, which is what a comparison wants.
+#
+# It must match the C++ twin's gridGraph exactly, vertex for vertex, or `make test` would be
+# diffing two different problems.
+def grid_graph(side):
+    n = side * side
+    graph = [[] for _ in range(n)]
+    for r in range(side):
+        for c in range(side):
+            u = r * side + c
+            if r > 0:
+                graph[u].append(u - side)
+            if c > 0:
+                graph[u].append(u - 1)
+            if c + 1 < side:
+                graph[u].append(u + 1)
+            if r + 1 < side:
+                graph[u].append(u + side)
+    return graph
+
+
+# Keep the closing lines and discard everything else, as it is written rather than afterwards.
+# A grid trace is far too large to hold: every step prints the whole quotient graph, so at
+# n = 10000 the captured text runs to gigabytes and the process dies holding it. This filters
+# line by line instead, so the memory is one line. The C++ twin does the same with a streambuf.
+class CounterSink:
+    def __init__(self, keys):
+        self.keys = keys
+        self.kept = []
+        self.line = ""
+
+    def write(self, text):
+        for character in text:
+            if character != "\n":
+                self.line += character
+                continue
+            if any(self.line.startswith(key) for key in self.keys):
+                self.kept.append(self.line)
+            self.line = ""
+
+    def flush(self):
+        pass
+
+
 examples = [("graph1", graph1), ("graph2", graph2),
             ("graph3", graph3), ("graph4", graph4),
             ("graph5", graph5), ("graph6", graph6),
@@ -1092,6 +1151,24 @@ matrix1_Ai = [0, 1, 3,
               3, 0, 2,
               4, 5,
               1, 5]
+
+# Grid mode: one square grid, the trace discarded, the closing lines kept. The C++ twin has the
+# same mode, spelled the same way, so `make test` can diff the two at a size the seven examples
+# cannot reach. That matters: two defects in amd2 left every example byte for byte identical
+# while the ordering was wrong on any grid of 10 a side or more.
+#
+#   python3 amd3.py grid 22
+if len(sys.argv) > 2 and sys.argv[1] == "grid":
+    grid_side = int(sys.argv[2])
+    print(f"=== grid {grid_side}x{grid_side} (n = {grid_side * grid_side}) ===")
+    grid_sink = CounterSink(["order:", "nnz(L)", "degree computations", "clique-member", "clique reads", "incidence entries", "bound below exact", "bound was loose", "aggressively", "dense threshold"])
+    saved_stdout = sys.stdout
+    sys.stdout = grid_sink
+    amd3_minimum_degree(grid_graph(grid_side))
+    sys.stdout = saved_stdout
+    for kept_line in grid_sink.kept:
+        print(kept_line)
+    sys.exit(0)
 
 # All of them by default. To run just one, pass its number: python3 amd3.py 3
 selected = int(sys.argv[1]) if len(sys.argv) > 1 else 0

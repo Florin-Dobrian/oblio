@@ -656,6 +656,7 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
     // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     std::size_t numBoundChecks = 0;
     std::size_t numLooseBounds = 0;
+    std::size_t numBoundsBelowExact = 0;   // an invariant, not a measurement
     std::size_t numAbsorbed = 0;                  // cliques killed aggressively
     // |C[c]| for every live clique, weighted. Exact, not an estimate, and the
     // invariants that keep it so are worth stating because they are not obvious:
@@ -884,6 +885,14 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
             exact[u] = amd3ExactDegree(A, I, C, eliminated, superMembers, mark, tag, u);
             ++numBoundChecks;
             if (bound > exact[u]) ++numLooseBounds;
+            // The other direction, which is not a quality signal but an INVARIANT. A bound
+            // may exceed the degree by any amount and still be a bound; falling below it is
+            // the one thing it must never do, since the picker would then be told a vertex is
+            // cheaper than it is. Counted because it was not: the layer measured looseness
+            // only, and a cap taken from the wrong counter drove this negative 22 times on a
+            // 10 by 10 grid while every example stayed green. Anything but zero here is a
+            // defect. See the amd2 subsection of README.md.
+            if (bound < exact[u]) ++numBoundsBelowExact;
             amd3Refile(buckets, degrees, u, bound);
         }
         // HASH SUPERVARIABLE DETECTION. Vertices indistinguishable from EACH
@@ -1152,6 +1161,8 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
     std::cout << "incidence entries scan 1 walked:                  "
               << numIncidenceReads << "\n";
     // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
+    std::cout << "bound below exact " << numBoundsBelowExact
+              << " times, which must be zero\n";
     std::cout << "bound was loose " << numLooseBounds << " times out of "
               << numBoundChecks << "\n";
     std::cout << "aggressively absorbed: " << numAbsorbed
@@ -1267,7 +1278,7 @@ int main(int argc, char** argv) {
     if (argc > 2 && std::string(argv[1]) == "grid") {
         const int side = std::atoi(argv[2]);
         std::cout << "=== grid " << side << "x" << side << " (n = " << side * side << ") ===\n";
-        CounterSink sink({"nnz(L)", "degree computations", "clique-member", "clique reads", "incidence entries", "bound was loose", "aggressively", "dense threshold"});
+        CounterSink sink({"order:", "nnz(L)", "degree computations", "clique-member", "clique reads", "incidence entries", "bound below exact", "bound was loose", "aggressively", "dense threshold"});
         std::streambuf* saved = std::cout.rdbuf(&sink);
         amd3MinimumDegree(gridGraph(side));
         std::cout.rdbuf(saved);

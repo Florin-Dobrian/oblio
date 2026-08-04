@@ -731,7 +731,7 @@ int main(int argc, char** argv) {
     if (argc > 2 && std::string(argv[1]) == "grid") {
         const int side = std::atoi(argv[2]);
         std::cout << "=== grid " << side << "x" << side << " (n = " << side * side << ") ===\n";
-        CounterSink sink({"nnz(L)", "degree computations"});
+        CounterSink sink({"order:", "nnz(L)", "degree computations"});
         std::streambuf* saved = std::cout.rdbuf(&sink);
         mmd1MinimumDegree(gridGraph(side));
         std::cout.rdbuf(saved);

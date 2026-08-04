@@ -135,7 +135,10 @@ still has to match. The alternative was editing fourteen files to unify the spel
 seemed the worse trade.
 
 Each prototype also takes an example number, `python3 md3.py 3` or `./md3_cpp 3`, and runs every
-example when given none.
+example when given none. Every layer above md5 takes a grid instead, `python3 amd2.py grid 22` or
+`./amd2_cpp grid 22`, which discards the trace and keeps the closing counters; `make test` diffs
+the twins on grids as well as on the examples, since the examples are too small to fire some of
+the mechanisms at all. See the grid-mode section below.
 
 Once a layer has been pulled into the main tree it gains a second check, against the production
 driver extracted from it:
@@ -143,23 +146,27 @@ driver extracted from it:
 ```
 make production       builds production_cpp, linking ../../src
 ./production_cpp mmd1        MMD1 on all seven graphs
-./production_cpp amd2        AMD2, reporting nnz(L) rather than the order
+./production_cpp amd2        AMD2 on all seven graphs
 ./production_cpp mmd1 3      just the third
+./production_cpp amd2 grid 20   one 20x20 grid, the same one the prototypes build
 ```
 
-`make test` runs it for every layer named in the Makefile's `PORTED` list, `mmd1` and `amd1`, and
-requires the order lines to agree with the prototype's. `PORTED_FILL` names the layers checked by
-nnz(L) instead, `amd2` today: production skips the postorder that prototype ends with, since
-`ElmForestEngine` does that work itself, so the two permutations legitimately differ while the fill
-does not. That check runs Oblio's own symbolic factorization, which is why the target links the
-whole library. The prototype's `matrix1` is left out of it, being the example that exists to
-exercise `amd3Aat` and `amd3Preprocess`, which production has no counterpart to. It links `../../src/QuotientGraph.cpp` and
-`../../src/Mmd1.cpp` directly rather than copying them, which is the opposite of what the vendored
-target does and deliberately so: a copy is right for code that is not ours to edit and wrong for
-code being actively changed at both ends, since noticing when the two come apart is the whole point.
-The harness feeds each graph as a full-symmetric CSC with the diagonal present, which is what a
-`SparseMatrix` holds, so the production path under check includes `buildGraph` dropping the
-diagonal rather than only the driver.
+`make test` runs it for every layer named in the Makefile's `PORTED` list, `mmd1`, `mmd2`, `amd1`
+and `amd2`, and requires the order lines to agree with the prototype's, on the seven examples and
+then on the grid sides in `GRID_SIDES`. Both halves are permutation checks and the second exists
+because the first cannot see a mechanism that needs real structure to fire: two defects in amd2
+left all seven examples byte for byte identical while the ordering was wrong on any grid of 10 a
+side or more. `PORTED_FILL` names layers to be checked by nnz(L) instead, and is empty; it was how
+amd2 was checked until the postorder moved to amd3, since production skips the postorder and so
+the permutations legitimately differed while the fill did not. That weaker check runs Oblio's own
+symbolic factorization, which is why the target links the whole library.
+
+The target links `../../src` directly rather than copying it, which is the opposite of what the
+vendored target does and deliberately so: a copy is right for code that is not ours to edit and
+wrong for code being actively changed at both ends, since noticing when the two come apart is the
+whole point. The harness feeds each graph as a full-symmetric CSC with the diagonal present, which
+is what a `SparseMatrix` holds, so the production path under check includes `QuotientGraph`
+dropping the diagonal rather than only the driver.
 
 The vendored routines have their own target, since they are not layers and have no Python twin:
 
@@ -366,6 +373,20 @@ holding it is killed. The grid is not an eighth example: nothing about it illust
 and its trace is unreadable. It exists so the counters can be read at a size the seven cannot
 reach.
 
+**And, since 2026-08-03, so that the layers can be CHECKED at that size.** The filter keeps the
+closing `order:` line as well as the counters, and `make test` diffs the whole filtered output on
+sides 10 and 20: between the twins for every layer in `GRID_LAYERS`, and against production for
+every layer in `PORTED`. The counters are the mode's first purpose and this is its second; the
+order comes last in the output, below the counters, so a reader after the counters is unaffected.
+Why the check is worth having is the amd2 subsection below: two defects there left all seven
+examples byte for byte identical while the ordering was wrong on any grid of 10 a side or more.
+
+**The Python twins gained the mode at the same time, and did not have it before.** All five C++
+layers above md5 had a grid mode and none of the Python ones did, so the twin check could only ever
+compare on the examples. Both sides now spell it the same way, `python3 amd2.py grid 22` against
+`./amd2_cpp grid 22`, with the same whitelist and the same `grid_graph`, which has to match vertex
+for vertex or the two would be diffing different problems.
+
 **Why it was added.** `benchmarks/ordering` shows our production MMD1 and AMD1 running about 4.5x
 and 3.4x slower than the vendored routines. Two explanations were available and they call for
 opposite work: our per-list allocation against their flat array, or the mechanisms these layers do
@@ -406,9 +427,15 @@ The AMD side has no such problem: `amd1` at 201856 is *better* than the vendored
 `amd2` at 212496 is worse than both, which is the coarser-supervariables cost the pass 1 and 2
 subsection already measured on small graphs.
 
-## Two bugs this found, both ours
+## Four bugs this found, all ours
 
-Worth recording, because both were invisible to the checks in place at the time.
+Worth recording, because every one was invisible to the checks in place at the time.
+
+**Two of them are amd2's and share one cause**, so they are written up together in the amd2
+section below, under "Two defects the permutation check found, both inherited from amd1": the
+bound's live-vertex cap taken from the wrong counter, which drove the bound below the true degree,
+and the fill accounting taking an unweighted count of the new clique. Both were correct lines in
+amd1 and became wrong the moment amd2 added a merge into a live vertex.
 
 **amd did not shrink the new clique on mass elimination.** When a vertex is mass-eliminated it
 joins the pivot's supervariable, so it stops being outside the new clique and must stop
@@ -1856,16 +1883,131 @@ absorptions and 198 hash merges. On grids the hash does most of the work, 112 me
 aggressive absorption at 22 by 22, which says that on a regular mesh the cliques rarely nest but
 the boundary vertices are often twins.
 
-**What these two cost in fill, which is not nothing.** amd2 against amd1: 681 against 657 at 10 by
-10, 2283 against 2175 at 16 by 16, 4898 against 4762 at 22 by 22, and on the 207 small graphs the
-same on 206 and worse on 1. Coarser supervariables mean fewer, larger pivots, so the ordering is
-cheaper to produce and slightly worse. That is the trade the vendored routine also makes, and the
-comparison to make is against the vendored routine rather than against amd1.
+**What these two cost in fill, which is not nothing.** amd2 against amd1 on grids, re-measured
+2026-08-03 after the two defects below were fixed, and every figure checked against a symbolic
+factorization of the emitted permutation:
+
+```
+              amd1     amd2
+ 10x10         657      659
+ 16x16        2175     2181
+ 22x22        4762     4753
+ 32x32       12074    12364
+ 64x64       67950    68822
+100x100     201856   212496
+```
+
+and on the 207 small graphs the same on 206 and worse on 1. Coarser supervariables mean fewer,
+larger pivots, so the ordering is cheaper to produce and slightly worse. That is the trade the
+vendored routine also makes, and the comparison to make is against the vendored routine rather
+than against amd1.
+
+Two things are worth reading off that table beyond the trade itself. The gap is not monotone in
+size, amd2 winning at 22 by 22 and losing on either side of it, which is the two-sided noise a
+tie-break difference produces rather than a systematic cost. And the last two rows are exactly
+production's AMD1 and AMD2 in `benchmarks/ordering/README.md`, digit for digit, which is the
+strongest evidence the port is faithful that either file carries: the prototype and the engine
+agree on the permutation and on what it fills, at a size the seven examples cannot reach.
 
 Against the vendored amd_order on the seven examples, both layers already match nnz(L) 7 of 7 and
 neither matches the permutation on any, which is the tie-break story the mmd2 section tells at
 more length. So these two do not move the acceptance test on their own; they move the mechanism
 count. The figures with all seven passes in are at the end of this section.
+
+### Two defects the permutation check found, both inherited from amd1
+
+Found 2026-08-03, and they are one finding rather than two. Splitting the old amd2 into amd2 and
+amd3 made amd2 comparable to production's `Amd2` by PERMUTATION rather than by fill, and that
+stronger check immediately went red on grids of 10 by 10 and larger while staying green on the
+seven examples. Both defects are lines that were correct in amd1 and became wrong the moment amd2
+added a merge into a LIVE vertex. amd3 already had both fixed, and so did production, so amd2 was
+the only file with them.
+
+**The bound's live-vertex cap, taken from the wrong counter.** The first cap is
+`num_left - weight(u)`, and amd2 derived `num_left` as `n - num_eliminated`, which is amd1's line.
+`num_eliminated` counts what has left the SELECTION, and a hash merge folds `v` into a live `u`, so
+`v` stops being selectable while every vertex it stands for is still live inside `u`. The count
+therefore overstates what has gone, the cap comes out too tight, and the bound falls below the true
+degree, which is the one thing a bound must never do:
+
+```
+                bound below exact
+grid  10x10          22
+grid  16x16          45
+grid  25x25          82
+```
+
+zero in all three after the fix. So this was never a tie-break difference, and the instrumentation
+could not see it: the layer counts how often the bound is LOOSE and never how often it is wrong in
+the other direction, which is the same blind spot the pass 5 bug had.
+
+**The vendored routine is the oracle, and it settles this without appeal to amd3.** `AMD_2`
+advances `nel` at exactly two sites inside its main loop, `nel += nvpiv` at the pivot and
+`nel += nvi` at mass elimination inside scan 2, both of which are original vertices genuinely
+leaving. Its supervariable absorption moves the weight and leaves `nel` alone:
+
+```c
+Nv [i] += Nv [j] ;
+Nv [j] = 0 ;
+Elen [j] = EMPTY ;
+```
+
+so `nleft = n - nel` there counts live originals. That is production's `numLive` and amd3's, and
+it is what amd2 now carries.
+
+**The fill accounting, taking an unweighted count.** `external_degree = len(C[pivot])` is amd1's
+line and is correct there, since without live merges every member of the new clique stands for
+exactly one original vertex and none of them is dead. With hash detection a member can stand for
+several, and a merged one stands for none while still lying in the list. Measured against a
+symbolic factorization of the emitted permutation, the reported figure was too low by 12 percent at
+10 by 10 and 30 percent at 32 by 32; it is exact at every size now.
+
+This one is worth separating from the first, because the two have opposite reach. The cap is an
+ordering defect and changes the permutation. The accounting is instrumentation and changes only
+the number printed beside it, so a reader comparing amd2's fill against amd1's was comparing a
+wrong number with a right one, and the apparent conclusion, that hash detection buys a large fill
+saving that grows with size, was entirely the defect. The corrected table is in the subsection
+above and says the opposite, which is what the vendored routine's own trade predicts.
+
+**And the harness is the other half of the finding, again.** Both defects leave the seven examples
+byte for byte identical, before and after, so no check in `make test` moved in either direction.
+Seven graphs of at most twelve vertices cannot exercise a mechanism that needs enough structure to
+fire, and the first defect fires 22 times on a 10 by 10 grid.
+
+**So the harness was changed rather than only the code, in three places.**
+
+- **The instrument was half-blind, and is not now.** The amd layers counted how often the bound was
+  LOOSE and never how often it went the other way, which is the one direction that is a defect
+  rather than a measurement. All three now print `bound below exact N times, which must be zero`
+  beside the looseness count, in both twins. That line reads 22 on a 10 by 10 grid with the cap
+  defect in place and 0 without it, so the instrument that missed this now reports it in the
+  ordinary trace.
+- **`make test` compares on grids as well as on the seven examples**, prototype against production
+  for every layer in `PORTED`, at sides 10 and 20.
+- **And the Python twins gained the grid mode the C++ ones already had**, so that comparison runs
+  between the twins too. Without it the twin check could only ever see the examples, which is a
+  gap the mutation test below exhibits directly.
+
+Confirmed to catch what it was built for, by putting the cap defect back into the C++ twin alone
+and leaving the Python correct:
+
+```
+amd2   py and cpp agree                          the seven examples cannot see it
+amd2   DIFFER on grid 10                         the twin grids can
+amd2   DIFFER on grid 20
+amd2   prototype and production agree            nor can the example check
+amd2   DIFFER on grid 10                         the production grids can
+amd2   DIFFER on grid 20                         make test exits 2
+```
+
+The first line is the gap stated in one line: the Python twin was correct and the C++ was not, and
+the seven examples could not tell them apart. Four checks catch it now where none did.
+
+The checks went from 17 to 35 and the run from 0.5 s to 7.8 s with everything already built,
+nearly all of the increase being Python at side 20 and nearly all of that the amd layers'
+exact-degree instrumentation, which computes per refreshed vertex the very union the bound exists
+to avoid. The Makefile's `GRID_SIDES` comment carries the figures and says what to edit if the
+wait ever grates.
 
 ### Pass 3: the two-pass degree update
 

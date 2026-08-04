@@ -505,6 +505,20 @@ std::vector<std::int32_t> amd2MinimumDegree(const Graph& G) {
     std::vector<bool> eliminated(n, false);
     std::vector<std::int32_t> pivots;             // the order over supervariables
     std::size_t numEliminated = 0;                // a counter, not a scan of eliminated
+    // Live ORIGINAL vertices, which is not n - numEliminated. numEliminated counts
+    // what has left the SELECTION, and a hash merge folds v into a LIVE u, so v
+    // stops being selectable while the vertices it stands for are still live inside
+    // u. The first cap of the bound needs the second reading, so it gets its own
+    // counter: only an elimination reduces it.
+    //
+    // amd1 has no such counter and does not need one, since it has no hash merges
+    // and every increment of numEliminated really is an original leaving. This file
+    // inherited that line along with the driver, which made the cap too tight and
+    // drove the bound BELOW the true degree, 22 times on a 10 by 10 grid. The
+    // vendored amd_2 is the oracle here: its nel is advanced only at the pivot and
+    // at mass elimination, never at the hash merge, which moves the weight with
+    // Nv[i] += Nv[j] and leaves nel alone.
+    std::size_t numLive = n;
     std::size_t nnzL = 0;
 
     // The cache, and the count of degree computations, which is what this layer
@@ -523,6 +537,7 @@ std::vector<std::int32_t> amd2MinimumDegree(const Graph& G) {
     std::vector<std::vector<std::int32_t>> hashBucket(n + 1);   // Amd.cpp's Head[hval]
     std::size_t numBoundChecks = 0;
     std::size_t numLooseBounds = 0;
+    std::size_t numBoundsBelowExact = 0;   // an invariant, not a measurement
 
     // The buckets, and minDegree, a LOWER BOUND on the current minimum degree.
     // The search starts at minDegree rather than at 0, so it never looks at
@@ -570,6 +585,7 @@ std::vector<std::int32_t> amd2MinimumDegree(const Graph& G) {
                                        superMembers[u].begin(), superMembers[u].end());
             superMembers[u].clear();
         }
+        numLive -= superMembers[pivot].size();  // every original the pivot stands for
 
         buckets.unfile(degrees[pivot], pivot);  // the pivot has left the graph
         degrees[pivot] = 0;
@@ -645,7 +661,7 @@ std::vector<std::int32_t> amd2MinimumDegree(const Graph& G) {
             numAbsorbed += deadCliques.size();
         }
 
-        const std::size_t numLeft = n - numEliminated;
+        const std::size_t numLeft = numLive;
         const std::vector<std::int32_t>& refreshedVertices = pivotClique;
         for (std::int32_t u : refreshedVertices) {
             // bound = |A[u]| + |C[pivot] - {u}| + sum |C[c] - C[pivot]| over the
@@ -668,6 +684,14 @@ std::vector<std::int32_t> amd2MinimumDegree(const Graph& G) {
             exact[u] = amd2ExactDegree(A, I, C, eliminated, superMembers, mark, tag, u);
             ++numBoundChecks;
             if (bound > exact[u]) ++numLooseBounds;
+            // The other direction, which is not a quality signal but an INVARIANT. A bound
+            // may exceed the degree by any amount and still be a bound; falling below it is
+            // the one thing it must never do, since the picker would then be told a vertex is
+            // cheaper than it is. Counted because it was not: the layer measured looseness
+            // only, and a cap taken from the wrong counter drove this negative 22 times on a
+            // 10 by 10 grid while every example stayed green. Anything but zero here is a
+            // defect. See the amd2 subsection of README.md.
+            if (bound < exact[u]) ++numBoundsBelowExact;
             amd2Refile(buckets, degrees, u, bound);
         }
         // HASH SUPERVARIABLE DETECTION, the second extra. Vertices indistinguishable from EACH
@@ -775,7 +799,14 @@ std::vector<std::int32_t> amd2MinimumDegree(const Graph& G) {
         // column then holds ext + w - 1 entries below its diagonal, the next
         // ext + w - 2, down to ext, and each column contributes its own diagonal.
         std::size_t superSize = superMembers[pivot].size();
-        std::size_t externalDegree = C[pivot].size();
+        // Weighted, because hash detection folds a vertex into a LIVE one, so a
+        // member of the new clique can stand for several original vertices, and a
+        // merged one stands for none and is still lying there. amd1 can use the
+        // plain count and this file cannot, which is the same inheritance the
+        // numLive counter above records.
+        std::size_t externalDegree = 0;
+        for (std::int32_t v : C[pivot])
+            if (!eliminated[v]) externalDegree += superMembers[v].size();
         nnzL += superSize * externalDegree + superSize * (superSize - 1) / 2 + superSize;
 
         std::ostringstream absorbedCliquesText;
@@ -847,6 +878,8 @@ std::vector<std::int32_t> amd2MinimumDegree(const Graph& G) {
     std::cout << "aggressively absorbed: " << numAbsorbed
               << ", hash merges: " << numHashMerges << "\n";
     // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
+    std::cout << "bound below exact " << numBoundsBelowExact
+              << " times, which must be zero\n";
     std::cout << "bound was loose " << numLooseBounds << " times out of "
               << numBoundChecks << "\n";
     std::cout << "order: [";
@@ -914,7 +947,7 @@ int main(int argc, char** argv) {
     if (argc > 2 && std::string(argv[1]) == "grid") {
         const int side = std::atoi(argv[2]);
         std::cout << "=== grid " << side << "x" << side << " (n = " << side * side << ") ===\n";
-        CounterSink sink({"nnz(L)", "degree computations", "clique-member", "clique reads", "bound was loose"});
+        CounterSink sink({"order:", "nnz(L)", "degree computations", "clique-member", "clique reads", "bound below exact", "bound was loose", "aggressively"});
         std::streambuf* saved = std::cout.rdbuf(&sink);
         amd2MinimumDegree(gridGraph(side));
         std::cout.rdbuf(saved);

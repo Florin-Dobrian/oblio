@@ -1108,10 +1108,13 @@ is the same front-size question named here.
 
 ## Structure
 
-### Five ordering questions left open, four deliberately and one not
+### Five ordering questions, four still open and deliberately so
 
 Raised at the end of the ordering optimization work and parked rather than decided, each with the
-reasoning that got them to that point so they can be picked up cold.
+reasoning that got them to that point so they can be picked up cold. The fifth was not parked but
+a defect, and it is closed; it stays here because the shape it exposed, a prototype built by adding
+mechanisms to a sibling and inheriting a line that the addition invalidates, recurred three times
+in two sessions and will recur again.
 
 **1. The prototypes and production have diverged in encoding, and the alignment check does not see
 it.** `experiments/ordering`'s `make test` compares four ported layers against production on the
@@ -1258,53 +1261,76 @@ The counters are five, not one: `QuotientGraph`'s `mMark` and `mTag`, plus the d
 `Mmd2`, `Amd1` and `Amd2`. `Amd2` sizes its mark at `2 * size`, since it stamps cliques at
 `c + size`; widening changes the element type and not the length.
 
-**5. The experiment's amd2 and production's Amd2 diverge on grids, and the check cannot see it.**
-Found 2026-08-03 and NOT deliberate, unlike the four above. Open.
+**5. The experiment's amd2 and production's Amd2 diverged on grids: DONE, 2026-08-03.** Kept
+rather than deleted, because the shape recurred three times in two sessions and will recur again
+the next time a prototype is built by adding mechanisms to a sibling.
 
-```
-seven example graphs      permutations agree        make test passes
-grid 8x8, grid 9x9        permutations agree
-grid 10x10 and larger     permutations DIFFER
-amd1 against Amd1         agrees on every grid tried
-```
+**Two defects, one cause.** Both were lines that are CORRECT in amd1 and became wrong the moment
+amd2 added a merge into a LIVE vertex. amd3 had both fixed and so did production, so amd2 was the
+only file carrying them.
 
-**It predates the amd2/amd3 split.** The old amd2, now amd3, was checked by FILL on the same seven
-graphs, which is weaker in two ways at once, so this has probably been there since amd2 was written.
-Splitting the file is what made the stronger check possible and the divergence visible.
+- **The bound's live-vertex cap.** amd2 derived `num_left` as `n - num_eliminated`, amd1's line.
+  `num_eliminated` counts what has left the SELECTION, and a hash merge folds `v` into a live `u`,
+  so `v` stops being selectable while everything it stands for is still live inside `u`. The cap
+  came out too tight and the bound fell BELOW the true degree, 22 times on a 10x10 grid and 82 on
+  25x25, zero after the fix. This is the ordering defect and it is what moved the permutation.
+- **The fill accounting.** `external_degree = len(C[pivot])`, an unweighted count, where a clique
+  member can now stand for several original vertices and a merged one for none while still lying
+  in the list. Instrumentation rather than ordering, so it moved only the number printed, but it
+  understated the reported fill by 12 percent at 10x10 and 30 percent at 32x32. Recorded as fixed
+  in the previous session's handoff note and in fact not fixed, in either twin.
 
-**Localized to aggressive absorption, not the hash.** On a 10x10 grid the first difference is at step
-4: both pick pivot 10, both report supervariable size 1, neither has made a hash merge yet, and the
-prototype absorbs one clique where production absorbs none. Instrumenting production shows its
-`touchedCliques` is EMPTY at that step while the prototype's is not, so the two disagree about which
-cliques the step touches at all.
+**The vendored routine is the oracle for the first, and it settles it without appeal to amd3.**
+`AMD_2` advances `nel` at exactly two sites in its main loop, `nel += nvpiv` at the pivot and
+`nel += nvi` at mass elimination inside scan 2, both originals genuinely leaving. Its supervariable
+absorption is `Nv[i] += Nv[j]; Nv[j] = 0;` and never touches `nel`, so `nleft = n - nel` counts
+live originals. That is production's `numLive`.
 
-**Which means the graph state has already diverged before any merge of either kind.** The pivots
-agree, no hash merge has fired, and every step up to there reports size 1, so no mass elimination
-either. That points at the eliminator or at absorption's purge rather than at either extra
-mechanism, and it is where the next session should start.
+**Verified.** Prototype and production permutations now agree on grids 8, 9, 10, 12, 16, 20, 25,
+30, 32, 40 and 45, where they diverged from 10x10 upward before. The prototype's reported nnz(L)
+matches a symbolic factorization of its own emitted permutation exactly at 10, 16, 22 and 32. And
+at the benchmark's own sizes the prototype reproduces production digit for digit, AMD1 67950 and
+201856 against AMD2 68822 and 212496 at 64x64 and 100x100, which is a stronger statement of
+faithfulness than either the experiment or the benchmark carried before.
 
-**One hypothesis tested and rejected.** `cliqueDegree` in `Amd2.cpp` is written once when a clique is
-formed, and the comment above it lists the invariants that keep it exact without mentioning hash
-merges. A hash merge does break it: the test requires `I[u] == I[v]`, so any other clique in that set
-holds both `u` and `v`, and merging `v` away leaves its weight counted twice. Maintaining
-`cliqueDegree` at the merge site changes nothing on this reproduction, because the divergence appears
-before any merge. **The staleness is still real and still unmentioned by that comment**, so it is
-worth fixing on its own account even though it is not this bug.
+**Two claims in the previous handoff note do not survive.** The divergence was localized there to
+aggressive absorption at step 4 of a 10x10 grid, with production's `touchedCliques` empty where the
+prototype's was not; that is not reproducible, since the absorbed and touched counts agree at every
+step through 73 and the first difference is a bound. And the `cliqueDegree` staleness hypothesis is
+probably not real: if `I[u] == I[v]` licenses the merge then every clique holding `v` holds `u`,
+`v`'s weight moves to `u`, and the clique's weighted size is unchanged, which is what the comment
+in `Amd2.cpp` claims. The two sides agreeing on every grid is evidence for it.
 
-**And one genuine bug was found and fixed on the way.** The new amd2 inherited amd1's
-`external_degree = len(C[pivot])`, an unweighted count, where hash merges make a clique member stand
-for several original vertices. amd3 had the weighted version with a comment saying exactly why.
-Fixed in both twins; the prototype's `nnz(L)` now matches production at 8x8 where it did not before.
+**One conclusion elsewhere was an artifact of the second defect.** With the fill understated, amd2
+appeared to fill far less than amd1, by a margin growing with size. Corrected, it fills slightly
+worse, two-sided, which is the coarser-supervariable trade the vendored routine also makes and what
+this file and the experiment README already said. The corrected table is in the experiment's
+"Passes 1 and 2" subsection.
 
-**Reproduction.** Both binaries take `grid N`. The prototype needs its `CounterSink` widened to keep
-the lines of interest, since it filters output by prefix; production needs a `printf` at the end of
-the elimination loop. A per-step line of pivot, supervariable size, absorbed count and hash count is
-enough to find the first difference.
+**And the harness was changed rather than only the code, in three places.** Both defects leave the
+seven examples byte for byte identical, so nothing in `make test` moved in either direction, before
+or after. Seven graphs of at most twelve vertices cannot validate a mechanism that only fires on
+larger structures.
 
-**And the harness is the other half of the finding.** Seven graphs of at most twelve vertices cannot
-validate a mechanism that only fires on larger structures. `make test` comparing prototype against
-production on a grid or two would have caught this when amd2 was written, and would cost almost
-nothing. That is the same test-set point at the top of this file, arriving from a new direction.
+- **The instrument was half-blind.** The amd layers counted how often the bound was LOOSE and never
+  how often it went below the exact degree, which is the one direction that is a defect rather than
+  a measurement, and is precisely what happened. All three now report it beside the looseness
+  count, in both twins.
+- **`make test` compares on grids**, prototype against production, for every layer in `PORTED`, at
+  sides 10 and 20.
+- **The Python twins gained the grid mode the C++ ones already had**, so the twin comparison runs
+  on grids too. Without it the twin check could only ever see the examples.
+
+Confirmed by putting the cap defect back into the C++ twin alone and leaving the Python correct:
+the two example checks stay green, all four grid checks go red, and `make test` exits 2. That the
+twin example check stays green is the gap in one line. The suite went from 17 checks to 35 and from
+0.5 s to 7.8 s with everything built, the increase being almost entirely Python at side 20.
+
+This does not close the test-set item at the top of this file, and should not be read as doing so.
+A grid is one problem family, it is the family every number in `benchmarks/ordering` already comes
+from, and it is the worst case for judging a tie-break. What it closes is narrower and worth
+having on its own: the ported prototypes and the engines they were extracted from are now checked
+against each other at a size where every mechanism fires.
 
 ### Two extractions in the dynamic factorization code
 

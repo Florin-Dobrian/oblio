@@ -66,6 +66,28 @@ static void printOrder(const std::vector<std::int32_t>& order) {
     std::cout << "]\n";
 }
 
+// The same square five-point grid the prototypes build, transcribed from gridGraph in each of
+// them. It has to match exactly, since the check below compares permutations and any difference
+// in the numbering would make them differ for a reason that is not the code.
+//
+// A grid is not an eighth example: nothing about it illustrates a mechanism. It is here because
+// the seven examples are at most twelve vertices, which is too small to fire a mechanism that
+// needs real structure, and two defects in amd2 lived behind exactly that gap. See the amd2
+// section of the README.
+static Graph gridGraph(int side) {
+    const int n = side * side;
+    Graph graph(n);
+    for (int r = 0; r < side; ++r)
+        for (int c = 0; c < side; ++c) {
+            const int u = r * side + c;
+            if (r > 0)        graph[u].push_back(u - side);
+            if (c > 0)        graph[u].push_back(u - 1);
+            if (c + 1 < side) graph[u].push_back(u + 1);
+            if (r + 1 < side) graph[u].push_back(u + side);
+        }
+    return graph;
+}
+
 static void run(const std::string& layer, const std::string& name, const Graph& graph) {
     std::cout << "=== " << name << " ===\n";
     std::vector<std::size_t>  colPtr;
@@ -142,6 +164,14 @@ int main(int argc, char** argv) {
     };
 
     const std::string layer = (argc > 1) ? argv[1] : "mmd1";
+
+    // Grid mode, matching the prototypes' own:  ./production_cpp amd2 grid 20
+    if (argc > 3 && std::string(argv[2]) == "grid") {
+        const int side = std::atoi(argv[3]);
+        run(layer, "grid " + std::to_string(side) + "x" + std::to_string(side), gridGraph(side));
+        return 0;
+    }
+
     const int selected      = (argc > 2) ? std::atoi(argv[2]) : 0;
     for (int number = 1; number <= static_cast<int>(examples.size()); ++number) {
         if (selected != 0 && number != selected) continue;

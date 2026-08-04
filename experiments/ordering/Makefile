@@ -79,6 +79,34 @@ BINS   = $(addsuffix _cpp,$(LAYERS))
 PORTED      = mmd1 mmd2 amd1 amd2
 PORTED_FILL =
 
+# The grid sides each ported layer is also compared on, beyond the seven examples. The examples
+# are at most twelve vertices, which is too small to fire a mechanism that needs real structure:
+# two defects in amd2 left every one of them byte for byte identical while the ordering was wrong
+# on any grid of 10 a side or more. So the examples check that the mechanisms are right in
+# miniature and these check that they are still right at a size where they all fire.
+#
+# Two sides rather than one, and small ones. 10 is the smallest that caught the amd2 pair, so it
+# is the regression case; 20 is four times the vertices, enough that mass elimination, aggressive
+# absorption and the hash all fire repeatedly. Anything larger belongs in benchmarks/ordering,
+# which measures rather than compares.
+#
+# What it costs, on the sandbox with everything already built: 0.46 s for the example checks
+# alone, 0.90 s with the prototype-against-production grids added, 7.8 s with the twin grids as
+# well. Nearly all of the last step is Python at side 20, and nearly all of that is the amd
+# layers' exact-degree instrumentation, which computes per refreshed vertex the very union the
+# bound exists to avoid. At side 10 alone the whole run is 1.2 s. So if the wait ever grates, the
+# edit is to give the twin loop below its own sides rather than to drop the check: the two loops
+# share this variable today only because they happened to want the same numbers.
+GRID_SIDES  = 10 20
+
+# The layers that have a grid mode, in both twins, and so can be compared on one. It is every
+# layer above md5: a grid at these sizes is unreadable as a trace and pointless as an example, so
+# the md ladder has no use for it, while mmd1 upward all carry counters worth reading at a size
+# the seven examples cannot reach. amd3 is here although it is not in PORTED: it has no production
+# counterpart to be checked against, which makes its twin the only oracle it has, and that is a
+# reason to exercise it harder rather than less.
+GRID_LAYERS = mmd1 mmd2 amd1 amd2 amd3
+
 # The production sources those drivers need, linked directly rather than copied. A copy is right
 # for the vendored routines, which are not ours to edit, and wrong here: the point of this check
 # is to notice when production and prototype come apart.
@@ -117,6 +145,19 @@ test: all production_cpp
 	  fi; \
 	  rm -f .$$L.py.out .$$L.cpp.out; \
 	done; \
+	for L in $(GRID_LAYERS); do \
+	  for S in $(GRID_SIDES); do \
+	    printf '%-6s ' "$$L"; \
+	    $(PYTHON) $$L.py grid $$S | tr -d " []{},'" > .$$L.py.out; \
+	    ./$${L}_cpp   grid $$S | tr -d " []{},'" > .$$L.cpp.out; \
+	    if diff .$$L.py.out .$$L.cpp.out > /dev/null; then \
+	      echo "py and cpp agree on grid $$S"; \
+	    else \
+	      echo "DIFFER on grid $$S"; rc=1; \
+	    fi; \
+	    rm -f .$$L.py.out .$$L.cpp.out; \
+	  done; \
+	done; \
 	for L in $(PORTED); do \
 	  printf '%-6s ' "$$L"; \
 	  ./$${L}_cpp     | grep -E '^===|^order:' > .$$L.proto.out; \
@@ -127,6 +168,19 @@ test: all production_cpp
 	    echo "DIFFER"; rc=1; \
 	  fi; \
 	  rm -f .$$L.proto.out .$$L.prod.out; \
+	done; \
+	for L in $(PORTED); do \
+	  for S in $(GRID_SIDES); do \
+	    printf '%-6s ' "$$L"; \
+	    ./$${L}_cpp     grid $$S | grep -E '^order:' > .$$L.proto.out; \
+	    ./production_cpp $$L grid $$S | grep -E '^order:' > .$$L.prod.out; \
+	    if diff .$$L.proto.out .$$L.prod.out > /dev/null; then \
+	      echo "prototype and production agree on grid $$S"; \
+	    else \
+	      echo "DIFFER on grid $$S"; rc=1; \
+	    fi; \
+	    rm -f .$$L.proto.out .$$L.prod.out; \
+	  done; \
 	done; \
 	for L in $(PORTED_FILL); do \
 	  printf '%-6s ' "$$L"; \

@@ -475,6 +475,7 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
     // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     std::size_t numBoundChecks = 0;
     std::size_t numLooseBounds = 0;
+    std::size_t numBoundsBelowExact = 0;   // an invariant, not a measurement
 
     // The buckets, and minDegree, a LOWER BOUND on the current minimum degree.
     // The search starts at minDegree rather than at 0, so it never looks at
@@ -595,6 +596,14 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
             exact[u] = amd1ExactDegree(A, I, C, superMembers, mark, tag, u);
             ++numBoundChecks;
             if (bound > exact[u]) ++numLooseBounds;
+            // The other direction, which is not a quality signal but an INVARIANT. A bound
+            // may exceed the degree by any amount and still be a bound; falling below it is
+            // the one thing it must never do, since the picker would then be told a vertex is
+            // cheaper than it is. Counted because it was not: the layer measured looseness
+            // only, and a cap taken from the wrong counter drove this negative 22 times on a
+            // 10 by 10 grid while every example stayed green. Anything but zero here is a
+            // defect. See the amd2 subsection of README.md.
+            if (bound < exact[u]) ++numBoundsBelowExact;
             amd1Refile(buckets, degrees, u, bound);
         }
         numDegreeComputations += refreshedVertices.size();
@@ -678,6 +687,8 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
     std::cout << "clique reads the bound needed:                    "
               << numCliqueReads << "\n";
     // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
+    std::cout << "bound below exact " << numBoundsBelowExact
+              << " times, which must be zero\n";
     std::cout << "bound was loose " << numLooseBounds << " times out of "
               << numBoundChecks << "\n";
     std::cout << "order: [";
@@ -745,7 +756,7 @@ int main(int argc, char** argv) {
     if (argc > 2 && std::string(argv[1]) == "grid") {
         const int side = std::atoi(argv[2]);
         std::cout << "=== grid " << side << "x" << side << " (n = " << side * side << ") ===\n";
-        CounterSink sink({"nnz(L)", "degree computations", "clique-member", "clique reads", "bound was loose"});
+        CounterSink sink({"order:", "nnz(L)", "degree computations", "clique-member", "clique reads", "bound below exact", "bound was loose"});
         std::streambuf* saved = std::cout.rdbuf(&sink);
         amd1MinimumDegree(gridGraph(side));
         std::cout.rdbuf(saved);

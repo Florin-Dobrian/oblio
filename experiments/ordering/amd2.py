@@ -344,6 +344,20 @@ def amd2_minimum_degree(G):
     eliminated = [False] * n
     pivots = []                                # the order over supervariables
     num_eliminated = 0                         # a counter, not a scan of eliminated
+    # Live ORIGINAL vertices, which is not n - num_eliminated. num_eliminated
+    # counts what has left the SELECTION, and a hash merge folds v into a LIVE u,
+    # so v stops being selectable while the vertices it stands for are still live
+    # inside u. The first cap of the bound needs the second reading, so it gets its
+    # own counter: only an elimination reduces it.
+    #
+    # amd1 has no such counter and does not need one, since it has no hash merges
+    # and every increment of num_eliminated really is an original leaving. This
+    # file inherited that line along with the driver, which made the cap too tight
+    # and drove the bound BELOW the true degree, 22 times on a 10 by 10 grid. The
+    # vendored amd_2 is the oracle here: its nel is advanced only at the pivot and
+    # at mass elimination, never at the hash merge, which moves the weight with
+    # Nv[i] += Nv[j] and leaves nel alone.
+    num_live = n
     nnz_L = 0
 
     # The cache, as in md5, except that from the first elimination it holds a
@@ -359,6 +373,7 @@ def amd2_minimum_degree(G):
     hash_bucket = [[] for _ in range(n + 1)]   # Amd.cpp's Head[hval]
     num_bound_checks = 0
     num_loose_bounds = 0
+    num_bounds_below_exact = 0             # an invariant, not a measurement
 
     # The buckets, and min_degree, a LOWER BOUND on the current minimum degree.
     # The search starts at min_degree rather than at 0, so it never looks at
@@ -397,6 +412,7 @@ def amd2_minimum_degree(G):
         for u in merged_vertices:              # the pivot now stands for them too
             super_members[pivot] += super_members[u]
             super_members[u] = []
+        num_live -= len(super_members[pivot])  # every original the pivot stands for
 
         amd2_unfile(buckets, filed, degrees[pivot], pivot)   # the pivot has left
         degrees[pivot] = 0
@@ -467,7 +483,7 @@ def amd2_minimum_degree(G):
                 I[u] = [c for c in I[u] if mark[c] != dead_tag]   # I[u] - dead
             num_absorbed += len(dead_cliques)
 
-        num_left = n - num_eliminated
+        num_left = num_live
         refreshed_vertices = pivot_clique
         for u in refreshed_vertices:
             # bound = |A[u]| + |C[pivot] - {u}| + sum |C[c] - C[pivot]| over the
@@ -491,6 +507,15 @@ def amd2_minimum_degree(G):
             num_bound_checks += 1
             if bound > exact_u:
                 num_loose_bounds += 1
+            # The other direction, which is not a quality signal but an INVARIANT. A bound
+            # may exceed the degree by any amount and still be a bound; falling below it is
+            # the one thing it must never do, since the picker would then be told a vertex is
+            # cheaper than it is. Counted because it was not: the layer measured looseness
+            # only, and a cap taken from the wrong counter drove this negative 22 times on a
+            # 10 by 10 grid while every example stayed green. Anything but zero here is a
+            # defect. See the amd2 subsection of README.md.
+            if bound < exact_u:
+                num_bounds_below_exact += 1
             amd2_refile(buckets, filed, degrees, u, bound)
 
         # HASH SUPERVARIABLE DETECTION, the second extra. Vertices indistinguishable
@@ -608,7 +633,13 @@ def amd2_minimum_degree(G):
         # column then holds ext + w - 1 entries below its diagonal, the next
         # ext + w - 2, down to ext, and each column contributes its own diagonal.
         super_size = len(super_members[pivot])
-        external_degree = len(C[pivot])
+        # Weighted, because hash detection folds a vertex into a LIVE one, so a
+        # member of the new clique can stand for several original vertices, and a
+        # merged one stands for none and is still lying there. amd1 can use the
+        # plain count and this file cannot, which is the same inheritance the
+        # num_live counter above records.
+        external_degree = sum(len(super_members[v]) for v in C[pivot]
+                              if not eliminated[v])
         nnz_L += (super_size * external_degree
                   + super_size * (super_size - 1) // 2
                   + super_size)
@@ -642,6 +673,8 @@ def amd2_minimum_degree(G):
     # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     print(f"aggressively absorbed: {num_absorbed}, hash merges: {num_hash_merges}")
     # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
+    print(f"bound below exact {num_bounds_below_exact} times, "
+          f"which must be zero")
     print(f"bound was loose {num_loose_bounds} times out of {num_bound_checks}")
     print(f"order: {order}")
     return order
@@ -771,10 +804,75 @@ graph7 = [
     {0, 1, 2, 3},     # 4
 ]
 
+# A square grid graph, four-neighbor, for running the counters at a size the seven examples
+# cannot reach. It is here rather than among them because it is not an example: nothing about it
+# illustrates a mechanism and its trace is far too long to read. The grid mode below discards the
+# trace and keeps only the closing lines, which is what a comparison wants.
+#
+# It must match the C++ twin's gridGraph exactly, vertex for vertex, or `make test` would be
+# diffing two different problems.
+def grid_graph(side):
+    n = side * side
+    graph = [[] for _ in range(n)]
+    for r in range(side):
+        for c in range(side):
+            u = r * side + c
+            if r > 0:
+                graph[u].append(u - side)
+            if c > 0:
+                graph[u].append(u - 1)
+            if c + 1 < side:
+                graph[u].append(u + 1)
+            if r + 1 < side:
+                graph[u].append(u + side)
+    return graph
+
+
+# Keep the closing lines and discard everything else, as it is written rather than afterwards.
+# A grid trace is far too large to hold: every step prints the whole quotient graph, so at
+# n = 10000 the captured text runs to gigabytes and the process dies holding it. This filters
+# line by line instead, so the memory is one line. The C++ twin does the same with a streambuf.
+class CounterSink:
+    def __init__(self, keys):
+        self.keys = keys
+        self.kept = []
+        self.line = ""
+
+    def write(self, text):
+        for character in text:
+            if character != "\n":
+                self.line += character
+                continue
+            if any(self.line.startswith(key) for key in self.keys):
+                self.kept.append(self.line)
+            self.line = ""
+
+    def flush(self):
+        pass
+
+
 examples = [("graph1", graph1), ("graph2", graph2),
             ("graph3", graph3), ("graph4", graph4),
             ("graph5", graph5), ("graph6", graph6),
             ("graph7", graph7)]
+
+# Grid mode: one square grid, the trace discarded, the closing lines kept. The C++ twin has the
+# same mode, spelled the same way, so `make test` can diff the two at a size the seven examples
+# cannot reach. That matters: two defects in amd2 left every example byte for byte identical
+# while the ordering was wrong on any grid of 10 a side or more.
+#
+#   python3 amd2.py grid 22
+if len(sys.argv) > 2 and sys.argv[1] == "grid":
+    grid_side = int(sys.argv[2])
+    print(f"=== grid {grid_side}x{grid_side} (n = {grid_side * grid_side}) ===")
+    grid_sink = CounterSink(["order:", "nnz(L)", "degree computations", "clique-member", "clique reads", "bound below exact", "bound was loose", "aggressively"])
+    saved_stdout = sys.stdout
+    sys.stdout = grid_sink
+    amd2_minimum_degree(grid_graph(grid_side))
+    sys.stdout = saved_stdout
+    for kept_line in grid_sink.kept:
+        print(kept_line)
+    sys.exit(0)
 
 # All of them by default. To run just one, pass its number: python3 amd2.py 3
 selected = int(sys.argv[1]) if len(sys.argv) > 1 else 0

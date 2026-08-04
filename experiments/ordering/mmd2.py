@@ -753,10 +753,75 @@ graph7 = [
     {0, 1, 2, 3},     # 4
 ]
 
+# A square grid graph, four-neighbor, for running the counters at a size the seven examples
+# cannot reach. It is here rather than among them because it is not an example: nothing about it
+# illustrates a mechanism and its trace is far too long to read. The grid mode below discards the
+# trace and keeps only the closing lines, which is what a comparison wants.
+#
+# It must match the C++ twin's gridGraph exactly, vertex for vertex, or `make test` would be
+# diffing two different problems.
+def grid_graph(side):
+    n = side * side
+    graph = [[] for _ in range(n)]
+    for r in range(side):
+        for c in range(side):
+            u = r * side + c
+            if r > 0:
+                graph[u].append(u - side)
+            if c > 0:
+                graph[u].append(u - 1)
+            if c + 1 < side:
+                graph[u].append(u + 1)
+            if r + 1 < side:
+                graph[u].append(u + side)
+    return graph
+
+
+# Keep the closing lines and discard everything else, as it is written rather than afterwards.
+# A grid trace is far too large to hold: every step prints the whole quotient graph, so at
+# n = 10000 the captured text runs to gigabytes and the process dies holding it. This filters
+# line by line instead, so the memory is one line. The C++ twin does the same with a streambuf.
+class CounterSink:
+    def __init__(self, keys):
+        self.keys = keys
+        self.kept = []
+        self.line = ""
+
+    def write(self, text):
+        for character in text:
+            if character != "\n":
+                self.line += character
+                continue
+            if any(self.line.startswith(key) for key in self.keys):
+                self.kept.append(self.line)
+            self.line = ""
+
+    def flush(self):
+        pass
+
+
 examples = [("graph1", graph1), ("graph2", graph2),
             ("graph3", graph3), ("graph4", graph4),
             ("graph5", graph5), ("graph6", graph6),
             ("graph7", graph7)]
+
+# Grid mode: one square grid, the trace discarded, the closing lines kept. The C++ twin has the
+# same mode, spelled the same way, so `make test` can diff the two at a size the seven examples
+# cannot reach. That matters: two defects in amd2 left every example byte for byte identical
+# while the ordering was wrong on any grid of 10 a side or more.
+#
+#   python3 mmd2.py grid 22
+if len(sys.argv) > 2 and sys.argv[1] == "grid":
+    grid_side = int(sys.argv[2])
+    print(f"=== grid {grid_side}x{grid_side} (n = {grid_side * grid_side}) ===")
+    grid_sink = CounterSink(["order:", "nnz(L)", "degree computations"])
+    saved_stdout = sys.stdout
+    sys.stdout = grid_sink
+    mmd2_minimum_degree(grid_graph(grid_side))
+    sys.stdout = saved_stdout
+    for kept_line in grid_sink.kept:
+        print(kept_line)
+    sys.exit(0)
 
 # All of them by default. To run just one, pass its number: python3 mmd2.py 3
 selected = int(sys.argv[1]) if len(sys.argv) > 1 else 0

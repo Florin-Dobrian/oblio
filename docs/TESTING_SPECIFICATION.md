@@ -17,7 +17,15 @@ file first, but CLAUDE.md is where it lives.
 
 `make test` builds and runs every suite. Each suite is a standalone binary that prints one line per
 assertion and a count, and returns nonzero on any failure. Suites are discovered by wildcard, so a
-new `tests/*.cpp` file needs no Makefile change. Totals today: **241 assertions across 8 suites**.
+new `tests/*.cpp` file needs no Makefile change.
+
+It then runs each example in `examples/` and checks its exit status, printing one line apiece with
+their output discarded. That is a weaker check than a suite and is not counted among the assertions
+below: it catches an example that crashes, that returns a failure, or that has quietly stopped
+being built, and says nothing about whether the numbers it prints are right. The stronger version,
+checking deterministic output, is open in docs/TODO.md and is awkward while residuals are in the
+output, since those legitimately differ in the last bits across BLAS
+implementations. Totals today: **252 assertions across 8 suites**.
 
 | suite | assertions | what it establishes |
 |---|---|---|
@@ -28,7 +36,7 @@ new `tests/*.cpp` file needs no Makefile change. Totals today: **241 assertions 
 | `test_symfactor` | 29 | supernodal index sets against a dense oracle |
 | `test_numfactor` | 18 | the numeric factor, by oracle and by reconstruction |
 | `test_solve` | 14 | the solve step, by residual |
-| `test_pipeline` | 58 | whole-pipeline combinations, by residual |
+| `test_pipeline` | 69 | whole-pipeline combinations, by residual |
 
 The counts in this table had drifted from the suite before MMD1 was added, `test_pipeline` reading
 48 against 56 on disk and the total reading 153 against 183. They are corrected here rather than
@@ -195,7 +203,7 @@ storages: real Cholesky, real static LDL^T, complex Cholesky and complex LDL^H a
 input, and complex LDL^T against complex-symmetric input. A 10x10 grid is checked separately in both
 storages. All are ordered by AMD.
 
-### test_pipeline, 58 assertions
+### test_pipeline, 69 assertions
 
 Added 2026-07-19, with slice 2 of dynamic LDL. Where `test_numfactor` checks the factor against an
 oracle and `test_solve` checks the solve, this suite checks that the phases *compose*, for a given
@@ -334,7 +342,8 @@ residual is at machine precision.
 
 Not redundant with the by-hand sweep. The facade owns both factors and chooses between them with
 `dynamicPivoting()`, so it can fail to reach a combination that works. That is exactly the defect
-`examples/pipeline.cpp` carried: it fixed the storage at `NumFactorStatic`, so every dynamic cell
+`examples/pipeline.cpp`, since renamed `examples/example_pipeline_real.cpp`, carried: it fixed the
+storage at `NumFactorStatic`, so every dynamic cell
 printed "not implemented" long after it was implemented. Nothing caught it because examples are
 built by `make` and never run. The `reached == 15` assertion is the guard against that shape of
 error, and it is why the count is asserted separately from the residual: a silently skipped
@@ -454,6 +463,41 @@ choose, so the count follows from the matrix and not from a comparison rounding 
 
 **Singular matrices are excluded throughout**: they have no residual to hit, and asserting something
 weaker about them would look like coverage without being any.
+
+**The facade's pivot statistics and inertia, eleven assertions.** `DirectSolver` does not expose the
+numeric factor, so four accessors are its only window onto what the pivot search did:
+`numDelayedColumns`, `numPivots1x1`, `numPivots2x2` and `inertia`. They are checked two ways, and
+neither way is the accessor checking itself.
+
+The three counts are compared against the by-hand sweep on the tier 1 matrix, which reaches the
+factor directly and whose numbers this suite already pins at 5 delayed and 4 two-by-twos. Agreement
+therefore says the forwarders report what the factor holds. A fourth assertion pins the partition,
+`1x1 + 2 * 2x2 == n`, which is what catches a 2x2 counted in columns rather than in blocks, the
+`pivotType` encoding using 2 and 3 for the two halves. A fifth checks that a statically pivoted
+factorization reports zero for all three, which is the accurate report rather than a placeholder: it
+takes the diagonal in symbolic order and makes no choices.
+
+The inertia is checked against the closed form for a grid Laplacian's eigenvalues,
+`4 - 2cos(pi i / (g+1)) - 2cos(pi j / (g+1))`, which shares no code with the factorization. Three
+shifts of one 8x8 grid, definite, mildly indefinite and strongly indefinite, with the negative count
+matching at every shift, the three components summing to the order, and at least one shift taking a
+2x2 so that case runs. One assertion checks that Cholesky, static LDL and dynamic LDL agree on the
+definite matrix, which is Sylvester's law across three different factors of one matrix. Two more
+check the cases it declines rather than guessing: before a factorization exists, and for a
+complex-symmetric `LDL^T`, whose eigenvalues are complex and have no signs to count.
+
+**The three shifts are chosen for conditioning, not rounded.** This grid's eigenvalues hit 2, 4 and
+6 exactly by symmetry, so those shifts make `A` exactly singular, and a zero eigenvalue then lands
+on whichever side rounding puts it. Shifts of 0, 1 and 3 give condition numbers of about 32, 105
+and 40.
+
+**One branch is not exercised and the mutation test says so.** A 2x2 block contributes two
+eigenvalues of its trace's sign when its determinant is positive, and that has never been observed:
+707 accepted blocks over 400 random indefinite matrices all had a negative determinant, and deleting
+the positive case leaves this suite green. At a root it is a guarantee, bounded Bunch-Kaufman
+reaching a 2x2 only after both diagonals fail their own tests, which forces `det < 0`. At a non-root
+it is not, Figure 3.3's test reading `|det|`, so the branch is defensive rather than dead and a
+witness would be worth having.
 
 ## What the catalog shows
 

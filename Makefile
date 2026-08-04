@@ -102,8 +102,20 @@ $(VENDOR_OBJS): %.o: %.cpp
 %_cpp: examples/%.cpp $(LIB_OBJS) $(LIB_HDRS)
 	$(CXX) $(CXXFLAGS) examples/$*.cpp $(LIB_OBJS) $(BLAS_LIBS) -o $@
 
-test: tests
+# The suites first, each printing its own PASS/FAIL lines, then the examples. An example is
+# documentation that compiles, and compiling is not the claim it makes: one of them once reported
+# every dynamic cell as unimplemented long after they worked, and nothing caught it because nothing
+# ran it. Running them here catches a crash, a hard refusal and a stale build, and nothing about
+# whether the numbers are right; their output is discarded so it cannot drown the suites. Checking
+# the numbers is the open half, in docs/TODO.md.
+test: tests examples
 	@for t in $(TEST_BINS); do echo "== $$t =="; ./$$t || exit 1; echo; done
+	@echo "== examples =="
+	@for e in $(EXAMPLE_BINS); do \
+	  if ./$$e > /dev/null 2>&1; then echo "  PASS  $$e"; \
+	  else echo "  FAIL  $$e (exit status)"; exit 1; fi; \
+	done
+	@echo
 
 examples: $(EXAMPLE_BINS)
 

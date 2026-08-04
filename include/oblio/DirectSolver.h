@@ -43,6 +43,15 @@
 
 namespace Oblio {
 
+// The inertia of a symmetric matrix: how many of its eigenvalues are positive, negative and zero.
+// The three sum to the matrix order. It is a scalar-type-free fact about A, not about the factor,
+// which is why it is a plain struct here rather than a member of either.
+struct Inertia {
+    std::size_t positive = 0;
+    std::size_t negative = 0;
+    std::size_t zero     = 0;
+};
+
 template<class Val>
 class DirectSolver {
 public:
@@ -102,13 +111,50 @@ public:
     // The intermediate results, for a caller who wants to inspect the ordering or the fill rather
     // than only the solution.
     const Permutation& permutation() const { return mPermutation; }
-    const ElmForest&   forest() const      { return mForest; }
+    const ElmForest&   elmForest() const   { return mElmForest; }
     const SymFactor&   symFactor() const   { return mSymFactor; }
 
     // Whether the numeric factor went into per-supernode storage, and how many pivots the
     // factorization had to replace (static LDL perturbs rather than failing).
     bool        usesDynamicStorage() const { return mUsesDynamicStorage; }
     std::size_t numPerturbations() const;
+
+    // What the pivot search did, which only dynamic LDL has: a statically pivoted factorization
+    // takes the diagonal in the order the symbolic factorization fixed and makes no choices, so all
+    // three are zero for it rather than describing it badly.
+    //
+    //   numDelayedColumns  columns a supernode could not pivot on and passed to its parent, summed
+    //                      over supernodes. Each one widens the parent's front, so this is what
+    //                      dynamic pivoting costs in fill and work
+    //   numPivots1x1       single-column pivots accepted
+    //   numPivots2x2       two-column blocks accepted, taken when no single column was acceptable
+    //
+    // The columns are partitioned, so numPivots1x1 + 2 * numPivots2x2 == size() once factored.
+    // All three are counted on demand by a scan of the factor, not maintained during it.
+    std::size_t numDelayedColumns() const;
+    std::size_t numPivots1x1() const;
+    std::size_t numPivots2x2() const;
+
+    // How many eigenvalues of A are positive, negative and zero. Not computed but *read*, from the
+    // signs of D, which is Sylvester's law of inertia: A = L D L^H is a congruence, a congruence
+    // preserves those signs, so counting them in D counts them in A without forming an eigenvalue.
+    // A 1x1 pivot contributes the sign of its diagonal; a 2x2 block contributes one of each sign
+    // when its determinant is negative, and two of its trace's sign when positive.
+    //
+    // This is what an indefinite solver is expected to report, and it is why one is used to count
+    // eigenvalues in an interval (factor A - sigma I and read the negatives) or to check
+    // second-order optimality on a saddle-point system.
+    //
+    // Returns false rather than guessing when it cannot answer: before a factorization, and for a
+    // complex-symmetric LDL^T, whose eigenvalues are complex and so have no signs to count. Every
+    // other case is covered, Cholesky's being trivially all positive since it factors nothing else.
+    //
+    // Two caveats on the answer itself. It is exact for a nonsingular A, and for a singular one a
+    // zero eigenvalue lands on whichever side rounding puts it, so the split is unreliable exactly
+    // where it would be most interesting. And a static LDL that perturbed a pivot
+    // (numPerturbations() > 0) reports the inertia of the matrix it actually factored, which is the
+    // perturbed one.
+    bool inertia(Inertia& inertia) const;
 
     // ||A x - b|| / ||b||, the one number that says whether the pipeline worked. Recomputes A x, so
     // it costs a multiplication; it is a convenience, not part of solving.
@@ -117,7 +163,7 @@ public:
 
 private:
     // Set by the constructor, which is where their defaults live, so they are not repeated here.
-    Ordering                mOrdering;
+    Ordering                   mOrdering;
     Factorization              mFactorization;
     Traversal                  mTraversal;
     Supernodes                 mSupernodes;
@@ -126,13 +172,13 @@ private:
     double mPivotThreshold = 0.1;   // not a constructor argument: dynamic LDL tuning, as on the engine
 
     Permutation mPermutation;
-    ElmForest   mForest;
+    ElmForest   mElmForest;
     SymFactor   mSymFactor;
 
     // Both storages are declared, one is filled. An unused vector costs nothing, and this keeps the
     // factor a concrete member rather than something reached through a pointer or a variant.
-    NumFactorStatic<Val>  mStaticFactor;
-    NumFactorDynamic<Val> mDynamicFactor;
+    NumFactorStatic<Val>  mNumFactorStatic;
+    NumFactorDynamic<Val> mNumFactorDynamic;
 
     std::size_t mSize               = 0;
     bool        mUsesDynamicStorage = false;

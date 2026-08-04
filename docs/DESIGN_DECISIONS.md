@@ -2420,7 +2420,8 @@ build. Executables carry the `_cpp` suffix and are gitignored.
 Distinct from its two neighbors:
 - `archive/`, frozen history (superseded PoC devlog, 0.9-analysis notes, old
   harnesses). Not maintained, not built.
-- `examples/`, usage samples showing how to *call* the library (`examples/basic.cpp`).
+- `examples/`, usage samples showing how to *call* the library (`examples/basic.cpp`, since
+  renamed `examples/example_basic.cpp`).
 
 An experiment answers a design question with code you can run and measure, then feeds
 a decision here. Current studies: `template-instantiation/` (how to instantiate the

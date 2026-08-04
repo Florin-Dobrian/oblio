@@ -237,9 +237,12 @@ softer layer: conventions for consistency, not correctness.
   is unambiguous. Should two objects ever both carry one, qualify then and not before: `acp`,
   `lcp`.
 
-  0.9 calls all of these `p`; we cannot, since `p` is the `Permutation`, and in any case the
-  prefix is more useful than the bare letter. Unlike indices there is no fixed set of positions:
-  each flat structure brings its own, and `lp` will arrive with the numeric factor.
+  0.9 calls all of these `p` and we do not, because the prefix says which array is being walked
+  where the bare letter says only that something is being walked. (This rule once carried a second
+  reason, that `p` was taken by the `Permutation`. That stopped being true when the permutation
+  became `P`, and the rule is unaffected: it never rested on the collision.) Unlike indices there
+  is no fixed set of positions: each flat structure brings its own, and `lp` will arrive with the
+  numeric factor.
 
   **A position is not an index.** It cannot be compared with one, it means nothing outside its
   own array, and it is a `std::size_t` because it measures rather than names: never negative,

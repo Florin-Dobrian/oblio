@@ -1108,6 +1108,37 @@ is the same front-size question named here.
 
 ## Structure
 
+### Nobody exposes nnz(L), and three objects could
+
+`ElmForest`, `SymFactor` and the two numeric factors all carry `frontSize` and `updateSize` per
+supernode, which is everything the count needs:
+
+```
+nnzL = sum over supernodes of frontSize * (frontSize + 1) / 2 + frontSize * updateSize
+```
+
+None of them offers it, so every caller sums it by hand. Today that is three copies, in
+`benchmarks/ordering`, `benchmarks/pipeline` and `examples/example_analysis.cpp`. The benchmarks
+would keep their own copy regardless, a benchmark standing alone being deliberate there, but the
+library should be able to answer.
+
+**It is one accessor on each, three lines apiece**, and the three agree: `ElmForest` and `SymFactor`
+were checked to give the identical value on grids at 3, 8 and 20 a side, under both supernode modes
+and with amalgamation on and off. `ElmForest` is the earliest object that can answer, which is
+section 2.5's claim, column counts without computing `L`, made reachable.
+
+**One thing the comment has to say: it counts entries, not nonzeros.** Amalgamation buys explicit
+zeros, so on an 8x8 grid under AMD the count is 354 with no amalgamation and 499 at threshold 8,
+while the true nonzeros stay 354. `exactPatterns()` is what distinguishes the two cases, and the
+count equals nnz(L) exactly when it is true.
+
+**And the numeric factor's answer is a third number, larger again**, because a block is allocated as
+a full `frontSize` by `frontSize + updateSize` rectangle, with the front's upper triangle allocated
+and left as zeros so BLAS can take the whole block: 375 and 652 against the 354 and 499 above. That
+is a property of the layout rather than of the factor's structure, so if the numeric factors answer
+at all they should answer both, which is 0.9's `numberOfEntries` against
+`numberOfAllocatedEntries`.
+
 ### Five ordering questions, four still open and deliberately so
 
 Raised at the end of the ordering optimization work and parked rather than decided, each with the
@@ -1551,20 +1582,65 @@ on simplicity; if front-size-first measurably helps, it earns its complexity. Fi
 prototype-first pattern: an isolated harness that runs both and reports the comparison, kept out of
 the main code until the conclusion is drawn.
 
+## Documentation
+
+### The README is written for us, not for a reader arriving cold
+
+Four items, found in a pass on 2026-08-04 and left undone deliberately: each is a structural
+decision about what the README is for, and the file currently answers that question as "a record of
+what we decided", which is the right answer for `docs/` and the wrong one for the front page.
+
+**Nothing points at the examples.** There are seven of them, they are the natural next step after
+the Quick Start block, and they appear only inside the `Structure` listing at line 223, below a
+third of a page about build systems. A reader who wants to know whether this library does what they
+need should be sent to `example_indefinite.cpp` and `example_analysis.cpp`, not left to find them.
+
+**The build discussion sits in a reader's path.** Makefile versus CMake, which to use when, and the
+CLion arrangement together run about a third of the file, between the Quick Start and everything
+describing what the library does. All of it is worth keeping and none of it is what someone
+evaluating the solver needs first. Probably a `Building` section that answers "how do I compile
+this" in ten lines, with the comparison moved to `CONTRIBUTING.md` or a `docs/` file.
+
+**There is no requirements line.** The whole dependency list is a C++17 compiler and a
+BLAS/LAPACK, and neither is stated: both are currently inferable only from the compile commands
+inside the build section.
+
+**There is no license statement.** `CONTRIBUTING.md` carries this as a going-public item and the
+intent is settled, PolyForm Noncommercial 1.0.0 with a commercial license on request. It is the
+first thing an outside researcher looks for, and its absence reads as an answer rather than as a
+gap. The trigger recorded elsewhere is when the code becomes usable by someone outside this effort,
+which the examples and the facade have arguably now reached.
+
+Four factual errors found in the same pass were fixed rather than recorded, since they were defects
+rather than decisions: the Quick Start named `OrderMethod`, which no longer exists and so did not
+compile; the feature list promised a `DenseMatrix<Val>` for batched solves, which does not exist in
+any form and which Status contradicted thirty lines below; "three factorization types" was five,
+the two missing being the Hermitian variants; and the opening sentence named neither `LDL^H` nor
+complex support. The Quick Start block is now compiled and run verbatim before being called correct.
+
 ## Testing
 
-### Examples are built but never run
+### Examples are run for exit status, and their output is still unchecked
 
-`make` compiles everything in `examples/`, and nothing ever executes it or checks what it prints. So
-an example can go stale silently, and one did: `examples/pipeline.cpp` fixed its storage at
-`NumFactorStatic` and therefore reported every dynamic LDL cell as "not implemented" for as long as
-it took someone to run it by hand and notice. The code was right; the example was lying about it.
+`make` compiled everything in `examples/` and nothing ever executed it, so an example could go stale
+silently, and one did: `examples/pipeline.cpp` (now `examples/example_pipeline_real.cpp`) fixed its
+storage at `NumFactorStatic` and therefore reported every dynamic LDL cell as "not implemented" for
+as long as it took someone to run it by hand and notice. The code was right; the example was lying
+about it.
 
-An example is documentation that compiles, which is most of its value, but compiling is not the
-claim it makes. The cheap fix is to run each example under `make test` and require exit status zero,
-which catches a crash but not a wrong number. The honest fix is for examples with deterministic
-output to have that output checked. Worth deciding which, rather than drifting into the first
-because it is easier.
+**The cheap half is done.** `make test` now runs each example and requires exit status zero,
+printing one `PASS`/`FAIL` line apiece with the output discarded so it cannot drown the suites.
+Confirmed to fail the build: making one example return 3 takes `make test` to exit status 2.
+
+**The honest half is open**, and it is worth being clear about why it is not merely more of the
+same. Five of the seven examples print residuals, and a residual differs in its last bits across
+BLAS implementations, which is exactly why `test_pipeline` bounds them rather than pinning them. So
+a golden-file comparison would go red on a correct build the first time it moved machines. Checking
+the output means either comparing only the structural columns, which needs a mode in each example
+that prints those alone, or bounding the numeric ones, which is a test framework growing inside the
+examples. Neither is obviously right, and the failure the entry was written about, an example that
+lies about what the library supports, is now largely prevented by a different route: the examples
+share the library's vocabulary closely enough that a stale one tends not to compile.
 
 ### The CMake build had drifted from the Makefile: DONE, 2026-07-31
 
@@ -1581,7 +1657,8 @@ the only suite checking that the phases compose. A CMake build therefore reporte
 strictly smaller claim than `make test` did, and nothing said so.
 
 **The examples block and the comment above it contradicted each other.** The comment stated that
-`basic.cpp` sketched a facade that "is not ported and does not compile against the current
+`basic.cpp` (now `example_basic.cpp`) sketched a facade that "is not ported and does not compile
+against the current
 library, so it is not listed here", and the `foreach(e basic pipeline)` on the next line listed it.
 The comment was the stale half: `DirectSolver` is ported, `basic.cpp` compiles and runs, and the
 exclusion it described had been lifted with the prose left behind. That is the corpse-in-place

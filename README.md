@@ -1,13 +1,16 @@
 # Oblio
 
-A sparse direct solver library for symmetric matrices. Implements supernodal
-Cholesky and LDL^T factorization with multiple fill-reducing orderings and
-traversal strategies.
+A sparse direct solver library for symmetric matrices, real and complex. Supernodal Cholesky and
+`LDL^T` / `LDL^H` factorization, definite and indefinite, with nine fill-reducing orderings and
+three traversals over one pipeline.
 
 ## Features
 
-- **Three factorization types**: Cholesky, Static LDL^T (with diagonal perturbation),
-  Dynamic LDL^T (threshold pivoting with 1x1 and 2x2 pivots)
+- **Five factorizations**: Cholesky (`A = CC^H`); static `LDL^T` and `LDL^H`, whose pivots are
+  fixed by the symbolic structure and which perturb a pivot too small to divide by; and dynamic
+  `LDL^T` and `LDL^H`, which choose pivots as they go, taking 1x1 and 2x2 blocks and delaying a
+  column they cannot use. The `T`/`H` pair coincides over the reals and differs over the complex
+  field, where one is symmetric and the other Hermitian
 - **Three traversal algorithms**: Left-looking, Right-looking, Multifrontal
 - **Ordering**, nine methods: Natural (identity), the vendored MMD (Multiple Minimum Degree) and
   AMD (Approximate Minimum Degree, Davis/Amestoy/Duff), and Oblio's own, built over a shared
@@ -15,8 +18,9 @@ traversal strategies.
   their vendored counterparts carry; and AMD1B and AMD2B, which are AMD1 and AMD2 computed on a
   different schedule and return the same permutations. Ours are not drop-in replacements for the
   vendored pair and order differently
-- **Single and multiple RHS**: `Vector<Val>` for one RHS, `DenseMatrix<Val>` for
-  batched solves using per-supernode BLAS (`dtrsm` + `dgemm`)
+- **One right-hand side per solve**, a `Vector<Val>`, with the factorization reused across as
+  many as wanted. Many right-hand sides at once, which is where the solve would become a level-3
+  BLAS operation, is the one thing on the roadmap rather than in the library; see Status
 - **Scalar types**: `double`, `std::complex<double>` (via explicit instantiation).
   Cholesky requires Hermitian input for complex; LDL^T variants handle complex
   symmetric (non-Hermitian) matrices.
@@ -35,7 +39,7 @@ Vector<double> b(n), x(n);
 for (std::size_t i = 0; i < n; ++i) b[i] = 1.0;
 
 // Ordering, factorization, traversal: the pipeline order. Each also has a setter.
-DirectSolver<double> solver(OrderMethod::AMD, Factorization::Cholesky, Traversal::LeftLooking);
+DirectSolver<double> solver(Ordering::AMD, Factorization::Cholesky, Traversal::LeftLooking);
 
 // The three phases have different lifetimes: analyze depends only on the pattern,
 // factor on the values, solve on the right-hand side.
@@ -67,7 +71,7 @@ wildcard, so a new `tests/*.cpp` file needs no edit in either.
 
 ```bash
 make            # build everything (tests and examples)
-make test       # build and run the test suites
+make test       # build and run the test suites, then run the examples for exit status
 make tests      # build the test binaries only
 make examples   # build the example programs
 make clean
@@ -86,7 +90,10 @@ directly into each executable. Nothing to remove but the files themselves, which
 `make clean` does.
 
 What it buys is the development loop. `make test` prints one `PASS`/`FAIL` line per assertion and
-a count, which is what the port is read against, and the Makefile's own header lists the
+a count, which is what the port is read against, followed by one line per example: each is run and
+its exit status checked, with its output discarded so it cannot drown the suites. That catches an
+example that crashes or has stopped compiling, and nothing about whether its numbers are
+right, and the Makefile's own header lists the
 inner-loop targets beyond the ones above: building one suite, or compiling the library alone as
 the fastest check that a unit still builds. The experiments under `experiments/` each carry their
 own Makefile for the same reasons, and none of them is part of this build.
@@ -210,7 +217,7 @@ src/                , method bodies + explicit instantiations (flat layout)
                       One .cpp per header, plus the vendored orderings, which have none:
   Amd.cpp           , AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
   Mmd.cpp           , MMD ordering (Sparspak/Liu, via Oblio 0.9)
-tests/              , test suites (241 assertions; see docs/TESTING_SPECIFICATION.md)
+tests/              , test suites (252 assertions; see docs/TESTING_SPECIFICATION.md)
   smoke.cpp                    5,  quick end-to-end sanity
   test_order.cpp              77,  the eight non-trivial orderings, and each B pair against its
                                    original entry for entry
@@ -219,9 +226,19 @@ tests/              , test suites (241 assertions; see docs/TESTING_SPECIFICATIO
   test_symfactor.cpp          29,  symbolic factorization
   test_numfactor.cpp          18,  numeric factorization
   test_solve.cpp              14,  the solve step, residual at machine precision
-  test_pipeline.cpp           58,  whole-pipeline combinations, by residual
+  test_pipeline.cpp           69,  whole-pipeline combinations, by residual
 examples/           , usage examples, named example_* as the tests are named test_*
   example_basic.cpp , one solve through the DirectSolver facade, the shortest way in
+  example_matrix.cpp           , building a SparseMatrix: CSC by hand, from a dense array, and
+                      from coordinate triplets, with the conversion that sorts, merges duplicates
+                      and keeps the diagonal
+  example_analysis.cpp         , the analyze phase alone: what each ordering costs in fill,
+                      supernodes and forest height, on an arrow and on two grids
+  example_indefinite.cpp       , one pattern under three value sets, definite to strongly
+                      indefinite: which factorizations refuse, which perturb, and what dynamic
+                      pivoting costs in delayed columns and 2x2 pivots
+  example_reuse.cpp            , the three lifetimes: one analysis over three value sets, one
+                      factor over three right-hand sides, and which settings discard an analysis
   example_pipeline_real.cpp    , the pipeline by hand, every ordering / factorization /
                       traversal, real
   example_pipeline_complex.cpp , the same sweep for complex, over two matrices, since Hermitian
@@ -298,7 +315,7 @@ Done:
 - [x] Namespaced headers (`include/oblio/`), explicit instantiation throughout
 - [x] Validated against Oblio 0.9 as oracle; end-to-end residual at machine precision
 - [x] `DirectSolver<Val>`, the top-level analyze / factor / solve driver
-- [x] 241 assertions across 8 suites
+- [x] 252 assertions across 8 suites
 - [x] Dynamic LDL, threshold 1x1 / 2x2 pivots: all three traversals, delayed columns and all, at
       machine precision. Non-root supernodes follow Ashcraft, Grimes and Lewis (1998) Figure 3.4
       with the Figure 3.3 acceptance test; roots, which cannot delay, use bounded Bunch-Kaufman

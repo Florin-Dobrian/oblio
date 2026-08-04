@@ -45,6 +45,7 @@
 #include "oblio/Vector.h"
 
 #include <algorithm>
+#include <cmath>
 #include <complex>
 #include <cstdint>
 #include <optional>
@@ -117,6 +118,32 @@ std::vector<std::vector<double>> gridLaplacian(std::size_t g) {
             if (c + 1 < g) { A[i][id(r, c + 1)] = A[id(r, c + 1)][i] = -1.0; }
         }
     return A;
+}
+
+// The same grid with sigma taken off the diagonal, A - sigma I. The pattern is untouched, since the
+// diagonal is stored whatever its value, so one analysis serves every shift. Used to drive the
+// inertia assertions, where the shift is what makes eigenvalues negative.
+std::vector<std::vector<double>> shiftedGridLaplacian(std::size_t g, double sigma) {
+    std::vector<std::vector<double>> A = gridLaplacian(g);
+    for (std::size_t i = 0; i < A.size(); ++i) A[i][i] -= sigma;
+    return A;
+}
+
+// How many eigenvalues of that matrix are negative, from the closed form rather than from anything
+// the library computes: the eigenvalues of the g by g five-point Laplacian are
+// 4 - 2cos(pi i / (g+1)) - 2cos(pi j / (g+1)). This is the oracle the inertia is checked against,
+// and it shares no code with the factorization.
+std::size_t negativeEigenvalues(std::size_t g, double sigma) {
+    std::size_t negative = 0;
+    for (std::size_t i = 1; i <= g; ++i)
+        for (std::size_t j = 1; j <= g; ++j) {
+            const double lambda = 4.0
+                - 2.0 * std::cos(M_PI * static_cast<double>(i) / static_cast<double>(g + 1))
+                - 2.0 * std::cos(M_PI * static_cast<double>(j) / static_cast<double>(g + 1))
+                - sigma;
+            if (lambda < 0.0) ++negative;
+        }
+    return negative;
 }
 
 // Tier 1. A banded matrix of half-bandwidth w with random off-diagonals, in which a fraction of
@@ -809,6 +836,104 @@ int main() {
         ck(dsAmal.analyze(A) && dsAmal.factor(A) && dsAmal.solve(b, x)
                && dsAmal.relativeResidual(A, b, x) < tol,
            "DirectSolver      : solves again after both forest settings changed");
+    }
+
+    // =============================================================================================
+    // What the facade reports about pivoting: the delay and pivot counts, and the inertia.
+    //
+    // These four accessors are the facade's only window onto the numeric factor, which it does not
+    // expose, so they are checked two ways. The counts are checked against the by-hand sweep above,
+    // which reaches the factor directly and whose numbers tier 1 already pins; agreement therefore
+    // means the forwarders read what the factor holds. The inertia is checked against the closed
+    // form for the grid's eigenvalues, which shares no code with anything here.
+    // =============================================================================================
+    {
+        // The tier 1 matrix, whose counts are pinned above at 5 delayed and 4 two-by-twos.
+        const SparseMatrix<double> A = toSparse(bandIndefinite(40, 3, 0.50, 7));
+        const std::size_t n = A.size();
+
+        const Outcome byHand = run<double, FD>(A, Ordering::Natural, Factorization::DynamicLDLT,
+                                               Traversal::LeftLooking);
+
+        DirectSolver<double> ds(Ordering::Natural, Factorization::DynamicLDLT,
+                                Traversal::LeftLooking);
+        ck(ds.analyze(A) && ds.factor(A), "facade counts     : dynamic factorization ran");
+
+        ck(ds.numDelayedColumns() == static_cast<std::size_t>(byHand.delayed)
+               && ds.numPivots1x1() == static_cast<std::size_t>(byHand.pivots1x1)
+               && ds.numPivots2x2() == static_cast<std::size_t>(byHand.pivots2x2),
+           "facade counts     : delayed, 1x1 and 2x2 agree with the by-hand sweep");
+
+        // The columns are partitioned by the pivot choice, which is the invariant that would catch
+        // a 2x2 counted in columns rather than in blocks.
+        ck(ds.numPivots1x1() + 2 * ds.numPivots2x2() == n,
+           "facade counts     : 1x1 + 2 * 2x2 covers every column exactly once");
+
+        // A static factorization makes no pivot choices, so all three are zero and that is the
+        // accurate report rather than a placeholder.
+        DirectSolver<double> dsStatic(Ordering::Natural, Factorization::StaticLDLT,
+                                      Traversal::LeftLooking);
+        ck(dsStatic.analyze(A) && dsStatic.factor(A)
+               && dsStatic.numDelayedColumns() == 0
+               && dsStatic.numPivots1x1() == 0 && dsStatic.numPivots2x2() == 0,
+           "facade counts     : a statically pivoted factor reports no pivot choices");
+
+        // Inertia, against the closed form. One pattern, three shifts, one analysis: the definite
+        // matrix, a mildly indefinite one and a strongly indefinite one, the last of which takes
+        // 2x2 pivots and so exercises the determinant branch rather than only the diagonal one.
+        const std::size_t g = 8;
+        const double      shift[] = { 0.0, 1.0, 3.0 };
+
+        DirectSolver<double> dsIn(Ordering::AMD, Factorization::DynamicLDLT);
+        ck(dsIn.analyze(toSparse(shiftedGridLaplacian(g, 0.0))),
+           "inertia           : one analysis serves every shift, the pattern being shared");
+
+        bool inertiaMatches = true, inertiaSums = true, tookA2x2 = false;
+        for (double sigma : shift) {
+            const SparseMatrix<double> S = toSparse(shiftedGridLaplacian(g, sigma));
+            Inertia in;
+            if (!dsIn.factor(S) || !dsIn.inertia(in)) { inertiaMatches = false; break; }
+            if (in.negative != negativeEigenvalues(g, sigma) || in.zero != 0) inertiaMatches = false;
+            if (in.positive + in.negative + in.zero != g * g)                 inertiaSums = false;
+            if (dsIn.numPivots2x2() > 0)                                      tookA2x2 = true;
+        }
+        ck(inertiaMatches, "inertia           : negative count matches the closed form at every shift");
+        ck(inertiaSums,    "inertia           : positive + negative + zero is the matrix order");
+        ck(tookA2x2,       "inertia           : at least one shift took a 2x2, so that branch ran");
+
+        // **One branch of the 2x2 case is not exercised here, and probably cannot be.** A block
+        // contributes one of each sign when its determinant is negative and two of the trace's sign
+        // when positive, and only the first has ever been seen: 707 accepted blocks over 400 random
+        // indefinite matrices were all negative, and mutating the positive case away leaves this
+        // suite green. At a root that is a guarantee, since bounded Bunch-Kaufman reaches a 2x2 only
+        // after both diagonals have failed their own tests, which forces det < 0. At a non-root it
+        // is not: Figure 3.3's test reads |det| and says nothing about the sign, so the branch is
+        // defensive rather than dead. Recorded in TESTING_SPECIFICATION under the gaps.
+
+        // The same three matrices under Cholesky and static LDL, where they answer at all: a
+        // congruence preserves inertia, so three different factors of one matrix must agree.
+        DirectSolver<double> dsCh(Ordering::AMD, Factorization::Cholesky);
+        DirectSolver<double> dsSt(Ordering::AMD, Factorization::StaticLDLT);
+        const SparseMatrix<double> definite = toSparse(shiftedGridLaplacian(g, 0.0));
+        Inertia inCh, inSt, inDy;
+        const bool agree =
+               dsCh.analyze(definite) && dsCh.factor(definite) && dsCh.inertia(inCh)
+            && dsSt.analyze(definite) && dsSt.factor(definite) && dsSt.inertia(inSt)
+            && dsIn.factor(definite)  && dsIn.inertia(inDy)
+            && inCh.positive == g * g && inCh.negative == 0
+            && inSt.positive == inCh.positive && inSt.negative == inCh.negative
+            && inDy.positive == inCh.positive && inDy.negative == inCh.negative;
+        ck(agree, "inertia           : Cholesky, static and dynamic agree on the definite matrix");
+
+        // The two cases it declines rather than guessing.
+        DirectSolver<double> dsUnfactored(Ordering::AMD, Factorization::DynamicLDLT);
+        Inertia unused;
+        ck(!dsUnfactored.inertia(unused),
+           "inertia           : refused before a factorization exists");
+
+        DirectSolver<std::complex<double>> dsSym(Ordering::AMD, Factorization::DynamicLDLT);
+        ck(!dsSym.inertia(unused),
+           "inertia           : refused for complex-symmetric LDLT, whose eigenvalues are complex");
     }
 
     std::cout << "\nPipeline tests: " << pass << "/" << (pass + fail) << " passed\n";

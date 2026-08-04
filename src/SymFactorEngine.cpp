@@ -7,18 +7,18 @@ namespace Oblio {
 // Adapter: the factor's pattern needs only A's pattern, so the matrix overload pulls it out
 // and forwards. The implementation below is free of Val and compiled once.
 template<class Val>
-bool SymFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p,
+bool SymFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& P,
                             const ElmForest& ef, SymFactor& sf) const {
-    return compute(A.colPtr(), A.rowIdx(), p, ef, sf);
+    return compute(A.colPtr(), A.rowIdx(), P, ef, sf);
 }
 
 bool SymFactorEngine::compute(const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,
-                            const Permutation& p, const ElmForest& ef, SymFactor& sf) const {
+                            const Permutation& P, const ElmForest& ef, SymFactor& sf) const {
     if (colPtr.empty())
         return false;
     const std::size_t size = colPtr.size() - 1;
-    if (p.size() != size || ef.size() != size)
+    if (P.size() != size || ef.size() != size)
         return false;
 
     const std::size_t snodeSize = ef.snodeSize();
@@ -60,8 +60,8 @@ bool SymFactorEngine::compute(const std::vector<std::size_t>&  colPtr,
     else
         getFrontalIndices(sf, snodeFrontPtr, frontNodeIdx);
 
-    const std::vector<std::int32_t>& oldToNew = p.oldToNew();
-    const std::vector<std::int32_t>& newToOld = p.newToOld();
+    const std::vector<std::int32_t>& oldToNew = P.oldToNew();
+    const std::vector<std::int32_t>& newToOld = P.newToOld();
 
     // Naming, following 0.9. Supernodes are doubled letters: jj a child, kk its parent, and
     // jj < kk since a child's label is below its parent's. A single letter is a column, so
@@ -72,7 +72,7 @@ bool SymFactorEngine::compute(const std::vector<std::size_t>&  colPtr,
     //
     // A position is named for the pointer array it walks: its initials, and nothing else.
     //
-    //   cp    colPtr         one entry per column      (0.9 calls all of these p)
+    //   cp    colPtr         one entry per column      (0.9 calls all of these P)
     //   sp    snodePtr       one entry per supernode
     //   sfp   snodeFrontPtr  one entry per supernode, the front indices alone
     //   np    nodePtr        one entry per node        (the transpose, in sortIndices)

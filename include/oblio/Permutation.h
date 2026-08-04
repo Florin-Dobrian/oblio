@@ -42,14 +42,14 @@ public:
     bool setOldToNew(const std::vector<std::int32_t>& map);
     bool setNewToOld(const std::vector<std::int32_t>& map);
 
-    // Compose with p, applying this permutation first and p second: p reorders the
+    // Compose with P, applying this permutation first and P second: P reorders the
     // indices this one has already produced, so afterwards
-    //     oldToNew[i] == p.oldToNew[oldToNew[i]]   (with the old value on the right)
+    //     oldToNew[i] == P.oldToNew[oldToNew[i]]   (with the old value on the right)
     // The usual case is refining an ordering: AMD, then a post-order of the resulting
     // elimination forest. Returns false, leaving this permutation unchanged, if the
     // sizes differ. No revalidation is needed, the composition of two bijections is a
     // bijection.
-    bool compose(const Permutation& p);
+    bool compose(const Permutation& P);
 
     // Rebuild newToOld as the inverse of oldToNew. An ordering engine fills oldToNew,
     // then calls this to complete the other direction consistently.

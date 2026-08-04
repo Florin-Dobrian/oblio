@@ -73,14 +73,14 @@ public:
     // found a non-positive pivot), or if the matrix does not match the structure the symbolic
     // factorization predicted.
     template<class Val>
-    bool compute(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& sf,
+    bool compute(const SparseMatrix<Val>& A, const Permutation& P, const SymFactor& sf,
                  NumFactorStatic<Val>& nf) const;
 
     // The same entry point, producing the dynamic factor. The static factorizations run into
     // per-supernode storage unchanged; the dynamic-LDL cases are the one thing this overload will
     // gain that its sibling cannot (a flat buffer cannot expand a front).
     template<class Val>
-    bool compute(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& sf,
+    bool compute(const SparseMatrix<Val>& A, const Permutation& P, const SymFactor& sf,
                  NumFactorDynamic<Val>& nf) const;
 
 private:
@@ -132,7 +132,7 @@ private:
     // Returns false if A holds an entry the symbolic structure does not predict, which means the
     // two do not describe the same matrix. That is a caller error, not a numeric failure.
     template<class Val>
-    bool assembleFromA(const SparseMatrix<Val>& A, const Permutation& p,
+    bool assembleFromA(const SparseMatrix<Val>& A, const Permutation& P,
                        const std::vector<std::int32_t>& gblToLcl,
                        std::size_t delaySize,
                        std::size_t frontSize, std::size_t numIdx,
@@ -211,10 +211,10 @@ private:
     // factorStaticSupernode and updateStaticUpdateBlock, and those branch on mFactorization to
     // choose Cholesky or LDL.
     template<class Val, class Factor>
-    bool factorStaticLeftLooking(const SparseMatrix<Val>& A, const Permutation& p,
+    bool factorStaticLeftLooking(const SparseMatrix<Val>& A, const Permutation& P,
                                  const SymFactor& sf, Factor& nf) const;
     template<class Val, class Factor>
-    bool factorStaticRightLooking(const SparseMatrix<Val>& A, const Permutation& p,
+    bool factorStaticRightLooking(const SparseMatrix<Val>& A, const Permutation& P,
                                   const SymFactor& sf, Factor& nf) const;
 
     // Static multifrontal. A third traversal producing the same factor as the two above, visited
@@ -229,7 +229,7 @@ private:
     // block is formed by updateStaticUpdateMatrix (one herk for Cholesky, formStaticUpper + gemmLower
     // for static LDL). Dynamic multifrontal is the same shape, with delayed columns as well.
     template<class Val, class Factor>
-    bool factorStaticMultifrontal(const SparseMatrix<Val>& A, const Permutation& p,
+    bool factorStaticMultifrontal(const SparseMatrix<Val>& A, const Permutation& P,
                                   const SymFactor& sf, Factor& nf) const;
 
     // The two pivot eliminations, applied once a selection loop has accepted one. Shared by the
@@ -314,7 +314,7 @@ private:
     // `DynamicLDLT` and `DynamicLDLH`, which are the same computation over the reals. Complex is
     // where the two part company; right-looking and multifrontal come after.
     template<class Val>
-    bool factorDynamicLeftLooking(const SparseMatrix<Val>& A, const Permutation& p,
+    bool factorDynamicLeftLooking(const SparseMatrix<Val>& A, const Permutation& P,
                                   const SymFactor& sf, NumFactorDynamic<Val>& nf) const;
 
     // Dynamic LDL, right-looking. The same factorization by the same two kernels: 0.9's
@@ -326,7 +326,7 @@ private:
     // holds values and must keep them: it calls expandVal where left-looking calls resetVal.
     // That is the whole of the difference, and it is why expandVal existed unported until now.
     template<class Val>
-    bool factorDynamicRightLooking(const SparseMatrix<Val>& A, const Permutation& p,
+    bool factorDynamicRightLooking(const SparseMatrix<Val>& A, const Permutation& P,
                                    const SymFactor& sf, NumFactorDynamic<Val>& nf) const;
 
     // Dynamic LDL, multifrontal: the last traversal, where delayed columns meet the update matrices.
@@ -338,7 +338,7 @@ private:
     // factor reuses the two dynamic pivot kernels, and the contribution block is formed by
     // updateDynamicUpdateMatrix. Dynamic storage only.
     template<class Val>
-    bool factorDynamicMultifrontal(const SparseMatrix<Val>& A, const Permutation& p,
+    bool factorDynamicMultifrontal(const SparseMatrix<Val>& A, const Permutation& P,
                                    const SymFactor& sf, NumFactorDynamic<Val>& nf) const;
 };
 

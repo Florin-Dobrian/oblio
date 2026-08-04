@@ -10,8 +10,8 @@
 namespace Oblio {
 
 template<class Val>
-void DirectSolver<Val>::setOrderMethod(OrderMethod method) {
-    mOrderMethod = method;
+void DirectSolver<Val>::setOrdering(Ordering ordering) {
+    mOrdering = ordering;
     mAnalyzed    = false;   // the ordering is the first thing the analysis computes
     mFactored    = false;
 }
@@ -55,7 +55,7 @@ bool DirectSolver<Val>::analyze(const SparseMatrix<Val>& A) {
     mAnalyzed = false;
     mFactored = false;
 
-    const OrderEngine ord(mOrderMethod);
+    const OrderEngine ord(mOrdering);
     if (!ord.compute(A, mPermutation))
         return false;
 

@@ -106,21 +106,21 @@ double solveResidual(const std::vector<std::vector<Val>>& dense, std::mt19937& r
     const std::size_t n = dense.size();
     const SparseMatrix<Val> A = toSparse(dense);
 
-    OrderEngine ord(OrderMethod::AMD);
-    Permutation p;
-    if (!ord.compute(A, p)) { ++failures; return -1; }
+    OrderEngine ord(Ordering::AMD);
+    Permutation P;
+    if (!ord.compute(A, P)) { ++failures; return -1; }
 
     ElmForest f;
     ElmForestEngine fe;
-    if (!fe.compute(A, p, f)) { ++failures; return -1; }
+    if (!fe.compute(A, P, f)) { ++failures; return -1; }
 
     SymFactor s;
     SymFactorEngine se;
-    if (!se.compute(A, p, f, s)) { ++failures; return -1; }
+    if (!se.compute(A, P, f, s)) { ++failures; return -1; }
 
     Factor nf;
     NumFactorEngine ne(factorization, traversal);
-    if (!ne.compute(A, p, s, nf)) { ++failures; return -1; }
+    if (!ne.compute(A, P, s, nf)) { ++failures; return -1; }
 
     // A known solution, and the right-hand side it implies.
     std::uniform_real_distribution<double> u(-1.0, 1.0);
@@ -136,7 +136,7 @@ double solveResidual(const std::vector<std::vector<Val>>& dense, std::mt19937& r
 
     SolveEngine sol;
     Vector<Val> x(n);
-    if (!sol.compute(p, nf, b, x)) { ++failures; return -1; }
+    if (!sol.compute(P, nf, b, x)) { ++failures; return -1; }
 
     Vector<Val> r(n);
     if (!mul.residual(A, x, b, r)) { ++failures; return -1; }

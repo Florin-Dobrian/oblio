@@ -31,7 +31,7 @@ class SymFactorEngine {
 public:
     SymFactorEngine() = default;
 
-    // Compute the symbolic factorization of A under p, from the forest ef.
+    // Compute the symbolic factorization of A under P, from the forest ef.
     //
     // The factor's pattern depends on A's pattern alone, never on its values, so the
     // implementation is the non-templated overload, taking colPtr and rowIdx, compiled
@@ -39,12 +39,12 @@ public:
     // a caller holding a graph with no numbers attached can compute the symbolic
     // factorization without inventing a scalar type to satisfy the signature.
     template<class Val>
-    bool compute(const SparseMatrix<Val>& A, const Permutation& p,
+    bool compute(const SparseMatrix<Val>& A, const Permutation& P,
                  const ElmForest& ef, SymFactor& sf) const;
 
     bool compute(const std::vector<std::size_t>&  colPtr,
                  const std::vector<std::int32_t>& rowIdx,
-                 const Permutation& p, const ElmForest& ef, SymFactor& sf) const;
+                 const Permutation& P, const ElmForest& ef, SymFactor& sf) const;
 
 private:
     // The front indices of each supernode, laid out contiguously. The map runs column to

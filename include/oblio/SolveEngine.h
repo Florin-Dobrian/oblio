@@ -52,7 +52,7 @@ public:
     // Solve A x = b, in A's ordering. Permutes b into the factor's ordering, solves, and permutes
     // back. This is the one to call.
     template<class Val, class Factor>
-    bool compute(const Permutation& p, const Factor& nf,
+    bool compute(const Permutation& P, const Factor& nf,
                  const Vector<Val>& b, Vector<Val>& x) const;
 
 private:

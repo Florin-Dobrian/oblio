@@ -11,8 +11,8 @@ int main(){ int pass=0,fail=0;
   ck(OblioTest::isStructurallySymmetric(A), "A structurally symmetric");
   ck(A.size()==4,"size == 4           ");
   ck(A.nnz()==10,   "nnz == 10 (full)    ");
-  Permutation p(A.size());
-  ck(p.size()==4 && p.validate(),"identity perm valid ");
-  bool rt=true; for(std::size_t i=0;i<p.size();++i) rt=rt&&static_cast<std::size_t>(p.newToOld()[static_cast<std::size_t>(p.oldToNew()[i])])==i;
+  Permutation P(A.size());
+  ck(P.size()==4 && P.validate(),"identity perm valid ");
+  bool rt=true; for(std::size_t i=0;i<P.size();++i) rt=rt&&static_cast<std::size_t>(P.newToOld()[static_cast<std::size_t>(P.oldToNew()[i])])==i;
   ck(rt,"perm round-trip     ");
   std::cout<<"port smoke: "<<pass<<"/"<<(pass+fail)<<" passed\n"; return fail==0?0:1; }

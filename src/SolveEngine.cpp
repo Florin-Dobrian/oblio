@@ -330,14 +330,14 @@ bool SolveEngine::compute(const Factor& nf, Vector<Val>& y) const {
 }
 
 template<class Val, class Factor>
-bool SolveEngine::compute(const Permutation& p, const Factor& nf,
+bool SolveEngine::compute(const Permutation& P, const Factor& nf,
                           const Vector<Val>& b, Vector<Val>& x) const {
     const std::size_t size = nf.size();
-    if (b.size() != size || p.size() != size)
+    if (b.size() != size || P.size() != size)
         return false;
 
-    const std::vector<std::int32_t>& oldToNew = p.oldToNew();
-    const std::vector<std::int32_t>& newToOld = p.newToOld();
+    const std::vector<std::int32_t>& oldToNew = P.oldToNew();
+    const std::vector<std::int32_t>& newToOld = P.newToOld();
 
     // The factor is of P A P^T, so the right-hand side must be permuted into its ordering, and the
     // answer permuted back. Row lk of the permuted system is row newToOld[lk] of the original.

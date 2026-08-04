@@ -25,8 +25,8 @@ bool isStructurallySymmetric(const Oblio::SparseMatrix<Val>& A) {
     const std::size_t size = A.size();
     std::set<std::pair<std::size_t, std::size_t>> entries;
     for (std::size_t j = 0; j < size; ++j)
-        for (std::size_t p = colPtr[j]; p < colPtr[j + 1]; ++p)
-            entries.insert({static_cast<std::size_t>(rowIdx[p]), j});
+        for (std::size_t cp = colPtr[j]; cp < colPtr[j + 1]; ++cp)
+            entries.insert({static_cast<std::size_t>(rowIdx[cp]), j});
     for (const auto& e : entries)
         if (entries.find({e.second, e.first}) == entries.end())
             return false;
@@ -44,11 +44,11 @@ bool isStructurallySymmetric(const Oblio::SparseMatrix<Val>& A) {
 // two is real evidence, not a tautology.
 template<class Val>
 std::vector<std::vector<std::int32_t>>
-denseFactorPattern(const Oblio::SparseMatrix<Val>& A, const Oblio::Permutation& p) {
+denseFactorPattern(const Oblio::SparseMatrix<Val>& A, const Oblio::Permutation& P) {
     const std::size_t size = A.size();
     const auto& colPtr = A.colPtr();
     const auto& rowIdx = A.rowIdx();
-    const auto& oldToNew = p.oldToNew();
+    const auto& oldToNew = P.oldToNew();
 
     // Lower triangle of the permuted A.
     std::vector<std::vector<bool>> L(size, std::vector<bool>(size, false));
@@ -93,9 +93,9 @@ denseFactorPattern(const Oblio::SparseMatrix<Val>& A, const Oblio::Permutation& 
 // engine, this checks the merge decisions and the labelling independently.
 template<class Val>
 std::vector<std::int32_t>
-fundamentalSupernodes(const Oblio::SparseMatrix<Val>& A, const Oblio::Permutation& p,
+fundamentalSupernodes(const Oblio::SparseMatrix<Val>& A, const Oblio::Permutation& P,
                       std::size_t& snodeSizeOut) {
-    const auto pattern = denseFactorPattern(A, p);
+    const auto pattern = denseFactorPattern(A, P);
     const std::size_t size = A.size();
 
     // The nodal elimination tree, and how many children each column has.

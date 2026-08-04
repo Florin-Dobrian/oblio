@@ -268,7 +268,7 @@ void NumFactorEngine::initNumFactor(const SymFactor& sf, NumFactorDynamic<Val>& 
 }
 
 template<class Val>
-bool NumFactorEngine::assembleFromA(const SparseMatrix<Val>& A, const Permutation& p,
+bool NumFactorEngine::assembleFromA(const SparseMatrix<Val>& A, const Permutation& P,
                                     const std::vector<std::int32_t>& gblToLcl,
                                     std::size_t delaySize,
                                     std::size_t frontSize, std::size_t numNodeIdx,
@@ -276,8 +276,8 @@ bool NumFactorEngine::assembleFromA(const SparseMatrix<Val>& A, const Permutatio
     const std::vector<std::size_t>&  colPtr   = A.colPtr();
     const std::vector<std::int32_t>& aRowIdx  = A.rowIdx();
     const std::vector<Val>&          aVal     = A.val();
-    const std::vector<std::int32_t>& oldToNew = p.oldToNew();
-    const std::vector<std::int32_t>& newToOld = p.newToOld();
+    const std::vector<std::int32_t>& oldToNew = P.oldToNew();
+    const std::vector<std::int32_t>& newToOld = P.newToOld();
 
     // For each front column of the supernode that holds an entry of A. Its local column position
     // is lcl, and its val column starts at lcl * numNodeIdx (column-major). The run starts at
@@ -591,7 +591,7 @@ void NumFactorEngine::updateStaticUpdateMatrix(const Factor& nf, std::int32_t kk
 // =================================================================================================
 
 template<class Val, class Factor>
-bool NumFactorEngine::factorStaticLeftLooking(const SparseMatrix<Val>& A, const Permutation& p,
+bool NumFactorEngine::factorStaticLeftLooking(const SparseMatrix<Val>& A, const Permutation& P,
                                         const SymFactor& sf, Factor& nf) const {
     initNumFactor(sf, nf);
 
@@ -615,7 +615,7 @@ bool NumFactorEngine::factorStaticLeftLooking(const SparseMatrix<Val>& A, const 
         // A's own values into kk's front, on the map just set. The static front is at its final
         // width from the start, so unlike the dynamic driver this could be a separate prepass; it
         // is folded in here to keep all four drivers one shape.
-        if (!assembleFromA(A, p, gblToLcl, 0, kkFrontSize, kkNumNodeIdx, kkNodeIdx, kkVal)) {
+        if (!assembleFromA(A, P, gblToLcl, 0, kkFrontSize, kkNumNodeIdx, kkNodeIdx, kkVal)) {
             clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
             return false;
         }
@@ -677,7 +677,7 @@ bool NumFactorEngine::factorStaticLeftLooking(const SparseMatrix<Val>& A, const 
 // =================================================================================================
 
 template<class Val, class Factor>
-bool NumFactorEngine::factorStaticRightLooking(const SparseMatrix<Val>& A, const Permutation& p,
+bool NumFactorEngine::factorStaticRightLooking(const SparseMatrix<Val>& A, const Permutation& P,
                                                const SymFactor& sf, Factor& nf) const {
     initNumFactor(sf, nf);
 
@@ -694,7 +694,7 @@ bool NumFactorEngine::factorStaticRightLooking(const SparseMatrix<Val>& A, const
 
         setGlobalToLocal(jjNumNodeIdx, jjNodeIdx, gblToLcl);
 
-        if (!assembleFromA(A, p, gblToLcl, 0, jjFrontSize,
+        if (!assembleFromA(A, P, gblToLcl, 0, jjFrontSize,
                            jjNumNodeIdx, jjNodeIdx, jjVal)) {
             clearGlobalToLocal(jjNumNodeIdx, jjNodeIdx, gblToLcl);
             return false;
@@ -749,7 +749,7 @@ bool NumFactorEngine::factorStaticRightLooking(const SparseMatrix<Val>& A, const
 // =================================================================================================
 
 template<class Val, class Factor>
-bool NumFactorEngine::factorStaticMultifrontal(const SparseMatrix<Val>& A, const Permutation& p,
+bool NumFactorEngine::factorStaticMultifrontal(const SparseMatrix<Val>& A, const Permutation& P,
                                                const SymFactor& sf, Factor& nf) const {
     initNumFactor(sf, nf);
 
@@ -776,7 +776,7 @@ bool NumFactorEngine::factorStaticMultifrontal(const SparseMatrix<Val>& A, const
         setGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
 
         // A's own values into kk's lu block.
-        if (!assembleFromA(A, p, gblToLcl, 0, kkFrontSize, kkNumNodeIdx, kkNodeIdx, kkVal)) {
+        if (!assembleFromA(A, P, gblToLcl, 0, kkFrontSize, kkNumNodeIdx, kkNodeIdx, kkVal)) {
             clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
             return false;
         }
@@ -1535,7 +1535,7 @@ void NumFactorEngine::assembleDelay(NumFactorDynamic<Val>& nf, std::int32_t jj, 
 // =================================================================================================
 
 template<class Val>
-bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const Permutation& p,
+bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const Permutation& P,
                                                const SymFactor& sf, NumFactorDynamic<Val>& nf) const {
     initNumFactor(sf, nf);
 
@@ -1610,7 +1610,7 @@ bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const
 
         setGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
 
-        if (!assembleFromA(A, p, gblToLcl, kkInboundDelaySize,
+        if (!assembleFromA(A, P, gblToLcl, kkInboundDelaySize,
                            kkPreFactorFrontSize, kkNumNodeIdx, kkNodeIdx, kkVal)) {
             clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
             return false;
@@ -1718,7 +1718,7 @@ bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const
 // =================================================================================================
 
 template<class Val>
-bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, const Permutation& p,
+bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, const Permutation& P,
                                                 const SymFactor& sf, NumFactorDynamic<Val>& nf) const {
     initNumFactor(sf, nf);
 
@@ -1746,7 +1746,7 @@ bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, cons
 
         setGlobalToLocal(jjNumNodeIdx, jjNodeIdx, gblToLcl);
 
-        if (!assembleFromA(A, p, gblToLcl, 0, jjPreFactorFrontSize,
+        if (!assembleFromA(A, P, gblToLcl, 0, jjPreFactorFrontSize,
                            jjNumNodeIdx, jjNodeIdx, jjVal)) {
             clearGlobalToLocal(jjNumNodeIdx, jjNodeIdx, gblToLcl);
             return false;
@@ -1869,7 +1869,7 @@ bool NumFactorEngine::factorDynamicRightLooking(const SparseMatrix<Val>& A, cons
 // =================================================================================================
 
 template<class Val>
-bool NumFactorEngine::factorDynamicMultifrontal(const SparseMatrix<Val>& A, const Permutation& p,
+bool NumFactorEngine::factorDynamicMultifrontal(const SparseMatrix<Val>& A, const Permutation& P,
                                                 const SymFactor& sf, NumFactorDynamic<Val>& nf) const {
     initNumFactor(sf, nf);
 
@@ -1933,7 +1933,7 @@ bool NumFactorEngine::factorDynamicMultifrontal(const SparseMatrix<Val>& A, cons
         setGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
 
         // A into kk's lu block, past the delayed columns (those come from children, not A).
-        if (!assembleFromA(A, p, gblToLcl, kkInboundDelaySize,
+        if (!assembleFromA(A, P, gblToLcl, kkInboundDelaySize,
                            kkPreFactorFrontSize, kkNumNodeIdx, kkNodeIdx, kkVal)) {
             clearGlobalToLocal(kkNumNodeIdx, kkNodeIdx, gblToLcl);
             return false;
@@ -1981,9 +1981,9 @@ bool NumFactorEngine::factorDynamicMultifrontal(const SparseMatrix<Val>& A, cons
 }
 
 template<class Val>
-bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& sf,
+bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& P, const SymFactor& sf,
                               NumFactorStatic<Val>& nf) const {
-    if (A.size() != p.size() || A.size() != sf.size())
+    if (A.size() != P.size() || A.size() != sf.size())
         return false;
 
     // **Dynamic pivoting cannot go into this storage, and never will.** A delayed column expands
@@ -2003,9 +2003,9 @@ bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, 
     }
 
     switch (mTraversal) {
-        case Traversal::LeftLooking:  return factorStaticLeftLooking(A, p, sf, nf);
-        case Traversal::RightLooking: return factorStaticRightLooking(A, p, sf, nf);
-        case Traversal::Multifrontal: return factorStaticMultifrontal(A, p, sf, nf);
+        case Traversal::LeftLooking:  return factorStaticLeftLooking(A, P, sf, nf);
+        case Traversal::RightLooking: return factorStaticRightLooking(A, P, sf, nf);
+        case Traversal::Multifrontal: return factorStaticMultifrontal(A, P, sf, nf);
     }
     return false;
 }
@@ -2017,9 +2017,9 @@ template bool NumFactorEngine::compute(const SparseMatrix<std::complex<double>>&
                                        NumFactorStatic<std::complex<double>>&) const;
 
 template<class Val>
-bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, const SymFactor& sf,
+bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& P, const SymFactor& sf,
                               NumFactorDynamic<Val>& nf) const {
-    if (A.size() != p.size() || A.size() != sf.size())
+    if (A.size() != P.size() || A.size() != sf.size())
         return false;
 
     // Dynamic LDL is the reason this storage exists. Everything runs except complex `LDL^H`. The
@@ -2044,9 +2044,9 @@ bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, 
     // `test_pipeline` asserts they agree bit for bit.
     if (dynamicPivoting(mFactorization)) {
         switch (mTraversal) {
-            case Traversal::LeftLooking:  return factorDynamicLeftLooking(A, p, sf, nf);
-            case Traversal::RightLooking: return factorDynamicRightLooking(A, p, sf, nf);
-            case Traversal::Multifrontal: return factorDynamicMultifrontal(A, p, sf, nf);
+            case Traversal::LeftLooking:  return factorDynamicLeftLooking(A, P, sf, nf);
+            case Traversal::RightLooking: return factorDynamicRightLooking(A, P, sf, nf);
+            case Traversal::Multifrontal: return factorDynamicMultifrontal(A, P, sf, nf);
         }
         return false;
     }
@@ -2066,9 +2066,9 @@ bool NumFactorEngine::compute(const SparseMatrix<Val>& A, const Permutation& p, 
     }
 
     switch (mTraversal) {
-        case Traversal::LeftLooking:  return factorStaticLeftLooking(A, p, sf, nf);
-        case Traversal::RightLooking: return factorStaticRightLooking(A, p, sf, nf);
-        case Traversal::Multifrontal: return factorStaticMultifrontal(A, p, sf, nf);
+        case Traversal::LeftLooking:  return factorStaticLeftLooking(A, P, sf, nf);
+        case Traversal::RightLooking: return factorStaticRightLooking(A, P, sf, nf);
+        case Traversal::Multifrontal: return factorStaticMultifrontal(A, P, sf, nf);
     }
     return false;
 }

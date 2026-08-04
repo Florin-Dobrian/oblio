@@ -66,18 +66,18 @@ bool Permutation::setNewToOld(const std::vector<std::int32_t>& map) {
     return true;
 }
 
-bool Permutation::compose(const Permutation& p) {
+bool Permutation::compose(const Permutation& P) {
     const std::size_t size = mOldToNew.size();
-    if (p.size() != size)
+    if (P.size() != size)
         return false;
 
-    // This permutation runs first, p second, so p maps the indices this one produces.
+    // This permutation runs first, P second, so P maps the indices this one produces.
     // The update is in place: slot i is read before it is written, and no other slot is
     // touched, so there is no aliasing. The new value then indexes newToOld, which
     // rebuilds the inverse as we go (every slot written exactly once, the composition
     // being a bijection), so no separate inversion pass is needed.
     for (std::int32_t i = 0; i < static_cast<std::int32_t>(size); ++i) {
-        mOldToNew[i] = p.mOldToNew[mOldToNew[i]];
+        mOldToNew[i] = P.mOldToNew[mOldToNew[i]];
         mNewToOld[mOldToNew[i]] = i;
     }
     return true;

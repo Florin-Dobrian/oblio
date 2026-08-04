@@ -36,9 +36,9 @@ static SparseMatrix<double> fromEdges(std::size_t size,
 // share one sparsity pattern, so the supernode's index set is exactly the pattern of its
 // lowest column: its front indices are the supernode's own columns, its update indices
 // the rest. This holds in both regimes, a trivial supernode being the one-column case.
-static bool matchesOracle(const SparseMatrix<double>& A, const Permutation& p,
+static bool matchesOracle(const SparseMatrix<double>& A, const Permutation& P,
                           const SymFactor& s, std::size_t& fillOut){
-    const auto pattern = OblioTest::denseFactorPattern(A, p);
+    const auto pattern = OblioTest::denseFactorPattern(A, P);
     const std::size_t size = A.size();
     if(s.size()!=size) return false;
 
@@ -61,7 +61,7 @@ static bool matchesOracle(const SparseMatrix<double>& A, const Permutation& p,
     }
     // Fill: entries of L absent from the permuted A.
     fillOut = 0;
-    const auto& cp=A.colPtr(); const auto& ri=A.rowIdx(); const auto& o2n=p.oldToNew();
+    const auto& cp=A.colPtr(); const auto& ri=A.rowIdx(); const auto& o2n=P.oldToNew();
     std::vector<std::vector<bool>> inA(size, std::vector<bool>(size,false));
     for(std::size_t ac=0;ac<size;++ac)
         for(std::size_t t=cp[ac];t<cp[ac+1];++t)
@@ -78,9 +78,9 @@ static bool matchesOracle(const SparseMatrix<double>& A, const Permutation& p,
 // index set is sorted and its front indices come first, the pattern of column lc is the
 // index set from position t onward. This is how numeric factorization will read a column,
 // and it must agree with the dense oracle whether or not supernodes were compressed.
-static bool columnPatternsMatch(const SparseMatrix<double>& A, const Permutation& p,
+static bool columnPatternsMatch(const SparseMatrix<double>& A, const Permutation& P,
                                 const SymFactor& s){
-    const auto pattern = OblioTest::denseFactorPattern(A,p);
+    const auto pattern = OblioTest::denseFactorPattern(A,P);
     std::vector<std::size_t> posInFront(s.size(), 0);
     std::vector<std::size_t> cursor(s.snodeSize(), 0);
     for(std::size_t lc=0; lc<s.size(); ++lc){
@@ -97,18 +97,18 @@ static bool columnPatternsMatch(const SparseMatrix<double>& A, const Permutation
     return true;
 }
 
-static bool runCase(const SparseMatrix<double>& A, const Permutation& p, std::size_t& fillOut,
+static bool runCase(const SparseMatrix<double>& A, const Permutation& P, std::size_t& fillOut,
                     Supernodes mode = Supernodes::Fundamental){
     ElmForestEngine feng(mode); SymFactorEngine seng;
     ElmForest f; SymFactor s;
-    if(!feng.compute(A,p,f)) return false;
-    if(!seng.compute(A,p,f,s)) return false;
+    if(!feng.compute(A,P,f)) return false;
+    if(!seng.compute(A,P,f,s)) return false;
     // The offsets must bracket the index array exactly.
     if(s.snodePtr().size()!=s.snodeSize()+1) return false;
     if(s.snodePtr()[s.snodeSize()]!=s.numNodeIdx()) return false;
     if(s.nodeIdx().size()!=s.numNodeIdx()) return false;
-    if(!columnPatternsMatch(A,p,s)) return false;
-    return matchesOracle(A,p,s,fillOut);
+    if(!columnPatternsMatch(A,P,s)) return false;
+    return matchesOracle(A,P,s,fillOut);
 }
 
 int main(){
@@ -116,19 +116,19 @@ int main(){
 
     // No fill: a path. Every column touches only the next one.
     { auto A=fromEdges(5,{{0,1},{1,2},{2,3},{3,4}}); reqSym(A,"path n=5            : symmetric");
-      Permutation p(5);
-      ck(runCase(A,p,fill) && fill==0, "path n=5 natural    : no fill"); }
+      Permutation P(5);
+      ck(runCase(A,P,fill) && fill==0, "path n=5 natural    : no fill"); }
 
     // Smallest genuine fill: 0 adjacent to 1 and 2, which are not adjacent.
     // Eliminating 0 fills (2,1).
     { auto A=fromEdges(3,{{0,1},{0,2}}); reqSym(A,"vee n=3             : symmetric");
-      Permutation p(3);
-      ck(runCase(A,p,fill) && fill==1, "vee n=3 natural     : 1 fill"); }
+      Permutation P(3);
+      ck(runCase(A,P,fill) && fill==1, "vee n=3 natural     : 1 fill"); }
 
     // A cycle fills: the path 0-1-2-3-4 closed by the edge 0-4.
     { auto A=fromEdges(5,{{0,1},{1,2},{2,3},{3,4},{0,4}}); reqSym(A,"cycle n=5           : symmetric");
-      Permutation p(5);
-      ck(runCase(A,p,fill) && fill==2, "cycle n=5 natural   : 2 fill"); }
+      Permutation P(5);
+      ck(runCase(A,P,fill) && fill==2, "cycle n=5 natural   : 2 fill"); }
 
     // 3x3 grid, the classic fill generator.
     { std::vector<std::pair<std::size_t,std::size_t>> e;
@@ -136,13 +136,13 @@ int main(){
           if(c+1<3){ e.push_back({u,u+1}); }
           if(r+1<3){ e.push_back({u,u+3}); } }
       auto A=fromEdges(9,e); reqSym(A,"grid 3x3            : symmetric");
-      Permutation p(9);
-      ck(runCase(A,p,fill) && fill==8, "grid 3x3 natural    : 8 fill"); }
+      Permutation P(9);
+      ck(runCase(A,P,fill) && fill==8, "grid 3x3 natural    : 8 fill"); }
 
     // Two disconnected blocks: two trees, so the union must not leak across them.
     { auto A=fromEdges(6,{{0,1},{1,2},{3,4},{4,5}}); reqSym(A,"two blocks          : symmetric");
-      Permutation p(6);
-      ck(runCase(A,p,fill) && fill==0, "two blocks natural  : 2 trees, no fill"); }
+      Permutation P(6);
+      ck(runCase(A,P,fill) && fill==0, "two blocks natural  : 2 trees, no fill"); }
 
     // A chosen permutation, checked against fill counts computable by hand. The arrow
     // has a hub adjacent to all five leaves. Eliminate the hub first and its five
@@ -179,8 +179,8 @@ int main(){
       auto A=fromEdges(4,{{0,1},{0,2},{0,3},{1,2},{1,3},{2,3}});
       reqSym(A,"dense n=4           : symmetric");
       ElmForestEngine feng; SymFactorEngine seng;
-      Permutation p(4); ElmForest f; SymFactor s;
-      bool ok = feng.compute(A,p,f) && seng.compute(A,p,f,s);
+      Permutation P(4); ElmForest f; SymFactor s;
+      bool ok = feng.compute(A,P,f) && seng.compute(A,P,f,s);
       std::vector<std::int32_t> idx(s.nodeIdx().begin(), s.nodeIdx().end());
       ck(ok && s.snodeSize()==1 && s.frontSize(0)==4 && s.updateSize(0)==0
          && s.numNodeIdx()==4 && idx==std::vector<std::int32_t>({0,1,2,3}),
@@ -190,27 +190,27 @@ int main(){
       auto A=fromEdges(5,{{0,1},{1,2},{1,3},{1,4},{2,3},{2,4},{3,4}});
       reqSym(A,"tail n=5            : symmetric");
       ElmForestEngine feng; SymFactorEngine seng;
-      Permutation p(5); ElmForest f; SymFactor s;
-      bool ok = feng.compute(A,p,f) && seng.compute(A,p,f,s);
+      Permutation P(5); ElmForest f; SymFactor s;
+      bool ok = feng.compute(A,P,f) && seng.compute(A,P,f,s);
       ck(ok && s.snodeSize()==2 && s.frontSize(0)==1 && s.updateSize(0)==1
          && s.frontSize(1)==4 && s.updateSize(1)==0,
          "tail n=5 natural    : supernodes {0} and {1,2,3,4}"); }
 
-    { auto A=fromEdges(5,{{0,1},{1,2},{2,3},{3,4}}); Permutation p(5);
+    { auto A=fromEdges(5,{{0,1},{1,2},{2,3},{3,4}}); Permutation P(5);
       std::size_t f2=0;
-      ck(runCase(A,p,f2), "path n=5 natural    : supernodal index sets match oracle"); }
+      ck(runCase(A,P,f2), "path n=5 natural    : supernodal index sets match oracle"); }
 
     // The nodal regime: compression turned off. Every supernode is one column, so the
     // forest and factor degenerate to the classic per-column form. The factor itself must
     // be identical to the compressed one; only the grouping into supernodes differs.
     { auto A=fromEdges(4,{{0,1},{0,2},{0,3},{1,2},{1,3},{2,3}});   // dense: 1 supernode when compressed
       ElmForestEngine feng(Supernodes::Nodal); SymFactorEngine seng;
-      Permutation p(4); ElmForest f; SymFactor s;
-      bool ok = feng.compute(A,p,f) && seng.compute(A,p,f,s);
+      Permutation P(4); ElmForest f; SymFactor s;
+      bool ok = feng.compute(A,P,f) && seng.compute(A,P,f,s);
       bool allOne = true;
       for(std::size_t k=0;k<s.snodeSize();++k) if(s.frontSize(k)!=1) allOne=false;
       ck(ok && s.snodeSize()==4 && allOne && s.nodeToSnode()==std::vector<std::int32_t>({0,1,2,3})
-         && columnPatternsMatch(A,p,s),
+         && columnPatternsMatch(A,P,s),
          "dense n=4 nodal     : no merging, identity map, same factor"); }
 
     // Same matrices, both regimes: the supernode counts differ, the factor does not.
@@ -224,14 +224,14 @@ int main(){
               for(std::size_t j=i+2;j<size;++j)
                   if(rng()%100 < 25) e.push_back({i,j});
           auto A=fromEdges(size,e);
-          Permutation p(size);
+          Permutation P(size);
           std::size_t f1=0, f2=0;
-          if(!runCase(A,p,f1,Supernodes::Nodal)) ++bad;
-          if(!runCase(A,p,f2,Supernodes::Fundamental)) ++bad;
+          if(!runCase(A,P,f1,Supernodes::Nodal)) ++bad;
+          if(!runCase(A,P,f2,Supernodes::Fundamental)) ++bad;
           if(f1!=f2) ++bad;                          // same fill either way
 
           ElmForestEngine nodal(Supernodes::Nodal), fund(Supernodes::Fundamental);
-          ElmForest fn, ff; nodal.compute(A,p,fn); fund.compute(A,p,ff);
+          ElmForest fn, ff; nodal.compute(A,P,fn); fund.compute(A,P,ff);
           if(fn.snodeSize()!=size) ++bad;              // nodal: one supernode per column
           if(ff.snodeSize()>fn.snodeSize()) ++bad;       // compression never grows the count
           nodalSnodes += fn.snodeSize(); fundSnodes += ff.snodeSize();
@@ -243,7 +243,7 @@ int main(){
 
     // Random connected patterns against the oracle, with AMD as well as natural order.
     { std::mt19937 rng(20260711);
-      OrderEngine ord(OrderMethod::AMD);
+      OrderEngine ord(Ordering::AMD);
       int bad=0; std::size_t totalFill=0;
       for(int trial=0; trial<200; ++trial){
           std::size_t size = 3 + rng()%10;
@@ -282,12 +282,12 @@ int main(){
               for(std::size_t j=i+2;j<size;++j)
                   if(rng()%100 < 30) e.push_back({i,j});
           auto A=fromEdges(size,e);
-          Permutation p(size);
-          const auto pattern = OblioTest::denseFactorPattern(A,p);
+          Permutation P(size);
+          const auto pattern = OblioTest::denseFactorPattern(A,P);
 
           ElmForestEngine feng; feng.setThreshold(8);
           ElmForest f; SymFactorEngine seng; SymFactor s;
-          if(!feng.compute(A,p,f) || !seng.compute(A,p,f,s)) { ++bad; continue; }
+          if(!feng.compute(A,P,f) || !seng.compute(A,P,f,s)) { ++bad; continue; }
 
           if(f.exactPatterns()) ++exactForests; else ++inexactForests;
 

@@ -55,16 +55,16 @@ static SparseMatrix<double> grid2D(int m) {
 }
 
 // Ordering time alone, in milliseconds: the best of three, after one warm-up.
-static double orderTime(const SparseMatrix<double>& A, OrderMethod method) {
+static double orderTime(const SparseMatrix<double>& A, Ordering method) {
     const OrderEngine oe(method);
     Permutation warm;
     oe.compute(A, warm);
 
     double best = 1e30;
     for (int trial = 0; trial < 3; ++trial) {
-        Permutation p;
+        Permutation P;
         const auto t0 = std::chrono::steady_clock::now();
-        oe.compute(A, p);
+        oe.compute(A, P);
         const auto t1 = std::chrono::steady_clock::now();
         best = std::min(best, std::chrono::duration<double, std::milli>(t1 - t0).count());
     }
@@ -73,16 +73,16 @@ static double orderTime(const SparseMatrix<double>& A, OrderMethod method) {
 
 // nnz(L) under that ordering, from the symbolic factor: exact, and the honest way to compare two
 // orderings, since a supernode contributes its own triangle plus its update rows.
-static std::size_t fill(const SparseMatrix<double>& A, OrderMethod method) {
+static std::size_t fill(const SparseMatrix<double>& A, Ordering method) {
     const OrderEngine oe(method);
-    Permutation p;
-    if (!oe.compute(A, p)) return 0;
+    Permutation P;
+    if (!oe.compute(A, P)) return 0;
     const ElmForestEngine fe;
     ElmForest ef;
-    if (!fe.compute(A, p, ef)) return 0;
+    if (!fe.compute(A, P, ef)) return 0;
     const SymFactorEngine se;
     SymFactor sf;
-    if (!se.compute(A, p, ef, sf)) return 0;
+    if (!se.compute(A, P, ef, sf)) return 0;
 
     std::size_t nnz = 0;
     for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(sf.snodeSize()); ++kk) {
@@ -99,13 +99,13 @@ int main(int argc, char** argv) {
         for (int k = 1; k < argc; ++k) sides.push_back(std::atoi(argv[k]));
     }
 
-    const std::vector<std::pair<std::string, OrderMethod>> methods = {
-        {"MMD",  OrderMethod::MMD},  {"MMD1", OrderMethod::MMD1},
-        {"MMD2", OrderMethod::MMD2},
-        {"AMD",  OrderMethod::AMD},  {"AMD1", OrderMethod::AMD1},
-        {"AMD2", OrderMethod::AMD2},
-        {"AMD1B", OrderMethod::AMD1B},
-        {"AMD2B", OrderMethod::AMD2B},
+    const std::vector<std::pair<std::string, Ordering>> methods = {
+        {"MMD",  Ordering::MMD},  {"MMD1", Ordering::MMD1},
+        {"MMD2", Ordering::MMD2},
+        {"AMD",  Ordering::AMD},  {"AMD1", Ordering::AMD1},
+        {"AMD2", Ordering::AMD2},
+        {"AMD1B", Ordering::AMD1B},
+        {"AMD2B", Ordering::AMD2B},
     };
 
     std::printf("%-12s %8s", "grid", "n");

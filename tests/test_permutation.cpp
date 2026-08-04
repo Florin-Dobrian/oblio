@@ -14,10 +14,10 @@ using Map = std::vector<std::int32_t>;
 
 // A permutation is well formed if the two maps are consistent inverses (validate),
 // and, applied to indices, oldToNew and newToOld undo each other.
-static bool wellFormed(const Permutation& p){
-    if(!p.validate()) return false;
-    for(std::size_t i=0;i<p.size();++i)
-        if(p.newToOld()[static_cast<std::size_t>(p.oldToNew()[i])]!=static_cast<std::int32_t>(i))
+static bool wellFormed(const Permutation& P){
+    if(!P.validate()) return false;
+    for(std::size_t i=0;i<P.size();++i)
+        if(P.newToOld()[static_cast<std::size_t>(P.oldToNew()[i])]!=static_cast<std::int32_t>(i))
             return false;
     return true; }
 
@@ -30,29 +30,29 @@ static Map composedBy(const Map& first, const Map& second){
 
 int main(){
     // Setters: accept a bijection, build the inverse, refuse anything else.
-    { Permutation p;
-      ck(p.setOldToNew({1,2,0}) && p.oldToNew()==Map({1,2,0}) && p.newToOld()==Map({2,0,1})
-         && wellFormed(p), "setOldToNew        : adopts map, builds inverse"); }
-    { Permutation p;
-      ck(p.setNewToOld({2,0,1}) && p.oldToNew()==Map({1,2,0}) && p.newToOld()==Map({2,0,1})
-         && wellFormed(p), "setNewToOld        : same permutation, other direction"); }
-    { Permutation p(3);
-      ck(!p.setOldToNew({0,1,1}) && !p.setOldToNew({0,1,3}) && !p.setOldToNew({0,1,-1})
-         && !p.setNewToOld({2,2,0}) && p.oldToNew()==Map({0,1,2}) && wellFormed(p),
+    { Permutation P;
+      ck(P.setOldToNew({1,2,0}) && P.oldToNew()==Map({1,2,0}) && P.newToOld()==Map({2,0,1})
+         && wellFormed(P), "setOldToNew        : adopts map, builds inverse"); }
+    { Permutation P;
+      ck(P.setNewToOld({2,0,1}) && P.oldToNew()==Map({1,2,0}) && P.newToOld()==Map({2,0,1})
+         && wellFormed(P), "setNewToOld        : same permutation, other direction"); }
+    { Permutation P(3);
+      ck(!P.setOldToNew({0,1,1}) && !P.setOldToNew({0,1,3}) && !P.setOldToNew({0,1,-1})
+         && !P.setNewToOld({2,2,0}) && P.oldToNew()==Map({0,1,2}) && wellFormed(P),
          "setters reject     : duplicate, out of range, negative; state untouched"); }
 
-    // Compose: this runs first, p second. Worked by hand: [1,2,0] then [2,0,1] is the
+    // Compose: this runs first, P second. Worked by hand: [1,2,0] then [2,0,1] is the
     // identity, because [2,0,1] is the inverse of [1,2,0].
     { Permutation a; a.setOldToNew({1,2,0});
       Permutation b; b.setOldToNew({2,0,1});
       ck(a.compose(b) && a.oldToNew()==Map({0,1,2}) && wellFormed(a),
          "compose            : with its own inverse gives the identity"); }
 
-    // Order matters, and it is "this first, then p", not the reverse.
+    // Order matters, and it is "this first, then P", not the reverse.
     { Permutation a; a.setOldToNew({1,0,2});     // swap 0 and 1
       Permutation b; b.setOldToNew({0,2,1});     // swap 1 and 2
       Permutation ab=a, ba=b;
-      ck(ab.compose(b) && ab.oldToNew()==composedBy({1,0,2},{0,2,1}), "compose            : this first, p second");
+      ck(ab.compose(b) && ab.oldToNew()==composedBy({1,0,2},{0,2,1}), "compose            : this first, P second");
       ck(ba.compose(a) && ba.oldToNew()==composedBy({0,2,1},{1,0,2}), "compose            : reversed gives the other product");
       ck(ab.oldToNew()!=ba.oldToNew(), "compose            : not commutative (as expected)"); }
 

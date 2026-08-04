@@ -34,17 +34,17 @@
 
 namespace Oblio {
 
-enum class OrderMethod { Natural, MMD, MMD1, MMD2, AMD, AMD1, AMD2, AMD1B, AMD2B };
+enum class Ordering { Natural, MMD, MMD1, MMD2, AMD, AMD1, AMD2, AMD1B, AMD2B };
 
 class OrderEngine {
 public:
     OrderEngine() = default;
-    explicit OrderEngine(OrderMethod method) : mMethod(method) {}
+    explicit OrderEngine(Ordering ordering) : mOrdering(ordering) {}
 
-    void        setMethod(OrderMethod method) { mMethod = method; }
-    OrderMethod method() const                { return mMethod; }
+    void     setOrdering(Ordering ordering) { mOrdering = ordering; }
+    Ordering ordering() const               { return mOrdering; }
 
-    // Order A into p.
+    // Order A into P.
     //
     // An ordering is a pure graph operation: AMD and MMD read the sparsity pattern and
     // would not know what to do with a value. So the implementation is the non-templated
@@ -53,48 +53,48 @@ public:
     // is public: a caller holding a graph with no numbers attached can order it without
     // inventing a scalar type to satisfy the signature.
     template<class Val>
-    bool compute(const SparseMatrix<Val>& A, Permutation& p) const;
+    bool compute(const SparseMatrix<Val>& A, Permutation& P) const;
 
     bool compute(const std::vector<std::size_t>&  colPtr,
                  const std::vector<std::int32_t>& rowIdx,
-                 Permutation& p) const;
+                 Permutation& P) const;
 
 private:
-    OrderMethod mMethod = OrderMethod::MMD;
+    Ordering mOrdering = Ordering::MMD;
 
-    bool orderNatural(std::size_t size, Permutation& p) const;
+    bool orderNatural(std::size_t size, Permutation& P) const;
     bool orderMMD(std::size_t size,
                   const std::vector<std::size_t>&  colPtr,
                   const std::vector<std::int32_t>& rowIdx,
-                  Permutation& p) const;
+                  Permutation& P) const;
     bool orderMMD1(std::size_t size,
                    const std::vector<std::size_t>&  colPtr,
                    const std::vector<std::int32_t>& rowIdx,
-                   Permutation& p) const;
+                   Permutation& P) const;
     bool orderMMD2(std::size_t size,
                    const std::vector<std::size_t>&  colPtr,
                    const std::vector<std::int32_t>& rowIdx,
-                   Permutation& p) const;
+                   Permutation& P) const;
     bool orderAMD(std::size_t size,
                   const std::vector<std::size_t>&  colPtr,
                   const std::vector<std::int32_t>& rowIdx,
-                  Permutation& p) const;
+                  Permutation& P) const;
     bool orderAMD1(std::size_t size,
                    const std::vector<std::size_t>&  colPtr,
                    const std::vector<std::int32_t>& rowIdx,
-                   Permutation& p) const;
+                   Permutation& P) const;
     bool orderAMD2(std::size_t size,
                    const std::vector<std::size_t>&  colPtr,
                    const std::vector<std::int32_t>& rowIdx,
-                   Permutation& p) const;
+                   Permutation& P) const;
     bool orderAMD1B(std::size_t size,
                     const std::vector<std::size_t>&  colPtr,
                     const std::vector<std::int32_t>& rowIdx,
-                    Permutation& p) const;
+                    Permutation& P) const;
     bool orderAMD2B(std::size_t size,
                     const std::vector<std::size_t>&  colPtr,
                     const std::vector<std::int32_t>& rowIdx,
-                    Permutation& p) const;
+                    Permutation& P) const;
 };
 
 extern template bool OrderEngine::compute(const SparseMatrix<double>&, Permutation&) const;

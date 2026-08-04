@@ -253,25 +253,25 @@ struct Outcome {
 // on the dynamic factor, so they are gathered under `if constexpr` and left zero otherwise, which
 // is the truth: a static factor delays nothing.
 template<class Val, class Factor>
-Outcome run(const SparseMatrix<Val>& A, OrderMethod om, Factorization fz, Traversal tr) {
+Outcome run(const SparseMatrix<Val>& A, Ordering om, Factorization fz, Traversal tr) {
     Outcome o;
     const std::size_t n = A.size();
 
     OrderEngine ord(om);
-    Permutation p;
-    if (!ord.compute(A, p)) return o;
+    Permutation P;
+    if (!ord.compute(A, P)) return o;
 
     ElmForest f;
     ElmForestEngine fe;
-    if (!fe.compute(A, p, f)) return o;
+    if (!fe.compute(A, P, f)) return o;
 
     SymFactor s;
     SymFactorEngine se;
-    if (!se.compute(A, p, f, s)) return o;
+    if (!se.compute(A, P, f, s)) return o;
 
     Factor nf;
     NumFactorEngine ne(fz, tr);
-    if (!ne.compute(A, p, s, nf)) return o;
+    if (!ne.compute(A, P, s, nf)) return o;
     o.ran = true;
     o.snodeSize = nf.snodeSize();
 
@@ -293,7 +293,7 @@ Outcome run(const SparseMatrix<Val>& A, OrderMethod om, Factorization fz, Traver
         b[i] = Val(1.0 + 0.3 * static_cast<double>(i % 5));
 
     SolveEngine sol;
-    if (!sol.compute(p, nf, b, x)) return o;
+    if (!sol.compute(P, nf, b, x)) return o;
     o.solved = true;
 
     MultiplyEngine mul;
@@ -306,7 +306,7 @@ Outcome run(const SparseMatrix<Val>& A, OrderMethod om, Factorization fz, Traver
 // The worst residual over both implemented traversals, for a factorization that supports both.
 // Returns -1 if any of them failed to run or solve.
 template<class Val, class Factor>
-double worstOverTraversals(const SparseMatrix<Val>& A, OrderMethod om, Factorization fz) {
+double worstOverTraversals(const SparseMatrix<Val>& A, Ordering om, Factorization fz) {
     double worst = 0.0;
     for (Traversal tr : {Traversal::LeftLooking, Traversal::RightLooking}) {
         const Outcome o = run<Val, Factor>(A, om, fz, tr);
@@ -346,27 +346,27 @@ int main() {
         // The three statically pivoted factorizations, each in both storages, each worst-cased over
         // both traversals. For real input LDLT and LDLH are the same computation, and both are run
         // rather than one being assumed to stand in for the other.
-        const double chS = worstOverTraversals<double, FS>(A, OrderMethod::Natural, Factorization::Cholesky);
-        const double chD = worstOverTraversals<double, FD>(A, OrderMethod::Natural, Factorization::Cholesky);
+        const double chS = worstOverTraversals<double, FS>(A, Ordering::Natural, Factorization::Cholesky);
+        const double chD = worstOverTraversals<double, FD>(A, Ordering::Natural, Factorization::Cholesky);
         ck(chS >= 0 && chS < tol, with("tier 0 Cholesky   : residual, flat storage, both traversals", chS));
         ck(chD >= 0 && chD < tol, with("tier 0 Cholesky   : residual, per-supernode storage, both traversals", chD));
 
-        const double ltS = worstOverTraversals<double, FS>(A, OrderMethod::Natural, Factorization::StaticLDLT);
-        const double ltD = worstOverTraversals<double, FD>(A, OrderMethod::Natural, Factorization::StaticLDLT);
+        const double ltS = worstOverTraversals<double, FS>(A, Ordering::Natural, Factorization::StaticLDLT);
+        const double ltD = worstOverTraversals<double, FD>(A, Ordering::Natural, Factorization::StaticLDLT);
         ck(ltS >= 0 && ltS < tol, with("tier 0 StaticLDLT : residual, flat storage, both traversals", ltS));
         ck(ltD >= 0 && ltD < tol, with("tier 0 StaticLDLT : residual, per-supernode storage, both traversals", ltD));
 
-        const double lhS = worstOverTraversals<double, FS>(A, OrderMethod::Natural, Factorization::StaticLDLH);
-        const double lhD = worstOverTraversals<double, FD>(A, OrderMethod::Natural, Factorization::StaticLDLH);
+        const double lhS = worstOverTraversals<double, FS>(A, Ordering::Natural, Factorization::StaticLDLH);
+        const double lhD = worstOverTraversals<double, FD>(A, Ordering::Natural, Factorization::StaticLDLH);
         ck(lhS >= 0 && lhS < tol, with("tier 0 StaticLDLH : residual, flat storage, both traversals", lhS));
         ck(lhD >= 0 && lhD < tol, with("tier 0 StaticLDLH : residual, per-supernode storage, both traversals", lhD));
 
         // Dynamic LDL on an input that needs no pivoting. Two separate claims: the answer is right,
         // and the machinery correctly decided to do nothing. The second is the one that would catch
         // a pivot search that delays out of confusion rather than necessity.
-        const Outcome dynL = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+        const Outcome dynL = run<double, FD>(A, Ordering::Natural, Factorization::DynamicLDLT,
                                      Traversal::LeftLooking);
-        const Outcome dynR = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+        const Outcome dynR = run<double, FD>(A, Ordering::Natural, Factorization::DynamicLDLT,
                                      Traversal::RightLooking);
         ck(dynL.solved && dynR.solved && dynL.residual < tol && dynR.residual < tol,
            with("tier 0 DynamicLDLT: residual, both traversals", std::max(dynL.residual, dynR.residual)));
@@ -376,9 +376,9 @@ int main() {
         // And the same for DynamicLDLH, which over the reals is the same computation: the dynamic
         // path never reads the Hermitian flag, and the solve's conjugate is the identity for
         // double. Run rather than assumed.
-        const Outcome dynHL = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLH,
+        const Outcome dynHL = run<double, FD>(A, Ordering::Natural, Factorization::DynamicLDLH,
                                       Traversal::LeftLooking);
-        const Outcome dynHR = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLH,
+        const Outcome dynHR = run<double, FD>(A, Ordering::Natural, Factorization::DynamicLDLH,
                                       Traversal::RightLooking);
         ck(dynHL.solved && dynHR.solved && dynHL.residual < tol && dynHR.residual < tol,
            with("tier 0 DynamicLDLH: residual, both traversals", std::max(dynHL.residual, dynHR.residual)));
@@ -388,12 +388,12 @@ int main() {
         // Combinations that must be refused rather than answered. These are as much a part of the
         // specification as the ones that work: a cell that starts returning a plausible wrong
         // answer instead of false is exactly the failure a port invites.
-        ck(!run<double, FS>(A, OrderMethod::Natural, Factorization::DynamicLDLT, Traversal::LeftLooking).ran,
+        ck(!run<double, FS>(A, Ordering::Natural, Factorization::DynamicLDLT, Traversal::LeftLooking).ran,
            "tier 0 refusal    : dynamic pivoting into flat storage");
 
         // Dynamic multifrontal on an input that needs no pivoting: the basic path, before delayed
         // columns enter. Same answer as the other two dynamic traversals.
-        const Outcome dynM = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+        const Outcome dynM = run<double, FD>(A, Ordering::Natural, Factorization::DynamicLDLT,
                                      Traversal::Multifrontal);
         ck(dynM.solved && dynM.residual < tol && dynM.delayed == 0,
            with("tier 0 DynamicLDLT: multifrontal residual, nothing delayed", dynM.residual));
@@ -403,11 +403,11 @@ int main() {
         // carries each supernode's contribution block up a stack to its parent. Checked end to end by
         // residual (real here; complex multifrontal is checked directly against the dense oracle in
         // test_numfactor).
-        const Outcome mfC = run<double, FS>(A, OrderMethod::Natural, Factorization::Cholesky,
+        const Outcome mfC = run<double, FS>(A, Ordering::Natural, Factorization::Cholesky,
                                     Traversal::Multifrontal);
-        const Outcome mfT = run<double, FS>(A, OrderMethod::Natural, Factorization::StaticLDLT,
+        const Outcome mfT = run<double, FS>(A, Ordering::Natural, Factorization::StaticLDLT,
                                     Traversal::Multifrontal);
-        const Outcome mfH = run<double, FS>(A, OrderMethod::Natural, Factorization::StaticLDLH,
+        const Outcome mfH = run<double, FS>(A, Ordering::Natural, Factorization::StaticLDLH,
                                     Traversal::Multifrontal);
         ck(mfC.solved && mfC.residual < tol, with("tier 0 Cholesky  : multifrontal residual, real", mfC.residual));
         ck(mfT.solved && mfT.residual < tol, with("tier 0 StaticLDLT: multifrontal residual, real", mfT.residual));
@@ -418,11 +418,11 @@ int main() {
         // overload accepts it: the cell exists to keep the two storages interchangeable for the
         // factorizations both can hold. Left- and right-looking were already dispatched here;
         // multifrontal returned false as "not ported yet" until 2026-07-26.
-        const Outcome mfCD = run<double, FD>(A, OrderMethod::Natural, Factorization::Cholesky,
+        const Outcome mfCD = run<double, FD>(A, Ordering::Natural, Factorization::Cholesky,
                                      Traversal::Multifrontal);
-        const Outcome mfTD = run<double, FD>(A, OrderMethod::Natural, Factorization::StaticLDLT,
+        const Outcome mfTD = run<double, FD>(A, Ordering::Natural, Factorization::StaticLDLT,
                                      Traversal::Multifrontal);
-        const Outcome mfHD = run<double, FD>(A, OrderMethod::Natural, Factorization::StaticLDLH,
+        const Outcome mfHD = run<double, FD>(A, Ordering::Natural, Factorization::StaticLDLH,
                                      Traversal::Multifrontal);
         ck(mfCD.solved && mfCD.residual < tol && mfCD.delayed == 0,
            with("tier 0 Cholesky  : multifrontal into dynamic storage", mfCD.residual));
@@ -449,7 +449,7 @@ int main() {
     // =============================================================================================
     {
         const SparseMatrix<double> A = toSparse(bandIndefinite(40, 3, 0.50, 7));
-        const Outcome o = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+        const Outcome o = run<double, FD>(A, Ordering::Natural, Factorization::DynamicLDLT,
                                   Traversal::LeftLooking);
 
         ck(o.solved && o.residual < tol, with("tier 1 band n=40  : residual", o.residual));
@@ -459,7 +459,7 @@ int main() {
         // The claim that the two transposes coincide over the reals, tested where it could
         // plausibly fail: an input that actually pivots. Bit-identical, not merely close, because
         // the two select the same arithmetic rather than equivalent arithmetic.
-        const Outcome oH = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLH,
+        const Outcome oH = run<double, FD>(A, Ordering::Natural, Factorization::DynamicLDLH,
                                    Traversal::LeftLooking);
         ck(oH.solved && oH.delayed == o.delayed && oH.snodesDelaying == o.snodesDelaying
                      && oH.pivots2x2 == o.pivots2x2 && oH.residual == o.residual,
@@ -469,7 +469,7 @@ int main() {
         // front by opposite means: left-looking discards an empty front and rebuilds it, while
         // right-looking must carry forward the values already accumulated in it. Agreement on a
         // matrix that actually delays is what says the second of those is right.
-        const Outcome oR = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+        const Outcome oR = run<double, FD>(A, Ordering::Natural, Factorization::DynamicLDLT,
                                    Traversal::RightLooking);
         ck(oR.solved && oR.delayed == o.delayed && oR.snodesDelaying == o.snodesDelaying
                      && oR.pivots2x2 == o.pivots2x2 && oR.residual == o.residual,
@@ -481,7 +481,7 @@ int main() {
         // meeting the stack. The pivoting decisions are the same (same delays, same 2x2 pivots); the
         // residual is checked to tolerance rather than bit-for-bit, since the assembly sums the
         // front in a different order than the pull.
-        const Outcome oM = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+        const Outcome oM = run<double, FD>(A, Ordering::Natural, Factorization::DynamicLDLT,
                                    Traversal::Multifrontal);
         ck(oM.solved && oM.residual < tol && oM.delayed == o.delayed
                      && oM.snodesDelaying == o.snodesDelaying && oM.pivots2x2 == o.pivots2x2,
@@ -489,7 +489,7 @@ int main() {
     }
     {
         const SparseMatrix<double> A = toSparse(bandIndefinite(24, 3, 0.50, 7));
-        const Outcome o = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+        const Outcome o = run<double, FD>(A, Ordering::Natural, Factorization::DynamicLDLT,
                                   Traversal::LeftLooking);
 
         ck(o.solved && o.residual < tol, with("tier 1 band n=24  : residual", o.residual));
@@ -511,7 +511,7 @@ int main() {
         const SparseMatrix<double> A = toSparse({{0.0, 1.0, 1.0},
                                                  {1.0, 1.0e6, 0.0},
                                                  {1.0, 0.0, 0.0}});
-        const Outcome o = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+        const Outcome o = run<double, FD>(A, Ordering::Natural, Factorization::DynamicLDLT,
                                   Traversal::LeftLooking);
 
         ck(o.solved && o.residual < tol,
@@ -530,7 +530,7 @@ int main() {
         std::vector<std::int32_t> rowIdx{0, 1};
         std::vector<double>       val{0.0, 1.0};
         const SparseMatrix<double> A(2, std::move(colPtr), std::move(rowIdx), std::move(val));
-        const Outcome o = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+        const Outcome o = run<double, FD>(A, Ordering::Natural, Factorization::DynamicLDLT,
                                   Traversal::LeftLooking);
 
         ck(o.ran && o.rank == 1 && o.delayed == 0 && o.pivots1x1 == 2,
@@ -558,7 +558,7 @@ int main() {
                                                  {0.0, c,   d,   p1,  e,   f  },
                                                  {0.0, 0.0, 1.0, e,   p2,  g  },
                                                  {0.0, 0.0, 0.0, f,   g,   p3 }});
-        const Outcome o = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+        const Outcome o = run<double, FD>(A, Ordering::Natural, Factorization::DynamicLDLT,
                                   Traversal::LeftLooking);
 
         ck(o.solved && o.residual < tol,
@@ -586,9 +586,9 @@ int main() {
         const double tol2 = 1e-11;   // looser: these are far worse conditioned than tiers 0 and 1
         const SparseMatrix<double> A = toSparse(saddlePoint(30, 12, 0.0, 13));
 
-        const Outcome L = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+        const Outcome L = run<double, FD>(A, Ordering::Natural, Factorization::DynamicLDLT,
                                   Traversal::LeftLooking);
-        const Outcome R = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+        const Outcome R = run<double, FD>(A, Ordering::Natural, Factorization::DynamicLDLT,
                                   Traversal::RightLooking);
 
         ck(L.solved && R.solved && L.residual < tol2 && R.residual < tol2,
@@ -599,7 +599,7 @@ int main() {
         // Multifrontal under heavy delaying. Counts are bounded, not matched to left-looking: with
         // dozens of threshold decisions and a different summation order in the assembly, a decision
         // can tip, which is a different valid factorization, not an error. The residual is the oracle.
-        const Outcome M = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+        const Outcome M = run<double, FD>(A, Ordering::Natural, Factorization::DynamicLDLT,
                                   Traversal::Multifrontal);
         ck(M.solved && M.residual < tol2 && M.delayed >= 40 && M.pivots2x2 >= 5,
            with("tier 2 saddle 30+12: multifrontal, heavy delaying, residual", M.residual));
@@ -608,7 +608,7 @@ int main() {
         // Every pivot a 2x2, so half the columns are marked as a pair's first. Even order only.
         for (std::size_t n : {std::size_t{12}, std::size_t{24}}) {
             const SparseMatrix<double> A = toSparse(zeroDiagonalTridiagonal(n));
-            const Outcome o = run<double, FD>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+            const Outcome o = run<double, FD>(A, Ordering::Natural, Factorization::DynamicLDLT,
                                       Traversal::LeftLooking);
 
             const std::int32_t half = static_cast<std::int32_t>(n / 2);
@@ -647,13 +647,13 @@ int main() {
         const SparseMatrix<C> dominant = toSparseComplex(bandComplexSymmetric(32, 3, 0.0, 7));
         const SparseMatrix<C> A        = toSparseComplex(bandComplexSymmetric(32, 3, 0.5, 7));
 
-        const double slt = worstOverTraversals<C, FSC>(dominant, OrderMethod::Natural,
+        const double slt = worstOverTraversals<C, FSC>(dominant, Ordering::Natural,
                                                        Factorization::StaticLDLT);
         ck(slt >= 0 && slt < tol, with("complex StaticLDLT: residual, both traversals", slt));
 
-        const Outcome dL = run<C, FDC>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+        const Outcome dL = run<C, FDC>(A, Ordering::Natural, Factorization::DynamicLDLT,
                                        Traversal::LeftLooking);
-        const Outcome dR = run<C, FDC>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+        const Outcome dR = run<C, FDC>(A, Ordering::Natural, Factorization::DynamicLDLT,
                                        Traversal::RightLooking);
         ck(dL.solved && dR.solved && dL.residual < tol && dR.residual < tol,
            with("complex DynamicLDLT: residual, both traversals", std::max(dL.residual, dR.residual)));
@@ -661,7 +661,7 @@ int main() {
                   && dR.delayed == dL.delayed && dR.pivots2x2 == dL.pivots2x2,
            counts("complex DynamicLDLT: delaying happened, traversals agree", dL));
 
-        const Outcome dM = run<C, FDC>(A, OrderMethod::Natural, Factorization::DynamicLDLT,
+        const Outcome dM = run<C, FDC>(A, Ordering::Natural, Factorization::DynamicLDLT,
                                        Traversal::Multifrontal);
         ck(dM.solved && dM.residual < tol && dM.delayed >= 1 && dM.pivots2x2 >= 1,
            with("complex DynamicLDLT: multifrontal, delaying happened, residual", dM.residual));
@@ -672,9 +672,9 @@ int main() {
         // against a reference; the oracle is the residual and, in test_numfactor, reconstruction.
         const SparseMatrix<C> H = toSparseComplex(bandComplexHermitian(32, 3, 0.5, 7));
 
-        const Outcome hL = run<C, FDC>(H, OrderMethod::Natural, Factorization::DynamicLDLH,
+        const Outcome hL = run<C, FDC>(H, Ordering::Natural, Factorization::DynamicLDLH,
                                        Traversal::LeftLooking);
-        const Outcome hR = run<C, FDC>(H, OrderMethod::Natural, Factorization::DynamicLDLH,
+        const Outcome hR = run<C, FDC>(H, Ordering::Natural, Factorization::DynamicLDLH,
                                        Traversal::RightLooking);
         ck(hL.solved && hR.solved && hL.residual < tol && hR.residual < tol,
            with("complex DynamicLDLH: residual, both traversals", std::max(hL.residual, hR.residual)));
@@ -685,7 +685,7 @@ int main() {
         // The last cell of the whole matrix: complex Hermitian dynamic through the stack. This is the
         // trickiest path, the conjugating pivot kernel reached by the multifrontal driver, and the
         // one with no reference behind it. The residual is the oracle.
-        const Outcome hM = run<C, FDC>(H, OrderMethod::Natural, Factorization::DynamicLDLH,
+        const Outcome hM = run<C, FDC>(H, Ordering::Natural, Factorization::DynamicLDLH,
                                        Traversal::Multifrontal);
         ck(hM.solved && hM.residual < tol && hM.delayed >= 1 && hM.pivots2x2 >= 1,
            with("complex DynamicLDLH: multifrontal, delaying happened, residual", hM.residual));
@@ -716,7 +716,7 @@ int main() {
                                  Factorization::DynamicLDLH})
             for (Traversal tr : {Traversal::LeftLooking, Traversal::RightLooking,
                                  Traversal::Multifrontal}) {
-                DirectSolver<double> solver(OrderMethod::Natural, fz, tr);
+                DirectSolver<double> solver(Ordering::Natural, fz, tr);
                 if (!solver.analyze(A) || !solver.factor(A) || !solver.solve(b, x))
                     continue;
                 ++reached;
@@ -735,10 +735,10 @@ int main() {
         // the vendored routines' output, being a different ordering rather than a copy of one.
         double worstOrder   = 0.0;
         int    reachedOrder = 0;
-        for (OrderMethod om : {OrderMethod::Natural, OrderMethod::MMD, OrderMethod::MMD1,
-                               OrderMethod::MMD2, OrderMethod::AMD, OrderMethod::AMD1,
-                               OrderMethod::AMD2, OrderMethod::AMD1B,
-                               OrderMethod::AMD2B}) {
+        for (Ordering om : {Ordering::Natural, Ordering::MMD, Ordering::MMD1,
+                               Ordering::MMD2, Ordering::AMD, Ordering::AMD1,
+                               Ordering::AMD2, Ordering::AMD1B,
+                               Ordering::AMD2B}) {
             DirectSolver<double> solver(om, Factorization::Cholesky, Traversal::LeftLooking);
             if (!solver.analyze(A) || !solver.factor(A) || !solver.solve(b, x))
                 continue;
@@ -746,15 +746,15 @@ int main() {
             worstOrder = std::max(worstOrder, solver.relativeResidual(A, b, x));
         }
 
-        ck(reachedOrder == 9, "OrderMethod       : all nine orderings reached");
+        ck(reachedOrder == 9, "Ordering       : all nine orderings reached");
         ck(reachedOrder == 9 && worstOrder < tol,
-           with("OrderMethod       : worst residual over all nine", worstOrder));
+           with("Ordering       : worst residual over all nine", worstOrder));
 
         // The multifrontal child ordering is computed during analyze, so the traversal has to be
         // known by then. Switching between left- and right-looking reads the same forest and must
         // not throw the analysis away; switching into or out of multifrontal must, because the
         // forest itself differs, its children reordered and its supernodes relabeled.
-        DirectSolver<double> ds(OrderMethod::Natural, Factorization::Cholesky,
+        DirectSolver<double> ds(Ordering::Natural, Factorization::Cholesky,
                                 Traversal::LeftLooking);
         ck(ds.analyze(A) && ds.analyzed(), "DirectSolver      : analyze succeeds");
 
@@ -775,19 +775,19 @@ int main() {
         // Fundamental and no amalgamation are the defaults; nodal and an amalgamating solver must
         // both reach the same answer, since neither changes what is being computed, only the block
         // structure it is computed in.
-        DirectSolver<double> dsDefault(OrderMethod::Natural, Factorization::Cholesky,
+        DirectSolver<double> dsDefault(Ordering::Natural, Factorization::Cholesky,
                                        Traversal::LeftLooking);
         ck(dsDefault.supernodes() == Supernodes::Fundamental && !dsDefault.amalgamation().has_value(),
            "DirectSolver      : fundamental supernodes and no amalgamation by default");
 
-        DirectSolver<double> dsNodal(OrderMethod::Natural, Factorization::Cholesky,
+        DirectSolver<double> dsNodal(Ordering::Natural, Factorization::Cholesky,
                                      Traversal::LeftLooking, Supernodes::Nodal);
         ck(dsNodal.supernodes() == Supernodes::Nodal
                && dsNodal.analyze(A) && dsNodal.factor(A) && dsNodal.solve(b, x)
                && dsNodal.relativeResidual(A, b, x) < tol,
            "DirectSolver      : nodal supernodes reachable and solve correct");
 
-        DirectSolver<double> dsAmal(OrderMethod::Natural, Factorization::Cholesky,
+        DirectSolver<double> dsAmal(Ordering::Natural, Factorization::Cholesky,
                                     Traversal::Multifrontal, Supernodes::Fundamental, 8);
         ck(dsAmal.amalgamation().has_value() && *dsAmal.amalgamation() == 8
                && dsAmal.analyze(A) && dsAmal.factor(A) && dsAmal.solve(b, x)

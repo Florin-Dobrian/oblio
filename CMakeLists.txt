@@ -93,9 +93,11 @@ endforeach()
 
 # ----- Examples --------------------------------------------------------------
 # Each builds a standalone driver linking oblio. Globbed for the same reason as
-# the tests. Both examples compile against the current library: basic.cpp drives
-# DirectSolver, which is ported, and pipeline.cpp wires the engines by hand. Note
-# that neither is run by anything, here or in the Makefile, which is its own item
+# the tests. All three compile against the current library: example_basic.cpp
+# drives DirectSolver, and the two example_pipeline_* files wire the engines by
+# hand, one per scalar type. The sources carry the example_ prefix, as tests/
+# carry test_, so the target names come out prefixed here with no edit. Note that
+# none of them is run by anything, here or in the Makefile, which is its own item
 # in docs/TODO.md.
 file(GLOB EXAMPLE_SRCS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/examples/*.cpp)
 foreach(src ${EXAMPLE_SRCS})

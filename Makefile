@@ -6,7 +6,8 @@
 #   make test       build and run the tests
 #   make examples   build the example programs (examples/*.cpp)
 #   make objs       compile the library sources to .o only (a fast core compile check)
-#   make <name>_cpp build one test (e.g. make test_order_cpp)
+#   make <name>_cpp build one test or example (e.g. make test_order_cpp,
+#                   make example_basic_cpp)
 #   make clean
 #
 # -Iinclude points at include/, so #include "oblio/X.h" resolves to the project
@@ -74,10 +75,11 @@ LIB_OBJS    = $(OBLIO_OBJS) $(VENDOR_OBJS)
 TEST_SRCS = $(wildcard tests/*.cpp)
 TEST_BINS = $(patsubst tests/%.cpp,%_cpp,$(TEST_SRCS))
 
-# One executable per examples/*.cpp file, named example_<stem>_cpp (the _cpp suffix folds them into
-# the same gitignore rule as the tests).
+# One executable per examples/*.cpp file, named <stem>_cpp, exactly as for the tests. The example_
+# prefix is carried by the source file itself (examples/example_basic.cpp), the way tests/ carries
+# test_, so this rule adds only the _cpp suffix and both directories follow one convention.
 EXAMPLE_SRCS = $(wildcard examples/*.cpp)
-EXAMPLE_BINS = $(patsubst examples/%.cpp,example_%_cpp,$(EXAMPLE_SRCS))
+EXAMPLE_BINS = $(patsubst examples/%.cpp,%_cpp,$(EXAMPLE_SRCS))
 
 .PHONY: all tests test examples objs clean
 
@@ -94,7 +96,10 @@ $(VENDOR_OBJS): %.o: %.cpp
 %_cpp: tests/%.cpp $(LIB_OBJS) $(LIB_HDRS) $(wildcard tests/*.h)
 	$(CXX) $(CXXFLAGS) tests/$*.cpp $(LIB_OBJS) $(BLAS_LIBS) -o $@
 
-example_%_cpp: examples/%.cpp $(LIB_OBJS) $(LIB_HDRS)
+# Two pattern rules share the %_cpp target, one per source directory. Make picks the one whose
+# prerequisite exists, and the stems cannot collide, tests/ being all test_* and examples/ all
+# example_*.
+%_cpp: examples/%.cpp $(LIB_OBJS) $(LIB_HDRS)
 	$(CXX) $(CXXFLAGS) examples/$*.cpp $(LIB_OBJS) $(BLAS_LIBS) -o $@
 
 test: tests

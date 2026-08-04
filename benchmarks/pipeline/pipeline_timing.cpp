@@ -82,16 +82,16 @@ static double bestOfThree(Work work) {
 // nnz(L), from the symbolic factor rather than from any ordering's estimate: a supernode
 // contributes its own triangle plus its update rows. Identical to the ordering folder's, and
 // deliberately duplicated rather than shared, since a benchmark should stand alone.
-static std::size_t fill(const SparseMatrix<double>& A, OrderMethod method) {
+static std::size_t fill(const SparseMatrix<double>& A, Ordering method) {
     const OrderEngine oe(method);
-    Permutation       p;
-    if (!oe.compute(A, p)) return 0;
+    Permutation       P;
+    if (!oe.compute(A, P)) return 0;
     const ElmForestEngine fe;
     ElmForest             ef;
-    if (!fe.compute(A, p, ef)) return 0;
+    if (!fe.compute(A, P, ef)) return 0;
     const SymFactorEngine se;
     SymFactor             sf;
-    if (!se.compute(A, p, ef, sf)) return 0;
+    if (!se.compute(A, P, ef, sf)) return 0;
 
     std::size_t nnz = 0;
     for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(sf.snodeSize()); ++kk) {
@@ -116,7 +116,7 @@ struct Row {
 // One traversal's factor time, with the analysis already done. Reported separately because
 // analyze depends on the traversal (multifrontal orders the children and relabels the supernodes)
 // while factor depends on it far more.
-static double factorTime(const SparseMatrix<double>& A, OrderMethod method, Traversal traversal,
+static double factorTime(const SparseMatrix<double>& A, Ordering method, Traversal traversal,
                          bool& ok) {
     DirectSolver<double> solver(method, Factorization::Cholesky, traversal);
     ok = solver.analyze(A);
@@ -124,13 +124,13 @@ static double factorTime(const SparseMatrix<double>& A, OrderMethod method, Trav
     return bestOfThree([&] { solver.factor(A); });
 }
 
-static Row measure(const SparseMatrix<double>& A, const std::string& name, OrderMethod method) {
+static Row measure(const SparseMatrix<double>& A, const std::string& name, Ordering method) {
     Row row;
     row.name = name;
     row.nnzL = fill(A, method);
 
     const OrderEngine oe(method);
-    row.order = bestOfThree([&] { Permutation p; oe.compute(A, p); });
+    row.order = bestOfThree([&] { Permutation P; oe.compute(A, P); });
 
     row.analyze = bestOfThree([&] {
         DirectSolver<double> s(method, Factorization::Cholesky, Traversal::LeftLooking);
@@ -162,12 +162,12 @@ int main(int argc, char** argv) {
         for (int k = 1; k < argc; ++k) sides.push_back(std::atoi(argv[k]));
     }
 
-    const std::vector<std::pair<std::string, OrderMethod>> methods = {
-        {"Natural", OrderMethod::Natural}, {"MMD", OrderMethod::MMD},
-        {"MMD1", OrderMethod::MMD1},       {"MMD2", OrderMethod::MMD2},
-        {"AMD", OrderMethod::AMD},         {"AMD1", OrderMethod::AMD1},
-        {"AMD1B", OrderMethod::AMD1B},     {"AMD2", OrderMethod::AMD2},
-        {"AMD2B", OrderMethod::AMD2B},
+    const std::vector<std::pair<std::string, Ordering>> methods = {
+        {"Natural", Ordering::Natural}, {"MMD", Ordering::MMD},
+        {"MMD1", Ordering::MMD1},       {"MMD2", Ordering::MMD2},
+        {"AMD", Ordering::AMD},         {"AMD1", Ordering::AMD1},
+        {"AMD1B", Ordering::AMD1B},     {"AMD2", Ordering::AMD2},
+        {"AMD2B", Ordering::AMD2B},
     };
 
     for (int side : sides) {

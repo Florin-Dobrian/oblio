@@ -79,13 +79,13 @@ static bool validHeight(const ElmForest& f){
 // supernode's columns share one pattern, so the supernode's index set is exactly the
 // pattern of its lowest column: hence frontSize is the column count and updateSize is
 // what remains of that pattern below them.
-static bool validSupernodes(const SparseMatrix<double>& A, const Permutation& p,
+static bool validSupernodes(const SparseMatrix<double>& A, const Permutation& P,
                             const ElmForest& f, Supernodes mode){
-    const auto pattern = OblioTest::denseFactorPattern(A,p);
+    const auto pattern = OblioTest::denseFactorPattern(A,P);
 
     if(mode==Supernodes::Fundamental){
         std::size_t wantSnodeSize=0;
-        const auto wantMap = OblioTest::fundamentalSupernodes(A,p,wantSnodeSize);
+        const auto wantMap = OblioTest::fundamentalSupernodes(A,P,wantSnodeSize);
         if(f.snodeSize()!=wantSnodeSize) return false;
         if(f.nodeToSnode()!=wantMap) return false;      // same merges, same labels
     } else {
@@ -116,20 +116,20 @@ static bool validSupernodes(const SparseMatrix<double>& A, const Permutation& p,
     return true; }
 
 // Everything the forest asserts about itself, checked against independent recomputation.
-static bool validForest(const SparseMatrix<double>& A, const Permutation& p, const ElmForest& f,
+static bool validForest(const SparseMatrix<double>& A, const Permutation& P, const ElmForest& f,
                         Supernodes mode){
     std::size_t roots=0;
     return validEtree(f.parent(),roots) && roots==f.numTrees()
-        && validLinks(f) && validHeight(f) && validSupernodes(A,p,f,mode); }
+        && validLinks(f) && validHeight(f) && validSupernodes(A,P,f,mode); }
 int main(){
     ElmForestEngine eng;
     { auto A=tridiagFull(4); reqSym(A,"tridiag n=4         : symmetric");
-      Permutation p(4); ElmForest f;
+      Permutation P(4); ElmForest f;
       // Columns 2 and 3 share a pattern ({2,3} and {3}), so they merge: 3 supernodes.
-      ck(eng.compute(A,p,f) && eq(f.parent(),{1,2,NP}) && f.snodeSize()==3
+      ck(eng.compute(A,P,f) && eq(f.parent(),{1,2,NP}) && f.snodeSize()==3
          && eq(f.nodeToSnode(),{0,1,2,2}), "tridiag n=4 natural : path, 2+3 merged"); }
     { auto A=tridiagFull(6); reqSym(A,"tridiag n=6         : symmetric");
-      Permutation p(6); ElmForest f; eng.compute(A,p,f);
+      Permutation P(6); ElmForest f; eng.compute(A,P,f);
       // Only the last two columns merge, as in the n=4 case: 5 supernodes.
       ck(eq(f.parent(),{1,2,3,4,NP}) && f.snodeSize()==5
          && eq(f.nodeToSnode(),{0,1,2,3,4,4}), "tridiag n=6 natural : path, 4+5 merged"); }
@@ -137,7 +137,7 @@ int main(){
       std::vector<std::int32_t> ri={0,1,2,3,4,5, 0,1, 0,2, 0,3, 0,4, 0,5};
       std::vector<double> v(ri.size(),1.0); SparseMatrix<double> A(6,cp,ri,v);
       reqSym(A,"arrow 6x6           : symmetric");
-      Permutation p(6); ElmForest f; eng.compute(A,p,f);
+      Permutation P(6); ElmForest f; eng.compute(A,P,f);
       // The hub is eliminated first, so every later column is dense: one supernode.
       ck(eq(f.parent(),{NP}) && f.snodeSize()==1 && f.frontSize(0)==6
          && f.updateSize(0)==0 && f.height()==1, "arrow 6x6 natural   : one supernode"); }
@@ -145,18 +145,18 @@ int main(){
       std::vector<std::int32_t> ri={0,1, 0,1,2, 1,2, 3,4, 3,4,5, 4,5};
       std::vector<double> v(ri.size(),1.0); SparseMatrix<double> A(6,cp,ri,v);
       reqSym(A,"two blocks          : symmetric");
-      Permutation p(6); ElmForest f; eng.compute(A,p,f);
+      Permutation P(6); ElmForest f; eng.compute(A,P,f);
       std::size_t roots=0; bool inv=validEtree(f.parent(),roots);
       // Each block compresses {0},{1,2} and {3},{4,5}: 4 supernodes, still 2 trees.
       ck(inv && roots==2 && eq(f.parent(),{1,NP,3,NP}) && f.snodeSize()==4
          && eq(f.nodeToSnode(),{0,1,1,2,3,3}), "two blocks natural  : 2 trees, compressed"); }
     { auto A=tridiagFull(30); reqSym(A,"tridiag n=30        : symmetric");
-      OrderEngine ord(OrderMethod::AMD); Permutation p; ord.compute(A,p);
-      ElmForest f; bool ok=eng.compute(A,p,f); std::size_t roots=0; bool inv=validEtree(f.parent(),roots);
+      OrderEngine ord(Ordering::AMD); Permutation P; ord.compute(A,P);
+      ElmForest f; bool ok=eng.compute(A,P,f); std::size_t roots=0; bool inv=validEtree(f.parent(),roots);
       ck(ok && inv && f.size()==30 && roots>=1, "tridiag n=30 + AMD  : valid etree"); }
 
     // The links, height and sizes, none of which the etree cases above touch.
-    { auto A=tridiagFull(4); Permutation p(4); ElmForest f; eng.compute(A,p,f);
+    { auto A=tridiagFull(4); Permutation P(4); ElmForest f; eng.compute(A,P,f);
       ck(eq(f.firstChild(),{NP,0,1}) && eq(f.lastChild(),{NP,0,1})
          && eq(f.nextSibling(),{NP,NP,NP}) && eq(f.previousSibling(),{NP,NP,NP})
          && f.numTrees()==1 && f.firstRoot()==2 && f.lastRoot()==2 && f.height()==3
@@ -168,7 +168,7 @@ int main(){
       std::vector<std::int32_t> ri={0,3, 1,3, 2,3, 0,1,2,3};
       std::vector<double> v={2,-1, 2,-1, 2,-1, -1,-1,-1,4};
       SparseMatrix<double> A(4,cp,ri,v); reqSym(A,"star n=4            : symmetric");
-      Permutation p(4); ElmForest f; eng.compute(A,p,f);
+      Permutation P(4); ElmForest f; eng.compute(A,P,f);
       ck(eq(f.parent(),{3,3,3,NP}) && eq(f.firstChild(),{NP,NP,NP,0}) && eq(f.lastChild(),{NP,NP,NP,2})
          && eq(f.nextSibling(),{1,2,NP,NP}) && eq(f.previousSibling(),{NP,0,1,NP})
          && f.numTrees()==1 && f.height()==2,
@@ -178,7 +178,7 @@ int main(){
     { std::vector<std::size_t> cp={0,2,5,7,9,12,14};
       std::vector<std::int32_t> ri={0,1, 0,1,2, 1,2, 3,4, 3,4,5, 4,5};
       std::vector<double> v(ri.size(),1.0); SparseMatrix<double> A(6,cp,ri,v);
-      Permutation p(6); ElmForest f; eng.compute(A,p,f);
+      Permutation P(6); ElmForest f; eng.compute(A,P,f);
       ck(f.numTrees()==2 && f.firstRoot()==1 && f.lastRoot()==3
          && f.nextSibling()[1]==3 && f.previousSibling()[3]==1 && f.height()==2,
          "two blocks natural  : root chain, height 2"); }
@@ -186,7 +186,7 @@ int main(){
     // The full invariant set against independent recomputation, over random patterns,
     // natural and AMD ordered. Covers the links, the height, and the front/update sizes.
     { std::mt19937 rng(20260711);
-      OrderEngine ord(OrderMethod::AMD);
+      OrderEngine ord(Ordering::AMD);
       int bad=0;
       for(int trial=0; trial<200; ++trial){
           std::size_t size = 3 + rng()%10;
@@ -221,9 +221,9 @@ int main(){
       std::vector<std::size_t> cp={0,2,4,7};
       std::vector<std::int32_t> ri={0,2, 1,2, 0,1,2};
       std::vector<double> v(ri.size(),1.0); SparseMatrix<double> A(3,cp,ri,v);
-      Permutation p(3);
+      Permutation P(3);
       ElmForest f0, f1; ElmForestEngine e1; e1.setThreshold(0);
-      eng.compute(A,p,f0); e1.compute(A,p,f1);
+      eng.compute(A,P,f0); e1.compute(A,P,f1);
       ck(f0.snodeSize()==3 && f1.snodeSize()==2 && eq2(f1.frontSize(),{1,2}),
          "star n=3 amalg(0)   : 3 supernodes -> 2, no fill"); }
 
@@ -238,16 +238,16 @@ int main(){
       for(std::size_t j=0;j<9;++j){
           for(std::size_t i=0;i<9;++i) if(M[i][j]){ ri.push_back(static_cast<std::int32_t>(i)); v.push_back(i==j?10.0:-1.0); }
           cp[j+1]=ri.size(); }
-      SparseMatrix<double> A(9,cp,ri,v); Permutation p(9);
+      SparseMatrix<double> A(9,cp,ri,v); Permutation P(9);
       ElmForest f0, f1; ElmForestEngine e1; e1.setThreshold(0);
-      eng.compute(A,p,f0); e1.compute(A,p,f1);
+      eng.compute(A,P,f0); e1.compute(A,P,f1);
       ck(f0.snodeSize()==7 && f1.snodeSize()==6 && f1.frontSize(5)==4,
          "grid amalg(0)       : 7 supernodes -> 6, 4-column front"); }
 
     // The invariants that survive tie-breaking. Amalgamation is greedy and not canonical, so
     // the partition it produces depends on how ties are broken; these hold regardless.
     { std::mt19937 rng(20260712);
-      OrderEngine ord(OrderMethod::AMD);
+      OrderEngine ord(Ordering::AMD);
       int bad=0; std::size_t fund=0, at8=0;
       for(int trial=0; trial<200; ++trial){
           std::size_t size = 3 + rng()%10;
@@ -266,12 +266,12 @@ int main(){
 
           const Permutation* perms[2] = {&pNat, &pAmd};
           for(int which=0; which<2; ++which){
-              const Permutation& p = *perms[which];
+              const Permutation& P = *perms[which];
               ElmForest f0, f1, f2;
               ElmForestEngine a0;
               ElmForestEngine a1; a1.setThreshold(0);
               ElmForestEngine a2; a2.setThreshold(8);
-              if(!a0.compute(A,p,f0) || !a1.compute(A,p,f1) || !a2.compute(A,p,f2)) { ++bad; continue; }
+              if(!a0.compute(A,P,f0) || !a1.compute(A,P,f1) || !a2.compute(A,P,f2)) { ++bad; continue; }
 
               // The links, height and labels must stay valid after amalgamation.
               if(!validLinks(f1) || !validHeight(f1)) ++bad;
@@ -312,14 +312,14 @@ int main(){
           for(std::size_t i=0;i<6;++i) if(M[i][j]){ ri.push_back(static_cast<std::int32_t>(i)); v.push_back(i==j?10.0:-1.0); }
           cp[j+1]=ri.size(); }
       SparseMatrix<double> A(6,cp,ri,v);
-      Permutation p(6);
+      Permutation P(6);
       ElmForest fNodal, fFund, fAmal0, fAmal8;
       ElmForestEngine eNodal(Supernodes::Nodal);
       ElmForestEngine eFund;
       ElmForestEngine eAmal0; eAmal0.setThreshold(0);
       ElmForestEngine eAmal8; eAmal8.setThreshold(64);
-      eNodal.compute(A,p,fNodal); eFund.compute(A,p,fFund);
-      eAmal0.compute(A,p,fAmal0); eAmal8.compute(A,p,fAmal8);
+      eNodal.compute(A,P,fNodal); eFund.compute(A,P,fFund);
+      eAmal0.compute(A,P,fAmal0); eAmal8.compute(A,P,fAmal8);
       ck(fNodal.exactPatterns(), "exactPatterns       : nodal, trivially true");
       ck(fFund.exactPatterns(),  "exactPatterns       : fundamental, true by definition");
       ck(fAmal0.exactPatterns(), "exactPatterns       : amalgamation at 0 buys nothing, still true");
@@ -355,15 +355,15 @@ int main(){
       }
       SparseMatrix<double> A(n, cp, ri, v);
 
-      Permutation p;
-      OrderEngine oe; oe.setMethod(OrderMethod::AMD);
-      oe.compute(A, p);
+      Permutation P;
+      OrderEngine oe; oe.setOrdering(Ordering::AMD);
+      oe.compute(A, P);
 
       ElmForest fOff, fOn;
       ElmForestEngine eOff;
       ElmForestEngine eOn;  eOn.setOptimizeMultifrontal(true);
-      eOff.compute(A, p, fOff);
-      eOn.compute(A, p, fOn);
+      eOff.compute(A, P, fOff);
+      eOn.compute(A, P, fOn);
 
       ck(!eOff.optimizeMultifrontal() && eOn.optimizeMultifrontal(),
          "optimizeMultifrontal: off by default, settable");

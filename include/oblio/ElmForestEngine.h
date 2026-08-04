@@ -89,7 +89,7 @@ public:
     void setOptimizeMultifrontal(bool optimize) { mOptimizeMultifrontal = optimize; }
     bool optimizeMultifrontal() const           { return mOptimizeMultifrontal; }
 
-    // Compute the elimination forest of A under the permutation p.
+    // Compute the elimination forest of A under the permutation P.
     //
     // Two overloads, the same layering used throughout this engine. The forest depends on
     // the sparsity pattern alone, never on the values, so the implementation is the
@@ -100,11 +100,11 @@ public:
     // a graph with no numbers attached can compute its elimination forest without inventing
     // a scalar type to satisfy the signature.
     template<class Val>
-    bool compute(const SparseMatrix<Val>& A, const Permutation& p, ElmForest& ef) const;
+    bool compute(const SparseMatrix<Val>& A, const Permutation& P, ElmForest& ef) const;
 
     bool compute(const std::vector<std::size_t>&  colPtr,
                  const std::vector<std::int32_t>& rowIdx,
-                 const Permutation& p, ElmForest& ef) const;
+                 const Permutation& P, ElmForest& ef) const;
 
 private:
     Supernodes                 mSupernodes = Supernodes::Fundamental;
@@ -120,7 +120,7 @@ private:
     // structure, in the permuted (factor) order. Writes ef.mSize and ef.mParent.
     void computeParent(const std::vector<std::size_t>&  colPtr,
                        const std::vector<std::int32_t>& rowIdx,
-                       const Permutation& p,
+                       const Permutation& P,
                        ElmForest& ef) const;
 
     // Given the parent links, finalize the rest: the doubly-linked child/sibling structure
@@ -164,7 +164,7 @@ private:
     //   writes:  mFrontSize, mUpdateSize
     void computeColumnSizes(const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,
-                            const Permutation& p,
+                            const Permutation& P,
                             ElmForest& ef) const;
 
     // Merge the columns of a nodal forest into fundamental supernodes: maximal paths in

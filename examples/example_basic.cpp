@@ -1,11 +1,11 @@
-// examples/basic.cpp
+// examples/example_basic.cpp
 // Minimal usage example: build a 4x4 tridiagonal matrix, factor it, solve, check the residual.
 //
 // This is the whole pipeline behind one object. For the same thing wired by hand, one engine at a
-// time, see examples/pipeline.cpp.
+// time, see examples/example_pipeline_real.cpp.
 //
 // Compile (macOS, from repo root):
-//   g++ -std=c++17 -O3 -DOBLIO_BLAS_UNDERSCORE -Iinclude examples/basic.cpp src/*.cpp -framework Accelerate -o basic
+//   g++ -std=c++17 -O3 -DOBLIO_BLAS_UNDERSCORE -Iinclude examples/example_basic.cpp src/*.cpp -framework Accelerate -o example_basic_cpp
 // Linux: replace `-framework Accelerate` with `-llapack -lblas`.
 
 #include "oblio/DirectSolver.h"
@@ -35,7 +35,7 @@ int main() {
         b[i] = 1.0;
 
     // Ordering, factorization, traversal: the pipeline order. Each also has a setter.
-    DirectSolver<double> solver(OrderMethod::AMD, Factorization::Cholesky, Traversal::LeftLooking);
+    DirectSolver<double> solver(Ordering::AMD, Factorization::Cholesky, Traversal::LeftLooking);
 
     // The three phases. Split like this because they have different lifetimes: analyze depends only
     // on the pattern, factor on the values, solve on the right-hand side.

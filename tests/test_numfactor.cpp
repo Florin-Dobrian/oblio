@@ -124,23 +124,23 @@ SparseMatrix<Val> toSparse(const std::vector<std::vector<Val>>& A) {
 // A and comparing against permuted indices compares the factors of two different matrices, which
 // is invisible whenever P is the identity and wrong the moment it is not.
 template<class Val>
-double compare(const SparseMatrix<Val>& A, const Permutation& p,
+double compare(const SparseMatrix<Val>& A, const Permutation& P,
                const std::vector<std::vector<Val>>& dense, Traversal traversal) {
     ElmForest f;
     ElmForestEngine fe;
-    if (!fe.compute(A, p, f)) return -1;
+    if (!fe.compute(A, P, f)) return -1;
 
     SymFactor s;
     SymFactorEngine se;
-    if (!se.compute(A, p, f, s)) return -1;
+    if (!se.compute(A, P, f, s)) return -1;
 
     NumFactorStatic<Val> nf;
     NumFactorEngine ne(Factorization::Cholesky, traversal);
-    if (!ne.compute(A, p, s, nf)) return -1;
+    if (!ne.compute(A, P, s, nf)) return -1;
 
     // P A P^T, in the factor's ordering: row li of the permuted matrix is row newToOld[li] of A.
     const std::size_t n = dense.size();
-    const std::vector<std::int32_t>& newToOld = p.newToOld();
+    const std::vector<std::int32_t>& newToOld = P.newToOld();
     std::vector<std::vector<Val>> permuted(n, std::vector<Val>(n, Val(0)));
     for (std::size_t li = 0; li < n; ++li)
         for (std::size_t lj = 0; lj < n; ++lj)
@@ -174,7 +174,7 @@ double compare(const SparseMatrix<Val>& A, const Permutation& p,
 // ordered. One number: the worst error anywhere.
 template<class Val>
 double sweep(int trials, Traversal traversal, std::mt19937& rng, int& failures) {
-    OrderEngine ord(OrderMethod::AMD);
+    OrderEngine ord(Ordering::AMD);
     double worst = 0;
     for (int t = 0; t < trials; ++t) {
         const std::size_t n = 4 + rng() % 12;
@@ -184,8 +184,8 @@ double sweep(int trials, Traversal traversal, std::mt19937& rng, int& failures) 
         Permutation pNat(n), pAmd;
         if (!ord.compute(A, pAmd)) { ++failures; continue; }
 
-        for (const Permutation& p : {pNat, pAmd}) {
-            const double d = compare(A, p, dense, traversal);
+        for (const Permutation& P : {pNat, pAmd}) {
+            const double d = compare(A, P, dense, traversal);
             if (d < 0) ++failures;
             else       worst = std::max(worst, d);
         }
@@ -277,24 +277,24 @@ double reconstructLdl(const NumFactorStatic<Val>& f,
 
 // Factor with LDL, then reconstruct. Returns -1 if the factorization failed.
 template<class Val>
-double compareLdl(const SparseMatrix<Val>& A, const Permutation& p,
+double compareLdl(const SparseMatrix<Val>& A, const Permutation& P,
                   const std::vector<std::vector<Val>>& dense,
                   Factorization factorization, Traversal traversal, std::size_t& perturbations) {
     ElmForest f;
     ElmForestEngine fe;
-    if (!fe.compute(A, p, f)) return -1;
+    if (!fe.compute(A, P, f)) return -1;
 
     SymFactor s;
     SymFactorEngine se;
-    if (!se.compute(A, p, f, s)) return -1;
+    if (!se.compute(A, P, f, s)) return -1;
 
     NumFactorStatic<Val> nf;
     NumFactorEngine ne(factorization, traversal);
-    if (!ne.compute(A, p, s, nf)) return -1;
+    if (!ne.compute(A, P, s, nf)) return -1;
     perturbations += std::as_const(nf).numPerturbations();
 
     const std::size_t n = dense.size();
-    const std::vector<std::int32_t>& newToOld = p.newToOld();
+    const std::vector<std::int32_t>& newToOld = P.newToOld();
     std::vector<std::vector<Val>> permuted(n, std::vector<Val>(n, Val(0)));
     for (std::size_t li = 0; li < n; ++li)
         for (std::size_t lj = 0; lj < n; ++lj)
@@ -311,18 +311,18 @@ double compareLdl(const SparseMatrix<Val>& A, const Permutation& p,
 // bit the same, and the difference must be exactly zero. Returns -1 if either factorization is
 // refused, or if the two disagree on structure or perturbation count.
 template<class Val>
-double staticVsDynamic(const SparseMatrix<Val>& A, const Permutation& p,
+double staticVsDynamic(const SparseMatrix<Val>& A, const Permutation& P,
                        Factorization factorization, Traversal traversal) {
     ElmForest f; ElmForestEngine fe;
-    if (!fe.compute(A, p, f)) return -1;
+    if (!fe.compute(A, P, f)) return -1;
     SymFactor s; SymFactorEngine se;
-    if (!se.compute(A, p, f, s)) return -1;
+    if (!se.compute(A, P, f, s)) return -1;
 
     NumFactorEngine ne(factorization, traversal);
     NumFactorStatic<Val>  sfac;
     NumFactorDynamic<Val> dfac;
-    if (!ne.compute(A, p, s, sfac)) return -1;
-    if (!ne.compute(A, p, s, dfac)) return -1;
+    if (!ne.compute(A, P, s, sfac)) return -1;
+    if (!ne.compute(A, P, s, dfac)) return -1;
 
     const NumFactorStatic<Val>&  cs = sfac;
     const NumFactorDynamic<Val>& cd = dfac;
@@ -374,21 +374,21 @@ double dynamicLdlWorst(const std::vector<std::vector<double>>& dense, int& twoBy
     const std::int32_t n = static_cast<std::int32_t>(dense.size());
     const SparseMatrix<double> A = toSparse(dense);
 
-    OrderEngine ord(OrderMethod::AMD);
-    Permutation p;
-    if (!ord.compute(A, p)) return -1;
+    OrderEngine ord(Ordering::AMD);
+    Permutation P;
+    if (!ord.compute(A, P)) return -1;
 
     ElmForest f; ElmForestEngine fe;
-    if (!fe.compute(A, p, f)) return -1;
+    if (!fe.compute(A, P, f)) return -1;
     SymFactor s; SymFactorEngine se;
-    if (!se.compute(A, p, f, s)) return -1;
+    if (!se.compute(A, P, f, s)) return -1;
 
     NumFactorDynamic<double> nf;
     NumFactorEngine ne(Factorization::DynamicLDLT, Traversal::LeftLooking);
-    if (!ne.compute(A, p, s, nf)) return -1;
+    if (!ne.compute(A, P, s, nf)) return -1;
     if (nf.snodeSize() != 1) return -1;
 
-    const std::vector<std::int32_t>& newToOld = p.newToOld();
+    const std::vector<std::int32_t>& newToOld = P.newToOld();
     std::vector<std::vector<double>> permuted(n, std::vector<double>(n));
     for (std::int32_t li = 0; li < n; ++li)
         for (std::int32_t lj = 0; lj < n; ++lj)
@@ -450,8 +450,8 @@ int main() {
         std::vector<std::vector<double>> A = {{4, 2, 2}, {2, 5, 0}, {2, 0, 6}};
         // Hermitian, and diagonally dominant enough to be positive definite.
         const SparseMatrix<double> S = toSparse(A);
-        Permutation p(3);
-        const double d = compare(S, p, A, Traversal::LeftLooking);
+        Permutation P(3);
+        const double d = compare(S, P, A, Traversal::LeftLooking);
         ck(d >= 0 && d < tol, "3x3 dense-ish       : matches dense Cholesky");
     }
 
@@ -459,12 +459,12 @@ int main() {
     {
         std::vector<std::vector<double>> A = {{1, 2}, {2, 1}};   // eigenvalues 3 and -1
         const SparseMatrix<double> S = toSparse(A);
-        Permutation p(2);
-        ElmForest f; ElmForestEngine fe; fe.compute(S, p, f);
-        SymFactor s; SymFactorEngine se; se.compute(S, p, f, s);
+        Permutation P(2);
+        ElmForest f; ElmForestEngine fe; fe.compute(S, P, f);
+        SymFactor s; SymFactorEngine se; se.compute(S, P, f, s);
         NumFactorStatic<double> nf;
         NumFactorEngine ne(Factorization::Cholesky, Traversal::LeftLooking);
-        ck(!ne.compute(S, p, s, nf), "indefinite 2x2      : refused, not factored");
+        ck(!ne.compute(S, P, s, nf), "indefinite 2x2      : refused, not factored");
     }
 
     // The sweeps. Both traversals must agree with the oracle, and therefore with each other.
@@ -492,7 +492,7 @@ int main() {
 
     // The grid. This is the sparse case: deep forest, real fill, an ordering that matters.
     {
-        OrderEngine ord(OrderMethod::AMD);
+        OrderEngine ord(Ordering::AMD);
         double worstR = 0, worstC = 0;
         int gridFail = 0;
         std::size_t supNat = 0, supAmd = 0, idxNat = 0, idxAmd = 0, heightNat = 0;
@@ -519,11 +519,11 @@ int main() {
                 supAmd = sa.snodeSize(); idxAmd = sa.numNodeIdx();
             }
 
-            for (const Permutation& p : {pNat, pAmd})
+            for (const Permutation& P : {pNat, pAmd})
                 for (Traversal tr : {Traversal::LeftLooking, Traversal::RightLooking,
                                      Traversal::Multifrontal}) {
-                    const double dr = compare(AR, p, denseR, tr);
-                    const double dc = compare(AC, p, denseC, tr);
+                    const double dr = compare(AR, P, denseR, tr);
+                    const double dc = compare(AC, P, denseC, tr);
                     if (dr < 0 || dc < 0) ++gridFail;
                     else { worstR = std::max(worstR, dr); worstC = std::max(worstC, dc); }
                 }
@@ -542,7 +542,7 @@ int main() {
 
     // Static LDL. Three symmetries, two traversals, checked by reconstruction.
     {
-        OrderEngine ord(OrderMethod::AMD);
+        OrderEngine ord(Ordering::AMD);
         int ldlFail = 0;
         std::size_t perturbations = 0;
         double wR = 0, wCs = 0, wCh = 0;
@@ -594,7 +594,7 @@ int main() {
     // (initNumFactor, the accessors, the friend write path) without any of the growth verbs dynamic
     // LDL will add.
     {
-        OrderEngine ord(OrderMethod::AMD);
+        OrderEngine ord(Ordering::AMD);
         int dynFail = 0;
         double worst = 0;
 

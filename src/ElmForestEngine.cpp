@@ -8,21 +8,21 @@ namespace Oblio {
 // Adapter: the forest needs only the sparsity pattern, so the matrix overload pulls it out
 // and forwards. The implementation below is free of Val and compiled once.
 template<class Val>
-bool ElmForestEngine::compute(const SparseMatrix<Val>& A, const Permutation& p,
+bool ElmForestEngine::compute(const SparseMatrix<Val>& A, const Permutation& P,
                               ElmForest& ef) const {
-    return compute(A.colPtr(), A.rowIdx(), p, ef);
+    return compute(A.colPtr(), A.rowIdx(), P, ef);
 }
 
 bool ElmForestEngine::compute(const std::vector<std::size_t>&  colPtr,
                               const std::vector<std::int32_t>& rowIdx,
-                              const Permutation& p, ElmForest& ef) const {
+                              const Permutation& P, ElmForest& ef) const {
     if (colPtr.empty())
         return false;
     const std::size_t size = colPtr.size() - 1;
-    if (p.size() != size)
+    if (P.size() != size)
         return false;
 
-    computeParent(colPtr, rowIdx, p, ef);
+    computeParent(colPtr, rowIdx, P, ef);
 
     // Start nodal: one trivial supernode per column, so the supernode count equals the
     // column count and the map is the identity. compressFundamental below merges these
@@ -36,7 +36,7 @@ bool ElmForestEngine::compute(const std::vector<std::size_t>&  colPtr,
     // precede compression, whose merge test reads a column's only-child status from the
     // links and its sparsity pattern from the sizes.
     finalizeLinks(ef);
-    computeColumnSizes(colPtr, rowIdx, p, ef);
+    computeColumnSizes(colPtr, rowIdx, P, ef);
 
     // Merge the columns into fundamental supernodes, unless asked to stay nodal, then
     // amalgamate if a threshold is set. Each rewrites the map, the parent links and the
@@ -69,11 +69,11 @@ bool ElmForestEngine::compute(const std::vector<std::size_t>&  colPtr,
 void ElmForestEngine::computeParent(
         const std::vector<std::size_t>&  colPtr,
         const std::vector<std::int32_t>& rowIdx,
-        const Permutation& p,
+        const Permutation& P,
         ElmForest& ef) const {
-    const std::size_t size = p.size();
-    const std::vector<std::int32_t>& oldToNew = p.oldToNew();
-    const std::vector<std::int32_t>& newToOld = p.newToOld();
+    const std::size_t size = P.size();
+    const std::vector<std::int32_t>& oldToNew = P.oldToNew();
+    const std::vector<std::int32_t>& newToOld = P.newToOld();
 
     ef.mSize = size;
     ef.mParent.assign(size, NIL);
@@ -83,11 +83,11 @@ void ElmForestEngine::computeParent(
     // ordering of A, and j and k carry the column roles, j the lower and k the higher. So lk
     // is the factor column being processed, lj an earlier neighbor of it (lj < lk, enforced
     // by the guard below), and ak is lk's column in A. The same prefix marks a position in
-    // the storage: cp is an offset into A's flat arrays, which is 0.9's p (the name p being
-    // taken here by the Permutation). Positions measure rather than name, so cp is a
-    // std::size_t and cannot be NIL, unlike the columns. Beyond those, r is the node the
-    // climb has reached and t the temporary that saves the next hop before compression
-    // overwrites it.
+    // the storage: cp is an offset into A's flat arrays, which is 0.9's p (a position is named
+    // for the array it walks, so we never use the bare letter). Positions measure rather than
+    // name, so cp is a std::size_t and cannot be NIL, unlike the columns. Beyond those, r is
+    // the node the climb has reached and t the temporary that saves the next hop before
+    // compression overwrites it.
     //
     // For each factor column lk (increasing), look at its neighbors mapping to earlier
     // columns lj < lk; path-compress to attach lj's subtree under lk.
@@ -181,11 +181,11 @@ std::size_t ElmForestEngine::computeHeight(const ElmForest& ef) const {
 void ElmForestEngine::computeColumnSizes(
         const std::vector<std::size_t>&  colPtr,
         const std::vector<std::int32_t>& rowIdx,
-        const Permutation& p,
+        const Permutation& P,
         ElmForest& ef) const {
     const std::size_t size = ef.mSize;
-    const std::vector<std::int32_t>& oldToNew = p.oldToNew();
-    const std::vector<std::int32_t>& newToOld = p.newToOld();
+    const std::vector<std::int32_t>& oldToNew = P.oldToNew();
+    const std::vector<std::int32_t>& newToOld = P.newToOld();
 
     // Front size. The forest is nodal here, so a supernode is a column and owns exactly
     // itself. Nothing to compute.

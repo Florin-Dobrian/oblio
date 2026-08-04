@@ -89,7 +89,7 @@ int main(int argc, char** argv) {
         for (std::size_t cp = colPtr[aj]; cp < colPtr[aj + 1]; ++cp)
             if (rowIdx[cp] == static_cast<std::int32_t>(aj)) val[cp] = 100.0;
     const SparseMatrix<double> A(colPtr.size() - 1, colPtr, rowIdx, val);
-    const OrderEngine engine(method == "mmd" ? OrderMethod::MMD : OrderMethod::AMD);
+    const OrderEngine engine(method == "mmd" ? Ordering::MMD : Ordering::AMD);
 
     // The sum is only there to stop the optimizer deleting the calls.
     std::size_t sum = 0;
@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
         else if (method == "amd1b") sum += orderAmd1B(colPtr, rowIdx).size();
         else if (method == "amd2b") sum += orderAmd2B(colPtr, rowIdx).size();
         else if (method == "mmd2") sum += orderMmd2(colPtr, rowIdx).size();
-        else if (vendored) { Permutation p; engine.compute(A, p); sum += p.size(); }
+        else if (vendored) { Permutation P; engine.compute(A, P); sum += P.size(); }
     }
     std::printf("%s, grid %dx%d, %d repeats, %zu\n", method.c_str(), side, side, repeats, sum);
     return 0;

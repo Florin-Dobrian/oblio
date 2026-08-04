@@ -19,8 +19,8 @@ namespace Oblio {
 // Adapter: an ordering needs only the sparsity pattern, so the matrix overload pulls it
 // out and forwards. The implementation below is free of Val and compiled once.
 template<class Val>
-bool OrderEngine::compute(const SparseMatrix<Val>& A, Permutation& p) const {
-    return compute(A.colPtr(), A.rowIdx(), p);
+bool OrderEngine::compute(const SparseMatrix<Val>& A, Permutation& P) const {
+    return compute(A.colPtr(), A.rowIdx(), P);
 }
 
 // Dispatch, and nothing else. A switch naming every enumerator with no default is the house
@@ -30,38 +30,38 @@ bool OrderEngine::compute(const SparseMatrix<Val>& A, Permutation& p) const {
 // fills, so no step happens before the method is known.
 bool OrderEngine::compute(const std::vector<std::size_t>&  colPtr,
                           const std::vector<std::int32_t>& rowIdx,
-                          Permutation& p) const {
+                          Permutation& P) const {
     if (colPtr.empty())
         return false;
     const std::size_t size = colPtr.size() - 1;
 
-    switch (mMethod) {
-        case OrderMethod::Natural: return orderNatural(size, p);
-        case OrderMethod::MMD:     return orderMMD(size, colPtr, rowIdx, p);
-        case OrderMethod::MMD1:    return orderMMD1(size, colPtr, rowIdx, p);
-        case OrderMethod::MMD2:    return orderMMD2(size, colPtr, rowIdx, p);
-        case OrderMethod::AMD:     return orderAMD(size, colPtr, rowIdx, p);
-        case OrderMethod::AMD1:    return orderAMD1(size, colPtr, rowIdx, p);
-        case OrderMethod::AMD2:    return orderAMD2(size, colPtr, rowIdx, p);
-        case OrderMethod::AMD1B:   return orderAMD1B(size, colPtr, rowIdx, p);
-        case OrderMethod::AMD2B:   return orderAMD2B(size, colPtr, rowIdx, p);
+    switch (mOrdering) {
+        case Ordering::Natural: return orderNatural(size, P);
+        case Ordering::MMD:     return orderMMD(size, colPtr, rowIdx, P);
+        case Ordering::MMD1:    return orderMMD1(size, colPtr, rowIdx, P);
+        case Ordering::MMD2:    return orderMMD2(size, colPtr, rowIdx, P);
+        case Ordering::AMD:     return orderAMD(size, colPtr, rowIdx, P);
+        case Ordering::AMD1:    return orderAMD1(size, colPtr, rowIdx, P);
+        case Ordering::AMD2:    return orderAMD2(size, colPtr, rowIdx, P);
+        case Ordering::AMD1B:   return orderAMD1B(size, colPtr, rowIdx, P);
+        case Ordering::AMD2B:   return orderAMD2B(size, colPtr, rowIdx, P);
     }
     return false;   // unreachable: every enumerator is named above, which is what -Wall checks
 }
 
-bool OrderEngine::orderNatural(std::size_t size, Permutation& p) const {
-    p.mOldToNew.assign(size, 0);
-    p.mNewToOld.assign(size, 0);
-    p.setIdentity();
+bool OrderEngine::orderNatural(std::size_t size, Permutation& P) const {
+    P.mOldToNew.assign(size, 0);
+    P.mNewToOld.assign(size, 0);
+    P.setIdentity();
     return true;
 }
 
 bool OrderEngine::orderMMD(std::size_t size,
                            const std::vector<std::size_t>&  colPtr,
                            const std::vector<std::int32_t>& rowIdx,
-                           Permutation& p) const {
-    p.mOldToNew.assign(size, 0);
-    p.mNewToOld.assign(size, 0);
+                           Permutation& P) const {
+    P.mOldToNew.assign(size, 0);
+    P.mNewToOld.assign(size, 0);
     if (size == 0) return true;
 
     // A is stored full-symmetric; the vendored MMD wants the off-diagonal structure only, so
@@ -95,8 +95,8 @@ bool OrderEngine::orderMMD(std::size_t size,
     mmd_order(N, cp.data(), ri.data(), perm.data(), invp.data());
 
     for (int j = 0; j < N; ++j) {
-        p.mOldToNew[j] = static_cast<std::int32_t>(invp[j]);
-        p.mNewToOld[j] = static_cast<std::int32_t>(perm[j]);
+        P.mOldToNew[j] = static_cast<std::int32_t>(invp[j]);
+        P.mNewToOld[j] = static_cast<std::int32_t>(perm[j]);
     }
     return true;
 }
@@ -108,17 +108,17 @@ bool OrderEngine::orderMMD(std::size_t size,
 bool OrderEngine::orderMMD1(std::size_t size,
                             const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,
-                            Permutation& p) const {
-    p.mOldToNew.assign(size, 0);
-    p.mNewToOld.assign(size, 0);
+                            Permutation& P) const {
+    P.mOldToNew.assign(size, 0);
+    P.mNewToOld.assign(size, 0);
     if (size == 0) return true;
 
     const std::vector<std::int32_t> order = orderMmd1(colPtr, rowIdx);
     if (order.size() != size) return false;
 
     for (std::size_t k = 0; k < size; ++k) {
-        p.mNewToOld[k]        = order[k];
-        p.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
+        P.mNewToOld[k]        = order[k];
+        P.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
     }
     return true;
 }
@@ -127,17 +127,17 @@ bool OrderEngine::orderMMD1(std::size_t size,
 bool OrderEngine::orderMMD2(std::size_t size,
                             const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,
-                            Permutation& p) const {
-    p.mOldToNew.assign(size, 0);
-    p.mNewToOld.assign(size, 0);
+                            Permutation& P) const {
+    P.mOldToNew.assign(size, 0);
+    P.mNewToOld.assign(size, 0);
     if (size == 0) return true;
 
     const std::vector<std::int32_t> order = orderMmd2(colPtr, rowIdx);
     if (order.size() != size) return false;
 
     for (std::size_t k = 0; k < size; ++k) {
-        p.mNewToOld[k]        = order[k];
-        p.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
+        P.mNewToOld[k]        = order[k];
+        P.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
     }
     return true;
 }
@@ -147,9 +147,9 @@ bool OrderEngine::orderMMD2(std::size_t size,
 bool OrderEngine::orderAMD(std::size_t size,
                            const std::vector<std::size_t>&  colPtr,
                            const std::vector<std::int32_t>& rowIdx,
-                           Permutation& p) const {
-    p.mOldToNew.assign(size, 0);
-    p.mNewToOld.assign(size, 0);
+                           Permutation& P) const {
+    P.mOldToNew.assign(size, 0);
+    P.mNewToOld.assign(size, 0);
     if (size == 0) return true;
     const int N  = static_cast<int>(size);
     const int nz = static_cast<int>(colPtr[size]);
@@ -158,13 +158,13 @@ bool OrderEngine::orderAMD(std::size_t size,
     for (int j = 0; j <= N; ++j) Ap[j] = static_cast<int>(colPtr[j]);
     for (int k = 0; k < nz; ++k) Ai[k] = static_cast<int>(rowIdx[k]);
 
-    std::vector<int> P(N);
-    const int status = amd_order(N, Ap.data(), Ai.data(), P.data(), nullptr, nullptr);
+    std::vector<int> perm(N);
+    const int status = amd_order(N, Ap.data(), Ai.data(), perm.data(), nullptr, nullptr);
     if (status < 0) return false;
 
     for (int k = 0; k < N; ++k) {
-        p.mNewToOld[k]    = static_cast<std::int32_t>(P[k]);
-        p.mOldToNew[P[k]] = static_cast<std::int32_t>(k);
+        P.mNewToOld[k]       = static_cast<std::int32_t>(perm[k]);
+        P.mOldToNew[perm[k]] = static_cast<std::int32_t>(k);
     }
     return true;
 }
@@ -173,17 +173,17 @@ bool OrderEngine::orderAMD(std::size_t size,
 bool OrderEngine::orderAMD1(std::size_t size,
                             const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,
-                            Permutation& p) const {
-    p.mOldToNew.assign(size, 0);
-    p.mNewToOld.assign(size, 0);
+                            Permutation& P) const {
+    P.mOldToNew.assign(size, 0);
+    P.mNewToOld.assign(size, 0);
     if (size == 0) return true;
 
     const std::vector<std::int32_t> order = orderAmd1(colPtr, rowIdx);
     if (order.size() != size) return false;
 
     for (std::size_t k = 0; k < size; ++k) {
-        p.mNewToOld[k]        = order[k];
-        p.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
+        P.mNewToOld[k]        = order[k];
+        P.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
     }
     return true;
 }
@@ -191,17 +191,17 @@ bool OrderEngine::orderAMD1(std::size_t size,
 bool OrderEngine::orderAMD2(std::size_t size,
                             const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,
-                            Permutation& p) const {
-    p.mOldToNew.assign(size, 0);
-    p.mNewToOld.assign(size, 0);
+                            Permutation& P) const {
+    P.mOldToNew.assign(size, 0);
+    P.mNewToOld.assign(size, 0);
     if (size == 0) return true;
 
     const std::vector<std::int32_t> order = orderAmd2(colPtr, rowIdx);
     if (order.size() != size) return false;
 
     for (std::size_t k = 0; k < size; ++k) {
-        p.mNewToOld[k]        = order[k];
-        p.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
+        P.mNewToOld[k]        = order[k];
+        P.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
     }
     return true;
 }
@@ -209,17 +209,17 @@ bool OrderEngine::orderAMD2(std::size_t size,
 bool OrderEngine::orderAMD1B(std::size_t size,
                             const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,
-                            Permutation& p) const {
-    p.mOldToNew.assign(size, 0);
-    p.mNewToOld.assign(size, 0);
+                            Permutation& P) const {
+    P.mOldToNew.assign(size, 0);
+    P.mNewToOld.assign(size, 0);
     if (size == 0) return true;
 
     const std::vector<std::int32_t> order = orderAmd1B(colPtr, rowIdx);
     if (order.size() != size) return false;
 
     for (std::size_t k = 0; k < size; ++k) {
-        p.mNewToOld[k]        = order[k];
-        p.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
+        P.mNewToOld[k]        = order[k];
+        P.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
     }
     return true;
 }
@@ -227,17 +227,17 @@ bool OrderEngine::orderAMD1B(std::size_t size,
 bool OrderEngine::orderAMD2B(std::size_t size,
                             const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,
-                            Permutation& p) const {
-    p.mOldToNew.assign(size, 0);
-    p.mNewToOld.assign(size, 0);
+                            Permutation& P) const {
+    P.mOldToNew.assign(size, 0);
+    P.mNewToOld.assign(size, 0);
     if (size == 0) return true;
 
     const std::vector<std::int32_t> order = orderAmd2B(colPtr, rowIdx);
     if (order.size() != size) return false;
 
     for (std::size_t k = 0; k < size; ++k) {
-        p.mNewToOld[k]        = order[k];
-        p.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
+        P.mNewToOld[k]        = order[k];
+        P.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
     }
     return true;
 }

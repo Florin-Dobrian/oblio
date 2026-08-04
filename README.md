@@ -220,9 +220,12 @@ tests/              , test suites (241 assertions; see docs/TESTING_SPECIFICATIO
   test_numfactor.cpp          18,  numeric factorization
   test_solve.cpp              14,  the solve step, residual at machine precision
   test_pipeline.cpp           58,  whole-pipeline combinations, by residual
-examples/           , usage examples
-  pipeline.cpp      , the pipeline by hand, every factorization / traversal / ordering
-  basic.cpp         , the same solve through the DirectSolver facade
+examples/           , usage examples, named example_* as the tests are named test_*
+  example_basic.cpp , one solve through the DirectSolver facade, the shortest way in
+  example_pipeline_real.cpp    , the pipeline by hand, every ordering / factorization /
+                      traversal, real
+  example_pipeline_complex.cpp , the same sweep for complex, over two matrices, since Hermitian
+                      and complex symmetric are different conditions and take different inputs
 benchmarks/         , timing against the current tree, and expected to keep compiling as it moves
   ordering/         , one phase against itself: what each ordering costs, in time and in fill
   pipeline/         , the phases against each other: what share of a solve the ordering is, and
@@ -277,8 +280,9 @@ OrderEngine -> ElmForestEngine -> SymFactorEngine -> NumFactorEngine -> SolveEng
 ```
 
 `MultiplyEngine` supplies the sparse matvec and residual. Today the phases are wired by hand
-(see `examples/pipeline.cpp`), or driven together by `DirectSolver<Val>`, which owns the
-intermediates and exposes the analyze / factor / solve phases (see `examples/basic.cpp`).
+(see `examples/example_pipeline_real.cpp` and its complex counterpart), or driven together by
+`DirectSolver<Val>`, which owns the intermediates and exposes the analyze / factor / solve phases
+(see `examples/example_basic.cpp`).
 
 ## Status
 

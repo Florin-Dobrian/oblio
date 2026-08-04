@@ -1108,7 +1108,7 @@ is the same front-size question named here.
 
 ## Structure
 
-### Four ordering questions left open on 2026-08-01, all deliberately
+### Five ordering questions left open, four deliberately and one not
 
 Raised at the end of the ordering optimization work and parked rather than decided, each with the
 reasoning that got them to that point so they can be picked up cold.
@@ -1257,6 +1257,54 @@ occasion, and md2 has three sets live at once besides.
 The counters are five, not one: `QuotientGraph`'s `mMark` and `mTag`, plus the drivers' own in
 `Mmd2`, `Amd1` and `Amd2`. `Amd2` sizes its mark at `2 * size`, since it stamps cliques at
 `c + size`; widening changes the element type and not the length.
+
+**5. The experiment's amd2 and production's Amd2 diverge on grids, and the check cannot see it.**
+Found 2026-08-03 and NOT deliberate, unlike the four above. Open.
+
+```
+seven example graphs      permutations agree        make test passes
+grid 8x8, grid 9x9        permutations agree
+grid 10x10 and larger     permutations DIFFER
+amd1 against Amd1         agrees on every grid tried
+```
+
+**It predates the amd2/amd3 split.** The old amd2, now amd3, was checked by FILL on the same seven
+graphs, which is weaker in two ways at once, so this has probably been there since amd2 was written.
+Splitting the file is what made the stronger check possible and the divergence visible.
+
+**Localized to aggressive absorption, not the hash.** On a 10x10 grid the first difference is at step
+4: both pick pivot 10, both report supervariable size 1, neither has made a hash merge yet, and the
+prototype absorbs one clique where production absorbs none. Instrumenting production shows its
+`touchedCliques` is EMPTY at that step while the prototype's is not, so the two disagree about which
+cliques the step touches at all.
+
+**Which means the graph state has already diverged before any merge of either kind.** The pivots
+agree, no hash merge has fired, and every step up to there reports size 1, so no mass elimination
+either. That points at the eliminator or at absorption's purge rather than at either extra
+mechanism, and it is where the next session should start.
+
+**One hypothesis tested and rejected.** `cliqueDegree` in `Amd2.cpp` is written once when a clique is
+formed, and the comment above it lists the invariants that keep it exact without mentioning hash
+merges. A hash merge does break it: the test requires `I[u] == I[v]`, so any other clique in that set
+holds both `u` and `v`, and merging `v` away leaves its weight counted twice. Maintaining
+`cliqueDegree` at the merge site changes nothing on this reproduction, because the divergence appears
+before any merge. **The staleness is still real and still unmentioned by that comment**, so it is
+worth fixing on its own account even though it is not this bug.
+
+**And one genuine bug was found and fixed on the way.** The new amd2 inherited amd1's
+`external_degree = len(C[pivot])`, an unweighted count, where hash merges make a clique member stand
+for several original vertices. amd3 had the weighted version with a comment saying exactly why.
+Fixed in both twins; the prototype's `nnz(L)` now matches production at 8x8 where it did not before.
+
+**Reproduction.** Both binaries take `grid N`. The prototype needs its `CounterSink` widened to keep
+the lines of interest, since it filters output by prefix; production needs a `printf` at the end of
+the elimination loop. A per-step line of pivot, supervariable size, absorbed count and hash count is
+enough to find the first difference.
+
+**And the harness is the other half of the finding.** Seven graphs of at most twelve vertices cannot
+validate a mechanism that only fires on larger structures. `make test` comparing prototype against
+production on a grid or two would have caught this when amd2 was written, and would cost almost
+nothing. That is the same test-set point at the top of this file, arriving from a new direction.
 
 ### Two extractions in the dynamic factorization code
 

@@ -30,11 +30,10 @@ check_c_source_compiles("
 unset(CMAKE_REQUIRED_LIBRARIES)
 
 # ----- Library ---------------------------------------------------------------
-# Source list matches REPO_MAP src/*.cpp. Amd.cpp and Mmd.cpp hold the ordering
-# implementations that OrderEngine.cpp dispatches to, and omitting them link-fails
-# on mmd_order / amd_order.
+# Source list matches REPO_MAP src/*.cpp. The two vendored ordering codes are not
+# here: they live in private/, which is not part of the published tree, and are
+# added below only when that directory exists.
 add_library(oblio STATIC
-    src/Amd.cpp
     src/Amd1.cpp
     src/Amd1B.cpp
     src/Amd2.cpp
@@ -42,7 +41,6 @@ add_library(oblio STATIC
     src/BlasLapack.cpp
     src/DirectSolver.cpp
     src/ElmForestEngine.cpp
-    src/Mmd.cpp
     src/Mmd1.cpp
     src/Mmd2.cpp
     src/MultiplyEngine.cpp
@@ -63,6 +61,21 @@ add_library(oblio STATIC
 
 # Users #include the "oblio/..." headers (namespaced). PUBLIC so tests/examples
 # that link oblio inherit the include path, so no separate global include is needed.
+# The vendored orderings, optional. Present, Ordering::MMD and Ordering::AMD work; absent, the
+# library still builds and those two enumerators refuse. Detected rather than configured, so a
+# tree that has the directory needs no flag and a clone needs no edit. Warnings are off for these
+# two files only, since they are copied verbatim and not maintained here.
+file(GLOB OBLIO_VENDOR_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/private/Amd.cpp
+                            ${CMAKE_CURRENT_SOURCE_DIR}/private/Mmd.cpp)
+if(OBLIO_VENDOR_SRCS)
+    target_sources(oblio PRIVATE ${OBLIO_VENDOR_SRCS})
+    set_source_files_properties(${OBLIO_VENDOR_SRCS} PROPERTIES COMPILE_OPTIONS "-w")
+    target_compile_definitions(oblio PUBLIC OBLIO_VENDORED_ORDERINGS)
+    message(STATUS "Vendored orderings: found in private/, MMD and AMD enabled")
+else()
+    message(STATUS "Vendored orderings: private/ absent, MMD and AMD will refuse")
+endif()
+
 target_include_directories(oblio PUBLIC include)
 target_link_libraries(oblio PUBLIC ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES})
 

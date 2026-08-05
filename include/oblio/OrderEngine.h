@@ -60,13 +60,24 @@ public:
                  Permutation& P) const;
 
 private:
-    Ordering mOrdering = Ordering::MMD;
+    // Our MMD, not the vendored one, because the vendored orderings are optional: a default has to
+    // be an ordering that is always there. MMD2 is the closest of ours to genmmd, which is what the
+    // default used to be.
+    Ordering mOrdering = Ordering::MMD2;
 
     bool orderNatural(std::size_t size, Permutation& P) const;
+    // The two vendored orderings, declared only when private/ supplies their sources. Everything
+    // else here is ours and is always present.
+#ifdef OBLIO_VENDORED_ORDERINGS
     bool orderMMD(std::size_t size,
                   const std::vector<std::size_t>&  colPtr,
                   const std::vector<std::int32_t>& rowIdx,
                   Permutation& P) const;
+    bool orderAMD(std::size_t size,
+                  const std::vector<std::size_t>&  colPtr,
+                  const std::vector<std::int32_t>& rowIdx,
+                  Permutation& P) const;
+#endif
     bool orderMMD1(std::size_t size,
                    const std::vector<std::size_t>&  colPtr,
                    const std::vector<std::int32_t>& rowIdx,
@@ -75,10 +86,6 @@ private:
                    const std::vector<std::size_t>&  colPtr,
                    const std::vector<std::int32_t>& rowIdx,
                    Permutation& P) const;
-    bool orderAMD(std::size_t size,
-                  const std::vector<std::size_t>&  colPtr,
-                  const std::vector<std::int32_t>& rowIdx,
-                  Permutation& P) const;
     bool orderAMD1(std::size_t size,
                    const std::vector<std::size_t>&  colPtr,
                    const std::vector<std::int32_t>& rowIdx,

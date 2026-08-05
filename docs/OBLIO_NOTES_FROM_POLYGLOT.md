@@ -48,7 +48,8 @@ that has never been questioned.
 
 **What.** Oblio's engines are consistently out-parameter APIs: `compute(A, Permutation&)`,
 `MultiplyEngine` filling a `y` rather than returning one. Some of that is a C++98 artifact, since
-0.9 dates from roughly 2003 to 2005, when returning a container risked a full copy.
+0.9 was developed between 1998 and 2005, starting the year C++98 was standardized and ending six
+years before move semantics arrived, throughout which returning a container risked a full copy.
 
 **Why C++11 changed this.** Before move constructors, `return y;` on a named local had two
 outcomes: NRVO applied and the object was built directly in the caller's storage, or NRVO did not

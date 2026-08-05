@@ -25,13 +25,22 @@ below: it catches an example that crashes, that returns a failure, or that has q
 being built, and says nothing about whether the numbers it prints are right. The stronger version,
 checking deterministic output, is open in docs/TODO.md and is awkward while residuals are in the
 output, since those legitimately differ in the last bits across BLAS
-implementations. Totals today: **252 assertions across 8 suites**.
+implementations. Totals today: **252 assertions across 8 suites** with the vendored orderings
+present, **238 without**.
+
+**The count depends on the build, and that is deliberate.** The vendored MMD and AMD live in
+`private/`, which is not published, and both builds detect rather than require it. Fourteen
+assertions in `test_order` check those two routines and compile only when they are there, so that
+suite reports 77 or 63. Nothing else varies: every other suite asserts the same thing either way,
+everything they use being ours. The one place the difference shows outside `test_order` is the
+nine-ordering sweep in `test_pipeline`, which expects every ordering the build has rather than a
+fixed nine.
 
 | suite | assertions | what it establishes |
 |---|---|---|
 | `smoke` | 5 | the tree builds and the basic objects work |
 | `test_permutation` | 11 | the index map and its composition |
-| `test_order` | 77 | the eight orderings are valid, and each B pair reproduces its original |
+| `test_order` | 77 / 63 | the orderings are valid, and each B pair reproduces its original (63 without `private/`) |
 | `test_forest` | 29 | elimination forest, supernodes, amalgamation, multifrontal child order |
 | `test_symfactor` | 29 | supernodal index sets against a dense oracle |
 | `test_numfactor` | 18 | the numeric factor, by oracle and by reconstruction |
@@ -86,7 +95,7 @@ inverse it gives the identity, it is order sensitive in both directions, it is n
 identity on either side is neutral, and a size mismatch is refused. A random sweep of 500 checks
 composition against direct application and the inverse against the identity.
 
-### test_order, 49 assertions
+### test_order, 49 assertions (14 of the suite's total are the vendored pair's, and optional)
 
 Seven matrices, each checked for structural symmetry and then ordered by all eight non-trivial
 methods, AMD, AMD1, AMD1B, AMD2, AMD2B, MMD, MMD1 and MMD2, with the result checked for validity as

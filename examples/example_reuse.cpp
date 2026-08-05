@@ -88,7 +88,7 @@ int main() {
     int analyses = 0, factorizations = 0, solves = 0;
     double worst = 0;
 
-    DirectSolver<Val> solver(Ordering::AMD, Factorization::Cholesky, Traversal::Multifrontal);
+    DirectSolver<Val> solver(Ordering::MMD2, Factorization::Cholesky, Traversal::Multifrontal);
 
     printf("Grid %zux%zu, %zu unknowns. Three value sets, three right-hand sides each.\n\n",
            side, side, size);
@@ -159,8 +159,8 @@ int main() {
     report("setTraversal: RightLooking -> Multifrontal");
 
     solver.analyze(A);
-    solver.setOrdering(Ordering::MMD);
-    report("setOrdering: AMD -> MMD");
+    solver.setOrdering(Ordering::AMD2);
+    report("setOrdering: MMD2 -> AMD2");
 
     solver.analyze(A);
     solver.setSupernodes(Supernodes::Nodal);

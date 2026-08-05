@@ -1,8 +1,8 @@
 # Oblio
 
 A sparse direct solver library for symmetric matrices, real and complex. Supernodal Cholesky and
-`LDL^T` / `LDL^H` factorization, definite and indefinite, with nine fill-reducing orderings and
-three traversals over one pipeline.
+`LDL^T` / `LDL^H` factorization, definite and indefinite, with fill-reducing ordering and three
+traversals over one pipeline.
 
 ## Features
 
@@ -12,12 +12,8 @@ three traversals over one pipeline.
   column they cannot use. The `T`/`H` pair coincides over the reals and differs over the complex
   field, where one is symmetric and the other Hermitian
 - **Three traversal algorithms**: Left-looking, Right-looking, Multifrontal
-- **Ordering**, nine methods: Natural (identity), the vendored MMD (Multiple Minimum Degree) and
-  AMD (Approximate Minimum Degree, Davis/Amestoy/Duff), and Oblio's own, built over a shared
-  quotient graph: MMD1 and AMD1, the base algorithms; MMD2 and AMD2, which add the mechanisms
-  their vendored counterparts carry; and AMD1B and AMD2B, which are AMD1 and AMD2 computed on a
-  different schedule and return the same permutations. Ours are not drop-in replacements for the
-  vendored pair and order differently
+- **Two fill-reducing orderings**, both minimum degree: MMD, using the exact degree, and AMD,
+  using an approximate degree bound. `Ordering::MMD` and `Ordering::AMD`
 - **One right-hand side per solve**, a `Vector<Val>`, with the factorization reused across as
   many as wanted. Many right-hand sides at once, which is where the solve would become a level-3
   BLAS operation, is the one thing on the roadmap rather than in the library; see Status
@@ -39,7 +35,7 @@ Vector<double> b(n), x(n);
 for (std::size_t i = 0; i < n; ++i) b[i] = 1.0;
 
 // Ordering, factorization, traversal: the pipeline order. Each also has a setter.
-DirectSolver<double> solver(Ordering::AMD, Factorization::Cholesky, Traversal::LeftLooking);
+DirectSolver<double> solver(Ordering::MMD2, Factorization::Cholesky, Traversal::LeftLooking);
 
 // The three phases have different lifetimes: analyze depends only on the pattern,
 // factor on the values, solve on the right-hand side.
@@ -54,6 +50,80 @@ printf("residual %.3e\n", solver.relativeResidual(A, b, x));
 ```
 
 Multiple right-hand sides (a dense `B`) are not wired yet; see Status.
+
+## Examples
+
+Seven standalone programs in `examples/`, built by `make examples` and run for exit status by
+`make test`. Each is heavily commented and answers one question, in roughly this order:
+
+- **`example_basic`**, what one solve looks like start to finish, through the facade.
+- **`example_matrix`**, how to get *your* matrix in: CSC written out by hand, converted from a
+  dense array, and assembled from coordinate triplets, with the conversion that sorts, merges
+  duplicates and keeps the diagonal.
+- **`example_analysis`**, what the ordering buys, in fill, supernode count and forest height,
+  across every ordering method on an arrow and two grids. Nothing is factored.
+- **`example_indefinite`**, what happens when the matrix is not positive definite: one pattern
+  under three value sets, and which factorizations refuse, which perturb and which pivot.
+- **`example_reuse`**, what can be kept between solves and what invalidates it: one analysis over
+  three matrices, one factor over three right-hand sides, and what each setter discards.
+- **`example_pipeline_real`** and **`example_pipeline_complex`**, what the facade is doing
+  underneath, with the engines wired by hand over every ordering, factorization and traversal.
+
+**If you are deciding whether you want a direct solver at all**, read `example_analysis`: it shows
+an ordering turning a dense factor into a sparse one on nine vertices. **If you are deciding
+whether you want this one rather than a Cholesky**, read `example_indefinite`: one matrix, three
+value sets, and the three factorizations refusing, perturbing and pivoting in turn.
+
+## Prerequisites
+
+The whole dependency list is a C++17 compiler, GNU make, and a BLAS and LAPACK. Nothing is vendored
+that has to be fetched, nothing is downloaded at build time, and there is no package manager to
+satisfy: `git clone` and `make` is the entire path. The one platform difference worth knowing before
+starting is that **macOS already has the BLAS**, in Accelerate, and Linux does not.
+
+### macOS
+
+Apple Silicon or Intel.
+
+- **Xcode Command Line Tools**: `xcode-select --install`. Provides `clang++`, `make`, and the
+  Accelerate framework, which is the BLAS and LAPACK. There is nothing further to install to build
+  and run the tests.
+- **CMake**, only for the CMake build: `brew install cmake`. Homebrew itself, if it is not already
+  present, installs with
+  `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`.
+
+Accelerate is selected automatically: the Makefile links `-framework Accelerate` when `uname` says
+Darwin, and CMake finds it through `find_package(BLAS)`.
+
+### Linux
+
+Verified on Ubuntu 24.04 with GCC 13.3 and GNU Make 4.3, both builds from a clean container.
+
+- **Compiler and make**: `sudo apt install build-essential`
+- **BLAS and LAPACK**: `sudo apt install libblas-dev liblapack-dev`. The `-dev` packages are the
+  ones that matter: a system carrying only the runtime `libblas3` and `liblapack3` links nothing,
+  and the failure is `/usr/bin/ld: cannot find -llapack` rather than anything about a missing
+  package.
+- **CMake**, only for the CMake build: `sudo apt install cmake`
+
+The Makefile links `-llapack -lblas` on anything that is not Darwin. Any BLAS implementation with
+the standard Fortran symbols will do, so OpenBLAS or MKL can be substituted by overriding
+`BLAS_LIBS` on the make command line.
+
+On distributions other than Debian and Ubuntu the package names differ, `lapack-devel` and
+`blas-devel` on Fedora and RHEL, and those have not been tested here.
+
+### Optional, for development rather than for building
+
+None of these is needed to compile the library, run the tests or run the examples.
+
+- **`bear`**, to generate the `compile_commands.json` an editor indexes from: `brew install bear`
+  or `sudo apt install bear`. See Editors below.
+- **`clang-tidy`**, which Apple does not ship: `brew install llvm` and a symlink to that one
+  binary. The reason not to put its directory on `PATH` is in `CLAUDE.md` under Tooling.
+- **Instruments**, the profiler of record on Apple Silicon, which comes with Xcode proper rather
+  than with the Command Line Tools. Used by `benchmarks/`; see `benchmarks/README.md`.
+- **Python 3**, for the ordering prototypes in `experiments/ordering/` only.
 
 ## Build
 
@@ -195,7 +265,7 @@ include/oblio/      , public headers (declarations only)
   SparseMatrix.h    , sparse symmetric matrix (CSC)
   Vector.h          , dense vector (one right-hand side)
   Permutation.h     , bidirectional index map (oldToNew / newToOld)
-  OrderEngine.h     , fill-reducing ordering, the nine methods below behind one enum
+  OrderEngine.h     , fill-reducing ordering, MMD and AMD behind one enum
   QuotientGraph.h   , the representation Oblio's own orderings run on, and its degree buckets
   Mmd1.h  Mmd2.h    , Oblio's own MMD orderings
   Amd1.h  Amd2.h    , Oblio's own AMD orderings
@@ -227,22 +297,12 @@ tests/              , test suites (252 assertions; see docs/TESTING_SPECIFICATIO
   test_numfactor.cpp          18,  numeric factorization
   test_solve.cpp              14,  the solve step, residual at machine precision
   test_pipeline.cpp           69,  whole-pipeline combinations, by residual
-examples/           , usage examples, named example_* as the tests are named test_*
-  example_basic.cpp , one solve through the DirectSolver facade, the shortest way in
-  example_matrix.cpp           , building a SparseMatrix: CSC by hand, from a dense array, and
-                      from coordinate triplets, with the conversion that sorts, merges duplicates
-                      and keeps the diagonal
-  example_analysis.cpp         , the analyze phase alone: what each ordering costs in fill,
-                      supernodes and forest height, on an arrow and on two grids
-  example_indefinite.cpp       , one pattern under three value sets, definite to strongly
-                      indefinite: which factorizations refuse, which perturb, and what dynamic
-                      pivoting costs in delayed columns and 2x2 pivots
-  example_reuse.cpp            , the three lifetimes: one analysis over three value sets, one
-                      factor over three right-hand sides, and which settings discard an analysis
-  example_pipeline_real.cpp    , the pipeline by hand, every ordering / factorization /
-                      traversal, real
-  example_pipeline_complex.cpp , the same sweep for complex, over two matrices, since Hermitian
-                      and complex symmetric are different conditions and take different inputs
+examples/           , seven usage examples, named example_* as the tests are named test_*
+                      (described under Examples above, not repeated here)
+  example_basic.cpp            , example_matrix.cpp
+  example_analysis.cpp         , example_indefinite.cpp
+  example_reuse.cpp            , example_pipeline_real.cpp
+  example_pipeline_complex.cpp
 benchmarks/         , timing against the current tree, and expected to keep compiling as it moves
   ordering/         , one phase against itself: what each ordering costs, in time and in fill
   pipeline/         , the phases against each other: what share of a solve the ordering is, and
@@ -255,16 +315,14 @@ experiments/        , frozen design studies, each answering one question with a 
   openmp/           , how much parallelism Accelerate already supplies, and what is left
 ```
 
-**On the ordering names.** A trailing digit means a different ordering: MMD2 has mechanisms MMD1
-lacks, so their permutations and their fill legitimately differ and both are correct. A trailing B
-means the same ordering computed on a different schedule, so AMD1B must return exactly AMD1's
-permutation and a difference is a defect in one of them. The two axes share one enum, which is why
-they are spelled out here and in `include/oblio/OrderEngine.h`.
+The ordering enum also carries Natural, the identity, and our own minimum-degree implementations
+under the names MMD1, MMD2, AMD1, AMD2, AMD1B and AMD2B. Those are work in progress; see
+`experiments/ordering/`.
 
 ## History
 
 This codebase is a C++17 modernization of Oblio 0.9, a sparse direct solver
-written circa 2003-2005. The algorithmic core, symbolic factorization,
+developed between 1998 and 2005. The algorithmic core, symbolic factorization,
 numeric factorization kernels, custom BLAS routines, solve engines, is
 ported directly from the 0.9 source, not reimplemented. What is new is the
 wrapping:
@@ -306,8 +364,6 @@ OrderEngine -> ElmForestEngine -> SymFactorEngine -> NumFactorEngine -> SolveEng
 Done:
 
 - [x] MMD and AMD ordering, vendored (AMD from SuiteSparse 3.3.4; MMD via Oblio 0.9)
-- [x] Oblio's own minimum-degree orderings over a shared quotient graph: MMD1, MMD2, AMD1,
-      AMD2, and the AMD1B and AMD2B schedule variants
 - [x] Supernodal symbolic factorization (elimination forest + symbolic factor, ported from 0.9)
 - [x] Cholesky and static LDL, both LDL^T and LDL^H, left-looking and right-looking
 - [x] Single-RHS triangular solve (`Vector`)

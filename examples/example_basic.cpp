@@ -35,7 +35,7 @@ int main() {
         b[i] = 1.0;
 
     // Ordering, factorization, traversal: the pipeline order. Each also has a setter.
-    DirectSolver<double> solver(Ordering::AMD, Factorization::Cholesky, Traversal::LeftLooking);
+    DirectSolver<double> solver(Ordering::MMD2, Factorization::Cholesky, Traversal::LeftLooking);
 
     // The three phases. Split like this because they have different lifetimes: analyze depends only
     // on the pattern, factor on the values, solve on the right-hand side.

@@ -178,9 +178,11 @@ make vendored         builds vendored_cpp
 
 That target compiles with warnings off, because the two files are not ours to clean up.
 
-`vendored/vendored_mmd.cpp` and `vendored/vendored_amd.cpp` are copies of `src/Mmd.cpp` and
-`src/Amd.cpp`, kept here so the comparison is self-contained, and never edited. `vendored.cpp`
-only feeds them the same seven graphs and prints their permutations in our format.
+The two routines are compiled straight from `private/Mmd.cpp` and `private/Amd.cpp` at the repo
+root, which is where they live now: they are not ours, are not published, and this directory no
+longer keeps copies of them. `vendored.cpp` only feeds them the same seven graphs and prints their
+permutations in our format. When `private/` is absent the target reports that it skipped rather
+than failing, so every other layer still builds.
 
 The lowercase names are deliberate, and so is the subfolder. Oblio capitalizes source files, but
 macOS formats APFS case-insensitive by default, so `Amd.cpp` and `amd.cpp` are one path: dropping
@@ -352,9 +354,8 @@ otherwise declines to do. Reproducing the vendored fill exactly would mean repro
 insertion history, which the paragraph above explains is coupled to `mmdupd`'s q2h and qxh walks
 rather than separable from them.
 
-The test is `vendored.cpp`, which links `vendored/vendored_mmd.cpp` and
-`vendored/vendored_amd.cpp`, copies of `src/Mmd.cpp` and `src/Amd.cpp` that are never edited, and
-runs both routines on the same seven graphs, printing permutations in our format. mmd2 and amd2
+The test is `vendored.cpp`, which links `private/Mmd.cpp` and `private/Amd.cpp` from the repo root,
+and runs both routines on the same seven graphs, printing permutations in our format. mmd2 and amd2
 are accepted when every feature above is present and exercised, nnz(L) matches the vendored
 routine on the seven graphs and on random ones, and every remaining order difference is traceable
 to a tie.
@@ -3673,5 +3674,5 @@ in detail and contrasts it with the MMD route.
 ## Related
 
 - `archive/sparse_factorization.md` section 5, the prose, pseudocode and worked examples.
-- `src/Mmd.cpp` and `src/Amd.cpp`, the vendored routines these are read against.
+- `private/Mmd.cpp` and `private/Amd.cpp`, the vendored routines these are read against.
 - `src/OrderEngine.cpp`, the glue that calls them.

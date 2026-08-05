@@ -204,7 +204,7 @@ int main() {
     // One actual solution, so the example ends on numbers a reader can check. Cholesky needs the
     // Hermitian matrix, so that is the one solved here.
     {
-        OrderEngine ordEng(Ordering::AMD);
+        OrderEngine ordEng(Ordering::MMD2);
         Permutation P;  ordEng.compute(AH, P);
         ElmForest ef;   ElmForestEngine efEng;  efEng.compute(AH, P, ef);
         SymFactor sf;   SymFactorEngine sfEng;  sfEng.compute(AH, P, ef, sf);
@@ -214,7 +214,7 @@ int main() {
         Vector<Val> x(n);
         solEng.compute(P, nf, b, x);
 
-        printf("\nSolution (Hermitian input, AMD, Cholesky, LeftLooking):\n");
+        printf("\nSolution (Hermitian input, MMD2, Cholesky, LeftLooking):\n");
         for (std::size_t i = 0; i < n; ++i)
             printf("  x[%zu] = %+.10f %+.10fi\n", i, x[i].real(), x[i].imag());
     }

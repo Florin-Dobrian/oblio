@@ -8,6 +8,9 @@
 build/
 cmake-build-*/
 
+# Which mode the objects were built in; see the Makefile, .build-mode.
+.build-mode
+
 # Test and example executables (carry the _cpp suffix, per the coding convention)
 *_cpp
 
@@ -35,6 +38,10 @@ venv/
 # Regenerate with `bear -- make test`; see CLAUDE.md, Tooling / Editor navigation.
 compile_commands.json
 .cache/
+
+# The vendored ordering codes (SuiteSparse AMD, Sparspak MMD). Not ours, not published, and
+# optional: both builds detect this directory rather than requiring it. See docs/DESIGN_DECISIONS.md.
+private/
 
 *.pdf
 

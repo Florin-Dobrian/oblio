@@ -1590,20 +1590,11 @@ Four items, found in a pass on 2026-08-04 and left undone deliberately: each is 
 decision about what the README is for, and the file currently answers that question as "a record of
 what we decided", which is the right answer for `docs/` and the wrong one for the front page.
 
-**Nothing points at the examples.** There are seven of them, they are the natural next step after
-the Quick Start block, and they appear only inside the `Structure` listing at line 223, below a
-third of a page about build systems. A reader who wants to know whether this library does what they
-need should be sent to `example_indefinite.cpp` and `example_analysis.cpp`, not left to find them.
-
 **The build discussion sits in a reader's path.** Makefile versus CMake, which to use when, and the
 CLion arrangement together run about a third of the file, between the Quick Start and everything
 describing what the library does. All of it is worth keeping and none of it is what someone
 evaluating the solver needs first. Probably a `Building` section that answers "how do I compile
 this" in ten lines, with the comparison moved to `CONTRIBUTING.md` or a `docs/` file.
-
-**There is no requirements line.** The whole dependency list is a C++17 compiler and a
-BLAS/LAPACK, and neither is stated: both are currently inferable only from the compile commands
-inside the build section.
 
 **There is no license statement.** `CONTRIBUTING.md` carries this as a going-public item and the
 intent is settled, PolyForm Noncommercial 1.0.0 with a commercial license on request. It is the

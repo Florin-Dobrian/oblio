@@ -67,6 +67,53 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-08-04: The vendored orderings move to private/ and become optional
+
+`src/Amd.cpp` (SuiteSparse AMD 3.3.4) and `src/Mmd.cpp` (Sparspak genmmd, via 0.9) are not our code
+and are not ours to publish. They now live in `private/`, which is gitignored, and both builds
+detect that directory rather than requiring it.
+
+**Detection, not configuration.** The Makefile takes `$(wildcard private/Amd.cpp private/Mmd.cpp)`
+and defines `OBLIO_VENDORED_ORDERINGS` when it is non-empty; CMake does the same with `file(GLOB)`
+and reports which mode it configured. There is no flag to pass: a tree that has the directory
+behaves as it always has, and a clone behaves without it. The alternative, an explicit option,
+would have to be set correctly by whoever builds, and the one person who needs it set is the one
+person who would never see the failure.
+
+**One override, `OBLIO_PUBLIC=1`, for building the way everyone else does.** It empties
+`VENDOR_SRCS`, so `private/` is ignored even when present. It is spelled the same in the root
+Makefile, both benchmark Makefiles and `experiments/ordering`, which is the point: the person who
+needs it is the only person who has the directory, and one word in front of any make command in any
+of those directories is a habit, where a different target name per directory is a lookup. Each of
+the four keeps a `.build-mode` stamp so the two interleave without a clean, rebuilding on a switch
+and not on a repeat, and neither discards what the other built.
+
+**What absence costs.** In `OrderEngine` the two `extern` declarations, the two method declarations,
+the two definitions and the two `switch` cases sit behind the guard, and the cases return `false`
+instead. Every enumerator is still named, so `-Wswitch` still protects the enum against a new
+ordering being forgotten. `Ordering::MMD` and `Ordering::AMD` remain in the enum and refuse, which
+is what the phase's `bool` is for.
+
+**The default moves to `Ordering::MMD2`**, in `OrderEngine::mOrdering` and the `DirectSolver`
+constructor. A default that refuses on a fresh clone is the first thing a newcomer meets and gives
+no hint why. MMD2 is the closest of ours to genmmd, which is what the default was, so the change is
+within the family rather than across it. The examples name `MMD2` explicitly rather than relying on
+the new default, so a reader sees a choice being made.
+
+**One copy, not two.** `experiments/ordering/vendored/` held byte-identical duplicates of both
+files; those are deleted and `experiments/ordering/Makefile` compiles straight from
+`../../private/`, reporting "skipped" rather than failing when it is absent.
+
+**Test counts now depend on the build**, 252 with and 238 without, the difference being fourteen
+assertions in `test_order` that check the vendored routines themselves. That is recorded in
+`docs/TESTING_SPECIFICATION.md`. Everything else asserts the same thing either way.
+
+**Not settled here: the licenses.** AMD carries a BSD-3-Clause notice, which permits redistribution
+provided the copyright, the conditions and the disclaimer are retained; the file has the copyright
+line but neither of the other two, so shipping it would need the full text added. MMD carries no
+notice at all and its Sparspak provenance is unclear. Neither question is answered by moving the
+files, and both remain open.
+
 ## 2026-08-01, The B suffix, a seam, and two hypotheses built and falsified
 
 The largest measured item on the ordering list was AMD1's three visits per element against the

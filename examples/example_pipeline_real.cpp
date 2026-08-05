@@ -165,7 +165,7 @@ int main() {
 
     // One actual solution, so the example ends on a number a reader can check by hand.
     {
-        OrderEngine ordEng(Ordering::AMD);
+        OrderEngine ordEng(Ordering::MMD2);
         Permutation P;  ordEng.compute(A, P);
         ElmForest ef;   ElmForestEngine efEng;  efEng.compute(A, P, ef);
         SymFactor sf;   SymFactorEngine sfEng;  sfEng.compute(A, P, ef, sf);
@@ -175,7 +175,7 @@ int main() {
         Vector<Val> x(n);
         solEng.compute(P, nf, b, x);
 
-        printf("\nSolution (AMD, Cholesky, LeftLooking):\n");
+        printf("\nSolution (MMD2, Cholesky, LeftLooking):\n");
         for (std::size_t i = 0; i < n; ++i)
             printf("  x[%zu] = %.10f\n", i, x[i]);
     }

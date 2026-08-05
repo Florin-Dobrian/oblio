@@ -106,7 +106,7 @@ double solveResidual(const std::vector<std::vector<Val>>& dense, std::mt19937& r
     const std::size_t n = dense.size();
     const SparseMatrix<Val> A = toSparse(dense);
 
-    OrderEngine ord(Ordering::AMD);
+    OrderEngine ord(Ordering::MMD2);
     Permutation P;
     if (!ord.compute(A, P)) { ++failures; return -1; }
 

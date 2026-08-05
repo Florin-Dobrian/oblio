@@ -1,14 +1,20 @@
 # Builds the Oblio units and every test in tests/. A simple alternative to the
 # CMake build (CMakeLists.txt); both compile the same src/ and tests/.
 #
-#   make            build everything (tests and examples)
-#   make tests      build the test executables
-#   make test       build and run the tests
-#   make examples   build the example programs (examples/*.cpp)
-#   make objs       compile the library sources to .o only (a fast core compile check)
-#   make <name>_cpp build one test or example (e.g. make test_order_cpp,
-#                   make example_basic_cpp)
-#   make clean
+#:   make            build everything (tests and examples)
+#:   make tests      build the test executables
+#:   make test       build and run the tests, then run the examples for exit status
+#:   make examples   build the example programs (examples/*.cpp)
+#:   make objs       compile the library sources to .o only (a fast core compile check)
+#:   make <name>_cpp build one test or example (e.g. make test_order_cpp,
+#:                   make example_basic_cpp)
+#:   make clean
+#:   make help       print this list
+#
+#: Prefix any of these with OBLIO_PUBLIC=1 to build as everyone else does, without the
+#: vendored orderings; see docs/DESIGN_DECISIONS.md. The same works in benchmarks/*/ and
+#: experiments/ordering/.
+#:
 #
 # -Iinclude points at include/, so #include "oblio/X.h" resolves to the project
 # headers. Executables carry the _cpp suffix (coding convention) and are gitignored.
@@ -56,14 +62,39 @@ OBLIO_SRCS = \
   src/SolveEngine.cpp \
   src/DirectSolver.cpp
 
-# Vendored ordering codes (SuiteSparse AMD, Sparspak MMD), copied verbatim, not
-# maintained here, so warnings are silenced (-w) for these two files only.
-VENDOR_SRCS = \
-  src/Amd.cpp \
-  src/Mmd.cpp
+# Vendored ordering codes (SuiteSparse AMD, Sparspak MMD), copied verbatim, not maintained here,
+# so warnings are silenced (-w) for these two files only.
+#
+# They live in private/, which is not tracked, and are optional: the build detects them rather than
+# requiring them. Present, Ordering::MMD and Ordering::AMD work as they always have. Absent, the
+# library still builds and those two enumerators refuse, everything else being unaffected. Nothing
+# is switched by hand and there is no flag to remember; a tree that has the directory behaves one
+# way and a clone behaves the other. See docs/DESIGN_DECISIONS.md.
+# OBLIO_PUBLIC=1 builds as everyone else does, ignoring private/ even when it is there. It is the
+# same word in every Makefile in this repo that links the library, so one habit covers all of them.
+ifdef OBLIO_PUBLIC
+  VENDOR_SRCS =
+else
+  VENDOR_SRCS = $(wildcard private/Amd.cpp private/Mmd.cpp)
+endif
+
+ifneq ($(VENDOR_SRCS),)
+  CXXFLAGS += -DOBLIO_VENDORED_ORDERINGS
+endif
 
 LIB_SRCS = $(OBLIO_SRCS) $(VENDOR_SRCS)
 LIB_HDRS = $(wildcard include/oblio/*.h)
+
+# Which configuration the build is in. The two differ by a macro, so objects and binaries from one
+# are wrong for the other, and no timestamp would say so: the sources are identical either way.
+# The $(shell) runs while this file is read and deletes the stamp when the recorded mode is not the
+# current one, which makes it out of date, which rebuilds what depends on it. Switching therefore
+# rebuilds and repeating does not, with no clean in between.
+BUILD_MODE := $(if $(VENDOR_SRCS),vendored,public)
+$(shell [ "`cat .build-mode 2>/dev/null`" = "$(BUILD_MODE)" ] || rm -f .build-mode)
+
+.build-mode:
+	@echo "$(BUILD_MODE)" > $@
 
 # Compile each source to an object so per-file flags can differ. Oblio objects get
 # full warnings; vendored objects get -w.
@@ -81,16 +112,21 @@ TEST_BINS = $(patsubst tests/%.cpp,%_cpp,$(TEST_SRCS))
 EXAMPLE_SRCS = $(wildcard examples/*.cpp)
 EXAMPLE_BINS = $(patsubst examples/%.cpp,%_cpp,$(EXAMPLE_SRCS))
 
-.PHONY: all tests test examples objs clean
+.PHONY: all tests test examples objs clean help
+
+# Print the target list from this file's header. The lines there are marked with #: so there is one
+# source of truth: the header comment is the help text, and neither can drift from the other.
+help:
+	@grep '^#:' $(firstword $(MAKEFILE_LIST)) | cut -c3-
 
 all: tests examples
 
 tests: $(TEST_BINS)
 
-$(OBLIO_OBJS): %.o: %.cpp $(LIB_HDRS)
+$(OBLIO_OBJS): %.o: %.cpp .build-mode $(LIB_HDRS)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(VENDOR_OBJS): %.o: %.cpp
+$(VENDOR_OBJS): %.o: %.cpp .build-mode
 	$(CXX) $(CXXFLAGS) -w -c $< -o $@
 
 %_cpp: tests/%.cpp $(LIB_OBJS) $(LIB_HDRS) $(wildcard tests/*.h)
@@ -109,12 +145,27 @@ $(VENDOR_OBJS): %.o: %.cpp
 # whether the numbers are right; their output is discarded so it cannot drown the suites. Checking
 # the numbers is the open half, in docs/TODO.md.
 test: tests examples
-	@for t in $(TEST_BINS); do echo "== $$t =="; ./$$t || exit 1; echo; done
-	@echo "== examples =="
-	@for e in $(EXAMPLE_BINS); do \
-	  if ./$$e > /dev/null 2>&1; then echo "  PASS  $$e"; \
+	@pass=0; total=0; suites=0; \
+	for t in $(TEST_BINS); do \
+	  echo "== $$t =="; \
+	  out=`./$$t` || { echo "$$out"; exit 1; }; \
+	  echo "$$out"; echo; \
+	  count=`echo "$$out" | grep -oE '[0-9]+/[0-9]+ passed' | tail -1`; \
+	  p=`echo "$$count" | cut -d/ -f1`; \
+	  n=`echo "$$count" | cut -d/ -f2 | cut -d' ' -f1`; \
+	  pass=`expr $$pass + $$p`; total=`expr $$total + $$n`; \
+	  suites=`expr $$suites + 1`; \
+	done; \
+	echo "== examples =="; \
+	runs=0; \
+	for e in $(EXAMPLE_BINS); do \
+	  if ./$$e > /dev/null 2>&1; then echo "  PASS  $$e"; runs=`expr $$runs + 1`; \
 	  else echo "  FAIL  $$e (exit status)"; exit 1; fi; \
-	done
+	done; \
+	echo; \
+	echo "== total =="; \
+	echo "  $$pass/$$total assertions across $$suites suites, $$runs examples run"; \
+	if [ "$$pass" != "$$total" ]; then exit 1; fi
 	@echo
 
 examples: $(EXAMPLE_BINS)
@@ -122,5 +173,8 @@ examples: $(EXAMPLE_BINS)
 # The library sources compiled to objects, nothing linked: a fast check that the core still builds.
 objs: $(LIB_OBJS)
 
+# private/*.o is named directly rather than through $(LIB_OBJS), which is empty of it under
+# OBLIO_PUBLIC: clean should remove everything a build can leave behind regardless of which mode
+# it is invoked in, so that the switch is never something to remember here.
 clean:
-	rm -f $(TEST_BINS) $(EXAMPLE_BINS) $(LIB_OBJS)
+	rm -f $(TEST_BINS) $(EXAMPLE_BINS) $(OBLIO_OBJS) private/Amd.o private/Mmd.o .build-mode

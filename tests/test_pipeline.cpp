@@ -773,8 +773,15 @@ int main() {
             worstOrder = std::max(worstOrder, solver.relativeResidual(A, b, x));
         }
 
-        ck(reachedOrder == 9, "Ordering       : all nine orderings reached");
-        ck(reachedOrder == 9 && worstOrder < tol,
+        // Two of the nine are the vendored routines, which are optional: without private/ they
+        // refuse and the sweep skips them, so what is expected is every ordering the build has.
+#ifdef OBLIO_VENDORED_ORDERINGS
+        const int expectedOrderings = 9;
+#else
+        const int expectedOrderings = 7;
+#endif
+        ck(reachedOrder == expectedOrderings, "Ordering       : every ordering built was reached");
+        ck(reachedOrder == expectedOrderings && worstOrder < tol,
            with("Ordering       : worst residual over all nine", worstOrder));
 
         // The multifrontal child ordering is computed during analyze, so the traversal has to be
@@ -884,7 +891,7 @@ int main() {
         const std::size_t g = 8;
         const double      shift[] = { 0.0, 1.0, 3.0 };
 
-        DirectSolver<double> dsIn(Ordering::AMD, Factorization::DynamicLDLT);
+        DirectSolver<double> dsIn(Ordering::MMD2, Factorization::DynamicLDLT);
         ck(dsIn.analyze(toSparse(shiftedGridLaplacian(g, 0.0))),
            "inertia           : one analysis serves every shift, the pattern being shared");
 
@@ -912,8 +919,8 @@ int main() {
 
         // The same three matrices under Cholesky and static LDL, where they answer at all: a
         // congruence preserves inertia, so three different factors of one matrix must agree.
-        DirectSolver<double> dsCh(Ordering::AMD, Factorization::Cholesky);
-        DirectSolver<double> dsSt(Ordering::AMD, Factorization::StaticLDLT);
+        DirectSolver<double> dsCh(Ordering::MMD2, Factorization::Cholesky);
+        DirectSolver<double> dsSt(Ordering::MMD2, Factorization::StaticLDLT);
         const SparseMatrix<double> definite = toSparse(shiftedGridLaplacian(g, 0.0));
         Inertia inCh, inSt, inDy;
         const bool agree =
@@ -926,12 +933,12 @@ int main() {
         ck(agree, "inertia           : Cholesky, static and dynamic agree on the definite matrix");
 
         // The two cases it declines rather than guessing.
-        DirectSolver<double> dsUnfactored(Ordering::AMD, Factorization::DynamicLDLT);
+        DirectSolver<double> dsUnfactored(Ordering::MMD2, Factorization::DynamicLDLT);
         Inertia unused;
         ck(!dsUnfactored.inertia(unused),
            "inertia           : refused before a factorization exists");
 
-        DirectSolver<std::complex<double>> dsSym(Ordering::AMD, Factorization::DynamicLDLT);
+        DirectSolver<std::complex<double>> dsSym(Ordering::MMD2, Factorization::DynamicLDLT);
         ck(!dsSym.inertia(unused),
            "inertia           : refused for complex-symmetric LDLT, whose eigenvalues are complex");
     }

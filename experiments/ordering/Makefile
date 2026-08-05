@@ -1,11 +1,19 @@
 # ordering experiment - the minimum degree family, built up one mechanism at a time.
 # Reference/teaching only; not part of the main Oblio build.
 #
-#   make          build every C++ prototype
-#   make test     build them, run each, check the C++ agrees with its Python twin, and check
-#                 each ported layer agrees with the production driver extracted from it
-#   make production   the production drivers on these graphs, linked from ../../src
-#   make clean
+#:   make          build every C++ prototype
+#:   make test     build them, run each, check the C++ agrees with its Python twin, and check
+#:                 each ported layer agrees with the production driver extracted from it
+#:   make production   the production drivers on these graphs, linked from ../../src
+#:   make vendored     the vendored MMD and AMD on the same graphs, for reference. This is the
+#:                 only target here that needs private/, and it reports rather than fails without
+#:                 it; OBLIO_PUBLIC=1 makes it behave as though private/ were absent
+#:   make clean
+#:   make help     print this list
+#:
+#: Prefix any of these with OBLIO_PUBLIC=1 to build as everyone else does, without the vendored
+#: orderings; see docs/DESIGN_DECISIONS.md. The same word works in the repo root and in both
+#: benchmarks. Here it reaches only `make vendored`, that being the only target that needs them.
 #
 # Each layer exists twice, as <name>.py and <name>.cpp, and the two are written to
 # print the same trace. That is the point of the pairing: the Python is the one to
@@ -107,15 +115,36 @@ GRID_SIDES  = 10 20
 # reason to exercise it harder rather than less.
 GRID_LAYERS = mmd1 mmd2 amd1 amd2 amd3
 
-# The production sources those drivers need, linked directly rather than copied. A copy is right
-# for the vendored routines, which are not ours to edit, and wrong here: the point of this check
-# is to notice when production and prototype come apart.
-# The fill check runs Oblio's symbolic factorization, so the whole library is linked. The
-# two vendored orderers compile with warnings off, as everywhere else.
-PROD_VENDOR = ../../src/Amd.cpp ../../src/Mmd.cpp
-PROD_SRCS   = $(filter-out $(PROD_VENDOR),$(wildcard ../../src/*.cpp))
+# The production sources those drivers need, linked directly rather than copied: the point of this
+# check is to notice when production and prototype come apart, and a copy would hide exactly that.
+# The fill check runs Oblio's symbolic factorization, so the whole library is linked.
+#
+# No vendored code here. production.cpp calls Mmd1, Mmd2, Amd1 and Amd2 directly and never
+# OrderEngine, so nothing in this link reaches Ordering::MMD or Ordering::AMD, and the two vendored
+# files under ../../private are neither needed nor compiled. They used to be, but only because
+# OrderEngine.cpp once declared their entry points unconditionally and the linker therefore
+# demanded them.
+PROD_SRCS   = $(wildcard ../../src/*.cpp)
+#
+# VENDOR_SRCS is spelled the same here, in ../../Makefile and in both benchmark Makefiles, so
+# `make <target> VENDOR_SRCS=` builds the published configuration from any of them.
+# OBLIO_PUBLIC=1 builds as everyone else does, ignoring private/ even when it is there. Same word
+# in every Makefile here that links the library. In this directory it reaches only the `vendored`
+# target, that being the only thing here that needs those two files: `production` links the library
+# but calls Mmd1, Mmd2, Amd1 and Amd2 directly and never OrderEngine, so it compiles and links
+# identically either way.
+ifdef OBLIO_PUBLIC
+  VENDOR_SRCS =
+else
+  VENDOR_SRCS = $(wildcard ../../private/Amd.cpp ../../private/Mmd.cpp)
+endif
 
-.PHONY: all test production vendored clean
+.PHONY: all test production vendored clean help
+
+# Print the target list from this file's header. Those lines are marked with #: so there is one
+# source of truth: the header comment is the help text.
+help:
+	@grep '^#:' $(firstword $(MAKEFILE_LIST)) | cut -c3-
 
 all: $(BINS)
 
@@ -197,22 +226,28 @@ test: all production_cpp
 
 # Oblio's own ordering drivers, run on the same graphs as the prototypes. The mirror image of
 # vendored_cpp: that one runs what we are reading against, this one runs what we extracted.
-production_cpp: production.cpp $(PROD_SRCS) $(PROD_VENDOR)
-	$(CXX) $(CXXFLAGS) -I../../include -DOBLIO_BLAS_UNDERSCORE -w -c $(PROD_VENDOR)
-	$(CXX) $(CXXFLAGS) -I../../include -DOBLIO_BLAS_UNDERSCORE production.cpp $(PROD_SRCS) \
-	  Amd.o Mmd.o $(BLAS_LIBS) -o $@
+production_cpp: production.cpp $(PROD_SRCS)
+	$(CXX) $(CXXFLAGS) -I../../include -DOBLIO_BLAS_UNDERSCORE production.cpp \
+	  $(PROD_SRCS) $(BLAS_LIBS) -o $@
 
 production: production_cpp
 
-# The vendored routines, built separately: they are not layers and have no Python
-# twin. vendored/vendored_mmd.cpp and vendored/vendored_amd.cpp are copies of
-# src/Mmd.cpp and src/Amd.cpp, never edited. The lowercase prefixed names matter:
-# macOS is case-insensitive by default, so Amd.cpp and amd.cpp would be one path.
-# Warnings are suppressed for these two only: they are not ours to clean up.
-vendored_cpp: vendored.cpp vendored/vendored_mmd.cpp vendored/vendored_amd.cpp
-	$(CXX) -std=c++17 -O3 -w $^ -o $@
+# The vendored routines, built separately: they are not layers and have no Python twin. They are
+# compiled straight from private/ at the repo root rather than from a copy here, which is both one
+# file less to keep in step and the only place they live now: private/ is not tracked and not
+# published. Warnings are suppressed for them: they are not ours to clean up.
+#
+# The target reports rather than fails when the directory is absent, so a clone of the public tree
+# can still build every layer.
+ifeq ($(VENDOR_SRCS),)
+vendored:
+	@echo "vendored: skipped, private/ is not present"
+else
+vendored_cpp: vendored.cpp $(VENDOR_SRCS)
+	$(CXX) -std=c++17 -O3 -w vendored.cpp $(VENDOR_SRCS) -o $@
 
 vendored: vendored_cpp
+endif
 
 clean:
 	rm -f $(BINS) vendored_cpp production_cpp Amd.o Mmd.o

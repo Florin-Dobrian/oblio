@@ -29,13 +29,19 @@ static SparseMatrix<double> tridiagFull(std::size_t size){
         if(j+1<size){ri.push_back(static_cast<std::int32_t>(j+1));v.push_back(-1);} cp[j+1]=ri.size(); }
     return SparseMatrix<double>(size,cp,ri,v); }
 int main(){
+        // The vendored MMD and AMD are checked only when private/ supplies them; see
+    // docs/TESTING_SPECIFICATION.md. Fourteen assertions here are theirs, one pair on each of the
+    // arrow, the diagonal and the complex arrow and one pair per size in the tridiagonal loop, so
+    // the total is 77 with that directory and 63 without. Nothing else changes.
     std::cout<<"=== OrderEngine tests (AMD / MMD lineages, full-symmetric A) ===\n";
     { std::vector<std::size_t> cp={0,6,8,10,12,14,16};
       std::vector<std::int32_t> ri={0,1,2,3,4,5, 0,1, 0,2, 0,3, 0,4, 0,5};
       std::vector<double> v(ri.size(),1.0); SparseMatrix<double> A(6,cp,ri,v);
       reqSym(A,"arrow 6x6      : symmetric");
+#ifdef OBLIO_VENDORED_ORDERINGS
       checkOrder(A,Ordering::AMD,"arrow 6x6      : AMD valid");
       checkOrder(A,Ordering::MMD,"arrow 6x6      : MMD valid");
+#endif
       checkOrder(A,Ordering::MMD1,"arrow 6x6      : MMD1 valid");
       checkOrder(A,Ordering::MMD2,"arrow 6x6      : MMD2 valid");
       checkOrder(A,Ordering::AMD1,"arrow 6x6      : AMD1 valid");
@@ -46,8 +52,10 @@ int main(){
       checkSameOrder(A,Ordering::AMD2,Ordering::AMD2B,"arrow 6x6      : AMD2B == AMD2"); }
     for(std::size_t size : {1u,2u,10u,100u}){ auto A=tridiagFull(size);
       reqSym(A,"tridiag n="+std::to_string(size)+" : symmetric");
+#ifdef OBLIO_VENDORED_ORDERINGS
       checkOrder(A,Ordering::AMD,"tridiag n="+std::to_string(size)+" : AMD valid");
       checkOrder(A,Ordering::MMD,"tridiag n="+std::to_string(size)+" : MMD valid");
+#endif
       checkOrder(A,Ordering::MMD1,"tridiag n="+std::to_string(size)+" : MMD1 valid");
       checkOrder(A,Ordering::MMD2,"tridiag n="+std::to_string(size)+" : MMD2 valid");
       checkOrder(A,Ordering::AMD1,"tridiag n="+std::to_string(size)+" : AMD1 valid");
@@ -62,8 +70,10 @@ int main(){
       for(std::size_t j=0;j<size;++j){cp[j]=j; ri[j]=static_cast<std::int32_t>(j);} cp[size]=size;
       SparseMatrix<double> A(size,cp,ri,v);
       reqSym(A,"diagonal 5x5   : symmetric");
+#ifdef OBLIO_VENDORED_ORDERINGS
       checkOrder(A,Ordering::AMD,"diagonal 5x5   : AMD valid");
       checkOrder(A,Ordering::MMD,"diagonal 5x5   : MMD valid");
+#endif
       checkOrder(A,Ordering::MMD1,"diagonal 5x5   : MMD1 valid");
       checkOrder(A,Ordering::MMD2,"diagonal 5x5   : MMD2 valid");
       checkOrder(A,Ordering::AMD1,"diagonal 5x5   : AMD1 valid");
@@ -76,8 +86,10 @@ int main(){
       std::vector<std::int32_t> ri={0,1,2,3,4,5, 0,1, 0,2, 0,3, 0,4, 0,5};
       std::vector<std::complex<double>> v(ri.size(),{1,0}); SparseMatrix<std::complex<double>> C(6,cp,ri,v);
       reqSym(C,"arrow complex  : symmetric");
+#ifdef OBLIO_VENDORED_ORDERINGS
       checkOrder(C,Ordering::AMD,"arrow complex  : AMD valid");
       checkOrder(C,Ordering::MMD,"arrow complex  : MMD valid");
+#endif
       checkOrder(C,Ordering::MMD1,"arrow complex  : MMD1 valid");
       checkOrder(C,Ordering::MMD2,"arrow complex  : MMD2 valid");
       checkOrder(C,Ordering::AMD1,"arrow complex  : AMD1 valid");

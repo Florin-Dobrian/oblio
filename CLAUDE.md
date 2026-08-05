@@ -126,6 +126,46 @@ g++ -std=c++17 -O3 -DOBLIO_BLAS_UNDERSCORE -I include \
 
 Linux: replace `-framework Accelerate` with `-lblas -llapack -lm`.
 
+Note that `src/*.cpp` no longer picks up the vendored orderings: they live in `private/`, which is
+gitignored. A by-hand command line like the one above therefore builds without them, and
+`Ordering::MMD` and `Ordering::AMD` refuse. Add `private/*.cpp` and `-DOBLIO_VENDORED_ORDERINGS` to
+include them, or use the Makefile, which detects the directory itself.
+
+### Building the way everyone else does
+
+`private/` holds the two vendored orderings and is not published, so this machine builds something
+nobody else can. To build as they do, put `OBLIO_PUBLIC=1` in front of any make command:
+
+```
+make test                          # this machine: 252 assertions
+OBLIO_PUBLIC=1 make test           # everyone else:  238
+```
+
+`make help` in any of those directories prints its target list and this note, so the reminder is a
+command rather than a file to find.
+
+**One word, every Makefile that links the library**, so there is one thing to remember rather than
+one per directory:
+
+```
+OBLIO_PUBLIC=1 make test                    # repo root
+OBLIO_PUBLIC=1 make test                    # experiments/ordering
+OBLIO_PUBLIC=1 make                         # benchmarks/ordering
+OBLIO_PUBLIC=1 make                         # benchmarks/pipeline
+```
+
+`export OBLIO_PUBLIC=1` once and a whole shell session builds that way. On any other machine the
+variable changes nothing, `private/` being absent already. It is harmless on every target: `clean`
+removes the same things either way, so there is nothing to remember about when it applies.
+
+The two modes interleave with no clean in between: each directory keeps a `.build-mode` stamp
+recording which it was built in, and a switch rebuilds while a repeat does not. Nothing is deleted
+either way.
+
+What this cannot catch is a published file referring to a path under `private/`, since the
+directory is still there. Only a fresh clone into a scratch directory checks that, and it is worth
+doing once before a release rather than per push.
+
 ## Tooling
 
 - `.clang-format`, formatting. Run routinely; safe to apply whole-file.

@@ -8,11 +8,16 @@
 
 #include <vector>
 
-// Entry points of the vendored ordering codes (raw int CSC arrays).
+// Entry points of the vendored ordering codes (raw int CSC arrays), declared only when those
+// sources are being compiled. They live in private/, which is not part of the published tree, so
+// the two orderings they implement are optional; see the Makefile and CMakeLists.txt for the
+// detection, and docs/DESIGN_DECISIONS.md for why.
+#ifdef OBLIO_VENDORED_ORDERINGS
 extern void mmd_order(int n, const int colPtr[], const int rowIdx[],
-                      int perm[], int invp[]);                         // src/Mmd.cpp
+                      int perm[], int invp[]);                         // private/Mmd.cpp
 extern "C" int amd_order(int n, const int Ap[], const int Ai[],
-                         int P[], double Control[], double Info[]);    // src/Amd.cpp
+                         int P[], double Control[], double Info[]);    // private/Amd.cpp
+#endif
 
 namespace Oblio {
 
@@ -37,10 +42,18 @@ bool OrderEngine::compute(const std::vector<std::size_t>&  colPtr,
 
     switch (mOrdering) {
         case Ordering::Natural: return orderNatural(size, P);
+#ifdef OBLIO_VENDORED_ORDERINGS
         case Ordering::MMD:     return orderMMD(size, colPtr, rowIdx, P);
+#else
+        case Ordering::MMD:     return false;   // vendored, and private/ is not present
+#endif
         case Ordering::MMD1:    return orderMMD1(size, colPtr, rowIdx, P);
         case Ordering::MMD2:    return orderMMD2(size, colPtr, rowIdx, P);
+#ifdef OBLIO_VENDORED_ORDERINGS
         case Ordering::AMD:     return orderAMD(size, colPtr, rowIdx, P);
+#else
+        case Ordering::AMD:     return false;   // vendored, and private/ is not present
+#endif
         case Ordering::AMD1:    return orderAMD1(size, colPtr, rowIdx, P);
         case Ordering::AMD2:    return orderAMD2(size, colPtr, rowIdx, P);
         case Ordering::AMD1B:   return orderAMD1B(size, colPtr, rowIdx, P);
@@ -56,6 +69,7 @@ bool OrderEngine::orderNatural(std::size_t size, Permutation& P) const {
     return true;
 }
 
+#ifdef OBLIO_VENDORED_ORDERINGS
 bool OrderEngine::orderMMD(std::size_t size,
                            const std::vector<std::size_t>&  colPtr,
                            const std::vector<std::int32_t>& rowIdx,
@@ -100,6 +114,7 @@ bool OrderEngine::orderMMD(std::size_t size,
     }
     return true;
 }
+#endif
 
 // Ours, over the shared quotient graph. The driver returns an elimination order, exactly as the
 // vendored AMD returns its P, and the two maps are written from it here: the friend grant on
@@ -144,6 +159,7 @@ bool OrderEngine::orderMMD2(std::size_t size,
 
 // A is full-symmetric; AMD ignores the diagonal and symmetrizes internally, so its structure
 // can be passed straight through.
+#ifdef OBLIO_VENDORED_ORDERINGS
 bool OrderEngine::orderAMD(std::size_t size,
                            const std::vector<std::size_t>&  colPtr,
                            const std::vector<std::int32_t>& rowIdx,
@@ -168,6 +184,7 @@ bool OrderEngine::orderAMD(std::size_t size,
     }
     return true;
 }
+#endif
 
 // Ours, over the same quotient graph as MMD1, and written into the maps the same way.
 bool OrderEngine::orderAMD1(std::size_t size,

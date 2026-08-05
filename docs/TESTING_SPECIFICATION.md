@@ -25,8 +25,8 @@ below: it catches an example that crashes, that returns a failure, or that has q
 being built, and says nothing about whether the numbers it prints are right. The stronger version,
 checking deterministic output, is open in docs/TODO.md and is awkward while residuals are in the
 output, since those legitimately differ in the last bits across BLAS
-implementations. Totals today: **252 assertions across 8 suites** with the vendored orderings
-present, **238 without**.
+implementations. Totals today: **269 assertions across 8 suites** with the vendored orderings
+present, **255 without**.
 
 **The count depends on the build, and that is deliberate.** The vendored MMD and AMD live in
 `private/`, which is not published, and both builds detect rather than require it. Fourteen
@@ -45,7 +45,7 @@ fixed nine.
 | `test_symfactor` | 29 | supernodal index sets against a dense oracle |
 | `test_numfactor` | 18 | the numeric factor, by oracle and by reconstruction |
 | `test_solve` | 14 | the solve step, by residual |
-| `test_pipeline` | 69 | whole-pipeline combinations, by residual |
+| `test_pipeline` | 86 | whole-pipeline combinations, by residual |
 
 The counts in this table had drifted from the suite before MMD1 was added, `test_pipeline` reading
 48 against 56 on disk and the total reading 153 against 183. They are corrected here rather than
@@ -212,7 +212,7 @@ storages: real Cholesky, real static LDL^T, complex Cholesky and complex LDL^H a
 input, and complex LDL^T against complex-symmetric input. A 10x10 grid is checked separately in both
 storages. All are ordered by AMD.
 
-### test_pipeline, 69 assertions
+### test_pipeline, 86 assertions
 
 Added 2026-07-19, with slice 2 of dynamic LDL. Where `test_numfactor` checks the factor against an
 oracle and `test_solve` checks the solve, this suite checks that the phases *compose*, for a given
@@ -507,6 +507,34 @@ the positive case leaves this suite green. At a root it is a guarantee, bounded 
 reaching a 2x2 only after both diagonals fail their own tests, which forces `det < 0`. At a non-root
 it is not, Figure 3.3's test reading `|det|`, so the branch is defensive rather than dead and a
 witness would be worth having.
+
+**The factor's three sizes, seventeen assertions.** `numNodeIdx`, `numVal` and `nnz` are answered
+by `ElmForest`, `SymFactor` and both numeric factors, and forwarded by `DirectSolver`. They are
+checked two ways, and the difference between the two is the point.
+
+*Against each other.* The four classes describe one factorization from four points in the pipeline,
+so they are constrained: the forest and the symbolic factor must agree on all three, a statically
+pivoted factor must match what symbolic predicted, a dynamically pivoted one must exceed it, and
+its index sets must exceed it by exactly the delayed columns. `numNodeIdx <= nnz <= numVal` holds
+in every class.
+
+*Against a recomputation.* Each class is also checked against the three sums recomputed in the test
+from the per-supernode sizes it publishes. **This is the check that pins the formulae**, and the
+relations above cannot replace it: mutation testing found that a dynamic `nnz` ignoring `delaySize`
+entirely still satisfies every inequality, because a dynamic factor's own `frontSize` differs from
+the symbolic one once columns have moved, so it comes out larger than predicted anyway. Only the
+recomputation catches it.
+
+**The facade's guard is tested through a refusal.** `DirectSolver` reports zero for all three before
+`factor()`, which is the count for a factor that does not exist rather than a sentinel. The case
+that makes the guard load-bearing is a factorization that *failed*: a Cholesky handed an indefinite
+matrix analyzes, refuses, and leaves behind whatever the attempt wrote, and the facade must report
+zero rather than that debris. Removing the guard passes every other assertion here and fails that
+one.
+
+Five mutations were run against this group and all five fail it: a dynamic `nnz` ignoring
+`delaySize`, a `SymFactor` `nnz` dropping the update rectangle, an `ElmForest` `numVal` off by one
+per supernode, a facade forwarding the wrong storage, and a facade without the guard.
 
 ## What the catalog shows
 

@@ -885,6 +885,156 @@ int main() {
                && dsStatic.numPivots1x1() == 0 && dsStatic.numPivots2x2() == 0,
            "facade counts     : a statically pivoted factor reports no pivot choices");
 
+        // The three sizes, on all four classes that answer them and on the facade that forwards.
+        //
+        // These check against each other rather than against a recomputation, which is what makes
+        // them worth having: the four classes describe one factorization from four points in the
+        // pipeline, so they are constrained to agree except where the algorithm says they must
+        // not. A wrong formula in one place breaks the agreement; a wrong formula copied into all
+        // four would not, which is why the nesting and the delay relation are checked too.
+        {
+            const SparseMatrix<double> S = toSparse(bandIndefinite(40, 3, 0.50, 7));
+
+            OrderEngine     ordEng(Ordering::MMD2);
+            ElmForestEngine efEng;
+            SymFactorEngine sfEng;
+            Permutation     P;
+            ElmForest       ef;
+            SymFactor       sf;
+            const bool analyzed = ordEng.compute(S, P) && efEng.compute(S, P, ef)
+                               && sfEng.compute(S, P, ef, sf);
+            ck(analyzed, "sizes             : analysis ran");
+
+            // Nesting, on every class: an index set is one entry per row, nnz adds the values
+            // against those rows, and the allocation adds the front's upper triangle on top.
+            auto nests = [](std::size_t numNodeIdx, std::size_t nnz, std::size_t numVal) {
+                return numNodeIdx <= nnz && nnz <= numVal;
+            };
+
+            // Recomputed here from the per-supernode sizes each class publishes, which is the only
+            // check that pins the formulae rather than the relations between them. An inequality
+            // cannot: a dynamic factor's own frontSize differs from the symbolic one once columns
+            // have moved, so even a formula that ignored delaySize entirely still comes out larger
+            // than predicted. `rows` is what the supernode's index set holds, which is where the
+            // delays show.
+            auto recompute = [](std::size_t snodes, auto front, auto rows) {
+                struct { std::size_t numNodeIdx = 0, nnz = 0, numVal = 0; } sum;
+                for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(snodes); ++jj) {
+                    const std::size_t f = front(jj), r = rows(jj);
+                    sum.numNodeIdx += r;
+                    sum.nnz        += f * (f + 1) / 2 + f * (r - f);
+                    sum.numVal     += r * f;
+                }
+                return sum;
+            };
+            auto matches = [](const auto& sum, const auto& object) {
+                return sum.numNodeIdx == object.numNodeIdx() && sum.nnz == object.nnz()
+                    && sum.numVal == object.numVal();
+            };
+            ck(nests(ef.numNodeIdx(), ef.nnz(), ef.numVal())
+                   && nests(sf.numNodeIdx(), sf.nnz(), sf.numVal()),
+               "sizes             : numNodeIdx <= nnz <= numVal, forest and symbolic");
+
+            // The forest predicts and the symbolic factor materializes, from the same sizes, so
+            // all three must match exactly. This is the assertion that catches a formula that
+            // drifted in one of the two.
+            ck(ef.numNodeIdx() == sf.numNodeIdx() && ef.nnz() == sf.nnz()
+                   && ef.numVal() == sf.numVal(),
+               "sizes             : forest and symbolic agree on all three");
+
+            NumFactorStatic<double>  nfs;
+            NumFactorDynamic<double> nfd;
+            NumFactorEngine          neS(Factorization::StaticLDLT,  Traversal::LeftLooking);
+            NumFactorEngine          neD(Factorization::DynamicLDLT, Traversal::LeftLooking);
+            const bool factored = neS.compute(S, P, sf, nfs) && neD.compute(S, P, sf, nfd);
+            ck(factored, "sizes             : both storages factored");
+
+            ck(nests(nfs.numNodeIdx(), nfs.nnz(), nfs.numVal())
+                   && nests(nfd.numNodeIdx(), nfd.nnz(), nfd.numVal()),
+               "sizes             : numNodeIdx <= nnz <= numVal, both numeric factors");
+
+            // A static factorization moves nothing, so its sizes are the symbolic ones exactly.
+            ck(nfs.numNodeIdx() == sf.numNodeIdx() && nfs.nnz() == sf.nnz()
+                   && nfs.numVal() == sf.numVal(),
+               "sizes             : the static factor matches what symbolic predicted");
+
+            // A dynamic one delays columns into their parents, which can only grow a front, so
+            // its sizes are at least the predicted ones and strictly larger where a delay landed.
+            // This matrix is tier 1's, which the suite already pins at 5 delayed columns.
+            std::size_t delayed = 0;
+            for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(nfd.snodeSize()); ++jj)
+                delayed += nfd.delaySize(jj);
+            ck(delayed > 0, "sizes             : the dynamic factor delayed at least one column");
+
+            // Strictly larger, not merely no smaller. A delayed column adds a row to its parent's
+            // front, which adds an index, values against it, and allocation for both, so with
+            // delays on the books every one of the three must have grown. The weaker `>=` is
+            // satisfied by a formula that ignores delaySize entirely, which is exactly the bug
+            // worth catching here.
+            ck(nfd.numNodeIdx() > sf.numNodeIdx() && nfd.nnz() > sf.nnz()
+                   && nfd.numVal() > sf.numVal(),
+               "sizes             : the dynamic factor is strictly larger than predicted");
+            ck(nfd.numNodeIdx() == sf.numNodeIdx() + delayed,
+               "sizes             : its index sets grew by exactly the delayed columns");
+
+            // Each class against a recomputation from its own published sizes.
+            ck(matches(recompute(ef.snodeSize(),
+                                 [&](std::int32_t jj) { return ef.frontSize(jj); },
+                                 [&](std::int32_t jj) {
+                                     return ef.frontSize(jj) + ef.updateSize(jj);
+                                 }), ef),
+               "sizes             : forest agrees with a recomputation from its sizes");
+            ck(matches(recompute(sf.snodeSize(),
+                                 [&](std::int32_t jj) { return sf.frontSize(jj); },
+                                 [&](std::int32_t jj) {
+                                     return sf.frontSize(jj) + sf.updateSize(jj);
+                                 }), sf),
+               "sizes             : symbolic agrees with a recomputation from its sizes");
+            ck(matches(recompute(nfs.snodeSize(),
+                                 [&](std::int32_t jj) { return nfs.frontSize(jj); },
+                                 [&](std::int32_t jj) {
+                                     return nfs.frontSize(jj) + nfs.updateSize(jj);
+                                 }), nfs),
+               "sizes             : static factor agrees with a recomputation");
+            ck(matches(recompute(nfd.snodeSize(),
+                                 [&](std::int32_t jj) { return nfd.frontSize(jj); },
+                                 [&](std::int32_t jj) { return nfd.frontSize(jj) + nfd.delaySize(jj)
+                                                             + nfd.updateSize(jj); }), nfd),
+               "sizes             : dynamic factor agrees with a recomputation, delays included");
+
+            // The guard the facade puts in front of all three. A Cholesky handed this indefinite
+            // matrix analyzes and then refuses, leaving whatever the attempt wrote behind; the
+            // facade must report zero rather than that debris.
+            DirectSolver<double> dsFailed(Ordering::MMD2, Factorization::Cholesky,
+                                          Traversal::LeftLooking);
+            const bool refused = dsFailed.analyze(S) && !dsFailed.factor(S);
+            ck(refused && dsFailed.numNodeIdx() == 0 && dsFailed.nnz() == 0
+                       && dsFailed.numVal() == 0,
+               "sizes             : zero after a factorization that refused, not partial counts");
+
+            // The facade forwards to whichever storage is live, and reports zero before there is
+            // one. Zero is the count for a factor that does not exist, not a sentinel.
+            DirectSolver<double> dsBefore(Ordering::MMD2, Factorization::DynamicLDLT,
+                                          Traversal::LeftLooking);
+            ck(dsBefore.numNodeIdx() == 0 && dsBefore.nnz() == 0 && dsBefore.numVal() == 0,
+               "sizes             : the facade reports zero before factor()");
+            ck(dsBefore.analyze(S) && dsBefore.numNodeIdx() == 0 && dsBefore.nnz() == 0,
+               "sizes             : and still zero after analyze() alone");
+
+            DirectSolver<double> dsS(Ordering::MMD2, Factorization::StaticLDLT,
+                                     Traversal::LeftLooking);
+            DirectSolver<double> dsD(Ordering::MMD2, Factorization::DynamicLDLT,
+                                     Traversal::LeftLooking);
+            const bool forwarded =
+                   dsS.analyze(S) && dsS.factor(S) && dsD.analyze(S) && dsD.factor(S)
+                && dsS.numNodeIdx() == nfs.numNodeIdx() && dsS.nnz() == nfs.nnz()
+                && dsS.numVal()     == nfs.numVal()
+                && dsD.numNodeIdx() == nfd.numNodeIdx() && dsD.nnz() == nfd.nnz()
+                && dsD.numVal()     == nfd.numVal();
+            ck(forwarded,
+               "sizes             : the facade forwards the live storage's three exactly");
+        }
+
         // Inertia, against the closed form. One pattern, three shifts, one analysis: the definite
         // matrix, a mildly indefinite one and a strongly indefinite one, the last of which takes
         // 2x2 pivots and so exercises the determinant branch rather than only the diagonal one.

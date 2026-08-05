@@ -289,7 +289,7 @@ src/                , method bodies + explicit instantiations (flat layout)
                       One .cpp per header, plus the vendored orderings, which have none:
   Amd.cpp           , AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
   Mmd.cpp           , MMD ordering (Sparspak/Liu, via Oblio 0.9)
-tests/              , test suites (252 assertions; see docs/TESTING_SPECIFICATION.md)
+tests/              , test suites (269 assertions; see docs/TESTING_SPECIFICATION.md)
   smoke.cpp                    5,  quick end-to-end sanity
   test_order.cpp              77,  the eight non-trivial orderings, and each B pair against its
                                    original entry for entry
@@ -298,7 +298,7 @@ tests/              , test suites (252 assertions; see docs/TESTING_SPECIFICATIO
   test_symfactor.cpp          29,  symbolic factorization
   test_numfactor.cpp          18,  numeric factorization
   test_solve.cpp              14,  the solve step, residual at machine precision
-  test_pipeline.cpp           69,  whole-pipeline combinations, by residual
+  test_pipeline.cpp           86,  whole-pipeline combinations, by residual
 examples/           , eight usage examples, named example_* as the tests are named test_*
                       (described under Examples above, not repeated here)
   example_basic.cpp            , example_matrix.cpp
@@ -373,7 +373,7 @@ Done:
 - [x] Namespaced headers (`include/oblio/`), explicit instantiation throughout
 - [x] Validated against Oblio 0.9 as oracle; end-to-end residual at machine precision
 - [x] `DirectSolver<Val>`, the top-level analyze / factor / solve driver
-- [x] 252 assertions across 8 suites
+- [x] 269 assertions across 8 suites
 - [x] Dynamic LDL, threshold 1x1 / 2x2 pivots: all three traversals, delayed columns and all, at
       machine precision. Non-root supernodes follow Ashcraft, Grimes and Lewis (1998) Figure 3.4
       with the Figure 3.3 acceptance test; roots, which cannot delay, use bounded Bunch-Kaufman

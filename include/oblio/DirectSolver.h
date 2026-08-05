@@ -135,6 +135,19 @@ public:
     std::size_t numPivots1x1() const;
     std::size_t numPivots2x2() const;
 
+    // The numeric factor's three sizes, forwarded to whichever storage is live, in the same order
+    // and with the same meanings as on the four classes that define them: numNodeIdx counts index
+    // entries, numVal the values allocated, nnz the entries of L. Zero before factor(), which is
+    // the true count for a factor that does not exist yet rather than a sentinel.
+    //
+    // **These are what the factorization did, not what the analysis predicted.** For a statically
+    // pivoted factor the two agree, nothing having moved. For a dynamically pivoted one they do
+    // not: a delayed column widens its parent's front, so these exceed symFactor()'s by exactly
+    // what the delays cost. Comparing the two is how that cost is read.
+    std::size_t numNodeIdx() const;
+    std::size_t numVal() const;
+    std::size_t nnz() const;
+
     // How many eigenvalues of A are positive, negative and zero. Not computed but *read*, from the
     // signs of D, which is Sylvester's law of inertia: A = L D L^H is a congruence, a congruence
     // preserves those signs, so counting them in D counts them in A without forming an eigenvalue.

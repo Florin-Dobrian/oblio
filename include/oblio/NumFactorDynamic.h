@@ -55,6 +55,45 @@ public:
     std::size_t   snodeSize()     const { return mSnodeSize; }
     Factorization factorization() const { return mFactorization; }
 
+    // Three sizes of the factor, in the same order on all four classes that can answer. They count
+    // different things and the difference grows with front width, so the names are not
+    // interchangeable:
+    //
+    //   numNodeIdx  the index sets, one entry per row a supernode touches
+    //   numVal      values *allocated*: the full rectangle, whose front block is stored whole with
+    //               its strict upper triangle left zero so BLAS can take it in one call
+    //   nnz         entries of L: each supernode's own lower triangle plus its update rectangle
+    //
+    // In magnitude they nest, numNodeIdx <= nnz <= numVal, with equality only when every
+    // supernode is one column. 0.9 spelled the last two numberOfEntries and
+    // numberOfAllocatedEntries.
+    //
+    // **nnz counts entries, not nonzeros.** Amalgamation pads index sets with structurally zero
+    // rows and those are counted here; the two agree exactly when the patterns are exact.
+    //
+    // Summed over the per-supernode vectors, which is the only way here and also the most direct:
+    // these are the lengths actually allocated rather than a formula reproducing them. They are
+    // therefore the *delayed* sizes, larger than the symbolic factorization predicted wherever a
+    // column was delayed into a front, which is what delaySize records. A supernode's block is
+    // frontSize columns by frontSize + delaySize + updateSize rows.
+    std::size_t numNodeIdx() const {
+        std::size_t sum = 0;
+        for (std::size_t jj = 0; jj < mSnodeSize; ++jj) sum += mNodeIdx[jj].size();
+        return sum;
+    }
+    std::size_t numVal() const {
+        std::size_t sum = 0;
+        for (std::size_t jj = 0; jj < mSnodeSize; ++jj) sum += mVal[jj].size();
+        return sum;
+    }
+    std::size_t nnz() const {
+        std::size_t sum = 0;
+        for (std::size_t jj = 0; jj < mSnodeSize; ++jj)
+            sum += mFrontSize[jj] * (mFrontSize[jj] + 1) / 2
+                 + mFrontSize[jj] * (mDelaySize[jj] + mUpdateSize[jj]);
+        return sum;
+    }
+
     // How many pivots the factorization had to replace. Meaningful when a *static* factorization
     // (Cholesky, static LDL) runs into this storage, exactly as on the static factor. Dynamic LDL,
     // when it lands, delays an unstable pivot instead of replacing it, and leaves this zero.

@@ -162,9 +162,43 @@ The two modes interleave with no clean in between: each directory keeps a `.buil
 recording which it was built in, and a switch rebuilds while a repeat does not. Nothing is deleted
 either way.
 
-What this cannot catch is a published file referring to a path under `private/`, since the
-directory is still there. Only a fresh clone into a scratch directory checks that, and it is worth
-doing once before a release rather than per push.
+### Before a release: build a real clone
+
+`OBLIO_PUBLIC=1` cannot catch two things, because `private/` is still on disk either way: a
+published file referring to a path inside it, and a file that is needed but was never committed.
+Only a clone proves absence, `git clone` carrying committed history and nothing else.
+
+```
+git clone . /tmp/oblio-clone
+cd /tmp/oblio-clone
+make test
+```
+
+Expect `238/238 assertions across 8 suites, 7 examples run`, against 252 in the working tree. Then
+
+```
+cd -
+rm -rf /tmp/oblio-clone
+```
+
+Run 2026-08-04 on alpamayo, after making the vendored orderings private: 252 in the tree, 238 in the
+clone, as expected.
+
+Worth extending to the other directories when something there has changed, all of which should
+work in the clone with no `private/` present:
+
+```
+cd /tmp/oblio-clone/experiments/ordering && make test    # every layer agrees, 35 comparisons
+cd /tmp/oblio-clone/benchmarks/ordering  && make         # builds; MMD and AMD rows refuse
+cd /tmp/oblio-clone/benchmarks/pipeline  && make         # builds
+cd /tmp/oblio-clone && cmake -S . -B bld && cmake --build bld && (cd bld && ctest)
+```
+
+The CMake configure line prints which mode it chose, so `private/ absent, MMD and AMD will refuse`
+is itself a check.
+
+Once before a release rather than per push: `make test` and `OBLIO_PUBLIC=1 make test` cover the
+day to day.
 
 ## Tooling
 

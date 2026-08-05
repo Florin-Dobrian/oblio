@@ -1108,36 +1108,59 @@ is the same front-size question named here.
 
 ## Structure
 
-### Nobody exposes nnz(L), and three objects could
+### The factor's three sizes are answered; the benchmarks still sum by hand
 
-`ElmForest`, `SymFactor` and the two numeric factors all carry `frontSize` and `updateSize` per
-supernode, which is everything the count needs:
+`ElmForest`, `SymFactor`, `NumFactorStatic` and `NumFactorDynamic` each answer `numNodeIdx()`,
+`nnz()` and `numVal()`, summed on demand except where a flat array's length already falls out of a
+prefix sum. `examples/example_analysis.cpp` uses `SymFactor::nnz()` and no longer carries its own
+loop.
+
+**What remains** is that `benchmarks/ordering` and `benchmarks/pipeline` still compute `nnz(L)`
+themselves. That is deliberate today, a benchmark standing alone being the rule in
+`benchmarks/README.md`, but the rule was written when nothing in the library could answer, and it
+is worth re-deciding now that something can.
+
+**And `SparseMatrix` has the same gap one level up.** `nnz()` counts stored entries, both triangles,
+and there is no accessor for one triangle alone. Fill is `nnz(L)` minus what `A` already had on and
+below the diagonal, so anything reporting fill needs that number and derives it:
 
 ```
-nnzL = sum over supernodes of frontSize * (frontSize + 1) / 2 + frontSize * updateSize
+const std::size_t nnzTrilA = (A.nnz() + A.size()) / 2;
 ```
 
-None of them offers it, so every caller sums it by hand. Today that is three copies, in
-`benchmarks/ordering`, `benchmarks/pipeline` and `examples/example_analysis.cpp`. The benchmarks
-would keep their own copy regardless, a benchmark standing alone being deliberate there, but the
-library should be able to answer.
+That is sound, resting on the full-storage and present-diagonal preconditions, and it is the caller
+knowing a storage rule rather than asking. One call site today, `examples/example_analysis.cpp`,
+which is why this is a note rather than a task. It becomes one the moment a second thing reports
+fill. The obvious shape is `nnzLower()` beside `nnz()`, counted the same way the four factor classes
+count theirs, and it would let that example ask for both of its columns instead of computing one.
 
-**It is one accessor on each, three lines apiece**, and the three agree: `ElmForest` and `SymFactor`
-were checked to give the identical value on grids at 3, 8 and 20 a side, under both supernode modes
-and with amalgamation on and off. `ElmForest` is the earliest object that can answer, which is
-section 2.5's claim, column counts without computing `L`, made reachable.
+### ElmForest and SymFactor could validate themselves, and would then earn a .cpp
 
-**One thing the comment has to say: it counts entries, not nonzeros.** Amalgamation buys explicit
-zeros, so on an 8x8 grid under AMD the count is 354 with no amalgamation and 499 at threshold 8,
-while the true nonzeros stay 354. `exactPatterns()` is what distinguishes the two cases, and the
-count equals nnz(L) exactly when it is true.
+Neither class has a `.cpp` today, and neither needs one: they are not templates, so there is no
+explicit instantiation to anchor, and their only functions are accessors that belong inline. Two of
+them, `frontSize(jj)` and `updateSize(jj)`, are read inside the numeric kernels' inner loops, so
+moving them out of line would cost a call per access in exactly the code the design is arranged
+around.
 
-**And the numeric factor's answer is a third number, larger again**, because a block is allocated as
-a full `frontSize` by `frontSize + updateSize` rectangle, with the front's upper triangle allocated
-and left as zeros so BLAS can take the whole block: 375 and 652 against the 354 and 499 above. That
-is a property of the layout rather than of the factor's structure, so if the numeric factors answer
-at all they should answer both, which is 0.9's `numberOfEntries` against
-`numberOfAllocatedEntries`.
+**A `validate()` on each is the thing that would change that.** Most of it is already written, in
+the suites: `test_forest` checks that parent links form a forest, that height agrees with the links
+and that the sizes are consistent; `test_symfactor` checks index sets are sorted, in range and
+non-empty. Those are checks a structure can make about itself, and a caller assembling one by hand
+has no way to make them today.
+
+**The split to get right is which checks move and which stay.** A `validate()` that reproduces the
+engine's own reasoning catches corruption and not misunderstanding: the thing checked and the
+checker would ship together and be wrong together. What makes `test_symfactor` valuable is that its
+oracle computes the same structure a different way, from a dense factor pattern. So:
+
+- **Into the class**: internal consistency. Links form a forest with no cycle, every parent is a
+  valid supernode or NIL, height matches the links, `snodePtr` is monotone, index sets are sorted
+  and within range, sizes agree with the arrays they describe.
+- **Staying in the suite**: anything computed independently. The dense-pattern oracle, the
+  fundamental-supernode recomputation, the comparison against a second implementation.
+
+At that point both classes gain a `.cpp` holding the validation and nothing else, the accessors
+staying in the header. That is the trigger to watch for: a body no longer obviously worth inlining.
 
 ### Five ordering questions, four still open and deliberately so
 

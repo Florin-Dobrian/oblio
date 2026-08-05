@@ -53,7 +53,7 @@ Multiple right-hand sides (a dense `B`) are not wired yet; see Status.
 
 ## Examples
 
-Seven standalone programs in `examples/`, built by `make examples` and run for exit status by
+Eight standalone programs in `examples/`, built by `make examples` and run for exit status by
 `make test`. Each is heavily commented and answers one question, in roughly this order:
 
 - **`example_basic`**, what one solve looks like start to finish, through the facade.
@@ -66,6 +66,8 @@ Seven standalone programs in `examples/`, built by `make examples` and run for e
   under three value sets, and which factorizations refuse, which perturb and which pivot.
 - **`example_reuse`**, what can be kept between solves and what invalidates it: one analysis over
   three matrices, one factor over three right-hand sides, and what each setter discards.
+- **`example_amalgamation`**, what merging supernodes costs and buys: fill against factorization
+  time against solve time, and the ratio of solves to factorizations where the trade turns.
 - **`example_pipeline_real`** and **`example_pipeline_complex`**, what the facade is doing
   underneath, with the engines wired by hand over every ordering, factorization and traversal.
 
@@ -297,12 +299,12 @@ tests/              , test suites (252 assertions; see docs/TESTING_SPECIFICATIO
   test_numfactor.cpp          18,  numeric factorization
   test_solve.cpp              14,  the solve step, residual at machine precision
   test_pipeline.cpp           69,  whole-pipeline combinations, by residual
-examples/           , seven usage examples, named example_* as the tests are named test_*
+examples/           , eight usage examples, named example_* as the tests are named test_*
                       (described under Examples above, not repeated here)
   example_basic.cpp            , example_matrix.cpp
   example_analysis.cpp         , example_indefinite.cpp
-  example_reuse.cpp            , example_pipeline_real.cpp
-  example_pipeline_complex.cpp
+  example_reuse.cpp            , example_amalgamation.cpp
+  example_pipeline_real.cpp    , example_pipeline_complex.cpp
 benchmarks/         , timing against the current tree, and expected to keep compiling as it moves
   ordering/         , one phase against itself: what each ordering costs, in time and in fill
   pipeline/         , the phases against each other: what share of a solve the ordering is, and

@@ -26,6 +26,10 @@
 // Newton iteration or a time-stepping loop has: the matrix keeps its structure and changes its
 // values, and the expensive structural work is done once.
 //
+// The nnz(L) column is the factor as built rather than as predicted, which for a dynamically
+// pivoted factorization are different numbers: solver.symFactor().nnz() is what the analysis said,
+// solver.nnz() what the factorization produced, and the gap is what the delays cost.
+//
 // What the three factorizations do with them:
 //
 //   Cholesky      needs positive definiteness, and refuses when it is absent. Refusing is the
@@ -105,14 +109,20 @@ int main() {
     Vector<Val> b(size), x(size);
     for (std::size_t i = 0; i < size; ++i) b[i] = Val(1);
 
-    printf("Grid %zux%zu, A - sigma I. One pattern, so one analysis serves every row.\n\n",
+    // A's counts belong here rather than in a column: the pattern is the same in every row, so a
+    // column of one repeated number would say less than one line does. What varies per row is the
+    // factor, which is what the table carries.
+    const SparseMatrix<Val> pattern = shiftedGrid(side, shift[0]);
+    printf("Grid %zux%zu, A - sigma I. One pattern, so one analysis serves every row.\n",
            side, side);
-    printf("  %-12s  %-8s  %5s  %10s  %-12s  %5s  %7s  %4s  %4s\n",
-           "factorization", "matrix", "sigma", "residual", "inertia", "pert", "delayed",
+    printf("nnz(A) = %zu, of which %zu on and below the diagonal.\n\n",
+           pattern.nnz(), (pattern.nnz() + pattern.size()) / 2);
+    printf("  %-12s  %-8s  %5s  %10s  %-12s  %6s  %5s  %7s  %4s  %4s\n",
+           "factorization", "matrix", "sigma", "residual", "inertia", "nnz(L)", "pert", "delayed",
            "1x1", "2x2");
-    printf("  %-12s  %-8s  %5s  %10s  %-12s  %5s  %7s  %4s  %4s\n",
-           "-------------", "------", "-----", "--------", "pos/neg/zero", "----", "-------",
-           "---", "---");
+    printf("  %-12s  %-8s  %5s  %10s  %-12s  %6s  %5s  %7s  %4s  %4s\n",
+           "-------------", "------", "-----", "--------", "pos/neg/zero", "------", "----",
+           "-------", "---", "---");
 
     for (Factorization factorization : {Factorization::Cholesky, Factorization::StaticLDLT,
                                         Factorization::DynamicLDLT}) {
@@ -148,10 +158,13 @@ int main() {
                 snprintf(signs, sizeof signs, "%zu/%zu/%zu",
                          inertia.positive, inertia.negative, inertia.zero);
 
-            printf("  %-12s  %-8s  %5.1f  %10.2e  %-12s  %5zu  %7zu  %4zu  %4zu\n",
+            // nnz() is the factor as built, not as predicted: for the dynamic rows it exceeds
+            // solver.symFactor().nnz() by what the delayed columns cost in extra fill.
+            printf("  %-12s  %-8s  %5.1f  %10.2e  %-12s  %6zu  %5zu  %7zu  %4zu  %4zu\n",
                    name(factorization), shiftName[k], shift[k],
-                   solver.relativeResidual(A, b, x), signs, solver.numPerturbations(),
-                   solver.numDelayedColumns(), solver.numPivots1x1(), solver.numPivots2x2());
+                   solver.relativeResidual(A, b, x), signs, solver.nnz(),
+                   solver.numPerturbations(), solver.numDelayedColumns(),
+                   solver.numPivots1x1(), solver.numPivots2x2());
         }
     }
 
@@ -167,6 +180,12 @@ int main() {
            "  what it paid: columns delayed to a parent, and 2x2 blocks taken where no single\n"
            "  column was acceptable. Note that 1x1 + 2 * 2x2 is %zu, the columns being\n"
            "  partitioned by the pivot choice.\n\n"
+           "  nnz(L) is the same in eight rows and larger in the ninth. It is 352 wherever the\n"
+           "  factor has the shape the analysis predicted, and every one of these nine shares one\n"
+           "  analysis. The exception is the strongly indefinite dynamic row, where nine delayed\n"
+           "  columns widened their parents' fronts and the factor came out at 367. That is the\n"
+           "  price of the machine-precision residual beside it, and is why the column is here:\n"
+           "  accuracy on a hard matrix is paid for in fill, not for free.\n\n"
            "  The inertia column is read from D and never from the matrix, so it is what the\n"
            "  factorization found rather than what this file assumed. All three factorizations\n"
            "  agree on it wherever they answer at all, which is Sylvester's law holding across\n"

@@ -52,10 +52,32 @@ public:
     std::size_t   snodeSize() const { return mSnodeSize; }
     Factorization factorization() const { return mFactorization; }
 
-    // Total node indices, and total values. The second is the rectangle count: the sum over
-    // supernodes of indexSize * frontSize.
+    // Three sizes of the factor, in the same order on all four classes that can answer. They count
+    // different things and the difference grows with front width, so the names are not
+    // interchangeable:
+    //
+    //   numNodeIdx  the index sets, one entry per row a supernode touches
+    //   numVal      values *allocated*: the full rectangle, whose front block is stored whole with
+    //               its strict upper triangle left zero so BLAS can take it in one call
+    //   nnz         entries of L: each supernode's own lower triangle plus its update rectangle
+    //
+    // In magnitude they nest, numNodeIdx <= nnz <= numVal, with equality only when every
+    // supernode is one column. 0.9 spelled the last two numberOfEntries and
+    // numberOfAllocatedEntries.
+    //
+    // **nnz counts entries, not nonzeros.** Amalgamation pads index sets with structurally zero
+    // rows and those are counted here; the two agree exactly when the patterns are exact.
+    //
+    // Two of the three are members here rather than sums: both arrays are flat and their lengths
+    // fall out of the prefix sums that build them. nnz has no such array and is summed.
     std::size_t numNodeIdx() const { return mNumNodeIdx; }
-    std::size_t numVal()     const { return mNumVal; }
+    std::size_t numVal() const { return mNumVal; }
+    std::size_t nnz() const {
+        std::size_t sum = 0;
+        for (std::size_t jj = 0; jj < mSnodeSize; ++jj)
+            sum += mFrontSize[jj] * (mFrontSize[jj] + 1) / 2 + mFrontSize[jj] * mUpdateSize[jj];
+        return sum;
+    }
 
     // How many pivots the factorization had to replace.
     //

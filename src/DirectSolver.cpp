@@ -143,6 +143,28 @@ std::size_t DirectSolver<Val>::numPivots2x2() const {
     return static_cast<std::size_t>(std::count(pivotType.begin(), pivotType.end(), 2));
 }
 
+// The factor's three sizes. Unlike the counts above these mean something under both storages, so
+// they forward rather than reporting zero for the static one. Before factor() neither factor holds
+// anything and all three are zero, which is the count rather than a placeholder.
+
+template<class Val>
+std::size_t DirectSolver<Val>::numNodeIdx() const {
+    if (!mFactored) return 0;
+    return mUsesDynamicStorage ? mNumFactorDynamic.numNodeIdx() : mNumFactorStatic.numNodeIdx();
+}
+
+template<class Val>
+std::size_t DirectSolver<Val>::numVal() const {
+    if (!mFactored) return 0;
+    return mUsesDynamicStorage ? mNumFactorDynamic.numVal() : mNumFactorStatic.numVal();
+}
+
+template<class Val>
+std::size_t DirectSolver<Val>::nnz() const {
+    if (!mFactored) return 0;
+    return mUsesDynamicStorage ? mNumFactorDynamic.nnz() : mNumFactorStatic.nnz();
+}
+
 // Sylvester's law of inertia, read off D. See the header for what this is for and where it stops
 // being reliable. Two walks, because the two storages hold D differently: statically pivoted, D is
 // the block's diagonal and nothing else; dynamically pivoted, pivotType says which columns pair

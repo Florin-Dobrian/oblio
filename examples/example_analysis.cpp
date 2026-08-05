@@ -14,7 +14,8 @@
 //
 // The columns:
 //
-//   nnz(L)      entries in the factor, its own triangle plus its update rows, summed per supernode
+//   nnz(L)      entries in the factor, from SymFactor::nnz(): each supernode's own lower
+//               triangle plus its update rectangle
 //   fill        nnz(L) minus the entries A already had below and on the diagonal: what elimination
 //               adds, and the quantity the ordering exists to reduce
 //   supernodes  how many blocks the columns group into. Fewer and larger is better for the numeric
@@ -103,18 +104,6 @@ SparseMatrix<Val> grid(std::size_t side) {
     return fromAdjacency(adjacency);
 }
 
-// Entries of L, from the symbolic factor alone: each supernode contributes its own lower triangle
-// plus the full rectangle of its update rows.
-std::size_t countNnzL(const SymFactor& sf) {
-    std::size_t nnzL = 0;
-    for (std::int32_t jj = 0; jj < static_cast<std::int32_t>(sf.snodeSize()); ++jj) {
-        const std::size_t frontSize  = sf.frontSize(jj);
-        const std::size_t updateSize = sf.updateSize(jj);
-        nnzL += frontSize * (frontSize + 1) / 2 + frontSize * updateSize;
-    }
-    return nnzL;
-}
-
 // One matrix, every ordering, analysis only.
 void report(const char* what, const SparseMatrix<Val>& A) {
     // A is stored full, both triangles with the diagonal, so its lower triangle holds this many.
@@ -137,12 +126,12 @@ void report(const char* what, const SparseMatrix<Val>& A) {
         if (!solver.analyze(A)) { printf("  %-8s  analyze failed\n", name(ordering)); continue; }
 
         // The three intermediates the facade owns, which it exposes for exactly this.
-        const ElmForest& ef   = solver.elmForest();
-        const SymFactor& sf   = solver.symFactor();
-        const std::size_t nnzL = countNnzL(sf);
+        const ElmForest& ef = solver.elmForest();
+        const SymFactor& sf = solver.symFactor();
 
         printf("  %-8s  %8zu  %8zu  %10zu  %6zu\n",
-               name(ordering), nnzL, nnzL - nnzTrilA, sf.snodeSize(), ef.height());
+               name(ordering), sf.nnz(), sf.nnz() - nnzTrilA, sf.snodeSize(),
+               ef.height());
     }
 }
 

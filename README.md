@@ -98,6 +98,18 @@ Apple Silicon or Intel. The combination tested is Apple Silicon, macOS 26.5.2 wi
 Accelerate is selected automatically: the Makefile links `-framework Accelerate` when `uname` says
 Darwin, and CMake finds it through `find_package(BLAS)`.
 
+**The Makefile says `g++` and macOS gives it Apple Clang.** There is no GCC here: `/usr/bin/g++`,
+`/usr/bin/clang++`, `/usr/bin/cc` and the rest are one file under many names, a shim that dispatches
+on the name it was invoked under to the real tool in the active developer directory. Apple kept the
+`gcc` and `g++` names as aliases when it moved to LLVM, which is why a Makefile written for GCC
+builds unchanged. `g++ --version` says `Apple clang`, and `ls -i /usr/bin/g++ /usr/bin/clang++`
+shows one inode.
+
+Worth knowing because the two are not the same compiler and do not warn about the same things:
+`-Wall -Wextra` covers a different set on each, so code that is clean under one can produce
+warnings under the other. `CXX` is assigned with `?=`, so `make CXX=clang++` names it explicitly and
+`make CXX=/opt/homebrew/opt/llvm/bin/clang++` selects an upstream LLVM if one is installed.
+
 ### Linux
 
 Any distribution with a C++17 compiler. Package names below are Debian and Ubuntu; the

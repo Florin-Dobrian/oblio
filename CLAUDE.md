@@ -42,6 +42,27 @@ either a reference or a target.
    Verify output against 0.9, same inputs through both codebases; don't advance a
    unit that hasn't been checked. The machine does the mechanical modernization; the
    human does the correctness verification.
+3. **Ask before touching a file.** Nothing is created, modified or deleted without an explicit
+   go-ahead for that specific change. Reading code, running a measurement, answering a question
+   and proposing an edit are all fine unprompted; making the edit is not. Thinking aloud about
+   how a vendored routine works, or asking where a check belongs, is a question and not a
+   request to change our code, and the difference is often invisible in the wording, so the
+   default when it is unclear is to answer and stop. An unasked change costs more than it saves:
+   it has to be reviewed, it buries the change that was actually wanted, and a wrong one leaves
+   the tree worse than doing nothing.
+4. **Present only the files touched in that step.** The output directory is cumulative, so
+   earlier uncommitted work sits there and gets presented again by accident, which buries the
+   files that actually changed and makes the review ambiguous. If older work is still
+   uncommitted, say so in one line rather than presenting the file a second time.
+5. **Never discard uncommitted work to undo a mistake.** `git checkout` on a path, `git reset
+   --hard`, `git clean` and `git stash drop` throw away everything uncommitted in what they
+   touch, not just the change being undone, and a path argument that looks narrow may not be:
+   `git checkout experiments/ordering/` takes the whole directory, README included. Undo by
+   editing the file back, or by copying from the staged copy in the output directory, both of
+   which are surgical and reversible. This is not a hypothetical: it cost a full session's
+   documentation work once and a second file twenty minutes later, and the only reason the
+   second was cheap is that the staged copy was current. Which is the other half of the rule:
+   stage after every meaningful edit, not at the end, so a copy always exists to restore from.
 
 ## Invariants (breaking one is a bug)
 

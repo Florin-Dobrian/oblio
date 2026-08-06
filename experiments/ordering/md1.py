@@ -1,5 +1,5 @@
 # %% [markdown]
-# # Minimum degree, step 1: the smallest version
+# # Minimum degree, iteration 1: the smallest version
 #
 # Naive minimum degree, nothing else. Eliminate the vertex of least degree,
 # make its neighbors a clique, repeat. The new edges are FILL: the whole point
@@ -7,7 +7,7 @@
 # archive/sparse_factorization.md as code. We build on it later.
 #
 # It names each fill edge as it is created, so the ordering can be seen earning
-# (or wasting) its keep, step by step.
+# (or wasting) its keep, iteration by iteration.
 #
 # The adjacency of a vertex is a plain list, UNSORTED, and membership comes from a
 # mark array stamped with a tag, one comparison per query. That is what the C++
@@ -84,7 +84,7 @@ def md1_eliminate(A, mark, tag, eliminated, pivot):
     return neighbors, fill_edges, tag
 
 def md1_minimum_degree(G):
-    """Eliminate the least-degree vertex each step, naming the fill it makes."""
+    """Eliminate the least-degree vertex each iteration, naming the fill it makes."""
     n = len(G)
     nnz_tril_A = sum(len(G[u]) for u in range(n)) // 2 + n   # before we mutate it
     # The input is given as sets, so sort once here to match the C++ literals.
@@ -92,6 +92,16 @@ def md1_minimum_degree(G):
     A = [sorted(adjacency) for adjacency in G]
     mark = [-1] * n                # scratch for membership, stamped with tag
     tag = 0
+    # Calls to the eliminate procedure, one per pivot. Not the count of vertices
+    # removed: a pivot can carry mass-merged vertices out with it, and from mmd1 up
+    # an iteration batches several eliminations before one degree update pass. The three
+    # counts coincide only where both of those are absent.
+    num_eliminations = 0
+    # Passes of the outer loop, each one a batch of eliminations followed by one
+    # degree update pass. Here the batch is always a single elimination, so this
+    # equals num_eliminations; from mmd1 up the two come apart.
+    num_iterations = 0
+    num_degree_computations = 0
     eliminated = [False] * n
     order = []
     total_fill = 0
@@ -100,9 +110,20 @@ def md1_minimum_degree(G):
     # NOT PRODUCTION: display only. The trace is what makes these files teachable and
     # is the whole reason they exist; nothing downstream reads it.
     md1_show(A, "start: every edge explicit, no fill yet", eliminated=eliminated)
-    for step in range(n):
-        pivot = min((u for u in range(n) if not eliminated[u]), key=lambda u: len(A[u]))
+    for iteration in range(n):
+        num_iterations += 1
+        # The scan asks every alive vertex for its degree, so the count is the alive
+        # count summed over iterations, n(n+1)/2 here since exactly one vertex leaves
+        # per iteration. Two things keep it from being comparable with the layers
+        # above. There is no initial build to charge for, degrees being computed here
+        # and nowhere else, so this starts at 0 where md4 and md5 start at n. And a
+        # degree computation is len(A[u]) rather than a union over A[u] and the
+        # cliques in I[u], so it is the same count of a much cheaper operation.
+        alive = [u for u in range(n) if not eliminated[u]]
+        num_degree_computations += len(alive)
+        pivot = min(alive, key=lambda u: len(A[u]))
         neighbors, fill_edges, tag = md1_eliminate(A, mark, tag, eliminated, pivot)
+        num_eliminations += 1
         degree = len(neighbors)
         order.append(pivot)
         total_fill += len(fill_edges)
@@ -112,15 +133,18 @@ def md1_minimum_degree(G):
         # NOT PRODUCTION: display only. The trace is what makes these files teachable and
         # is the whole reason they exist; nothing downstream reads it.
         md1_show(A,
-             (f"step {step}: eliminate {pivot} (degree {degree}), "
+             (f"iteration {iteration}: eliminate {pivot} (degree {degree}), "
               f"fill edges: {fill_edges_text}, fill so far: {total_fill}"),
              eliminated=eliminated)
 
     # The degree of a pivot at elimination is the count of its column of L, so
     # the degrees already computed give nnz(L) with no extra work (Section 5.1).
     nnz_L = degree_sum + n
-    print(f"nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
+    print(f"n = {n}, nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
           f"fill = {nnz_L - nnz_tril_A} (fill edges counted: {total_fill})")
+    print(f"iterations: {num_iterations}")
+    print(f"eliminations: {num_eliminations}")
+    print(f"degree computations: {num_degree_computations}")
     print(f"order: {order}")
     return order
 
@@ -204,7 +228,7 @@ graph4 = [
 
 # graph5, five vertices and four edges, two paths joined at 4: 2-1-4-0-3. Small
 # and fill free, and here for one reason: it is the smallest graph on which md3's
-# merge test declines a genuine supervariable. At the step whose pivot is 0 and
+# merge test declines a genuine supervariable. At the iteration whose pivot is 0 and
 # whose clique is {4}, vertex 4 has nothing explicit left but belongs to c1 as
 # well as to the new clique, so I[4] == {pivot} fails even though c1's only
 # member is 4 itself and everything 4 reaches lies inside the new clique. The
@@ -223,11 +247,11 @@ graph5 = [
 # graph6, six vertices and eight edges. Here because one small graph carries
 # three things at once. Its supervariable {0, 4} is a supernode but NOT a
 # fundamental one: the elimination forest is 2 -> 1 -> 4 and 3 -> 0 -> 4, so 4
-# already has 1 as a child when 0 merges into it. The merge happens at step 2 of
+# already has 1 as a child when 0 merges into it. The merge happens at iteration 2 of
 # 5, so the run continues afterwards and the selection degree, 3 over {2, 3, 4},
 # differs from the external degree, 2 over {2, 3}, with the difference being the
 # weight that merged. And super_members ends with a hole in the middle, slot 4
-# empty between two used ones, while no pivot equals its own step number. See the
+# empty between two used ones, while no pivot equals its own iteration number. See the
 # README sections on mass elimination and on external degree.
 #
 #   edges: 0-2 0-3 0-4 1-3 2-3 2-4 2-5 3-4
@@ -240,7 +264,7 @@ graph6 = [
     {2},              # 5
 ]
 
-# graph7, five vertices and six edges. The pairwise case: at the step whose pivot
+# graph7, five vertices and six edges. The pairwise case: at the iteration whose pivot
 # is 0 and whose clique is {2, 4}, vertices 2 and 4 are indistinguishable FROM
 # EACH OTHER, both reaching the same closed neighborhood, yet neither is
 # absorbable into the pivot, since each still reaches 3 from outside the clique.

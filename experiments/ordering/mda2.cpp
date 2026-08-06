@@ -1,4 +1,4 @@
-// mda2.cpp -- minimum degree, step 2a: the quotient graph, with the degree bounded.
+// mda2.cpp -- minimum degree, iteration 2a: the quotient graph, with the degree bounded.
 //
 // md2 with one call site changed: the picker asks for a BOUND on the degree instead
 // of the degree. Everything else, the quotient graph, the elimination, the pruning,
@@ -30,7 +30,7 @@
 //
 // mda2 cannot use it. That form is stated against C[pivot], so it applies only to a
 // vertex IN C[pivot], and this picker produces a number for every live vertex at
-// every step, touched or not. What makes the tighter form available is MAINTAINED
+// every iteration, touched or not. What makes the tighter form available is MAINTAINED
 // degrees, which narrow the refresh set to exactly C[pivot]'s members: that is
 // mdam2. See the README section "Zooming in on md2", and 5.13 of
 // archive/sparse_factorization.md.
@@ -335,6 +335,25 @@ std::vector<std::int32_t> mda2MinimumDegree(const Graph& G) {
     Cliques C(n);   // clique id -> member list
     std::vector<std::int32_t> mark(n, NIL);    // scratch for membership, with tag
     std::int32_t tag = 0;
+    // Calls to the eliminate procedure, one per pivot. Not the count of vertices
+    // removed: a pivot can carry mass-merged vertices out with it, and from mmd1 up
+    // an iteration batches several eliminations before one degree update pass. The three
+    // counts coincide only where both of those are absent.
+    std::size_t numEliminations = 0;
+    // Summed over the eliminations, |C[p]| being the new clique AFTER the trim, so
+    // in supernodal terms the update rather than the front. It is the raw reach of
+    // the eliminations, undeduplicated: where a layer deduplicates, the degree
+    // update count comes out below this, and the gap is what the batching saved.
+    // In md2 it is nnz(L) - n, there being no mass elimination to shrink a clique.
+    std::size_t numCliqueEntries = 0;
+    // Passes of the outer loop, each one a batch of eliminations followed by one
+    // degree update pass. Here the batch is always a single elimination, so this
+    // equals numEliminations; from mmd1 up the two come apart.
+    std::size_t numIterations = 0;
+    // Every bound this layer computes. No split into a build and updates, because
+    // nothing is maintained: the picker recomputes each candidate's bound from
+    // scratch on every iteration, as md2 and md3 do with exact degrees.
+    std::size_t numBoundComputations = 0;
     std::vector<bool> eliminated(n, false);
     std::vector<std::int32_t> order;
     std::size_t degreeSum = 0;
@@ -344,16 +363,20 @@ std::vector<std::int32_t> mda2MinimumDegree(const Graph& G) {
     // NOT PRODUCTION: display only. The trace is what makes these files teachable and
     // is the whole reason they exist; nothing downstream reads it.
     mda2Show(A, I, C, mark, tag, "start: every edge explicit, no clique yet", &eliminated);
-    for (std::int32_t step = 0; step < static_cast<std::int32_t>(n); ++step) {
+    for (std::int32_t iteration = 0; iteration < static_cast<std::int32_t>(n); ++iteration) {
+        ++numIterations;
         std::int32_t pivot = NIL;          // O(n) scan, O(live) additions, no unions
         std::size_t best = 0;
         for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) {
             if (eliminated[u]) continue;
+            ++numBoundComputations;
             std::size_t candidateBound = mda2Bound(A, I, C, u);
             if (pivot == NIL || candidateBound < best) { pivot = u; best = candidateBound; }
         }
         auto [neighbors, absorbedCliques, prunedEdges] =
             mda2Eliminate(A, I, C, eliminated, mark, tag, pivot);
+        ++numEliminations;
+        numCliqueEntries += C[pivot].size();
         std::size_t degree = neighbors.size();
         // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
         // No union is needed for it: the eliminator has just formed reach(pivot) as
@@ -383,7 +406,7 @@ std::vector<std::int32_t> mda2MinimumDegree(const Graph& G) {
             }
         }
         std::ostringstream title;
-        title << "step " << step << ": eliminate " << pivot << " (bound " << best
+        title << "iteration " << iteration << ": eliminate " << pivot << " (bound " << best
               << ", degree " << degree
               << "), absorbed cliques: " << absorbedCliquesText.str()
               << ", pruned edges: " << prunedEdgesText.str();
@@ -393,10 +416,15 @@ std::vector<std::int32_t> mda2MinimumDegree(const Graph& G) {
     }
 
     std::size_t nnzL = degreeSum + n;
-    std::cout << "nnz(L) = " << nnzL << " against nnz(tril A) = " << nnzTrilA
+    std::cout << "n = " << n << ", nnz(L) = " << nnzL
+              << " against nnz(tril A) = " << nnzTrilA
               << ", fill = " << (nnzL - nnzTrilA) << "\n";
+    std::cout << "iterations: " << numIterations << "\n";
+    std::cout << "eliminations: " << numEliminations << "\n";
+    std::cout << "sum of |C[p]|: " << numCliqueEntries << "\n";
     // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     std::cout << "loose picks = " << loosePicks << " of " << n << "\n";
+    std::cout << "bound computations: " << numBoundComputations << "\n";
     std::cout << "order: [";
     for (std::size_t k = 0; k < order.size(); ++k)
         std::cout << (k == 0 ? "" : ", ") << order[k];
@@ -481,7 +509,7 @@ int main(int argc, char** argv) {
 
     // graph5, five vertices and four edges, two paths joined at 4: 2-1-4-0-3.
     // Small and fill free, and here for one reason: it is the smallest graph on
-    // which md3's merge test declines a genuine supervariable. At the step whose
+    // which md3's merge test declines a genuine supervariable. At the iteration whose
     // pivot is 0 and whose clique is {4}, vertex 4 has nothing explicit left but
     // belongs to c1 as well as to the new clique, so I[4] == {pivot} fails even
     // though c1's only member is 4 itself and everything 4 reaches lies inside
@@ -500,12 +528,12 @@ int main(int argc, char** argv) {
     // graph6, six vertices and eight edges. Here because one small graph carries
     // three things at once. Its supervariable {0, 4} is a supernode but NOT a
     // fundamental one: the elimination forest is 2 -> 1 -> 4 and 3 -> 0 -> 4, so
-    // 4 already has 1 as a child when 0 merges into it. The merge happens at step
+    // 4 already has 1 as a child when 0 merges into it. The merge happens at iteration
     // 2 of 5, so the run continues afterwards and the selection degree, 3 over
     // {2, 3, 4}, differs from the external degree, 2 over {2, 3}, with the
     // difference being the weight that merged. And superMembers ends with a hole
     // in the middle, slot 4 empty between two used ones, while no pivot equals
-    // its own step number. See the README sections on mass elimination and on
+    // its own iteration number. See the README sections on mass elimination and on
     // external degree.
     //
     //   edges: 0-2 0-3 0-4 1-3 2-3 2-4 2-5 3-4
@@ -518,7 +546,7 @@ int main(int argc, char** argv) {
         {2},              // 5
     };
 
-    // graph7, five vertices and six edges. The pairwise case: at the step whose
+    // graph7, five vertices and six edges. The pairwise case: at the iteration whose
     // pivot is 0 and whose clique is {2, 4}, vertices 2 and 4 are
     // indistinguishable FROM EACH OTHER, both reaching the same closed
     // neighborhood, yet neither is absorbable into the pivot, since each still

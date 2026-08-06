@@ -1,8 +1,8 @@
 # %% [markdown]
-# # Minimum degree, step 4: maintained degrees
+# # Minimum degree, iteration 4: maintained degrees
 #
 # Every version so far has recomputed a reachable set for EVERY live vertex at
-# EVERY step, just to find the smallest, then thrown all but one away. On a 3D
+# EVERY iteration, just to find the smallest, then thrown all but one away. On a 3D
 # grid that is roughly ten times the necessary work, and the ratio grows with n.
 # Section 5.7 of archive/sparse_factorization.md.
 #
@@ -196,7 +196,7 @@ def md4_eliminate(A, I, C, mark, tag, eliminated, pivot):
 
     # Mass elimination. u is INDISTINGUISHABLE from the pivot when the two have
     # the same closed neighborhood, md4_neighbors(u) | {u} == md4_neighbors(pivot)
-    # | {pivot}, as it stood before the step. Equivalently, now that the clique is
+    # | {pivot}, as it stood before the iteration. Equivalently, now that the clique is
     # formed, when everything u can still reach lies inside it. The test below is
     # a cheap sufficient condition for that: nothing explicit left and no clique
     # but the new one means u sees exactly what the pivot sees, so eliminating it
@@ -232,31 +232,52 @@ def md4_minimum_degree(G):
     C = {}                                     # clique id -> member list
     mark = [-1] * n                            # scratch for membership, with tag
     tag = 0
+    # Calls to the eliminate procedure, one per pivot. Not the count of vertices
+    # removed: a pivot can carry mass-merged vertices out with it, and from mmd1 up
+    # an iteration batches several eliminations before one degree update pass. The three
+    # counts coincide only where both of those are absent.
+    num_eliminations = 0
+    # Summed over the eliminations, |C[p]| being the new clique AFTER the trim, so
+    # in supernodal terms the update rather than the front. It is the raw reach of
+    # the eliminations, undeduplicated: where a layer deduplicates, the degree
+    # update count comes out below this, and the gap is what the batching saved.
+    # In md2 it is nnz(L) - n, there being no mass elimination to shrink a clique.
+    num_clique_entries = 0
+    # Passes of the outer loop, each one a batch of eliminations followed by one
+    # degree update pass. Here the batch is always a single elimination, so this
+    # equals num_eliminations; from mmd1 up the two come apart.
+    num_iterations = 0
     super_members = [[u] for u in range(n)]    # the vertices each pivot stands for
     eliminated = [False] * n
     pivots = []                                # the order over supervariables
-    num_eliminated = 0                         # a counter, not a scan of eliminated
+    num_eliminated_vertices = 0                         # a counter, not a scan of eliminated
     nnz_L = 0
 
     # The cache, and the count of degree computations, which is what this layer
     # exists to reduce. Built once, then touched only where it can be wrong.
     degrees = [len(A[u]) for u in range(n)]
-    num_degree_computations = n
+    # Only the updates are counted. The total, including the initial pass over all
+    # n vertices, is that plus n, so the report derives it rather than keeping a
+    # second counter that could drift from this one.
+    num_degree_updates = 0
 
     # NOT PRODUCTION: display only. The trace is what makes these files teachable and
     # is the whole reason they exist; nothing downstream reads it.
     md4_show(A, I, C, degrees, "start: every edge explicit, no clique yet",
              eliminated=eliminated)
     md4_show_state(degrees, super_members, eliminated, pivots)
-    step = 0
-    while num_eliminated < n:
+    iteration = 0
+    while num_eliminated_vertices < n:
+        num_iterations += 1
         pivot = min((u for u in range(n) if not eliminated[u]),
                     key=lambda u: degrees[u])
         neighbors, absorbed_cliques, pruned_edges, merged_vertices, tag = md4_eliminate(
             A, I, C, mark, tag, eliminated, pivot)
+        num_eliminations += 1
+        num_clique_entries += len(C[pivot])
         degree = len(neighbors)
         pivots.append(pivot)
-        num_eliminated += 1 + len(merged_vertices)
+        num_eliminated_vertices += 1 + len(merged_vertices)
         for u in merged_vertices:              # the pivot now stands for them too
             super_members[pivot] += super_members[u]
             super_members[u] = []
@@ -265,13 +286,13 @@ def md4_minimum_degree(G):
         # Everything else has the same A, the same cliques and the same live
         # neighbors as before, so its cached value is still correct.
         # Set view: the refresh set is exactly C[pivot], because reach(u) can only
-        # change when a source of it changed, and the step touched no source
+        # change when a source of it changed, and the iteration touched no source
         # outside C[pivot].
         refreshed_vertices = list(C[pivot])
         for u in refreshed_vertices:
             neighbors_u, tag = md4_neighbors(A, I, C, mark, tag, u)
             degrees[u] = len(neighbors_u)
-        num_degree_computations += len(refreshed_vertices)
+        num_degree_updates += len(refreshed_vertices)
         degrees[pivot] = 0
         for u in merged_vertices:
             degrees[u] = 0
@@ -295,22 +316,26 @@ def md4_minimum_degree(G):
         # NOT PRODUCTION: display only. The trace is what makes these files teachable and
         # is the whole reason they exist; nothing downstream reads it.
         md4_show(A, I, C, degrees,
-                 (f"step {step}: eliminate {pivot} (degree {degree}, size {super_size}, "
+                 (f"iteration {iteration}: eliminate {pivot} (degree {degree}, size {super_size}, "
                   f"external degree {external_degree}), "
                   f"absorbed cliques: {absorbed_cliques_text}, "
                   f"pruned edges: {pruned_edges_text}, "
                   f"merged vertices: {merged_vertices_text}, "
-                  f"refreshed: {refreshed_vertices_text}"),
+                  f"refreshed vertices: {refreshed_vertices_text}"),
                  eliminated=eliminated)
         # NOT PRODUCTION: display only. The trace is what makes these files teachable and
         # is the whole reason they exist; nothing downstream reads it.
         md4_show_state(degrees, super_members, eliminated, pivots)
-        step += 1
+        iteration += 1
 
     order = [u for pivot in pivots for u in super_members[pivot]]
-    print(f"nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
+    print(f"n = {n}, nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
           f"fill = {nnz_L - nnz_tril_A}")
-    print(f"degree computations: {num_degree_computations}")
+    print(f"iterations: {num_iterations}")
+    print(f"eliminations: {num_eliminations}")
+    print(f"sum of |C[p]|: {num_clique_entries}")
+    print(f"degree computations: {num_degree_updates + n}, "
+          f"degree updates: {num_degree_updates}")
     print(f"order: {order}")
     return order
 
@@ -385,7 +410,7 @@ graph4 = [
 
 # graph5, five vertices and four edges, two paths joined at 4: 2-1-4-0-3. Small
 # and fill free, and here for one reason: it is the smallest graph on which md3's
-# merge test declines a genuine supervariable. At the step whose pivot is 0 and
+# merge test declines a genuine supervariable. At the iteration whose pivot is 0 and
 # whose clique is {4}, vertex 4 has nothing explicit left but belongs to c1 as
 # well as to the new clique, so I[4] == {pivot} fails even though c1's only
 # member is 4 itself and everything 4 reaches lies inside the new clique. The
@@ -404,11 +429,11 @@ graph5 = [
 # graph6, six vertices and eight edges. Here because one small graph carries
 # three things at once. Its supervariable {0, 4} is a supernode but NOT a
 # fundamental one: the elimination forest is 2 -> 1 -> 4 and 3 -> 0 -> 4, so 4
-# already has 1 as a child when 0 merges into it. The merge happens at step 2 of
+# already has 1 as a child when 0 merges into it. The merge happens at iteration 2 of
 # 5, so the run continues afterwards and the selection degree, 3 over {2, 3, 4},
 # differs from the external degree, 2 over {2, 3}, with the difference being the
 # size of what merged. And super_members ends with a hole in the middle, slot 4
-# empty between two used ones, while no pivot equals its own step number. See the
+# empty between two used ones, while no pivot equals its own iteration number. See the
 # README sections on mass elimination and on external degree.
 #
 #   edges: 0-2 0-3 0-4 1-3 2-3 2-4 2-5 3-4
@@ -421,7 +446,7 @@ graph6 = [
     {2},              # 5
 ]
 
-# graph7, five vertices and six edges. The pairwise case: at the step whose pivot
+# graph7, five vertices and six edges. The pairwise case: at the iteration whose pivot
 # is 0 and whose clique is {2, 4}, vertices 2 and 4 are indistinguishable FROM
 # EACH OTHER, both reaching the same closed neighborhood, yet neither is
 # absorbable into the pivot, since each still reaches 3 from outside the clique.

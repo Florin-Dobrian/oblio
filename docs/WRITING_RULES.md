@@ -90,6 +90,22 @@ supernode, parent, child) when discussing the elimination forest, and the neutra
 neutral: a node is neither row nor column (the structure is symmetric), so a supernode of nodes
 commits to neither.
 
+**Clique, not element.** An eliminated pivot's fill-in structure is a **clique**. AMD and genmmd
+both call it an *element*, and every ordering paper in that lineage follows them, so the word is
+in every source we read and it leaks into our own writing constantly. It is still not our word.
+Clique says what the object IS, a set of vertices now mutually adjacent, and it is the word the
+rest of this tree already uses: `QuotientGraph::clique`, `cliqueSize`, `cliqueDegree`, the clique
+arena, and the counter "clique-member visits".
+
+The one place *element* is correct is inside a quotation of code that uses it. When the prose is
+walking through `mmdupd` or `AMD_2`, naming their `ehead` chain or their `Elen` array, their word
+has to stand or the explanation stops matching the source. Make it visibly theirs, and say once
+per document that element is their name for our clique. Everywhere else, including comments and
+identifiers in our own files, it is clique.
+
+*Element* in the ordinary English sense is untouched: "a d-element list", "an element of `A[u]`",
+`std::min_element`. That is a different word and it collides with nothing.
+
 **The Cholesky factor is `C`, the LDL factor is `L`.** Cholesky is `A = CC^H` (`CC^T` in real);
 LDL is `A = LDL^H` (or `LDL^T`). The letter carries the distinction the two turn on: `C` holds its
 own diagonal, whereas `L` is *unit* lower triangular with the diagonal pulled out into `D`. Writing

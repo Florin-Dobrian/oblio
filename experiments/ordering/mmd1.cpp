@@ -8,7 +8,7 @@
 // archive/sparse_factorization.md.
 //
 // The idea, from Liu (1985), is the M in MMD. Refreshing degrees is the expensive
-// step, so do it less often: eliminate a whole INDEPENDENT SET of least-degree
+// iteration, so do it less often: eliminate a whole INDEPENDENT SET of least-degree
 // vertices before refreshing anything. Non-adjacent pivots cannot disturb each
 // other's degrees, so every pivot in a batch is still a true minimum-degree
 // vertex when it is taken.
@@ -16,10 +16,10 @@
 // We never search for the independent set. It falls out of the bookkeeping:
 // eliminating a pivot EVICTS every vertex it reached from the degree buckets, so
 // whatever is still sitting in the bucket was not reached, hence is non-adjacent
-// to everything already taken this round.
+// to everything already taken this iteration.
 //
 // WHAT THIS GIVES UP, and it is not what one would guess. The pivots are exact,
-// but the vertices the batch evicted are invisible for the rest of the round, so
+// but the vertices the batch evicted are invisible for the rest of the iteration, so
 // the choice is made among the untouched remainder rather than among all
 // candidates. The batch does not pick a worse vertex, it picks a different vertex
 // OF THE SAME DEGREE. Minimum degree is famously sensitive to tie-breaks, so the
@@ -57,16 +57,16 @@
 //
 // The tag/marker machinery with its maxint overflow reset is not modeled at all.
 // It exists because the marks live in reusable integer arrays; ours are the mark
-// and touchedRound arrays, which do the same job with an explicit tag.
+// and touchedIteration arrays, which do the same job with an explicit tag.
 //
 //
 // COMPLEXITY, AND ONE PLACE THE PYTHON PAYS MORE THAN THE C++. The goal is the
 // same asymptotic cost as the vendored routines, without their coding style. Two
 // things were wrong and are fixed: the driver loop counts eliminations rather than
-// scanning `eliminated` (O(n) per step before, O(1) now), and the mass elimination
+// scanning `eliminated` (O(n) per iteration before, O(1) now), and the mass elimination
 // block strips a merged vertex from C[pivot] alone rather than from every clique,
 // which is sound because I[u] was {pivot}. On a 20 by 20 grid those two cost 14800
-// and 4247 elementary steps before, against 34 and 47 after, with the real
+// and 4247 elementary iterations before, against 34 and 47 after, with the real
 // neighbor work at 26408.
 //
 // The containers are flat: A and I are sorted vectors, C is indexed by clique id,
@@ -415,7 +415,7 @@ mmd1Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
 
     // Mass elimination. u is INDISTINGUISHABLE from the pivot when the two have
     // the same closed neighborhood, mmd1Neighbors(u) | {u} == mmd1Neighbors(pivot)
-    // | {pivot}, as it stood before the step. Equivalently, now that the clique is
+    // | {pivot}, as it stood before the iteration. Equivalently, now that the clique is
     // formed, when everything u can still reach lies inside it. The test below is
     // a cheap sufficient condition for that: nothing explicit left and no clique
     // but the new one means u sees exactly what the pivot sees, so eliminating it
@@ -466,8 +466,8 @@ void mmd1Refile(Buckets& buckets, std::vector<std::size_t>& degrees,
 // delta widens the batch to vertices within delta of the minimum degree, which
 // buys still fewer refreshes for a real concession, since those vertices are not
 // minimal. delta = 0 keeps the batch to true minima. A negative delta takes one
-// pivot per round, which is md5's behavior reached through this code path.
-// delta is signed: negative means one pivot per round. It is compared against a
+// pivot per iteration, which is md5's behavior reached through this code path.
+// delta is signed: negative means one pivot per iteration. It is compared against a
 // degree and its useful range stops at n - 1, so it is an index-like quantity by
 // Oblio's rule, a std::int32_t rather than a count.
 std::vector<std::int32_t> mmd1MinimumDegree(const Graph& G, std::int32_t delta = 0) {
@@ -480,31 +480,45 @@ std::vector<std::int32_t> mmd1MinimumDegree(const Graph& G, std::int32_t delta =
     Cliques C(n);      // clique id -> member list
     std::vector<std::int32_t> mark(n, NIL);       // scratch for membership, with tag
     std::int32_t tag = 0;
+    // Calls to the eliminate procedure, one per pivot. Not the count of vertices
+    // removed: a pivot can carry mass-merged vertices out with it, and from mmd1 up
+    // an iteration batches several eliminations before one degree update pass. The three
+    // counts coincide only where both of those are absent.
+    std::size_t numEliminations = 0;
+    // Summed over the eliminations, |C[p]| being the new clique AFTER the trim, so
+    // in supernodal terms the update rather than the front. It is the raw reach of
+    // the eliminations, undeduplicated: where a layer deduplicates, the degree
+    // update count comes out below this, and the gap is what the batching saved.
+    // In md2 it is nnz(L) - n, there being no mass elimination to shrink a clique.
+    std::size_t numCliqueEntries = 0;
     std::vector<std::vector<std::int32_t>> superMembers(n);   // for the expansion
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u)
         superMembers[u].push_back(u);
     std::vector<bool> eliminated(n, false);
     std::vector<std::int32_t> pivots;             // the order over supervariables
-    std::size_t numEliminated = 0;                // a counter, not a scan of eliminated
+    std::size_t numEliminatedVertices = 0;                // a counter, not a scan of eliminated
     std::size_t nnzL = 0;
 
     std::vector<std::size_t> degrees(n);          // a degree counts, so it measures
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) degrees[u] = A[u].size();
-    std::size_t numDegreeComputations = n;
+    // Only the updates are counted. The total, including the initial pass over all
+    // n vertices, is that plus n, so the report derives it rather than keeping a
+    // second counter that could drift from this one.
+    std::size_t numDegreeUpdates = 0;
 
     Buckets buckets(n);
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u)
         buckets.file(degrees[u], u);
     std::size_t minDegree = n > 0 ? *std::min_element(degrees.begin(), degrees.end()) : 0;
     std::size_t numBucketProbes = 0;
-    std::size_t numRounds = 0;                    // batches, the metric this layer adds
-    std::vector<std::int32_t> touchedRound(n, NIL);  // the round u was last evicted in
+    std::size_t numIterations = 0;                    // batches, the metric this layer adds
+    std::vector<std::int32_t> touchedIteration(n, NIL);  // the iteration u was last evicted in
 
     // NOT PRODUCTION: display only. The trace is what makes these files teachable and
     // is the whole reason they exist; nothing downstream reads it.
     mmd1Show(A, I, C, degrees, "start: every edge explicit, no clique yet", &eliminated);
     mmd1ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
-    while (numEliminated < n) {
+    while (numEliminatedVertices < n) {
         while (buckets.empty(minDegree)) {      // walk up to the first live bucket
             ++minDegree;
             ++numBucketProbes;
@@ -515,7 +529,7 @@ std::vector<std::int32_t> mmd1MinimumDegree(const Graph& G, std::int32_t delta =
         // Take pivots from buckets [minDegree, minDegree + delta]. Eviction is
         // what keeps them independent: eliminating a pivot pulls every vertex it
         // reached out of the buckets, so whatever is still filed was not reached,
-        // hence is not adjacent to anything taken this round.
+        // hence is not adjacent to anything taken this iteration.
         //
         // Set view of the invariant the eviction maintains, where reached is the
         // union of C[p] over the pivots taken so far:
@@ -523,7 +537,7 @@ std::vector<std::int32_t> mmd1MinimumDegree(const Graph& G, std::int32_t delta =
         //     filed = live - reached,  so  batch & reached == {}
         //
         // No set is built for either side. Membership in filed is the filed flag,
-        // and touchedRound is the same idea one level up: it stamps the round a
+        // and touchedIteration is the same idea one level up: it stamps the iteration a
         // vertex was evicted in, so the refresh set is accumulated without a set
         // and without a sort.
         // Clamped: a degree is at most n - 1, so a wider window would walk the
@@ -546,9 +560,11 @@ std::vector<std::int32_t> mmd1MinimumDegree(const Graph& G, std::int32_t delta =
 
             auto [neighbors, absorbedCliques, prunedEdges, mergedVertices] =
                 mmd1Eliminate(A, I, C, eliminated, mark, tag, pivot);
+            ++numEliminations;
+            numCliqueEntries += C[pivot].size();
             batch.push_back(pivot);
             pivots.push_back(pivot);
-            numEliminated += 1 + mergedVertices.size();
+            numEliminatedVertices += 1 + mergedVertices.size();
             for (std::int32_t u : mergedVertices) {   // the pivot now stands for them too
                 superMembers[pivot].insert(superMembers[pivot].end(),
                                            superMembers[u].begin(), superMembers[u].end());
@@ -560,8 +576,8 @@ std::vector<std::int32_t> mmd1MinimumDegree(const Graph& G, std::int32_t delta =
 
             for (std::int32_t u : C[pivot]) {   // EVICT, with a stale degree
                 buckets.unfile(degrees[u], u);
-                if (touchedRound[u] != static_cast<std::int32_t>(numRounds)) {
-                    touchedRound[u] = static_cast<std::int32_t>(numRounds);
+                if (touchedIteration[u] != static_cast<std::int32_t>(numIterations)) {
+                    touchedIteration[u] = static_cast<std::int32_t>(numIterations);
                     touched.push_back(u);       // a marker, so O(1) per eviction
                 }
             }
@@ -616,13 +632,13 @@ std::vector<std::int32_t> mmd1MinimumDegree(const Graph& G, std::int32_t delta =
                     first = false;
                 }
             }
-            std::cout << "round " << numRounds << ": eliminate " << pivot << " (degree "
+            std::cout << "iteration " << numIterations << ": eliminate " << pivot << " (degree "
                       << degree << ", size " << superSize << ", external degree "
                       << externalDegree << "), absorbed cliques: "
                       << absorbedCliquesText.str() << ", pruned edges: "
                       << prunedEdgesText.str() << ", merged vertices: "
                       << mergedVerticesText.str() << ", evicted: " << evictedText.str() << "\n";
-            if (delta < 0) break;               // one pivot per round, as md5 does
+            if (delta < 0) break;               // one pivot per iteration, as md5 does
         }
 
         // ---- one REFRESH, for everything the batch reached -----------------
@@ -632,9 +648,9 @@ std::vector<std::int32_t> mmd1MinimumDegree(const Graph& G, std::int32_t delta =
             degrees[u] = mmd1Neighbors(A, I, C, mark, tag, u).size();
             buckets.file(degrees[u], u);
         }
-        numDegreeComputations += refreshedVertices.size();
+        numDegreeUpdates += refreshedVertices.size();
         for (std::int32_t u : refreshedVertices) minDegree = std::min(minDegree, degrees[u]);
-        ++numRounds;
+        ++numIterations;
 
         std::ostringstream batchText;
         for (std::size_t k = 0; k < batch.size(); ++k)
@@ -650,8 +666,8 @@ std::vector<std::int32_t> mmd1MinimumDegree(const Graph& G, std::int32_t delta =
             }
         }
         std::ostringstream title;
-        title << "round " << (numRounds - 1) << " done: batch of " << batch.size() << ": "
-              << batchText.str() << ", refreshed: " << refreshedVerticesText.str();
+        title << "iteration " << (numIterations - 1) << " done: batch of " << batch.size() << ": "
+              << batchText.str() << ", refreshed vertices: " << refreshedVerticesText.str();
         // NOT PRODUCTION: display only. The trace is what makes these files teachable and
         // is the whole reason they exist; nothing downstream reads it.
         mmd1Show(A, I, C, degrees, title.str(), &eliminated);
@@ -661,11 +677,15 @@ std::vector<std::int32_t> mmd1MinimumDegree(const Graph& G, std::int32_t delta =
     std::vector<std::int32_t> order;
     for (std::int32_t pivot : pivots)
         for (std::int32_t u : superMembers[pivot]) order.push_back(u);
-    std::cout << "nnz(L) = " << nnzL << " against nnz(tril A) = " << nnzTrilA
+    std::cout << "n = " << n << ", nnz(L) = " << nnzL
+              << " against nnz(tril A) = " << nnzTrilA
               << ", fill = " << (nnzL - nnzTrilA) << "\n";
-    std::cout << "degree computations: " << numDegreeComputations
-              << ", bucket probes: " << numBucketProbes
-              << ", rounds: " << numRounds << "\n";
+    std::cout << "iterations: " << numIterations << "\n";
+    std::cout << "eliminations: " << numEliminations << "\n";
+    std::cout << "sum of |C[p]|: " << numCliqueEntries << "\n";
+    std::cout << "degree computations: " << (numDegreeUpdates + n)
+              << ", degree updates: " << numDegreeUpdates
+              << ", bucket probes: " << numBucketProbes << "\n";
     std::cout << "order: [";
     for (std::size_t k = 0; k < order.size(); ++k)
         std::cout << (k == 0 ? "" : ", ") << order[k];
@@ -692,7 +712,7 @@ static Graph gridGraph(int side) {
 }
 
 // Keep the trace's summary lines and discard everything else, as it is written rather than
-// afterwards. A grid trace is far too large to hold: every step prints the whole quotient graph,
+// afterwards. A grid trace is far too large to hold: every iteration prints the whole quotient graph,
 // so at n = 10000 the captured text runs to gigabytes and the process dies holding it. This
 // filters line by line instead, keeping only what the whitelist names, so the memory is one line.
 class CounterSink : public std::streambuf {
@@ -809,7 +829,7 @@ int main(int argc, char** argv) {
 
     // graph5, five vertices and four edges, two paths joined at 4: 2-1-4-0-3.
     // Small and fill free, and here for one reason: it is the smallest graph on
-    // which mmd1's merge test declines a genuine supervariable. At the step whose
+    // which mmd1's merge test declines a genuine supervariable. At the iteration whose
     // pivot is 0 and whose clique is {4}, vertex 4 has nothing explicit left but
     // belongs to c1 as well as to the new clique, so I[4] == {pivot} fails even
     // though c1's only member is 4 itself and everything 4 reaches lies inside
@@ -828,12 +848,12 @@ int main(int argc, char** argv) {
     // graph6, six vertices and eight edges. Here because one small graph carries
     // three things at once. Its supervariable {0, 4} is a supernode but NOT a
     // fundamental one: the elimination forest is 2 -> 1 -> 4 and 3 -> 0 -> 4, so
-    // 4 already has 1 as a child when 0 merges into it. The merge happens at step
+    // 4 already has 1 as a child when 0 merges into it. The merge happens at iteration
     // 2 of 5, so the run continues afterwards and the selection degree, 3 over
     // {2, 3, 4}, differs from the external degree, 2 over {2, 3}, with the
     // difference being the size of what merged. And superMembers ends with a hole
     // in the middle, slot 4 empty between two used ones, while no pivot equals
-    // its own step number. See the README sections on mass elimination and on
+    // its own iteration number. See the README sections on mass elimination and on
     // external degree.
     //
     //   edges: 0-2 0-3 0-4 1-3 2-3 2-4 2-5 3-4
@@ -846,7 +866,7 @@ int main(int argc, char** argv) {
         {2},              // 5
     };
 
-    // graph7, five vertices and six edges. The pairwise case: at the step whose
+    // graph7, five vertices and six edges. The pairwise case: at the iteration whose
     // pivot is 0 and whose clique is {2, 4}, vertices 2 and 4 are
     // indistinguishable FROM EACH OTHER, both reaching the same closed
     // neighborhood, yet neither is absorbable into the pivot, since each still

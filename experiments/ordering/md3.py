@@ -1,7 +1,7 @@
 # %% [markdown]
-# # Minimum degree, step 3: supervariables and mass elimination
+# # Minimum degree, iteration 3: supervariables and mass elimination
 #
-# md2 stopped the graph from growing. This step stops it from being as wide, by
+# md2 stopped the graph from growing. This iteration stops it from being as wide, by
 # noticing that eliminating a pivot often makes some of its neighbors
 # INDISTINGUISHABLE from it: their whole remaining neighborhood lies inside the
 # new clique, so eliminating them next costs no fill at all. Rather than let the
@@ -17,7 +17,7 @@
 # The degree stays a plain count of neighbors, as in md2, and there is no weight
 # array. The literature carries one, and later layers will need it, but here it
 # would be redundant twice over: md3 merges only into the PIVOT, which is
-# eliminated in the same step, so no live vertex ever stands for more than one
+# eliminated in the same iteration, so no live vertex ever stands for more than one
 # original vertex, and a supervariable's size is len(super_members[p]) whenever
 # it is wanted. A weight array earns its place once the members are held as
 # chains over a flat array rather than as lists, where a size is no longer free.
@@ -197,7 +197,7 @@ def md3_eliminate(A, I, C, mark, tag, eliminated, pivot):
 
     # Mass elimination. u is INDISTINGUISHABLE from the pivot when the two have
     # the same closed neighborhood, md3_neighbors(u) | {u} == md3_neighbors(pivot)
-    # | {pivot}, as it stood before the step. Equivalently, now that the clique is
+    # | {pivot}, as it stood before the iteration. Equivalently, now that the clique is
     # formed, when everything u can still reach lies inside it. The test below is
     # a cheap sufficient condition for that: nothing explicit left and no clique
     # but the new one means u sees exactly what the pivot sees, so eliminating it
@@ -233,10 +233,26 @@ def md3_minimum_degree(G):
     C = {}                                     # clique id -> member list
     mark = [-1] * n                            # scratch for membership, with tag
     tag = 0
+    # Calls to the eliminate procedure, one per pivot. Not the count of vertices
+    # removed: a pivot can carry mass-merged vertices out with it, and from mmd1 up
+    # an iteration batches several eliminations before one degree update pass. The three
+    # counts coincide only where both of those are absent.
+    num_eliminations = 0
+    # Summed over the eliminations, |C[p]| being the new clique AFTER the trim, so
+    # in supernodal terms the update rather than the front. It is the raw reach of
+    # the eliminations, undeduplicated: where a layer deduplicates, the degree
+    # update count comes out below this, and the gap is what the batching saved.
+    # In md2 it is nnz(L) - n, there being no mass elimination to shrink a clique.
+    num_clique_entries = 0
+    # Passes of the outer loop, each one a batch of eliminations followed by one
+    # degree update pass. Here the batch is always a single elimination, so this
+    # equals num_eliminations; from mmd1 up the two come apart.
+    num_iterations = 0
+    num_degree_computations = 0
     super_members = [[u] for u in range(n)]    # the vertices each pivot stands for
     eliminated = [False] * n
     pivots = []                                # the order over supervariables
-    num_eliminated = 0                         # a counter, not a scan of eliminated
+    num_eliminated_vertices = 0                         # a counter, not a scan of eliminated
     nnz_L = 0
 
     # NOT PRODUCTION: display only. The trace is what makes these files teachable and
@@ -244,20 +260,24 @@ def md3_minimum_degree(G):
     tag = md3_show(A, I, C, mark, tag, "start: every edge explicit, no clique yet",
                    eliminated=eliminated)
     md3_show_state(super_members, eliminated, pivots)
-    step = 0
-    while num_eliminated < n:
+    iteration = 0
+    while num_eliminated_vertices < n:
+        num_iterations += 1
         pivot, best = -1, 0
         for u in range(n):                 # the key advances the tag, so no lambda
             if eliminated[u]:
                 continue
+            num_degree_computations += 1
             candidate, tag = md3_neighbors(A, I, C, mark, tag, u)
             if pivot == -1 or len(candidate) < best:
                 pivot, best = u, len(candidate)
         neighbors, absorbed_cliques, pruned_edges, merged_vertices, tag = md3_eliminate(
             A, I, C, mark, tag, eliminated, pivot)
+        num_eliminations += 1
+        num_clique_entries += len(C[pivot])
         degree = len(neighbors)
         pivots.append(pivot)
-        num_eliminated += 1 + len(merged_vertices)
+        num_eliminated_vertices += 1 + len(merged_vertices)
         for u in merged_vertices:              # the pivot now stands for them too
             super_members[pivot] += super_members[u]
             super_members[u] = []
@@ -280,7 +300,7 @@ def md3_minimum_degree(G):
         # NOT PRODUCTION: display only. The trace is what makes these files teachable and
         # is the whole reason they exist; nothing downstream reads it.
         tag = md3_show(A, I, C, mark, tag,
-                       (f"step {step}: eliminate {pivot} (degree {degree}, size {super_size}, "
+                       (f"iteration {iteration}: eliminate {pivot} (degree {degree}, size {super_size}, "
                         f"external degree {external_degree}), "
                         f"absorbed cliques: {absorbed_cliques_text}, "
                         f"pruned edges: {pruned_edges_text}, "
@@ -289,11 +309,15 @@ def md3_minimum_degree(G):
         # NOT PRODUCTION: display only. The trace is what makes these files teachable and
         # is the whole reason they exist; nothing downstream reads it.
         md3_show_state(super_members, eliminated, pivots)
-        step += 1
+        iteration += 1
 
     order = [u for pivot in pivots for u in super_members[pivot]]
-    print(f"nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
+    print(f"n = {n}, nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
           f"fill = {nnz_L - nnz_tril_A}")
+    print(f"iterations: {num_iterations}")
+    print(f"eliminations: {num_eliminations}")
+    print(f"sum of |C[p]|: {num_clique_entries}")
+    print(f"degree computations: {num_degree_computations}")
     print(f"order: {order}")
     return order
 
@@ -368,7 +392,7 @@ graph4 = [
 
 # graph5, five vertices and four edges, two paths joined at 4: 2-1-4-0-3. Small
 # and fill free, and here for one reason: it is the smallest graph on which md3's
-# merge test declines a genuine supervariable. At the step whose pivot is 0 and
+# merge test declines a genuine supervariable. At the iteration whose pivot is 0 and
 # whose clique is {4}, vertex 4 has nothing explicit left but belongs to c1 as
 # well as to the new clique, so I[4] == {pivot} fails even though c1's only
 # member is 4 itself and everything 4 reaches lies inside the new clique. The
@@ -387,11 +411,11 @@ graph5 = [
 # graph6, six vertices and eight edges. Here because one small graph carries
 # three things at once. Its supervariable {0, 4} is a supernode but NOT a
 # fundamental one: the elimination forest is 2 -> 1 -> 4 and 3 -> 0 -> 4, so 4
-# already has 1 as a child when 0 merges into it. The merge happens at step 2 of
+# already has 1 as a child when 0 merges into it. The merge happens at iteration 2 of
 # 5, so the run continues afterwards and the selection degree, 3 over {2, 3, 4},
 # differs from the external degree, 2 over {2, 3}, with the difference being the
 # size of what merged. And super_members ends with a hole in the middle, slot 4
-# empty between two used ones, while no pivot equals its own step number. See the
+# empty between two used ones, while no pivot equals its own iteration number. See the
 # README sections on mass elimination and on external degree.
 #
 #   edges: 0-2 0-3 0-4 1-3 2-3 2-4 2-5 3-4
@@ -404,7 +428,7 @@ graph6 = [
     {2},              # 5
 ]
 
-# graph7, five vertices and six edges. The pairwise case: at the step whose pivot
+# graph7, five vertices and six edges. The pairwise case: at the iteration whose pivot
 # is 0 and whose clique is {2, 4}, vertices 2 and 4 are indistinguishable FROM
 # EACH OTHER, both reaching the same closed neighborhood, yet neither is
 # absorbable into the pivot, since each still reaches 3 from outside the clique.

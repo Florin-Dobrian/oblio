@@ -32,7 +32,7 @@
 # does.
 #
 # PASS 2, THE q2h SPLIT. mmdupd does not walk a flat list of reached vertices. It
-# walks the ELEMENTS created this round, `el = list[el]`, and for each one it
+# walks the ELEMENTS created this iteration, `el = list[el]`, and for each one it
 # computes dg0 once, the weighted size of that element, then visits the element's
 # members. A member is classified by what it has left BESIDES the new element:
 # mmdelm stashes fwd[rn] = nq + 1 where nq counts the survivors of the compaction,
@@ -49,7 +49,7 @@
 # does move is the ORDER of the filing, since the refresh is now element by element
 # with q2h before qxh, and filing order decides what a bucket holds.
 #
-# A vertex reached by two pivots in the same round is refreshed once: mmdupd skips
+# A vertex reached by two pivots in the same iteration is refreshed once: mmdupd skips
 # it on the second visit with `if(bwd[en]!=0) goto n2200`, since a refiled vertex
 # has a bucket again. Here that is the `filed` flag.
 #
@@ -105,7 +105,7 @@
 # The early termination, `if((num+qsize[mn])>neqns)goto n1000`, checked after the
 # pivot is numbered and before it is eliminated. When the last supervariable is
 # reached there is nothing left to update, so genmmd skips the elimination and goes
-# straight to the numbering. Ours is the same test on num_eliminated: take the
+# straight to the numbering. Ours is the same test on num_eliminated_vertices: take the
 # pivot, account for it, and stop rather than eliminate into an empty graph.
 #
 # Run: python3 mmd2.py       every example
@@ -308,7 +308,7 @@ def mmd2_eliminate(A, I, C, mark, tag, eliminated, outmatched, pivot):
 
     # Mass elimination. u is INDISTINGUISHABLE from the pivot when the two have
     # the same closed neighborhood, mmd2_neighbors(u) | {u} == mmd2_neighbors(pivot)
-    # | {pivot}, as it stood before the step. Equivalently, now that the clique is
+    # | {pivot}, as it stood before the iteration. Equivalently, now that the clique is
     # formed, when everything u can still reach lies inside it. The test below is
     # a cheap sufficient condition for that: nothing explicit left and no clique
     # but the new one means u sees exactly what the pivot sees, so eliminating it
@@ -363,14 +363,14 @@ def mmd2_refile(buckets, filed, degrees, u, new_degree):
 def mmd2_minimum_degree(G, delta=0):
     """Multiple elimination: a batch of independent pivots per degree refresh.
 
-    delta is signed: negative means one pivot per round. It is compared against a
+    delta is signed: negative means one pivot per iteration. It is compared against a
     degree and its useful range stops at n - 1, so in the C++ twin it is a
     std::int32_t, an index-like quantity rather than a count.
 
     delta widens the batch to vertices within delta of the minimum degree, which
     buys still fewer refreshes for a real concession, since those vertices are not
     minimal. delta = 0 keeps the batch to true minima. A negative delta takes one
-    pivot per round, which is md5's behavior reached through this code path.
+    pivot per iteration, which is md5's behavior reached through this code path.
     """
     n = len(G)
     nnz_tril_A = sum(len(G[u]) for u in range(n)) // 2 + n
@@ -381,15 +381,29 @@ def mmd2_minimum_degree(G, delta=0):
     C = {}                                     # clique id -> member list
     mark = [-1] * n                            # scratch for membership, with tag
     tag = 0
+    # Calls to the eliminate procedure, one per pivot. Not the count of vertices
+    # removed: a pivot can carry mass-merged vertices out with it, and from mmd1 up
+    # an iteration batches several eliminations before one degree update pass. The three
+    # counts coincide only where both of those are absent.
+    num_eliminations = 0
+    # Summed over the eliminations, |C[p]| being the new clique AFTER the trim, so
+    # in supernodal terms the update rather than the front. It is the raw reach of
+    # the eliminations, undeduplicated: where a layer deduplicates, the degree
+    # update count comes out below this, and the gap is what the batching saved.
+    # In md2 it is nnz(L) - n, there being no mass elimination to shrink a clique.
+    num_clique_entries = 0
     super_members = [[u] for u in range(n)]    # the vertices each pivot stands for
     eliminated = [False] * n
     outmatched = [False] * n                   # withheld from the buckets, not merged
     pivots = []                                # the order over supervariables
-    num_eliminated = 0                         # a counter, not a scan of eliminated
+    num_eliminated_vertices = 0                         # a counter, not a scan of eliminated
     nnz_L = 0
 
     degrees = [len(A[u]) for u in range(n)]     # weighted from here on
-    num_degree_computations = n
+    # Only the updates are counted. The total, including the initial pass over all
+    # n vertices, is that plus n, so the report derives it rather than keeping a
+    # second counter that could drift from this one.
+    num_degree_updates = 0
 
     # mmdint files a degree-0 vertex under degree 1, `if(dg==0)dg=1`, so the
     # bucket a vertex sits in is max(degree, 1) rather than its degree. From here
@@ -401,11 +415,11 @@ def mmd2_minimum_degree(G, delta=0):
         mmd2_file(buckets, filed, degrees[u], u)
     min_degree = min(degrees) if n else 0
     num_bucket_probes = 0
-    num_rounds = 0                             # batches, the metric this layer adds
+    num_iterations = 0                             # batches, the metric this layer adds
     ncsub = 0                                  # genmmd's subscript estimate
     pair_merges = 0                            # q2h merges, the coarser supervariables
     outmatched_count = 0                       # vertices withheld rather than refiled
-    touched_round = [-1] * n                   # the round in which u was last evicted
+    touched_iteration = [-1] * n                   # the iteration in which u was last evicted
 
     # NOT PRODUCTION: display only. The trace is what makes these files teachable and
     # is the whole reason they exist; nothing downstream reads it.
@@ -426,7 +440,7 @@ def mmd2_minimum_degree(G, delta=0):
         nnz_L += external_degree + 1
         eliminated[u] = True
         pivots.append(u)
-        num_eliminated += 1
+        num_eliminated_vertices += 1
     if prepass_vertices:
         prepass_text = ", ".join(str(u) for u in prepass_vertices)
         # NOT PRODUCTION: display only. The trace is what makes these files teachable and
@@ -437,7 +451,7 @@ def mmd2_minimum_degree(G, delta=0):
         mmd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
     min_degree = 2 if n > 2 else min_degree     # head[1] = 0, and mdeg starts at 2
 
-    while num_eliminated < n:
+    while num_eliminated_vertices < n:
         while not buckets[min_degree]:         # walk up to the first live bucket
             min_degree += 1
             num_bucket_probes += 1
@@ -447,7 +461,7 @@ def mmd2_minimum_degree(G, delta=0):
         # Take pivots from buckets [min_degree, min_degree + delta]. Eviction is
         # what keeps them independent: eliminating a pivot pulls every vertex it
         # reached out of the buckets, so whatever is still filed was not reached,
-        # hence is not adjacent to anything taken this round.
+        # hence is not adjacent to anything taken this iteration.
         #
         # Set view of the invariant the eviction maintains, where reached is the
         # union of C[p] over the pivots taken so far:
@@ -455,7 +469,7 @@ def mmd2_minimum_degree(G, delta=0):
         #     filed = live - reached,  so  batch & reached == {}
         #
         # No set is built for either side. Membership in filed is the filed[] flag,
-        # and touched_round[] is the same idea one level up: it stamps the round a
+        # and touched_iteration[] is the same idea one level up: it stamps the iteration a
         # vertex was evicted in, so the refresh set is accumulated without a set
         # and without a sort.
         # Clamped: a degree is at most n - 1, so a wider window would walk the
@@ -476,9 +490,11 @@ def mmd2_minimum_degree(G, delta=0):
 
             neighbors, absorbed_cliques, pruned_edges, merged_vertices, tag = mmd2_eliminate(
                 A, I, C, mark, tag, eliminated, outmatched, pivot)
+            num_eliminations += 1
+            num_clique_entries += len(C[pivot])
             batch.append(pivot)
             pivots.append(pivot)
-            num_eliminated += 1 + len(merged_vertices)
+            num_eliminated_vertices += 1 + len(merged_vertices)
             for u in merged_vertices:          # the pivot now stands for them too
                 super_members[pivot] += super_members[u]
                 super_members[u] = []
@@ -488,8 +504,8 @@ def mmd2_minimum_degree(G, delta=0):
 
             for u in C[pivot]:                 # EVICT, with a stale degree
                 mmd2_unfile(buckets, filed, degrees[u], u)
-                if touched_round[u] != num_rounds:   # a marker, so O(1) per eviction
-                    touched_round[u] = num_rounds
+                if touched_iteration[u] != num_iterations:   # a marker, so O(1) per eviction
+                    touched_iteration[u] = num_iterations
                     touched.append(u)
 
             ncsub += degree + len(super_members[pivot]) - 2   # genmmd's *ncsub
@@ -504,17 +520,17 @@ def mmd2_minimum_degree(G, delta=0):
             pruned_edges_text = ", ".join(f"{u}-{v}" for u, v in pruned_edges) if pruned_edges else "none"
             merged_vertices_text = ", ".join(str(u) for u in merged_vertices) if merged_vertices else "none"
             evicted_text = ", ".join(str(u) for u in C[pivot]) if C[pivot] else "none"
-            print(f"round {num_rounds}: eliminate {pivot} (degree {degree}, size {super_size}, "
+            print(f"iteration {num_iterations}: eliminate {pivot} (degree {degree}, size {super_size}, "
                   f"external degree {external_degree}), "
                   f"absorbed cliques: {absorbed_cliques_text}, pruned edges: {pruned_edges_text}, "
                   f"merged vertices: {merged_vertices_text}, evicted: {evicted_text}")
-            if num_eliminated >= n:            # genmmd's num + qsize[mn] > neqns:
+            if num_eliminated_vertices >= n:            # genmmd's num + qsize[mn] > neqns:
                 break                          # nothing left to update
-            if delta < 0:                      # one pivot per round, as md5 does
+            if delta < 0:                      # one pivot per iteration, as md5 does
                 break
 
         # ---- one REFRESH, walked ELEMENT BY ELEMENT ------------------------
-        # mmdupd walks the elements this round created, not the vertices it
+        # mmdupd walks the elements this iteration created, not the vertices it
         # reached, and computes dg0 once per element: the size of that element,
         # which every member of it reaches in full. A member with exactly one other
         # source goes on the q2h list and is answered from dg0 plus that source;
@@ -536,7 +552,7 @@ def mmd2_minimum_degree(G, delta=0):
             # other source is walked directly.
             q2h, qxh = [], []
             for u in element_members:
-                if filed[u] or outmatched[u]:   # already refreshed this round, or
+                if filed[u] or outmatched[u]:   # already refreshed this iteration, or
                     continue                    # withheld as outmatched
                 other_sources = len(A[u]) + len(I[u]) - 1
                 (q2h if other_sources == 1 else qxh).append(u)
@@ -579,7 +595,7 @@ def mmd2_minimum_degree(G, delta=0):
                                 super_members[u] += super_members[v]
                                 super_members[v] = []
                                 eliminated[v] = True
-                                num_eliminated += 1
+                                num_eliminated_vertices += 1
                                 pair_merges += 1
                             else:
                                 # v reaches more than u does, so it can never be
@@ -604,25 +620,29 @@ def mmd2_minimum_degree(G, delta=0):
                 mmd2_file(buckets, filed, degrees[u], u)
                 refreshed_vertices.append(u)
 
-        num_degree_computations += len(refreshed_vertices)
+        num_degree_updates += len(refreshed_vertices)
         min_degree = min([min_degree] + [degrees[u] for u in refreshed_vertices])
-        num_rounds += 1
+        num_iterations += 1
 
         batch_text = ", ".join(str(u) for u in batch)
         refreshed_vertices_text = ", ".join(str(u) for u in refreshed_vertices) if refreshed_vertices else "none"
         # NOT PRODUCTION: display only. The trace is what makes these files teachable and
         # is the whole reason they exist; nothing downstream reads it.
         mmd2_show(A, I, C, degrees,
-                  (f"round {num_rounds - 1} done: batch of {len(batch)}: {batch_text}, "
-                   f"refreshed: {refreshed_vertices_text}"),
+                  (f"iteration {num_iterations - 1} done: batch of {len(batch)}: {batch_text}, "
+                   f"refreshed vertices: {refreshed_vertices_text}"),
                   eliminated=eliminated)
         mmd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
 
     order = [u for pivot in pivots for u in super_members[pivot]]
-    print(f"nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
+    print(f"n = {n}, nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
           f"fill = {nnz_L - nnz_tril_A}")
-    print(f"degree computations: {num_degree_computations}, "
-          f"bucket probes: {num_bucket_probes}, rounds: {num_rounds}, "
+    print(f"iterations: {num_iterations}")
+    print(f"eliminations: {num_eliminations}")
+    print(f"sum of |C[p]|: {num_clique_entries}")
+    print(f"degree computations: {num_degree_updates + n}, "
+          f"degree updates: {num_degree_updates}, "
+          f"bucket probes: {num_bucket_probes}, "
           f"pair merges: {pair_merges}, outmatched: {outmatched_count}, "
           f"ncsub: {ncsub}")
     print(f"order: {order}")
@@ -699,7 +719,7 @@ graph4 = [
 
 # graph5, five vertices and four edges, two paths joined at 4: 2-1-4-0-3. Small
 # and fill free, and here for one reason: it is the smallest graph on which md3's
-# merge test declines a genuine supervariable. At the step whose pivot is 0 and
+# merge test declines a genuine supervariable. At the iteration whose pivot is 0 and
 # whose clique is {4}, vertex 4 has nothing explicit left but belongs to c1 as
 # well as to the new clique, so I[4] == {pivot} fails even though c1's only
 # member is 4 itself and everything 4 reaches lies inside the new clique. The
@@ -718,11 +738,11 @@ graph5 = [
 # graph6, six vertices and eight edges. Here because one small graph carries
 # three things at once. Its supervariable {0, 4} is a supernode but NOT a
 # fundamental one: the elimination forest is 2 -> 1 -> 4 and 3 -> 0 -> 4, so 4
-# already has 1 as a child when 0 merges into it. The merge happens at step 2 of
+# already has 1 as a child when 0 merges into it. The merge happens at iteration 2 of
 # 5, so the run continues afterwards and the selection degree, 3 over {2, 3, 4},
 # differs from the external degree, 2 over {2, 3}, with the difference being the
 # size of what merged. And super_members ends with a hole in the middle, slot 4
-# empty between two used ones, while no pivot equals its own step number. See the
+# empty between two used ones, while no pivot equals its own iteration number. See the
 # README sections on mass elimination and on external degree.
 #
 #   edges: 0-2 0-3 0-4 1-3 2-3 2-4 2-5 3-4
@@ -735,7 +755,7 @@ graph6 = [
     {2},              # 5
 ]
 
-# graph7, five vertices and six edges. The pairwise case: at the step whose pivot
+# graph7, five vertices and six edges. The pairwise case: at the iteration whose pivot
 # is 0 and whose clique is {2, 4}, vertices 2 and 4 are indistinguishable FROM
 # EACH OTHER, both reaching the same closed neighborhood, yet neither is
 # absorbable into the pivot, since each still reaches 3 from outside the clique.
@@ -778,7 +798,7 @@ def grid_graph(side):
 
 
 # Keep the closing lines and discard everything else, as it is written rather than afterwards.
-# A grid trace is far too large to hold: every step prints the whole quotient graph, so at
+# A grid trace is far too large to hold: every iteration prints the whole quotient graph, so at
 # n = 10000 the captured text runs to gigabytes and the process dies holding it. This filters
 # line by line instead, so the memory is one line. The C++ twin does the same with a streambuf.
 class CounterSink:

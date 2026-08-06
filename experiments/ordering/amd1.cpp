@@ -38,7 +38,7 @@
 // not guaranteed to be minimal at all.
 //
 // The trace prints the exact degree beside the bound, so the gap is visible at
-// every step, and the closing lines count how often the bound was loose.
+// every iteration, and the closing lines count how often the bound was loose.
 //
 // THIS FILE IS THE IDEA ALONE. Aggressive absorption, hash supervariable
 // detection, the two-pass update, dense row handling and the rest of amd_1 and
@@ -396,7 +396,7 @@ amd1Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
 
     // Mass elimination. u is INDISTINGUISHABLE from the pivot when the two have
     // the same closed neighborhood, amd1Neighbors(u) | {u} == amd1Neighbors(pivot)
-    // | {pivot}, as it stood before the step. Equivalently, now that the clique is
+    // | {pivot}, as it stood before the iteration. Equivalently, now that the clique is
     // formed, when everything u can still reach lies inside it. The test below is
     // a cheap sufficient condition for that: nothing explicit left and no clique
     // but the new one means u sees exactly what the pivot sees, so eliminating it
@@ -454,12 +454,27 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
     Cliques C(n);      // clique id -> member list
     std::vector<std::int32_t> mark(n, NIL);       // scratch for membership, with tag
     std::int32_t tag = 0;
+    // Calls to the eliminate procedure, one per pivot. Not the count of vertices
+    // removed: a pivot can carry mass-merged vertices out with it, and from mmd1 up
+    // an iteration batches several eliminations before one degree update pass. The three
+    // counts coincide only where both of those are absent.
+    std::size_t numEliminations = 0;
+    // Summed over the eliminations, |C[p]| being the new clique AFTER the trim, so
+    // in supernodal terms the update rather than the front. It is the raw reach of
+    // the eliminations, undeduplicated: where a layer deduplicates, the degree
+    // update count comes out below this, and the gap is what the batching saved.
+    // In md2 it is nnz(L) - n, there being no mass elimination to shrink a clique.
+    std::size_t numCliqueEntries = 0;
+    // Passes of the outer loop, each one a batch of eliminations followed by one
+    // degree update pass. Here the batch is always a single elimination, so this
+    // equals numEliminations; from mmd1 up the two come apart.
+    std::size_t numIterations = 0;
     std::vector<std::vector<std::int32_t>> superMembers(n);   // for the expansion
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u)
         superMembers[u].push_back(u);
     std::vector<bool> eliminated(n, false);
     std::vector<std::int32_t> pivots;             // the order over supervariables
-    std::size_t numEliminated = 0;                // a counter, not a scan of eliminated
+    std::size_t numEliminatedVertices = 0;                // a counter, not a scan of eliminated
     std::size_t nnzL = 0;
 
     // The cache, and the count of degree computations, which is what this layer
@@ -469,7 +484,12 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
     std::vector<std::size_t> degrees(n);          // a degree counts, so it measures
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) degrees[u] = A[u].size();
     std::vector<std::size_t> exact = degrees;
-    std::size_t numDegreeComputations = n;
+    // Only the updates are counted. The total, including the initial pass over all
+    // n vertices, is that plus n, so the report derives it. That first pass finds
+    // |A[u]| with no clique yet formed, which is the bound formula on an empty
+    // clique set and so is exact; the bound becomes a bound from the first
+    // elimination on.
+    std::size_t numBoundUpdates = 0;
     std::size_t numMemberVisits = 0;              // what an exact refresh would cost
     std::size_t numCliqueReads = 0;               // what the bound costs instead
     // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
@@ -492,11 +512,11 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
     std::size_t numBucketProbes = 0;
 
     // |C[c] - C[pivot]| per clique, indexed by clique id, hoisted out of the loop it is used in.
-    // Allocating and zeroing it per pivot reads better and is O(n) per step, hence O(n * n) over
+    // Allocating and zeroing it per pivot reads better and is O(n) per iteration, hence O(n * n) over
     // the run in bookkeeping alone, independent of the graph, which would swamp the very cost the
-    // bound exists to save. Only the entries a step writes are touched, and they are exactly the
-    // ones it reads, so the step clears what it wrote rather than the array being rebuilt. The
-    // Python twin has no such line, its outside being a dict over the cliques the step touched,
+    // bound exists to save. Only the entries an iteration writes are touched, and they are exactly the
+    // ones it reads, so the iteration clears what it wrote rather than the array being rebuilt. The
+    // Python twin has no such line, its outside being a dict over the cliques the iteration touched,
     // which is already the right shape.
     std::vector<std::size_t> outside(n, 0);
 
@@ -505,8 +525,9 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
     amd1Show(A, I, C, degrees, exact,
              "start: every edge explicit, no clique yet, degrees exact", &eliminated);
     amd1ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
-    int step = 0;
-    while (numEliminated < n) {
+    int iteration = 0;
+    while (numEliminatedVertices < n) {
+        ++numIterations;
         while (buckets.empty(minDegree)) {      // walk up to the first live bucket
             ++minDegree;
             ++numBucketProbes;
@@ -515,9 +536,11 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
         std::int32_t pivot = buckets.head[minDegree];   // whatever was filed last
         auto [neighbors, absorbedCliques, prunedEdges, mergedVertices] =
             amd1Eliminate(A, I, C, eliminated, mark, tag, pivot);
+        ++numEliminations;
+        numCliqueEntries += C[pivot].size();
         std::size_t degree = neighbors.size();
         pivots.push_back(pivot);
-        numEliminated += 1 + mergedVertices.size();
+        numEliminatedVertices += 1 + mergedVertices.size();
         for (std::int32_t u : mergedVertices) {   // the pivot now stands for them too
             superMembers[pivot].insert(superMembers[pivot].end(),
                                        superMembers[u].begin(), superMembers[u].end());
@@ -573,7 +596,7 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
             numMemberVisits += C[c].size();     // what an exact degree pays PER VERTEX
         }
 
-        const std::size_t numLeft = n - numEliminated;
+        const std::size_t numLeft = n - numEliminatedVertices;
         const std::vector<std::int32_t>& refreshedVertices = pivotClique;
         for (std::int32_t u : refreshedVertices) {
             // bound = |A[u]| + |C[pivot] - {u}| + sum |C[c] - C[pivot]| over the
@@ -606,10 +629,10 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
             if (bound < exact[u]) ++numBoundsBelowExact;
             amd1Refile(buckets, degrees, u, bound);
         }
-        numDegreeComputations += refreshedVertices.size();
+        numBoundUpdates += refreshedVertices.size();
         for (std::int32_t u : refreshedVertices) minDegree = std::min(minDegree, degrees[u]);
 
-        for (std::int32_t c : touchedCliques) outside[c] = 0;   // clear what this step wrote
+        for (std::int32_t c : touchedCliques) outside[c] = 0;   // clear what this iteration wrote
 
         // A supervariable of size w is w consecutive columns of L. Its external
         // degree is what remains of the clique after the merges, since a merged
@@ -662,25 +685,30 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
             }
         }
         std::ostringstream title;
-        title << "step " << step << ": eliminate " << pivot << " (degree " << degree
+        title << "iteration " << iteration << ": eliminate " << pivot << " (degree " << degree
               << ", size " << superSize << ", external degree " << externalDegree
               << "), absorbed cliques: " << absorbedCliquesText.str()
               << ", pruned edges: " << prunedEdgesText.str()
               << ", merged vertices: " << mergedVerticesText.str()
-              << ", refreshed: " << refreshedVerticesText.str();
+              << ", refreshed vertices: " << refreshedVerticesText.str();
         // NOT PRODUCTION: display only. The trace is what makes these files teachable and
         // is the whole reason they exist; nothing downstream reads it.
         amd1Show(A, I, C, degrees, exact, title.str(), &eliminated);
         amd1ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
-        ++step;
+        ++iteration;
     }
 
     std::vector<std::int32_t> order;
     for (std::int32_t pivot : pivots)
         for (std::int32_t u : superMembers[pivot]) order.push_back(u);
-    std::cout << "nnz(L) = " << nnzL << " against nnz(tril A) = " << nnzTrilA
+    std::cout << "n = " << n << ", nnz(L) = " << nnzL
+              << " against nnz(tril A) = " << nnzTrilA
               << ", fill = " << (nnzL - nnzTrilA) << "\n";
-    std::cout << "degree computations: " << numDegreeComputations
+    std::cout << "iterations: " << numIterations << "\n";
+    std::cout << "eliminations: " << numEliminations << "\n";
+    std::cout << "sum of |C[p]|: " << numCliqueEntries << "\n";
+    std::cout << "bound computations: " << (numBoundUpdates + n)
+              << ", bound updates: " << numBoundUpdates
               << ", bucket probes: " << numBucketProbes << "\n";
     std::cout << "clique-member visits an exact degree would need: "
               << numMemberVisits << "\n";
@@ -717,7 +745,7 @@ static Graph gridGraph(int side) {
 }
 
 // Keep the trace's summary lines and discard everything else, as it is written rather than
-// afterwards. A grid trace is far too large to hold: every step prints the whole quotient graph,
+// afterwards. A grid trace is far too large to hold: every iteration prints the whole quotient graph,
 // so at n = 10000 the captured text runs to gigabytes and the process dies holding it. This
 // filters line by line instead, keeping only what the whitelist names, so the memory is one line.
 class CounterSink : public std::streambuf {
@@ -834,7 +862,7 @@ int main(int argc, char** argv) {
 
     // graph5, five vertices and four edges, two paths joined at 4: 2-1-4-0-3.
     // Small and fill free, and here for one reason: it is the smallest graph on
-    // which amd1's merge test declines a genuine supervariable. At the step whose
+    // which amd1's merge test declines a genuine supervariable. At the iteration whose
     // pivot is 0 and whose clique is {4}, vertex 4 has nothing explicit left but
     // belongs to c1 as well as to the new clique, so I[4] == {pivot} fails even
     // though c1's only member is 4 itself and everything 4 reaches lies inside
@@ -853,12 +881,12 @@ int main(int argc, char** argv) {
     // graph6, six vertices and eight edges. Here because one small graph carries
     // three things at once. Its supervariable {0, 4} is a supernode but NOT a
     // fundamental one: the elimination forest is 2 -> 1 -> 4 and 3 -> 0 -> 4, so
-    // 4 already has 1 as a child when 0 merges into it. The merge happens at step
+    // 4 already has 1 as a child when 0 merges into it. The merge happens at iteration
     // 2 of 5, so the run continues afterwards and the selection degree, 3 over
     // {2, 3, 4}, differs from the external degree, 2 over {2, 3}, with the
     // difference being the size of what merged. And superMembers ends with a hole
     // in the middle, slot 4 empty between two used ones, while no pivot equals
-    // its own step number. See the README sections on mass elimination and on
+    // its own iteration number. See the README sections on mass elimination and on
     // external degree.
     //
     //   edges: 0-2 0-3 0-4 1-3 2-3 2-4 2-5 3-4
@@ -871,7 +899,7 @@ int main(int argc, char** argv) {
         {2},              // 5
     };
 
-    // graph7, five vertices and six edges. The pairwise case: at the step whose
+    // graph7, five vertices and six edges. The pairwise case: at the iteration whose
     // pivot is 0 and whose clique is {2, 4}, vertices 2 and 4 are
     // indistinguishable FROM EACH OTHER, both reaching the same closed
     // neighborhood, yet neither is absorbable into the pivot, since each still

@@ -1,6 +1,6 @@
-// md3.cpp -- minimum degree, step 3: supervariables and mass elimination.
+// md3.cpp -- minimum degree, iteration 3: supervariables and mass elimination.
 //
-// md2 stopped the graph from growing. This step stops it from being as wide, by
+// md2 stopped the graph from growing. This iteration stops it from being as wide, by
 // noticing that eliminating a pivot often makes some of its neighbors
 // INDISTINGUISHABLE from it: their whole remaining neighborhood lies inside the
 // new clique, so eliminating them next costs no fill at all. Rather than let the
@@ -16,7 +16,7 @@
 // The degree stays a plain count of neighbors, as in md2, and there is no weight
 // array. The literature carries one, and later layers will need it, but here it
 // would be redundant twice over: md3 merges only into the PIVOT, which is
-// eliminated in the same step, so no live vertex ever stands for more than one
+// eliminated in the same iteration, so no live vertex ever stands for more than one
 // original vertex, and a supervariable's size is superMembers[p].size() whenever
 // it is wanted. A weight array earns its place once the members are held as
 // chains over a flat array rather than as lists, where a size is no longer free.
@@ -304,7 +304,7 @@ md3Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
 
     // Mass elimination. u is INDISTINGUISHABLE from the pivot when the two have
     // the same closed neighborhood, md3Neighbors(u) | {u} == md3Neighbors(pivot)
-    // | {pivot}, as it stood before the step. Equivalently, now that the clique is
+    // | {pivot}, as it stood before the iteration. Equivalently, now that the clique is
     // formed, when everything u can still reach lies inside it. The test below is
     // a cheap sufficient condition for that: nothing explicit left and no clique
     // but the new one means u sees exactly what the pivot sees, so eliminating it
@@ -346,32 +346,52 @@ std::vector<std::int32_t> md3MinimumDegree(const Graph& G) {
     Cliques C(n);      // clique id -> member list
     std::vector<std::int32_t> mark(n, NIL);       // scratch for membership, with tag
     std::int32_t tag = 0;
+    // Calls to the eliminate procedure, one per pivot. Not the count of vertices
+    // removed: a pivot can carry mass-merged vertices out with it, and from mmd1 up
+    // an iteration batches several eliminations before one degree update pass. The three
+    // counts coincide only where both of those are absent.
+    std::size_t numEliminations = 0;
+    // Summed over the eliminations, |C[p]| being the new clique AFTER the trim, so
+    // in supernodal terms the update rather than the front. It is the raw reach of
+    // the eliminations, undeduplicated: where a layer deduplicates, the degree
+    // update count comes out below this, and the gap is what the batching saved.
+    // In md2 it is nnz(L) - n, there being no mass elimination to shrink a clique.
+    std::size_t numCliqueEntries = 0;
+    // Passes of the outer loop, each one a batch of eliminations followed by one
+    // degree update pass. Here the batch is always a single elimination, so this
+    // equals numEliminations; from mmd1 up the two come apart.
+    std::size_t numIterations = 0;
+    std::size_t numDegreeComputations = 0;
     std::vector<std::vector<std::int32_t>> superMembers(n);   // for the expansion
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u)
         superMembers[u].push_back(u);
     std::vector<bool> eliminated(n, false);
     std::vector<std::int32_t> pivots;             // the order over supervariables
-    std::size_t numEliminated = 0;                // a counter, not a scan of eliminated
+    std::size_t numEliminatedVertices = 0;                // a counter, not a scan of eliminated
     std::size_t nnzL = 0;
 
     // NOT PRODUCTION: display only. The trace is what makes these files teachable and
     // is the whole reason they exist; nothing downstream reads it.
     md3Show(A, I, C, mark, tag, "start: every edge explicit, no clique yet", &eliminated);
     md3ShowState(superMembers, eliminated, pivots);
-    int step = 0;
-    while (numEliminated < n) {
+    int iteration = 0;
+    while (numEliminatedVertices < n) {
+        ++numIterations;
         std::int32_t pivot = NIL;
         std::size_t best = 0;
         for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) {
             if (eliminated[u]) continue;
+            ++numDegreeComputations;
             std::size_t degree = md3Neighbors(A, I, C, mark, tag, u).size();
             if (pivot == NIL || degree < best) { pivot = u; best = degree; }
         }
         auto [neighbors, absorbedCliques, prunedEdges, mergedVertices] =
             md3Eliminate(A, I, C, eliminated, mark, tag, pivot);
+        ++numEliminations;
+        numCliqueEntries += C[pivot].size();
         std::size_t degree = neighbors.size();
         pivots.push_back(pivot);
-        numEliminated += 1 + mergedVertices.size();
+        numEliminatedVertices += 1 + mergedVertices.size();
         for (std::int32_t u : mergedVertices) {   // the pivot now stands for them too
             superMembers[pivot].insert(superMembers[pivot].end(),
                                        superMembers[u].begin(), superMembers[u].end());
@@ -419,7 +439,7 @@ std::vector<std::int32_t> md3MinimumDegree(const Graph& G) {
             }
         }
         std::ostringstream title;
-        title << "step " << step << ": eliminate " << pivot << " (degree " << degree
+        title << "iteration " << iteration << ": eliminate " << pivot << " (degree " << degree
               << ", size " << superSize << ", external degree " << externalDegree
               << "), absorbed cliques: " << absorbedCliquesText.str()
               << ", pruned edges: " << prunedEdgesText.str()
@@ -428,14 +448,19 @@ std::vector<std::int32_t> md3MinimumDegree(const Graph& G) {
         // is the whole reason they exist; nothing downstream reads it.
         md3Show(A, I, C, mark, tag, title.str(), &eliminated);
         md3ShowState(superMembers, eliminated, pivots);
-        ++step;
+        ++iteration;
     }
 
     std::vector<std::int32_t> order;
     for (std::int32_t pivot : pivots)
         for (std::int32_t u : superMembers[pivot]) order.push_back(u);
-    std::cout << "nnz(L) = " << nnzL << " against nnz(tril A) = " << nnzTrilA
+    std::cout << "n = " << n << ", nnz(L) = " << nnzL
+              << " against nnz(tril A) = " << nnzTrilA
               << ", fill = " << (nnzL - nnzTrilA) << "\n";
+    std::cout << "iterations: " << numIterations << "\n";
+    std::cout << "eliminations: " << numEliminations << "\n";
+    std::cout << "sum of |C[p]|: " << numCliqueEntries << "\n";
+    std::cout << "degree computations: " << numDegreeComputations << "\n";
     std::cout << "order: [";
     for (std::size_t k = 0; k < order.size(); ++k)
         std::cout << (k == 0 ? "" : ", ") << order[k];
@@ -520,7 +545,7 @@ int main(int argc, char** argv) {
 
     // graph5, five vertices and four edges, two paths joined at 4: 2-1-4-0-3.
     // Small and fill free, and here for one reason: it is the smallest graph on
-    // which md3's merge test declines a genuine supervariable. At the step whose
+    // which md3's merge test declines a genuine supervariable. At the iteration whose
     // pivot is 0 and whose clique is {4}, vertex 4 has nothing explicit left but
     // belongs to c1 as well as to the new clique, so I[4] == {pivot} fails even
     // though c1's only member is 4 itself and everything 4 reaches lies inside
@@ -539,12 +564,12 @@ int main(int argc, char** argv) {
     // graph6, six vertices and eight edges. Here because one small graph carries
     // three things at once. Its supervariable {0, 4} is a supernode but NOT a
     // fundamental one: the elimination forest is 2 -> 1 -> 4 and 3 -> 0 -> 4, so
-    // 4 already has 1 as a child when 0 merges into it. The merge happens at step
+    // 4 already has 1 as a child when 0 merges into it. The merge happens at iteration
     // 2 of 5, so the run continues afterwards and the selection degree, 3 over
     // {2, 3, 4}, differs from the external degree, 2 over {2, 3}, with the
     // difference being the size of what merged. And superMembers ends with a hole
     // in the middle, slot 4 empty between two used ones, while no pivot equals
-    // its own step number. See the README sections on mass elimination and on
+    // its own iteration number. See the README sections on mass elimination and on
     // external degree.
     //
     //   edges: 0-2 0-3 0-4 1-3 2-3 2-4 2-5 3-4
@@ -557,7 +582,7 @@ int main(int argc, char** argv) {
         {2},              // 5
     };
 
-    // graph7, five vertices and six edges. The pairwise case: at the step whose
+    // graph7, five vertices and six edges. The pairwise case: at the iteration whose
     // pivot is 0 and whose clique is {2, 4}, vertices 2 and 4 are
     // indistinguishable FROM EACH OTHER, both reaching the same closed
     // neighborhood, yet neither is absorbable into the pivot, since each still

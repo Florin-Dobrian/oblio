@@ -1,5 +1,5 @@
 # %% [markdown]
-# # Minimum degree, step 2a: the quotient graph, with the degree bounded
+# # Minimum degree, iteration 2a: the quotient graph, with the degree bounded
 #
 # md2 with one line changed: the picker asks for a BOUND on the degree instead of
 # the degree. Everything else, the quotient graph, the elimination, the pruning,
@@ -38,7 +38,7 @@
 # bound turns a walk over the cliques' members into one addition per clique.
 #
 # So bound(u) >= degree(u) always, with equality exactly when no vertex belongs to
-# two cliques of I[u]. Both are printed at every step, side by side, so the
+# two cliques of I[u]. Both are printed at every iteration, side by side, so the
 # looseness is visible rather than argued. Computing the exact degree defeats the
 # purpose and is here only to be looked at.
 #
@@ -66,7 +66,7 @@
 #
 # **mda2 cannot use the tighter form, and the reason is structural.** It is stated
 # against C[pivot], so it applies only to a vertex IN C[pivot]. mda2's picker
-# produces a number for every live vertex at every step, touched or not, and for an
+# produces a number for every live vertex at every iteration, touched or not, and for an
 # untouched u there is no C[pivot] in I[u] and no group to state the bound against.
 # What makes the tighter form available is MAINTAINED degrees, which narrow the
 # refresh set to exactly C[pivot]'s members: that is mdam2, and it is the earliest
@@ -285,6 +285,25 @@ def mda2_minimum_degree(G):
     C = {}                                 # clique id -> member list
     mark = [-1] * n                        # scratch for membership, stamped with tag
     tag = 0
+    # Calls to the eliminate procedure, one per pivot. Not the count of vertices
+    # removed: a pivot can carry mass-merged vertices out with it, and from mmd1 up
+    # an iteration batches several eliminations before one degree update pass. The three
+    # counts coincide only where both of those are absent.
+    num_eliminations = 0
+    # Summed over the eliminations, |C[p]| being the new clique AFTER the trim, so
+    # in supernodal terms the update rather than the front. It is the raw reach of
+    # the eliminations, undeduplicated: where a layer deduplicates, the degree
+    # update count comes out below this, and the gap is what the batching saved.
+    # In md2 it is nnz(L) - n, there being no mass elimination to shrink a clique.
+    num_clique_entries = 0
+    # Passes of the outer loop, each one a batch of eliminations followed by one
+    # degree update pass. Here the batch is always a single elimination, so this
+    # equals num_eliminations; from mmd1 up the two come apart.
+    num_iterations = 0
+    # Every bound this layer computes. No split into a build and updates, because
+    # nothing is maintained: the picker recomputes each candidate's bound from
+    # scratch on every iteration, as md2 and md3 do with exact degrees.
+    num_bound_computations = 0
     eliminated = [False] * n
     order = []
     degree_sum = 0
@@ -295,16 +314,20 @@ def mda2_minimum_degree(G):
     # is the whole reason they exist; nothing downstream reads it.
     tag = mda2_show(A, I, C, mark, tag, "start: every edge explicit, no clique yet",
                     eliminated=eliminated)
-    for step in range(n):
+    for iteration in range(n):
+        num_iterations += 1
         pivot, best = -1, 0
         for u in range(n):                 # no tag advances here: the bound reads lengths
             if eliminated[u]:
                 continue
+            num_bound_computations += 1
             candidate_bound = mda2_bound(A, I, C, u)
             if pivot == -1 or candidate_bound < best:
                 pivot, best = u, candidate_bound
         neighbors, absorbed_cliques, pruned_edges, tag = mda2_eliminate(
             A, I, C, mark, tag, eliminated, pivot)
+        num_eliminations += 1
+        num_clique_entries += len(C[pivot])
         degree = len(neighbors)
         # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
         # No union is needed for it: the eliminator has just formed reach(pivot) as
@@ -319,16 +342,20 @@ def mda2_minimum_degree(G):
         # NOT PRODUCTION: display only. The trace is what makes these files teachable and
         # is the whole reason they exist; nothing downstream reads it.
         tag = mda2_show(A, I, C, mark, tag,
-                        (f"step {step}: eliminate {pivot} (bound {best}, degree {degree}), "
+                        (f"iteration {iteration}: eliminate {pivot} (bound {best}, degree {degree}), "
                          f"absorbed cliques: {absorbed_cliques_text}, "
                          f"pruned edges: {pruned_edges_text}"),
                         eliminated=eliminated)
 
     nnz_L = degree_sum + n
-    print(f"nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
+    print(f"n = {n}, nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
           f"fill = {nnz_L - nnz_tril_A}")
+    print(f"iterations: {num_iterations}")
+    print(f"eliminations: {num_eliminations}")
+    print(f"sum of |C[p]|: {num_clique_entries}")
     # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     print(f"loose picks = {loose_picks} of {n}")
+    print(f"bound computations: {num_bound_computations}")
     print(f"order: {order}")
     return order
 
@@ -403,7 +430,7 @@ graph4 = [
 
 # graph5, five vertices and four edges, two paths joined at 4: 2-1-4-0-3. Small
 # and fill free, and here for one reason: it is the smallest graph on which md3's
-# merge test declines a genuine supervariable. At the step whose pivot is 0 and
+# merge test declines a genuine supervariable. At the iteration whose pivot is 0 and
 # whose clique is {4}, vertex 4 has nothing explicit left but belongs to c1 as
 # well as to the new clique, so I[4] == {pivot} fails even though c1's only
 # member is 4 itself and everything 4 reaches lies inside the new clique. The
@@ -422,11 +449,11 @@ graph5 = [
 # graph6, six vertices and eight edges. Here because one small graph carries
 # three things at once. Its supervariable {0, 4} is a supernode but NOT a
 # fundamental one: the elimination forest is 2 -> 1 -> 4 and 3 -> 0 -> 4, so 4
-# already has 1 as a child when 0 merges into it. The merge happens at step 2 of
+# already has 1 as a child when 0 merges into it. The merge happens at iteration 2 of
 # 5, so the run continues afterwards and the selection degree, 3 over {2, 3, 4},
 # differs from the external degree, 2 over {2, 3}, with the difference being the
 # weight that merged. And super_members ends with a hole in the middle, slot 4
-# empty between two used ones, while no pivot equals its own step number. See the
+# empty between two used ones, while no pivot equals its own iteration number. See the
 # README sections on mass elimination and on external degree.
 #
 #   edges: 0-2 0-3 0-4 1-3 2-3 2-4 2-5 3-4
@@ -439,7 +466,7 @@ graph6 = [
     {2},              # 5
 ]
 
-# graph7, five vertices and six edges. The pairwise case: at the step whose pivot
+# graph7, five vertices and six edges. The pairwise case: at the iteration whose pivot
 # is 0 and whose clique is {2, 4}, vertices 2 and 4 are indistinguishable FROM
 # EACH OTHER, both reaching the same closed neighborhood, yet neither is
 # absorbable into the pivot, since each still reaches 3 from outside the clique.

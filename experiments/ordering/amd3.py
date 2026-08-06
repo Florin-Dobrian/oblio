@@ -63,7 +63,7 @@ import sys
 def amd3_show(A, I, C, degrees, exact, title=None, eliminated=None):
     """Print a quotient graph: adjacency, incidence, cliques, and both degrees, in
     the order the structure holds them. The stored value is the BOUND; the exact
-    degree is printed beside it so the gap is visible at every step."""
+    degree is printed beside it so the gap is visible at every iteration."""
     n = len(A)
     width = len(str(max(n - 1, 0)))
     alive_vertices = [u for u in range(n) if eliminated is None or not eliminated[u]]
@@ -395,7 +395,7 @@ def amd3_eliminate(A, I, C, mark, tag, eliminated, pivot):
 
     # Mass elimination. u is INDISTINGUISHABLE from the pivot when the two have
     # the same closed neighborhood, amd3_neighbors(u) | {u} == amd3_neighbors(pivot)
-    # | {pivot}, as it stood before the step. Equivalently, now that the clique is
+    # | {pivot}, as it stood before the iteration. Equivalently, now that the clique is
     # formed, when everything u can still reach lies inside it. The test below is
     # a cheap sufficient condition for that: nothing explicit left and no clique
     # but the new one means u sees exactly what the pivot sees, so eliminating it
@@ -465,11 +465,26 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
     # vertex of the same index cannot be confused. Everything else uses the first n.
     mark = [-1] * (2 * n)                      # scratch for membership, with tag
     tag = 0
+    # Calls to the eliminate procedure, one per pivot. Not the count of vertices
+    # removed: a pivot can carry mass-merged vertices out with it, and from mmd1 up
+    # an iteration batches several eliminations before one degree update pass. The three
+    # counts coincide only where both of those are absent.
+    num_eliminations = 0
+    # Summed over the eliminations, |C[p]| being the new clique AFTER the trim, so
+    # in supernodal terms the update rather than the front. It is the raw reach of
+    # the eliminations, undeduplicated: where a layer deduplicates, the degree
+    # update count comes out below this, and the gap is what the batching saved.
+    # In md2 it is nnz(L) - n, there being no mass elimination to shrink a clique.
+    num_clique_entries = 0
+    # Passes of the outer loop, each one a batch of eliminations followed by one
+    # degree update pass. Here the batch is always a single elimination, so this
+    # equals num_eliminations; from mmd1 up the two come apart.
+    num_iterations = 0
     super_members = [[u] for u in range(n)]    # the vertices each pivot stands for
     eliminated = [False] * n
     pivots = []                                # the order over supervariables
-    num_eliminated = 0                         # a counter, not a scan of eliminated
-    # Live ORIGINAL vertices, which is not n - num_eliminated. num_eliminated
+    num_eliminated_vertices = 0                         # a counter, not a scan of eliminated
+    # Live ORIGINAL vertices, which is not n - num_eliminated_vertices. num_eliminated_vertices
     # counts what has left the SELECTION, and a hash merge folds v into a LIVE u,
     # so v stops being selectable while the vertices it stands for are still live
     # inside u. The first cap of the bound needs the second reading, so it gets its
@@ -481,7 +496,12 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
     # BOUND rather than a degree. exact[] is carried alongside for the trace only.
     degrees = [len(A[u]) for u in range(n)]
     exact = list(degrees)
-    num_degree_computations = n
+    # Only the updates are counted. The total, including the initial pass over all
+    # n vertices, is that plus n, so the report derives it. That first pass finds
+    # |A[u]| with no clique yet formed, which is the bound formula on an empty
+    # clique set and so is exact; the bound becomes a bound from the first
+    # elimination on.
+    num_bound_updates = 0
     num_member_visits = 0                      # what an exact refresh would cost
     num_clique_reads = 0                       # clique reads in the bound itself
     num_incidence_reads = 0                    # incidence entries scan 1 walks
@@ -550,7 +570,7 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
         I[u] = []
         super_members[u] = []                  # weight 0, as Nv[i] = 0
         eliminated[u] = True
-        num_eliminated += 1
+        num_eliminated_vertices += 1
         num_live -= 1                          # it is out of the graph, not merged
     if dense_vertices:
         for w in range(n):
@@ -571,8 +591,9 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
               "start: every edge explicit, no clique yet, degrees exact",
               eliminated=eliminated)
     amd3_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
-    step = 0
-    while num_eliminated < n:
+    iteration = 0
+    while num_eliminated_vertices < n:
+        num_iterations += 1
         while not buckets[min_degree]:         # walk up to the first live bucket
             min_degree += 1
             num_bucket_probes += 1
@@ -581,12 +602,14 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
 
         neighbors, absorbed_cliques, pruned_edges, merged_vertices, tag = amd3_eliminate(
             A, I, C, mark, tag, eliminated, pivot)
+        num_eliminations += 1
+        num_clique_entries += len(C[pivot])
         is_element[pivot] = True
         for c in absorbed_cliques:             # the absorbed become children of it
             parent[c] = pivot
         degree = len(neighbors)
         pivots.append(pivot)
-        num_eliminated += 1 + len(merged_vertices)
+        num_eliminated_vertices += 1 + len(merged_vertices)
         for u in merged_vertices:              # the pivot now stands for them too
             super_members[pivot] += super_members[u]
             super_members[u] = []
@@ -798,14 +821,14 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
                         A[v] = []
                         I[v] = []
                         eliminated[v] = True
-                        num_eliminated += 1
+                        num_eliminated_vertices += 1
                         hash_pairs.append((u, v))
                         num_hash_merges += 1
 
         for k in used_keys:                    # only what was touched
             hash_bucket[k].clear()
 
-        num_degree_computations += len(refreshed_vertices)
+        num_bound_updates += len(refreshed_vertices)
         min_degree = min([min_degree] + [degrees[u] for u in refreshed_vertices
                                          if not eliminated[u]])
 
@@ -849,17 +872,17 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
         # NOT PRODUCTION: display only. The trace is what makes these files teachable and
         # is the whole reason they exist; nothing downstream reads it.
         amd3_show(A, I, C, degrees, exact,
-                  (f"step {step}: eliminate {pivot} (degree {degree}, size {super_size}, "
+                  (f"iteration {iteration}: eliminate {pivot} (degree {degree}, size {super_size}, "
                   f"external degree {external_degree}), "
                   f"absorbed cliques: {absorbed_cliques_text}, "
                   f"pruned edges: {pruned_edges_text}, "
                   f"merged vertices: {merged_vertices_text}, "
-                  f"refreshed: {refreshed_vertices_text}"),
+                  f"refreshed vertices: {refreshed_vertices_text}"),
                  eliminated=eliminated)
         # NOT PRODUCTION: display only. The trace is what makes these files teachable and
         # is the whole reason they exist; nothing downstream reads it.
         amd3_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
-        step += 1
+        iteration += 1
 
     # ---- THE POSTORDER, in place of raw elimination order -------------------
     # The elements form the assembly tree, and any postorder of it gives the same
@@ -930,9 +953,13 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
                              + lnz_dense) // 2
         front_max = max(front_max, num_dense)
 
-    print(f"nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
+    print(f"n = {n}, nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
           f"fill = {nnz_L - nnz_tril_A}")
-    print(f"degree computations: {num_degree_computations}, "
+    print(f"iterations: {num_iterations}")
+    print(f"eliminations: {num_eliminations}")
+    print(f"sum of |C[p]|: {num_clique_entries}")
+    print(f"bound computations: {num_bound_updates + n}, "
+          f"bound updates: {num_bound_updates}, "
           f"bucket probes: {num_bucket_probes}")
     print(f"clique-member visits an exact degree would need: {num_member_visits}")
     print(f"clique reads the bound needed:                    {num_clique_reads}")
@@ -1028,7 +1055,7 @@ graph4 = [
 
 # graph5, five vertices and four edges, two paths joined at 4: 2-1-4-0-3. Small
 # and fill free, and here for one reason: it is the smallest graph on which md3's
-# merge test declines a genuine supervariable. At the step whose pivot is 0 and
+# merge test declines a genuine supervariable. At the iteration whose pivot is 0 and
 # whose clique is {4}, vertex 4 has nothing explicit left but belongs to c1 as
 # well as to the new clique, so I[4] == {pivot} fails even though c1's only
 # member is 4 itself and everything 4 reaches lies inside the new clique. The
@@ -1047,11 +1074,11 @@ graph5 = [
 # graph6, six vertices and eight edges. Here because one small graph carries
 # three things at once. Its supervariable {0, 4} is a supernode but NOT a
 # fundamental one: the elimination forest is 2 -> 1 -> 4 and 3 -> 0 -> 4, so 4
-# already has 1 as a child when 0 merges into it. The merge happens at step 2 of
+# already has 1 as a child when 0 merges into it. The merge happens at iteration 2 of
 # 5, so the run continues afterwards and the selection degree, 3 over {2, 3, 4},
 # differs from the external degree, 2 over {2, 3}, with the difference being the
 # size of what merged. And super_members ends with a hole in the middle, slot 4
-# empty between two used ones, while no pivot equals its own step number. See the
+# empty between two used ones, while no pivot equals its own iteration number. See the
 # README sections on mass elimination and on external degree.
 #
 #   edges: 0-2 0-3 0-4 1-3 2-3 2-4 2-5 3-4
@@ -1064,7 +1091,7 @@ graph6 = [
     {2},              # 5
 ]
 
-# graph7, five vertices and six edges. The pairwise case: at the step whose pivot
+# graph7, five vertices and six edges. The pairwise case: at the iteration whose pivot
 # is 0 and whose clique is {2, 4}, vertices 2 and 4 are indistinguishable FROM
 # EACH OTHER, both reaching the same closed neighborhood, yet neither is
 # absorbable into the pivot, since each still reaches 3 from outside the clique.
@@ -1107,7 +1134,7 @@ def grid_graph(side):
 
 
 # Keep the closing lines and discard everything else, as it is written rather than afterwards.
-# A grid trace is far too large to hold: every step prints the whole quotient graph, so at
+# A grid trace is far too large to hold: every iteration prints the whole quotient graph, so at
 # n = 10000 the captured text runs to gigabytes and the process dies holding it. This filters
 # line by line instead, so the memory is one line. The C++ twin does the same with a streambuf.
 class CounterSink:

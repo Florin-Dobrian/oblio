@@ -126,6 +126,15 @@ g++ -std=c++17 -O3 -DOBLIO_BLAS_UNDERSCORE -I include \
 
 Linux: replace `-framework Accelerate` with `-lblas -llapack -lm`.
 
+`g++` there is Apple Clang, not GCC. On macOS `/usr/bin/g++` and `/usr/bin/clang++` are one file
+under two names, dispatching to the active developer directory; `g++ --version` says `Apple clang`.
+The README's macOS prerequisites explain it. What matters for this work is that the two compilers
+warn about different things under the same `-Wall -Wextra`, so **a warning-clean build here is not
+evidence of one on Linux, or the reverse**. Apple Clang has `-Wbitwise-instead-of-logical` and GCC
+has no such option, which cost a build break on 2026-08-04; the optimizers differ too, and a GCC
+`-O3` loop-hoist once made a real speedup measure as zero. `CXX` uses `?=`, so `make CXX=clang++`
+names it explicitly.
+
 Note that `src/*.cpp` no longer picks up the vendored orderings: they live in `private/`, which is
 gitignored. A by-hand command line like the one above therefore builds without them, and
 `Ordering::MMD` and `Ordering::AMD` refuse. Add `private/*.cpp` and `-DOBLIO_VENDORED_ORDERINGS` to

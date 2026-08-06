@@ -219,6 +219,87 @@ These are the open questions, and they are the reason this is a report and not a
    known repair, which is exactly why it should not go first. It is a constant factor on a layer
    whose fill behavior we do not yet understand.
 
+## Leads and observations parked, 2026-08-06
+
+None of these is measured and none may matter. They are here so that they are not lost, since
+each came out of reading the vendored codes closely and each could plausibly bear on a gap above.
+
+**1. We touch four arrays where AMD touches one, and it is a candidate for AMD1's time gap.**
+Both our AMD layers already compute `outside[c]`, the count of a clique's members lying outside
+the new clique, by subtraction rather than by walking: `outside[c] = cliqueDegree[c] - weightU`
+on first sighting and `outside[c] -= weightU` after. That is AMD's scan 1, line for line. What
+differs is where the state lives. Per touched clique we use
+
+- `outside[c]`, the running count,
+- `cliqueDegree[c]`, which AMD does not need because `Degree[e]` already holds it,
+- `mark[c]`, to answer "first sighting this iteration",
+- `touchedCliques`, built by push_back and walked again at the end of the iteration only to zero
+  `outside`.
+
+AMD's `W[e]` does all four jobs at once by storing the count OFFSET ABOVE the current stamp
+`wflg`: the value above `wflg` is the count, seeding from `Degree[e]` needs no second array,
+"below `wflg`" is the first-sighting test, and advancing `wflg` clears every clique at once with
+no list and no second pass. So we pay roughly three extra cache lines per touched clique plus a
+full second pass per iteration that AMD never makes.
+
+Worth measuring, not worth believing yet. Reasoning about cache traffic has a poor record on this
+project: cachegrind was wrong three times in one afternoon in three directions, and two other
+performance leads raised the same day this was written measured as 291-to-1 irrelevant and as
+right-mechanism-wrong-cause. What would settle it is counting touched cliques per iteration and
+profiling the share taken by `touchedCliques` and the clearing pass.
+
+It cannot explain any fill gap. Encoding does not change which pivot is chosen.
+
+**2. Our own mark and tag have no overflow guard, and both vendored routines do.** `QuotientGraph`
+holds `mMark` and `mTag`, and the drivers `Mmd2`, `Amd1`, `Amd1B`, `Amd2` and `Amd2B` hold their
+own, all unguarded. Measured on 2D and 3D grids, the stamp advances about 15n over a run, so an
+`int32` wrap needs n near 140 million and nothing is at risk at any size we run. The reason it is
+still worth recording is that our `mMark` carries no permanent sentinel, so a wrap would give a
+stale MATCH rather than a collision: silent, data-dependent, and benign-looking.
+
+The experiment README says only that the prototypes do not need the reset. That is true and is not
+the same statement as production not needing it.
+
+**3. The two vendored routines set the ceiling 256 times apart, and only one of them derives it.**
+AMD computes `wbig = Int_MAX_VAL - n`, with the header stating the rule outright: `wflg` may not
+reach it, and the `- n` is headroom because the largest value ever stored is `wflg + |Le \ Lme|`
+and that set size is bounded by n. So AMD's ceiling is exactly what the constraint demands, and it
+is a variable so the same source is correct for `int32_t` and `int64_t`.
+
+genmmd takes the ceiling as a caller argument, and OUR wrapper passes the historical `8388607`,
+which is `2^23 - 1`, in `private/Mmd.cpp` line 202. It is the only occurrence in the repo. The
+constraint there is the same in kind, since `mmdupd` computes `mt = tag + md0` before testing it,
+but it would permit anything up to about `INT_MAX - n`. Why 1985 chose a value 256 times lower is
+not recoverable from the code: the original Fortran comments did not survive the port. The
+best-fitting guess is SPARSPAK's shared workspace with integer and real views of one array, where
+a value passing through a `REAL` slot must be exactly representable in a 24-bit mantissa, which
+puts the largest safe integer at `2^24`. That is a guess and should be marked as one. Netlib's
+SPARSPAK source would settle it in one line.
+
+Consequence worth knowing: with `8388607` and a stamp advancing at about 15n, the vendored MMD's
+sweep becomes reachable around n of half a million. Measured, it fires zero times at every size we
+benchmark, so it is not a hidden term in the MMD timing comparison. The wrapper is ours, not
+vendored, so the value is our choice if that ever changes. It must stay below the maximum by at
+least `n`; raising it to `INT_MAX` would defeat the guard rather than disable it, since the
+addition would wrap before the test could catch it.
+
+**4. AMD's `W` array carries three meanings at once, and we have not evaluated whether to.** For
+an element: zero means absorbed, permanently; at or above `wflg` the excess is the set size; below
+`wflg` but nonzero means live and not yet seen this scan. For a variable: equal to `wflg` means in
+the pattern. Hence `clear_flag` collapses everything nonzero to 1 rather than to 0, so absorption
+survives the sweep, and restarts `wflg` at 2. genmmd does a smaller version of the same thing,
+getting two logical marks from one array by offsetting the stamp, `mt = tag + md0`. Ours holds
+stamps only, with `mCliqueSize[c] = 0` as a separate absorption sentinel and `outside[c]` as a
+separate counter. This is the same observation as item 1 seen from the other side, and the
+trade is not obviously in either direction: theirs is denser, ours cannot suffer this class of
+aliasing bug and is far easier to reason about.
+
+**5. A stale claim in the experiment README.** It says amd1 obtains `|C[c] - C[p]|` by walking each
+touched clique's members while amd2 obtains it by subtraction. Production `Amd1.cpp` does the
+subtraction, same as `Amd2.cpp`. Either the prototype and production have diverged here or the
+sentence predates a change to one of them. Worth checking before that paragraph is trusted again,
+since a 3.7x work ratio is quoted from it.
+
 ## What was not measured, and should not be assumed
 
 - **Anything but structured grids.** Two families now instead of one, which is progress, but a

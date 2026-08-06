@@ -85,7 +85,8 @@ starting is that **macOS already has the BLAS**, in Accelerate, and Linux does n
 
 ### macOS
 
-Apple Silicon or Intel.
+Apple Silicon or Intel. The combination tested is Apple Silicon, macOS 26.5.2 with Apple clang
+21.0.0.
 
 - **Xcode Command Line Tools**: `xcode-select --install`. Provides `clang++`, `make`, and the
   Accelerate framework, which is the BLAS and LAPACK. There is nothing further to install to build
@@ -99,21 +100,43 @@ Darwin, and CMake finds it through `find_package(BLAS)`.
 
 ### Linux
 
-Verified on Ubuntu 24.04 with GCC 13.3 and GNU Make 4.3, both builds from a clean container.
+Any distribution with a C++17 compiler. Package names below are Debian and Ubuntu; the
+combination tested is Ubuntu 24.04 with GCC 13.3.
 
 - **Compiler and make**: `sudo apt install build-essential`
-- **BLAS and LAPACK**: `sudo apt install libblas-dev liblapack-dev`. The `-dev` packages are the
-  ones that matter: a system carrying only the runtime `libblas3` and `liblapack3` links nothing,
-  and the failure is `/usr/bin/ld: cannot find -llapack` rather than anything about a missing
-  package.
+- **BLAS and LAPACK**, either of two, and the choice is worth a moment:
+  - `sudo apt install libopenblas-dev` for **OpenBLAS**, tuned and the one to use for anything
+    where the time matters. It supplies both BLAS and LAPACK.
+  - `sudo apt install libblas-dev liblapack-dev` for the **reference** implementation, the Netlib
+    Fortran that defines the interface. Correct, unblocked and untuned, and enough to build and
+    test.
 - **CMake**, only for the CMake build: `sudo apt install cmake`
 
-The Makefile links `-llapack -lblas` on anything that is not Darwin. Any BLAS implementation with
-the standard Fortran symbols will do, so OpenBLAS or MKL can be substituted by overriding
-`BLAS_LIBS` on the make command line.
+**The difference is large and it is not close.** Factoring a 300x300 grid Laplacian, Cholesky,
+same binary: 308 ms against the reference and 184 ms against OpenBLAS with no amalgamation, 251
+against 99 at threshold 32. So 1.7x to 2.5x, and the gap widens as the blocks get larger, which is
+what a tuned kernel is for. Solve time barely moves, the triangular solve being our own code
+walking supernodes rather than a level-3 kernel.
 
-On distributions other than Debian and Ubuntu the package names differ, `lapack-devel` and
-`blas-devel` on Fedora and RHEL, and those have not been tested here.
+**Switching needs no rebuild.** Debian and Ubuntu route `libblas.so.3` through
+`update-alternatives`, so installing OpenBLAS raises its priority above the reference and every
+already-linked program picks it up when it next starts. The measurements above are one binary run
+twice, with an `apt install` in between. `update-alternatives --display` on
+`libblas.so.3-x86_64-linux-gnu` says which is in force, and `ldd` on a built example says which one
+it actually loaded.
+
+**Whichever you install, it must be a `-dev` package.** A system carrying only the runtime
+`libblas3` and `liblapack3` can run programs already linked against them but cannot link a new one:
+the runtime packages ship `libblas.so.3`, which the dynamic linker loads by SONAME at start-up,
+while `-lblas` at build time needs the unversioned `libblas.so` symlink that only `-dev` provides.
+Hence the failure names a linker flag, `/usr/bin/ld: cannot find -llapack`, rather than a package.
+
+The Makefile links `-llapack -lblas` on anything that is not Darwin, and any implementation with
+the standard Fortran symbols will do, so MKL or a hand-built BLIS can be pointed at by overriding
+`BLAS_LIBS` on the make command line instead.
+
+Package names differ elsewhere: `lapack-devel` and `blas-devel` on Fedora and RHEL. Those are
+untested.
 
 ### Optional, for development rather than for building
 

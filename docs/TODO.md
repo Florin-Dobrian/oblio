@@ -1162,13 +1162,14 @@ oracle computes the same structure a different way, from a dense factor pattern.
 At that point both classes gain a `.cpp` holding the validation and nothing else, the accessors
 staying in the header. That is the trigger to watch for: a body no longer obviously worth inlining.
 
-### Five ordering questions, four still open and deliberately so
+### Five ordering questions, three still open and deliberately so
 
 Raised at the end of the ordering optimization work and parked rather than decided, each with the
 reasoning that got them to that point so they can be picked up cold. The fifth was not parked but
 a defect, and it is closed; it stays here because the shape it exposed, a prototype built by adding
 mechanisms to a sibling and inheriting a line that the addition invalidates, recurred three times
-in two sessions and will recur again.
+in two sessions and will recur again. The fourth is now half closed: the prototypes carry the
+guard, production does not, and the ceiling is a placeholder rather than a derivation.
 
 **1. The prototypes and production have diverged in encoding, and the alignment check does not see
 it.** `experiments/ordering`'s `make test` compares four ported layers against production on the
@@ -1239,6 +1240,71 @@ parallel arrays a reader keeps in step by hand. The same may apply to `mCliquePt
 only if 7 percent of a one-shot solve is worth it.
 
 **4. The mark-and-tag counters are `std::int32_t` with no guard, and both references have one.**
+**The prototypes now have one, 2026-08-06; production does not.** All thirteen layers in
+`experiments/ordering` carry the sweep, at a `TAG_CEILING` of `2^30 - 1`, with a `tag sweeps`
+counter as the witness that it stays inert. What follows is the reasoning that produced it and
+what is left to do, which is the production half and the ceiling.
+
+**What the prototypes settled, and it transfers.** The sweep is unconditional, `mark` back to
+`NIL` and `tag` to 0, because ours carries no permanent sentinel where both references do, so
+neither their selective loop nor AMD's `wbig = Int_MAX_VAL - n` headroom is needed. The rule for
+where a check may go is **one before each region that advances the tag, at a point where nothing
+in `mark` is live**, which gives one site in md1 and mda2, two in nine layers, and three in amd2
+and amd3, whose hash pair loop advances a tag per pair tested and so must be guarded inside the
+loop rather than before it. The eliminators are the standing hazard, holding two stamps live
+across the prune loop and a third across the `C[pivot]` compaction. `experiments/ordering`'s
+README carries the full account under "The tag guard".
+
+**The ceiling is a placeholder and is the first thing to revise, because a constant cannot be
+right.** `2^30 - 1` was chosen pragmatically, high enough not to fire and low enough to leave
+room. What it has to cover is the tag's advance between two consecutive checks, since the test is
+`tag >= CEILING` at the START of a region and the tag then climbs through that whole region before
+the next check. So the largest value reached is `CEILING - 1` plus the region's advance, and that
+advance is `O(n)`. A constant cannot bound a quantity that grows with the problem: at `2^30 - 1`
+the headroom above the ceiling is `2^30`, so any `n` past about a billion overflows, and `n` is a
+legal `std::int32_t`.
+
+AMD is the only one of the three codes that got this right, and its `wbig = Int_MAX_VAL - n` at
+`Amd.cpp:1349` is exactly the shape we need: the `- n` is precisely the most that can be added
+after the test passes, computed once from `n` at entry rather than picked. `genmmd` has the same
+defect we do, a caller-supplied constant, and a much worse value: `8388607`, a 24-bit artifact,
+which at our measured `15n` advance rate would start sweeping around `n = 560000`.
+
+**The derivation needs less than it looks.** Not a close reading of AMD, which is worth doing for
+the encoding but is not a prerequisite. It needs the largest inter-check advance, and we already
+know that per layer because we placed the checks: about `n` where the region is a degree or bound
+pass, about `2n` on the amd layers where the exact-degree instrumentation spends a second tag per
+vertex, and `O(1)` where the region is an eliminator. So `INT32_MAX - k * n` with a small `k`,
+computed at the top of each driver, and correct at every representable size instead of below a
+threshold.
+
+**Not urgent, and the reason is worth recording so nobody re-derives it in a panic.** A dense
+triangle in 32 GB is `n = 89442`; a 2D five-point grid's factor fits at about `n = 1e8` and a 3D
+seven-point one at about `n = 3.5e6`, both extrapolated from the fill measured in
+`experiments/ordering/REPORT.md`. Realistic budgets are lower again, since the frontal stack and
+the indices come out of the same memory. So the largest `n` reachable on real hardware sits two
+to three orders of magnitude below where the current ceiling fails. This is correctness hygiene,
+not risk.
+
+One consequence, since it explains a difference that would otherwise look arbitrary: **our amd2
+and amd3 carry a third check site where AMD carries none.** AMD guards two regions, at
+`Amd.cpp:1694` and `1949`, and does not guard the `wflg++` per candidate in supervariable
+detection at `2067`. It does not have to, because its headroom is `n` and that pass spends at
+most one per live variable. We need the third site only because our ceiling is a constant that
+cannot be reasoned about. Fix the ceiling and the third site probably becomes unnecessary.
+
+The two directions are not symmetric, which is what should govern any revision: too low costs an
+amortized `O(n)` fill and is always inert for correct input, while too high is a silent wrong
+answer.
+
+**And one inconsistency was created rather than found, so it is ours to clean up.** Grid mode
+filters output through a per-file whitelist of counter prefixes, and `"tag sweeps"` had to be
+appended to five of them by hand, in both twins, ten edits for one line. The lists have no common
+source and already differ from each other for good reasons, so nothing detects a sixth file being
+missed; the layer that got it wrong first, mmd1, printed the counter to a filter that discarded
+it, and the grid check passed while proving nothing. Worth one small shared default that a file
+extends rather than restates.
+
 The mark array is how every set operation in the ordering is done: a set is a number, membership is
 `mMark[v] == mTag`, insertion is one store, and nothing is ever cleared because the next set uses a
 larger number and every older stamp is then stale. It is the tool, and it is what makes each pass

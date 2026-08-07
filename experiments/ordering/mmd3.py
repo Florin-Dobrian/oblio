@@ -1,22 +1,108 @@
 # %% [markdown]
-# # Multiple minimum degree, complete
+# # Multiple minimum degree, matching genmmd's permutation
 #
-# mmd1 has the idea: a batch of independent pivots per degree refresh. What it
-# does not have is the rest of what genmmd does, and this file adds it, one pass
-# at a time. Section 5.11 of archive/sparse_factorization.md, plus the vendored
-# routine itself in vendored/vendored_mmd.cpp.
+# mmd2 has every mechanism genmmd has, and still returns a different permutation.
+# This layer adds no mechanism at all. It changes the ORDER FOUR LISTS ARE WALKED
+# IN, and that is the whole difference between the two files.
 #
-# The list, against the vendored routine that carries each:
+# THE ALIGNMENT LEDGER. One row per divergence found, root-caused and closed. It is
+# kept here rather than in a note because the code is where it will be read, and it
+# is APPEND ONLY: a row is never edited once closed, so the sequence stays a record
+# of what was actually wrong rather than a tidy summary written afterwards. The same
+# table is in mmd3.cpp and is summarized in the README's mmd3 section.
 #
-#   1. the PREPASS over head[1], numbering degree 0 and 1 vertices before the main
-#      loop and leaving their neighbors' degrees stale                    [done]
-#   2. mmdupd's q2h path, split on mmdelm's fwd[rn] = nq + 1 stash        [done]
-#   3. the pairwise merge inside the q2h walk, which folds a vertex into a
-#      LIVE one, so a candidate can stand for several vertices             [done]
-#   4. OUTMATCHED marking, bwd[nd] = -maxint                              [done]
-#   5. the filing convention, dg - qsize[en] + 1 floored at 1             [done]
-#   6. the counters: ncsub, and the early termination on num + qsize      [done]
+#   #  what diverged                where here             genmmd                nature
+#   -  ---------------------------  ---------------------  --------------------  ---------
+#   1  element expansion            mmd3_neighbors, I[u]   mmdelm, the el stack  convention
+#   2  q2h walk                     the refresh            mmdupd, q2h           convention
+#   3  qxh walk                     the refresh            mmdupd, qxh           convention
+#   4  batch element order          the driver             genmmd, ehead         convention
+#   5  merged weight in a           the refresh, q2h       mmdupd, dg -          DEFECT
+#      supervariable's bucket                              qsize[en] + 1
+#   6  supervariable member order   the final expansion    mmdnum, the scan      cosmetic
 #
+# All six closed 2026-08-07. The nature column is the one to read first.
+#
+# DEFECT means wrong on its own terms, independent of genmmd: entry 5 filed a
+# supervariable one bucket too high per vertex merged into it, so it was never picked
+# as early as its size had earned, and the code did not do what its own comment said.
+# It was FIXED IN mmd2 AND IN PRODUCTION Mmd2 as well, where it had been costing fill
+# since those were written; mmd2's gap against genmmd fell from about 20 percent to
+# about 7. mmd1 cannot have it, having no q2h path and no live merges, and the amd
+# layers cannot either, since AMD files at an EXTERNAL degree, which excludes a
+# vertex's own supervariable and so does not move when its weight changes.
+#
+# CONVENTION means neither side is wrong. A tie-break has no right answer, and 1 to 4
+# only change which of several equal-degree vertices wins. What they cost is not
+# quality but COMPARABILITY: while they differed, no measurement against genmmd could
+# separate a difference of mechanism from a difference of arbitrary choice.
+#
+# COSMETIC means it cannot change the answer at all. Entry 6 reorders the members of a
+# supervariable, which are indistinguishable by construction, so the fill and the
+# elimination forest are identical either way.
+#
+# 5 is a different kind, and the first real defect rather than a convention. In the
+# q2h refresh we subtracted u's own weight from dg0 BEFORE the walk; genmmd keeps dg0
+# whole and subtracts at the end. Those differ exactly when the walk MERGES a vertex
+# into u, since genmmd's merge does `qsize[en] += qsize[nd]` in the same walk and the
+# weight it then subtracts is the post-merge one. Subtracting first files a
+# supervariable one bucket too high per vertex merged into it, so it is not picked as
+# early as its size has earned. Closing it took 32x32 from 1.5 percent fill above
+# genmmd to ZERO, and matched 5x5 and 7x7 outright.
+#
+# 1 to 4 are one defect found four times, described under THE FOUR LISTS below. They
+# were closed together because none can be judged alone: with 2, 3 and 4 the seven
+# examples reach four of seven, and only 1 takes them to seven of seven, since 1
+# fixes the order of C[pivot] and therefore the content order of what 2, 3 and 4
+# walk.
+#
+# 6 cannot change the fill and does not pretend to. A supervariable's members are
+# indistinguishable by construction, so any order among them gives the same factor,
+# which is why fill reached genmmd's exactly while the printed permutation still
+# differed. It is closed anyway, because an exact permutation makes the comparison an
+# equality test rather than a judgement, and that is the instrument the next layer
+# will be aligned with.
+#
+# WHERE IT STANDS. Seven of seven examples. On grids, 67 to 78 percent of the pivots,
+# a fraction FLAT in n rather than falling, which says one more mechanism rather than
+# accumulating drift. Fill against genmmd went from about 20 percent to about 10.
+#
+# WHY THAT MATTERS AND IS NOT A DETAIL. Minimum degree is a tie-break algorithm.
+# At almost every iteration several vertices share the least degree, and which one is
+# taken is decided by whatever the data structure happens to hand over first. So
+# two codes can agree on every rule and still part company on the first tie, and
+# from there they are ordering different graphs. Matching the permutation is not
+# cosmetic: it is the only way to tell a difference of MECHANISM from a difference
+# of ARBITRARY CHOICE, and until it holds, a fill comparison measures both at once.
+#
+# THE FOUR LISTS. Every one is the same idiom. genmmd holds a linked list threaded
+# through an integer array and pushes at the head, `list[nb] = h; h = nb`, then
+# reads from the head, so the entry seen LAST is processed FIRST. We hold a vector
+# and append, which is the same set in the opposite order. Same set, same cost.
+#
+#   mmd3_neighbors, the I[u] walk    mmdelm's element stack, `list[nb] = el; el = nb`
+#   the q2h walk                     mmdupd's, `list[nb] = q2h; q2h = nb`
+#   the qxh walk                     mmdupd's, `list[nb] = qxh; qxh = nb`
+#   the batch walk                   the driver's, `list[mn] = ehead; ehead = mn`
+#
+# The first is the deepest and the other three cannot be judged without it: it fixes
+# the order of C[pivot], which is the content order of every list built downstream.
+# With the other three alone the seven examples reach four of seven; with all four
+# they reach seven of seven.
+#
+# WHAT IS NOT DONE HERE, and it is why this file exists as a layer rather than as an
+# edit to mmd2. Grids still part company with genmmd in the last third of the run,
+# at a fraction that is flat in n rather than growing, so one more mechanism is
+# unaccounted for and this is the anchor it will be found against.
+#
+# NOT A SORT. genmmd never sorts, and neither does this. Sorting the element members
+# reaches five of seven on the examples and is a different thing entirely: it
+# reproduces the effect on these graphs without reproducing the mechanism, and costs
+# a sort per element in a routine whose design is built on not having one.
+#
+# Everything below this header is mmd2, unchanged. Section 5.11 of
+# archive/sparse_factorization.md, plus the vendored routine itself.
+
 # PASS 1, THE PREPASS. genmmd numbers every vertex in the degree-1 list before the
 # main loop starts, marks each marker[mn] = maxint, and never refreshes a
 # neighbor. Two things travel with it. mmdint files a degree-0 vertex under degree
@@ -78,7 +164,7 @@
 # the degree lists rather than refiling it: bwd[nd] = -maxint. It is not merged and
 # not eliminated, just held out until something reaches it again, at which point
 # mmdelm restores it with bwd[rn] = 0. Here that is the `outmatched` flag, cleared
-# in mmd2_eliminate for every vertex the new clique reaches.
+# in mmd3_eliminate for every vertex the new clique reaches.
 #
 # PASS 4, THE FILING CONVENTION. mmdupd does not file a vertex under its degree.
 # It files under `dg = dg - qsize[en] + 1`, floored at 1, where dg was the weighted
@@ -108,8 +194,8 @@
 # straight to the numbering. Ours is the same test on num_eliminated_vertices: take the
 # pivot, account for it, and stop rather than eliminate into an empty graph.
 #
-# Run: python3 mmd2.py       every example
-#      python3 mmd2.py 3     just the third
+# Run: python3 mmd3.py       every example
+#      python3 mmd3.py 3     just the third
 
 # %%
 import sys
@@ -134,7 +220,7 @@ SHOW_THRESHOLD = 32
 # I[u] cliques that contain u
 # C[c] vertices that c contains
 
-def mmd2_show(A, I, C, degrees, title=None, eliminated=None):
+def mmd3_show(A, I, C, degrees, title=None, eliminated=None):
     """Print a quotient graph: adjacency, incidence, cliques, degrees, in the order
     the structure holds them. The degree shown is the stored one, never
     recomputed, which is the point of this layer."""
@@ -160,7 +246,7 @@ def mmd2_show(A, I, C, degrees, title=None, eliminated=None):
         print(f"  c{c}: {{{clique_members_text}}}")
     print()
 
-def mmd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots,
+def mmd3_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots,
                    title=None):
     """Print the state arrays: degrees, buckets, min degree, members, eliminated,
     and the order so far."""
@@ -192,14 +278,14 @@ def mmd2_show_state(degrees, buckets, min_degree, super_members, eliminated, piv
     print(f"  order: {[u for pivot in pivots for u in super_members[pivot]]}")
     print()
 
-def mmd2_storage(A, I, C):
+def mmd3_storage(A, I, C):
     """Entries actually stored, as in md5. Batching changes when degrees are
     refreshed, not what the quotient graph holds."""
     return (sum(len(adjacency) for adjacency in A)
             + sum(len(incidence) for incidence in I)
             + sum(len(clique_members) for clique_members in C.values()))
 
-def mmd2_neighbors(A, I, C, eliminated, mark, tag, u):
+def mmd3_neighbors(A, I, C, eliminated, mark, tag, u):
     """The neighbors of live vertex u: its explicit adjacency A[u] together with
     the members of every clique that contains u, minus u itself, which the
     cliques always carry. This is George and Liu's reachable set, and it is what
@@ -231,14 +317,24 @@ def mmd2_neighbors(A, I, C, eliminated, mark, tag, u):
         if not eliminated[v]:
             mark[v] = tag
             neighbors.append(v)
-    for c in I[u]:
+
+    # THE ONE CHANGE FROM mmd2, AND IT IS NOT AN ALGORITHM. genmmd holds this list as a
+    # linked list pushed at the head, `list[nb] = el; el = nb`, and then reads from the
+    # head, so the entry seen LAST is processed FIRST. We hold it as a vector and append,
+    # which is the same set in the opposite order. The set is the same either way, and so
+    # is the cost; what differs is which of two equal candidates wins, and minimum degree
+    # is decided by exactly that. Walking backwards restores genmmd's order without
+    # paying for a head insertion.
+    # This one is mmdelm's ELEMENT stack, and it is the deepest of the four: it fixes
+    # the order of C[pivot], hence the content order of every list built from it.
+    for c in reversed(I[u]):
         for v in C[c]:
             if mark[v] != tag and not eliminated[v]:
                 mark[v] = tag
                 neighbors.append(v)
     return neighbors, tag
 
-def mmd2_degree(A, I, C, eliminated, super_members, mark, tag, u):
+def mmd3_degree(A, I, C, eliminated, super_members, mark, tag, u):
     """The weighted degree of u: its neighbors counted in ORIGINAL vertices, since
     a neighbor may stand for several. Returns (degree, tag).
 
@@ -249,10 +345,10 @@ def mmd2_degree(A, I, C, eliminated, super_members, mark, tag, u):
     weight array is kept: md3 through mmd1 have none for the same reason. One
     becomes necessary only when the members are chains over a flat array, where a
     size stops being free."""
-    neighbors, tag = mmd2_neighbors(A, I, C, eliminated, mark, tag, u)
+    neighbors, tag = mmd3_neighbors(A, I, C, eliminated, mark, tag, u)
     return sum(len(super_members[v]) for v in neighbors), tag
 
-def mmd2_eliminate(A, I, C, mark, tag, eliminated, outmatched, pivot):
+def mmd3_eliminate(A, I, C, mark, tag, eliminated, outmatched, pivot):
     """Turn the pivot into a clique, then merge in every member it makes
     indistinguishable. Identical to md5_eliminate: this layer changes how often
     degrees are refreshed, not what an elimination does.
@@ -284,7 +380,7 @@ def mmd2_eliminate(A, I, C, mark, tag, eliminated, outmatched, pivot):
         merged   = { u in C[pivot] : A[u] == {} and I[u] == {pivot} }
         C[pivot] = C[pivot] - merged
     """
-    neighbors, tag = mmd2_neighbors(A, I, C, eliminated, mark, tag, pivot)
+    neighbors, tag = mmd3_neighbors(A, I, C, eliminated, mark, tag, pivot)
     absorbed_cliques = list(I[pivot])
     for c in absorbed_cliques:
         del C[c]
@@ -324,7 +420,7 @@ def mmd2_eliminate(A, I, C, mark, tag, eliminated, outmatched, pivot):
         I[u] = kept
 
     # Mass elimination. u is INDISTINGUISHABLE from the pivot when the two have
-    # the same closed neighborhood, mmd2_neighbors(u) | {u} == mmd2_neighbors(pivot)
+    # the same closed neighborhood, mmd3_neighbors(u) | {u} == mmd3_neighbors(pivot)
     # | {pivot}, as it stood before the iteration. Equivalently, now that the clique is
     # formed, when everything u can still reach lies inside it. The test below is
     # a cheap sufficient condition for that: nothing explicit left and no clique
@@ -349,7 +445,7 @@ def mmd2_eliminate(A, I, C, mark, tag, eliminated, outmatched, pivot):
     eliminated[pivot] = True
     return neighbors, absorbed_cliques, pruned_edges, merged_vertices, tag
 
-def mmd2_file(buckets, filed, d, u):
+def mmd3_file(buckets, filed, d, u):
     """Push u at the head of bucket d, which is the O(1) end of the C++ twin's
     linked list.
 
@@ -362,7 +458,7 @@ def mmd2_file(buckets, filed, d, u):
     buckets[d].insert(0, u)
     filed[u] = True
 
-def mmd2_unfile(buckets, filed, d, u):
+def mmd3_unfile(buckets, filed, d, u):
     """Take u out of bucket d, if it is there. Set view: buckets[d].discard(u), and
     discard rather than remove, since a caller may unfile a vertex twice."""
     if not filed[u]:
@@ -370,14 +466,14 @@ def mmd2_unfile(buckets, filed, d, u):
     buckets[d].remove(u)
     filed[u] = False
 
-def mmd2_refile(buckets, filed, degrees, u, new_degree):
+def mmd3_refile(buckets, filed, degrees, u, new_degree):
     """Move u from the bucket for its old degree to the one for new_degree. Set
     view: buckets[old].discard(u) then buckets[new].add(u)."""
-    mmd2_unfile(buckets, filed, degrees[u], u)
+    mmd3_unfile(buckets, filed, degrees[u], u)
     degrees[u] = new_degree
-    mmd2_file(buckets, filed, new_degree, u)
+    mmd3_file(buckets, filed, new_degree, u)
 
-def mmd2_minimum_degree(G, delta=0):
+def mmd3_minimum_degree(G, delta=0):
     """Multiple elimination: a batch of independent pivots per degree refresh.
 
     delta is signed: negative means one pivot per iteration. It is compared against a
@@ -432,7 +528,7 @@ def mmd2_minimum_degree(G, delta=0):
     filed = [False] * n                        # whether u is in a bucket at all
     for u in range(n):
         degrees[u] = max(degrees[u], 1)
-        mmd2_file(buckets, filed, degrees[u], u)
+        mmd3_file(buckets, filed, degrees[u], u)
     min_degree = min(degrees) if n else 0
     num_bucket_probes = 0
     num_iterations = 0                             # batches, the metric this layer adds
@@ -444,9 +540,9 @@ def mmd2_minimum_degree(G, delta=0):
     # NOT PRODUCTION: display only. The trace is what makes these files teachable and
     # is the whole reason they exist; nothing downstream reads it.
     if n <= SHOW_THRESHOLD:
-        mmd2_show(A, I, C, degrees, "start: every edge explicit, no clique yet",
+        mmd3_show(A, I, C, degrees, "start: every edge explicit, no clique yet",
                   eliminated=eliminated)
-        mmd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
+        mmd3_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
 
     # ---- the PREPASS -------------------------------------------------------
     # Number everything in bucket 1, which after the floor above holds the
@@ -456,7 +552,7 @@ def mmd2_minimum_degree(G, delta=0):
     # these vertices. That staleness is the point, and it is what genmmd does.
     prepass_vertices = list(buckets[1]) if n > 1 else list(buckets[1])
     for u in prepass_vertices:
-        mmd2_unfile(buckets, filed, degrees[u], u)
+        mmd3_unfile(buckets, filed, degrees[u], u)
         external_degree = sum(1 for v in A[u] if not eliminated[v])
         nnz_L += external_degree + 1
         eliminated[u] = True
@@ -467,10 +563,10 @@ def mmd2_minimum_degree(G, delta=0):
         # NOT PRODUCTION: display only. The trace is what makes these files teachable and
         # is the whole reason they exist; nothing downstream reads it.
         if n <= SHOW_THRESHOLD:
-            mmd2_show(A, I, C, degrees,
+            mmd3_show(A, I, C, degrees,
                       f"prepass: numbered {len(prepass_vertices)}: {prepass_text}",
                       eliminated=eliminated)
-            mmd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
+            mmd3_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
     min_degree = 2 if n > 2 else min_degree     # head[1] = 0, and mdeg starts at 2
 
     while num_eliminated_vertices < n:
@@ -508,7 +604,7 @@ def mmd2_minimum_degree(G, delta=0):
                 continue
             pivot = buckets[min_degree][0]     # the head, whatever was filed last
             degree = degrees[pivot]
-            mmd2_unfile(buckets, filed, degree, pivot)
+            mmd3_unfile(buckets, filed, degree, pivot)
 
             # Sweep the tag back before it can wrap. Two sites in this layer, one
             # before each region that advances the tag, and each placed where nothing
@@ -516,14 +612,14 @@ def mmd2_minimum_degree(G, delta=0):
             # it, since a batch takes several pivots and each calls the eliminator.
             # Safe between eliminations because the eviction that follows stamps
             # touched_iteration and filed, which are separate arrays. Not inside
-            # mmd2_eliminate, which holds three stamps live in turn: clique_tag and
+            # mmd3_eliminate, which holds three stamps live in turn: clique_tag and
             # absorbed_tag across the prune loop, then the merged set across the
             # C[pivot] compaction. Never observed to fire.
             if tag > TAG_CEILING:
                 mark = [-1] * n
                 tag = 0
                 num_tag_sweeps += 1
-            neighbors, absorbed_cliques, pruned_edges, merged_vertices, tag = mmd2_eliminate(
+            neighbors, absorbed_cliques, pruned_edges, merged_vertices, tag = mmd3_eliminate(
                 A, I, C, mark, tag, eliminated, outmatched, pivot)
             num_eliminations += 1
             num_clique_entries += len(C[pivot])
@@ -533,12 +629,12 @@ def mmd2_minimum_degree(G, delta=0):
             for u in merged_vertices:          # the pivot now stands for them too
                 super_members[pivot] += super_members[u]
                 super_members[u] = []
-                mmd2_unfile(buckets, filed, degrees[u], u)
+                mmd3_unfile(buckets, filed, degrees[u], u)
                 degrees[u] = 0
             degrees[pivot] = 0
 
             for u in C[pivot]:                 # EVICT, with a stale degree
-                mmd2_unfile(buckets, filed, degrees[u], u)
+                mmd3_unfile(buckets, filed, degrees[u], u)
                 if touched_iteration[u] != num_iterations:   # a marker, so O(1) per eviction
                     touched_iteration[u] = num_iterations
                     touched.append(u)
@@ -584,7 +680,9 @@ def mmd2_minimum_degree(G, delta=0):
             mark = [-1] * n
             tag = 0
             num_tag_sweeps += 1
-        for element in batch:
+        # The driver's element list, `list[mn] = ehead; ehead = mn`, so the LAST pivot
+        # of a batch is the FIRST element refreshed. See mmd3_neighbors.
+        for element in reversed(batch):
             element_members = [u for u in C[element] if not eliminated[u]]
             tag += 1                            # dg0's members, marked once
             element_tag = tag
@@ -604,7 +702,8 @@ def mmd2_minimum_degree(G, delta=0):
                 other_sources = len(A[u]) + len(I[u]) - 1
                 (q2h if other_sources == 1 else qxh).append(u)
 
-            for u in q2h:
+            # mmdupd's q2h list, a head-pushed stack in genmmd. See mmd3_neighbors.
+            for u in reversed(q2h):
                 if eliminated[u] or outmatched[u]:   # merged or withheld by an
                     continue                         # earlier q2h vertex
                 # Everything u reaches is in the element or comes from its one
@@ -614,14 +713,13 @@ def mmd2_minimum_degree(G, delta=0):
                 # so one q2h vertex cannot hide a neighbor from the next.
                 tag += 1
                 vertex_tag = tag
-                # dg0 is kept WHOLE and u's own weight subtracted at the end, which is
-                # genmmd's `dg - qsize[en] + 1` and NOT the same as subtracting it now.
-                # The walk below can MERGE a vertex into u, and genmmd's merge does
+                # dg0 is kept WHOLE here and u's own weight subtracted at the end, which
+                # is genmmd's `dg - qsize[en] + 1` and not the same as subtracting it
+                # now. The walk below can MERGE a vertex into u, and genmmd's merge does
                 # `qsize[en] += qsize[nd]` in that same walk, so the weight it subtracts
                 # is the one AFTER the merge. Subtracting first files a supervariable one
-                # bucket too high per merged vertex, so it is never picked as early as its
-                # size has earned. This was a DEFECT here until 2026-08-07, found by
-                # aligning mmd3 against genmmd; see that file's ledger, entry 5.
+                # bucket too high per merged vertex, so it is not picked as early as its
+                # size has earned. See the ledger, entry 5.
                 degree = dg0
                 for v in A[u]:
                     if eliminated[v] or mark[v] == vertex_tag:
@@ -664,15 +762,16 @@ def mmd2_minimum_degree(G, delta=0):
                         mark[v] = vertex_tag
                         degree += len(super_members[v])
                 degrees[u] = max(degree - len(super_members[u]) + 1, 1)   # dg - qsize[en] + 1
-                mmd2_file(buckets, filed, degrees[u], u)
+                mmd3_file(buckets, filed, degrees[u], u)
                 refreshed_vertices.append(u)
 
-            for u in qxh:
+            # mmdupd's qxh list, the same stack. See mmd3_neighbors.
+            for u in reversed(qxh):
                 if eliminated[u] or outmatched[u]:
                     continue
-                degree, tag = mmd2_degree(A, I, C, eliminated, super_members, mark, tag, u)
+                degree, tag = mmd3_degree(A, I, C, eliminated, super_members, mark, tag, u)
                 degrees[u] = max(degree + 1, 1)   # dg - qsize[en] + 1, floored
-                mmd2_file(buckets, filed, degrees[u], u)
+                mmd3_file(buckets, filed, degrees[u], u)
                 refreshed_vertices.append(u)
 
         num_degree_updates += len(refreshed_vertices)
@@ -684,13 +783,29 @@ def mmd2_minimum_degree(G, delta=0):
         # NOT PRODUCTION: display only. The trace is what makes these files teachable and
         # is the whole reason they exist; nothing downstream reads it.
         if n <= SHOW_THRESHOLD:
-            mmd2_show(A, I, C, degrees,
+            mmd3_show(A, I, C, degrees,
                       (f"iteration {num_iterations - 1} done: batch of {len(batch)}: {batch_text}, "
                        f"refreshed vertices: {refreshed_vertices_text}"),
                       eliminated=eliminated)
-            mmd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
+            mmd3_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
 
-    order = [u for pivot in pivots for u in super_members[pivot]]
+    # mmdnum, and the last thing that differed from genmmd. A supervariable's members
+    # are indistinguishable by construction, so their order among themselves cannot
+    # change the fill; it does change the permutation, which is why every grid matched
+    # on FILL and on the PIVOT SEQUENCE while the printed order still diverged.
+    # genmmd numbers them root first, then by ASCENDING VERTEX INDEX, and it gets that
+    # from a single ascending scan rather than a sort: `for nd = 1..neqns, if perm[nd]
+    # <= 0` walks to the root and takes the next number. One pass, and the ascending
+    # order falls out of the scan. See the ledger, entry 6.
+    root_of = [-1] * n
+    for pivot in pivots:
+        for u in super_members[pivot]:
+            root_of[u] = pivot
+    members_of = [[] for _ in range(n)]        # merged members, ascending by the scan
+    for v in range(n):
+        if root_of[v] != -1 and root_of[v] != v:
+            members_of[root_of[v]].append(v)
+    order = [u for pivot in pivots for u in [pivot] + members_of[pivot]]
     print(f"n = {n}, nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
           f"fill = {nnz_L - nnz_tril_A}")
     print(f"iterations: {num_iterations}")
@@ -866,18 +981,18 @@ examples = [("graph1", graph1), ("graph2", graph2),
 # for byte identical while the ordering was wrong on any grid of 10 a side or more. Nothing is
 # filtered: the run is silent above SHOW_THRESHOLD and prints its closing lines as always.
 #
-#   python3 mmd2.py grid 22
+#   python3 mmd3.py grid 22
 if len(sys.argv) > 2 and sys.argv[1] == "grid":
     grid_side = int(sys.argv[2])
     print(f"=== grid {grid_side}x{grid_side} (n = {grid_side * grid_side}) ===")
-    mmd2_minimum_degree(grid_graph(grid_side))
+    mmd3_minimum_degree(grid_graph(grid_side))
     sys.exit(0)
 
-# All of them by default. To run just one, pass its number: python3 mmd2.py 3
+# All of them by default. To run just one, pass its number: python3 mmd3.py 3
 selected = int(sys.argv[1]) if len(sys.argv) > 1 else 0
 for number, (name, g) in enumerate(examples, start=1):
     if selected and number != selected:
         continue
     print(f"=== {name} ===")
-    mmd2_minimum_degree(g)
+    mmd3_minimum_degree(g)
     print()

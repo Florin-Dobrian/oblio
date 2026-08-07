@@ -116,7 +116,7 @@ int main(int argc, char** argv) {
 
     const std::vector<std::pair<std::string, Ordering>> allMethods = {
         {"MMD",  Ordering::MMD},  {"MMD1", Ordering::MMD1},
-        {"MMD2", Ordering::MMD2},
+        {"MMD2", Ordering::MMD2}, {"MMD3", Ordering::MMD3},
         {"AMD",  Ordering::AMD},  {"AMD1", Ordering::AMD1},
         {"AMD2", Ordering::AMD2},
         {"AMD1B", Ordering::AMD1B},
@@ -124,7 +124,7 @@ int main(int argc, char** argv) {
     };
     const std::vector<std::pair<std::string, Ordering>> mmdMethods = {
         {"MMD",  Ordering::MMD},  {"MMD1", Ordering::MMD1},
-        {"MMD2", Ordering::MMD2},
+        {"MMD2", Ordering::MMD2}, {"MMD3", Ordering::MMD3},
     };
     const auto& methods = mmdOnly ? mmdMethods : allMethods;
 
@@ -132,7 +132,8 @@ int main(int argc, char** argv) {
     for (const auto& m : methods) std::printf(" %10s", (m.first + " ms").c_str());
     for (const auto& m : methods) std::printf(" %10s", (m.first + " nnzL").c_str());
     if (mmdOnly)
-        std::printf(" %10s %10s %10s %10s", "MMD1 time", "MMD1 fill", "MMD2 time", "MMD2 fill");
+        std::printf(" %10s %10s %10s %10s %10s %10s", "MMD1 time", "MMD1 fill",
+                    "MMD2 time", "MMD2 fill", "MMD3 time", "MMD3 fill");
     std::printf("\n");
 
     for (int side : sides) {
@@ -150,7 +151,7 @@ int main(int argc, char** argv) {
         if (mmdOnly) {
             const double baseTime = times[0];
             const double baseFill = static_cast<double>(fills[0]);
-            for (std::size_t k = 1; k < 3; ++k) {
+            for (std::size_t k = 1; k < methods.size(); ++k) {
                 const double f = static_cast<double>(fills[k]);
                 std::printf(" %9.2fx", times[k] / baseTime);
                 std::printf(" %9.1f%%", 100.0 * (f - baseFill) / baseFill);

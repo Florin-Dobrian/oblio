@@ -290,6 +290,11 @@ public:
     // alone; every walk skips a numbered vertex from here on.
     void number(std::int32_t u);
 
+    // Walk I[u] from the back in reachableSet(), matching genmmd's element stack. A tie-break
+    // convention and nothing else: it changes which permutation comes out, never which sets are
+    // computed. See the member's note.
+    void setReverseIncidence(bool on) { mReverseIncidence = on; }
+
     // Kill these cliques and take them out of the incidence lists of these vertices. A clique
     // dies when it is found to lie wholly inside a newer one, which is aggressive absorption, and
     // the vertices to purge are the newer clique's members, since those are the only lists that
@@ -301,6 +306,11 @@ public:
     // stands for its whole supervariable, whose members are eliminated consecutively, so this is
     // where a supervariable of size w becomes w columns.
     std::vector<std::int32_t> order(const std::vector<std::int32_t>& pivots) const;
+
+    // The same permutation with each supervariable's members in ASCENDING VERTEX INDEX rather
+    // than merge order. Indistinguishable members, so the fill and the forest are unchanged;
+    // only the permutation is, and it is genmmd's. Used by Mmd3 alone. See the .cpp.
+    std::vector<std::int32_t> orderAscending(const std::vector<std::int32_t>& pivots) const;
 
 private:
     // The head and tail of an elimination, shared by the two overloads above and private because
@@ -368,6 +378,15 @@ private:
     // short-circuits, and the load of the eliminated flag never happens. Measured at about a
     // quarter of the exact refresh, which is MMD1's hot loop, so it is worth the member.
     bool mLiveMerges = false;
+
+    // Which end of I[u] reachableSet() walks from. genmmd threads its element list through an
+    // integer array and pushes at the head, `list[nb] = el; el = nb`, then reads from the head, so
+    // the element seen LAST is expanded FIRST; we hold a vector and append. Same set either way and
+    // the same cost, but the order decides C[pivot]'s order, hence which of two equal-degree
+    // candidates a later iteration finds first, and minimum degree is settled by exactly that.
+    // Off by default, so every existing driver is unaffected; Mmd3 turns it on. See
+    // experiments/ordering/mmd3.py, where the same four walks are reversed together.
+    bool mReverseIncidence = false;
 
     std::vector<std::int32_t> mMark;     // membership scratch, read against mTag
     std::int32_t              mTag = 0;

@@ -1,11 +1,11 @@
-#include "oblio/Mmd2.h"
+#include "oblio/Mmd3.h"
 
 #include <algorithm>
 #include <cstdint>
 
 namespace Oblio {
 
-std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
+std::vector<std::int32_t> orderMmd3(const std::vector<std::size_t>&  colPtr,
                                     const std::vector<std::int32_t>& rowIdx,
                                     std::int32_t delta) {
     if (colPtr.empty()) return std::vector<std::int32_t>();
@@ -13,6 +13,12 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
     if (size == 0) return std::vector<std::int32_t>();
 
     QuotientGraph qg(colPtr, rowIdx);
+    // The fourth walk, and the deepest: it fixes the order of C[pivot], hence the content order of
+    // every list built from it. The other three are below. All four mirror genmmd holding a linked
+    // list pushed at the head and read from the head, `list[nb] = h; h = nb`, where we append to a
+    // vector. Same sets, same cost, different winner among equals, and minimum degree is settled by
+    // exactly that. See experiments/ordering/mmd3.py.
+    qg.setReverseIncidence(true);
     std::vector<std::int32_t> pivots;
     pivots.reserve(size);
     std::size_t numEliminated = 0;
@@ -104,7 +110,10 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
 
         // ---- one refresh, walked element by element -----------------------------
         refreshed.clear();
-        for (std::int32_t element : batch) {
+        // The driver's element list, genmmd's `list[mn] = ehead; ehead = mn`, so the LAST pivot of
+        // a batch is the FIRST element refreshed.
+        for (auto ee = batch.rbegin(); ee != batch.rend(); ++ee) {
+            const std::int32_t element = *ee;
             const std::int32_t* members     = qg.clique(element);
             const std::size_t   membersSize = qg.cliqueSize(element);
 
@@ -130,18 +139,19 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
                 (otherSources == 1 ? q2h : qxh).push_back(u);
             }
 
-            for (std::int32_t u : q2h) {
+            // mmdupd's q2h list, `list[nb] = q2h; q2h = nb`.
+            for (auto uu = q2h.rbegin(); uu != q2h.rend(); ++uu) {
+                const std::int32_t u = *uu;
                 if (qg.eliminated(u) || outmatched[u] != 0) continue;   // by an earlier q2h vertex
                 ++tag;
                 const std::int32_t vertexTag = tag;
                 // dg0 is kept WHOLE and u's own weight subtracted at the end, which is
-                // genmmd's `dg - qsize[en] + 1` and NOT the same as subtracting it now. The
+                // genmmd's `dg - qsize[en] + 1` and not the same as subtracting it now. The
                 // walk below can MERGE a vertex into u, and genmmd's merge does
                 // `qsize[en] += qsize[nd]` in that same walk, so the weight it subtracts is the
                 // one AFTER the merge. Subtracting first files a supervariable one bucket too
-                // high per merged vertex, so it is never picked as early as its size has earned.
-                // This was a DEFECT here until 2026-08-07, found by aligning Mmd3 against
-                // genmmd; see experiments/ordering/mmd3.py, ledger entry 5.
+                // high per merged vertex, so it is not picked as early as its size has earned.
+                // See experiments/ordering/mmd3.py, ledger entry 5.
                 std::size_t degree = dg0;
 
                 // Not hoisted, deliberately. A q2h vertex has adjacencySize + incidenceSize == 2
@@ -188,7 +198,9 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
                 refreshed.push_back(u);
             }
 
-            for (std::int32_t u : qxh) {                 // the full union, as md5 computes it
+            // mmdupd's qxh list, the same stack.
+            for (auto uu = qxh.rbegin(); uu != qxh.rend(); ++uu) {
+                const std::int32_t u = *uu;                 // the full union, as md5 computes it
                 if (qg.eliminated(u) || outmatched[u] != 0) continue;
                 const std::size_t degree = qg.reachableWeight(u);   // reach excludes u already
                 degrees[u] = std::max<std::size_t>(degree + 1, 1);
@@ -201,7 +213,7 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
         ++numRounds;
     }
 
-    return qg.order(pivots);
+    return qg.orderAscending(pivots);   // genmmd's mmdnum. See the ledger, entry 6.
 }
 
 } // namespace Oblio

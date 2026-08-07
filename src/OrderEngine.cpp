@@ -1,6 +1,7 @@
 #include "oblio/OrderEngine.h"
 #include "oblio/Mmd1.h"
 #include "oblio/Mmd2.h"
+#include "oblio/Mmd3.h"
 #include "oblio/Amd1.h"
 #include "oblio/Amd1B.h"
 #include "oblio/Amd2.h"
@@ -49,6 +50,7 @@ bool OrderEngine::compute(const std::vector<std::size_t>&  colPtr,
 #endif
         case Ordering::MMD1:    return orderMMD1(size, colPtr, rowIdx, P);
         case Ordering::MMD2:    return orderMMD2(size, colPtr, rowIdx, P);
+        case Ordering::MMD3:    return orderMMD3(size, colPtr, rowIdx, P);
 #ifdef OBLIO_VENDORED_ORDERINGS
         case Ordering::AMD:     return orderAMD(size, colPtr, rowIdx, P);
 #else
@@ -148,6 +150,25 @@ bool OrderEngine::orderMMD2(std::size_t size,
     if (size == 0) return true;
 
     const std::vector<std::int32_t> order = orderMmd2(colPtr, rowIdx);
+    if (order.size() != size) return false;
+
+    for (std::size_t k = 0; k < size; ++k) {
+        P.mNewToOld[k]        = order[k];
+        P.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
+    }
+    return true;
+}
+
+// The completed MMD with genmmd's list order, which changes the permutation and nothing else.
+bool OrderEngine::orderMMD3(std::size_t size,
+                            const std::vector<std::size_t>&  colPtr,
+                            const std::vector<std::int32_t>& rowIdx,
+                            Permutation& P) const {
+    P.mOldToNew.assign(size, 0);
+    P.mNewToOld.assign(size, 0);
+    if (size == 0) return true;
+
+    const std::vector<std::int32_t> order = orderMmd3(colPtr, rowIdx);
     if (order.size() != size) return false;
 
     for (std::size_t k = 0; k < size; ++k) {

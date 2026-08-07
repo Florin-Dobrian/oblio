@@ -34,7 +34,7 @@
 
 namespace Oblio {
 
-enum class Ordering { Natural, MMD, MMD1, MMD2, AMD, AMD1, AMD2, AMD1B, AMD2B };
+enum class Ordering { Natural, MMD, MMD1, MMD2, MMD3, AMD, AMD1, AMD2, AMD1B, AMD2B };
 
 class OrderEngine {
 public:
@@ -61,9 +61,14 @@ public:
 
 private:
     // Our MMD, not the vendored one, because the vendored orderings are optional: a default has to
-    // be an ordering that is always there. MMD2 is the closest of ours to genmmd, which is what the
-    // default used to be.
-    Ordering mOrdering = Ordering::MMD2;
+    // be an ordering that is always there. MMD3 since 2026-08-07, and the reason is not that it
+    // measured best. It returns genmmd's permutation EXACTLY, on every example and every square
+    // grid tested, so its behavior is whatever thirty years of use have established for a
+    // reference implementation, where MMD2's tie-break is ours and has been exercised on grids
+    // alone. On those grids MMD2 is in fact very slightly better at 32 a side and a few percent
+    // worse above it; a default is a bet on the cases nobody has run, and reproducing the
+    // reference is the better bet. See experiments/ordering's mmd3 section.
+    Ordering mOrdering = Ordering::MMD3;
 
     bool orderNatural(std::size_t size, Permutation& P) const;
     // The two vendored orderings, declared only when private/ supplies their sources. Everything
@@ -83,6 +88,10 @@ private:
                    const std::vector<std::int32_t>& rowIdx,
                    Permutation& P) const;
     bool orderMMD2(std::size_t size,
+                   const std::vector<std::size_t>&  colPtr,
+                   const std::vector<std::int32_t>& rowIdx,
+                   Permutation& P) const;
+    bool orderMMD3(std::size_t size,
                    const std::vector<std::size_t>&  colPtr,
                    const std::vector<std::int32_t>& rowIdx,
                    Permutation& P) const;

@@ -58,7 +58,7 @@ public:
     // Every setting is available two ways: in the constructor, in pipeline order, and through a
     // setter afterwards. The defaults are each engine's own default, so a DirectSolver built with
     // no arguments behaves as the engines it drives would.
-    explicit DirectSolver(Ordering      ordering      = Ordering::MMD2,
+    explicit DirectSolver(Ordering      ordering      = Ordering::MMD3,
                           Factorization factorization = Factorization::Cholesky,
                           Traversal     traversal     = Traversal::LeftLooking,
                           Supernodes    supernodes    = Supernodes::Fundamental,

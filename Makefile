@@ -45,6 +45,7 @@ OBLIO_SRCS = \
   src/QuotientGraph.cpp \
   src/Mmd1.cpp \
   src/Mmd2.cpp \
+  src/Mmd3.cpp \
   src/Amd1.cpp \
   src/Amd1B.cpp \
   src/Amd2.cpp \

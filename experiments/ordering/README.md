@@ -24,6 +24,7 @@ Each adds exactly one mechanism to the one before. The right column cites
 | `md5` | degree buckets, so the minimum is walked to, not scanned | 5.9, 5.10 |
 | `mmd1` | multiple elimination: a batch of pivots per degree update pass | 5.11, 5.12 |
 | `mmd2` | the rest of genmmd, one pass at a time | 5.11, 5.12 |
+| `mmd3` | mmd2 with genmmd's list order, to match its permutation | 5.11, 5.12 |
 | `amd1` | approximate degree: a bound instead of a set union | 5.13, 5.14 |
 | `amd2` | the rest of amd_1 and amd_2, one pass at a time | 5.13, 5.14 |
 
@@ -387,9 +388,230 @@ are accepted when every feature above is present and exercised, nnz(L) matches t
 routine on the seven graphs and on random ones, and every remaining order difference is traceable
 to a tie.
 
+## mmd3, and the alignment ledger
+
+**mmd3 adds no mechanism. It exists to return genmmd's permutation, and it is an anchor rather
+than a candidate ordering.** mmd2 has every mechanism genmmd has and still returned a different
+permutation, which meant every comparison between them measured two things at once: a difference
+of MECHANISM and a difference of ARBITRARY CHOICE. Minimum degree is a tie-break algorithm, so at
+almost every iteration several vertices share the least degree and the winner is whichever the
+data structure hands over first. Two codes can agree on every rule and part company on the first
+tie, and from there they are ordering different graphs.
+
+**It worked, and the result is stronger than a tidy permutation.** mmd3 now returns genmmd's
+permutation EXACTLY, on all seven examples and on every square grid tested from 5 a side to 80,
+`n = 6400`. Its fill is genmmd's to the digit at every size on the scale ladder, where mmd2 ran
+12 to 25 percent above. Six alignments, four conventions and two real defects, and no mechanism
+added to mmd2 at all.
+
+### The ledger
+
+Append only. A row is never edited once closed, so the sequence stays a record of what was wrong
+rather than a summary written afterwards. The authoritative copy is in `mmd3.py`'s header and
+mirrored in `mmd3.cpp`.
+
+```
+#  what diverged                where in ours          genmmd                nature
+-  ---------------------------  ---------------------  --------------------  ----------
+1  element expansion            mmd3_neighbors, I[u]   mmdelm, the el stack  convention
+2  q2h walk                     the refresh            mmdupd, q2h           convention
+3  qxh walk                     the refresh            mmdupd, qxh           convention
+4  batch element order          the driver             genmmd, ehead         convention
+5  merged weight in a           the refresh, q2h       mmdupd, dg -          DEFECT
+   supervariable's bucket                              qsize[en] + 1
+6  supervariable member order   the final expansion    mmdnum, the scan      cosmetic
+```
+
+All six closed 2026-08-07. **The nature column is the one to read first**, because the three
+kinds carry entirely different consequences.
+
+**DEFECT** means wrong on its own terms, with no appeal to genmmd needed. Only entry 5 qualifies:
+it filed a supervariable one bucket too high per vertex merged into it, so it was never picked as
+early as its size had earned, and the code did not do what its own comment, `dg - qsize[en] + 1`,
+said. A defect found in mmd3 is a defect wherever the same code sits, so it was **fixed in mmd2
+and in production `Mmd2` as well**. It had been costing fill in both since they were written:
+
+```
+grid          n      MMD2 fill before   MMD2 fill after
+32x32      1024           +1.6%              -0.5%
+100x100   10000          +16.2%              +5.9%
+200x200   40000          +18.4%              +6.8%
+400x400  160000          +25.2%              +8.3%
+```
+
+Nowhere else has it. `mmd1` has no q2h path and no live merges. The amd layers file at an
+EXTERNAL degree, which excludes a vertex's own supervariable and therefore does not move when its
+weight changes, so the shape cannot arise; `amd2` says as much at its hash merge.
+
+**CONVENTION** means neither side is wrong. A tie-break has no right answer, and entries 1 to 4
+only change which of several equal-degree vertices wins. What they cost is not quality but
+COMPARABILITY: while they differed, no measurement against genmmd could separate a difference of
+mechanism from a difference of arbitrary choice. That is the whole reason mmd3 exists.
+
+**COSMETIC** means it cannot change the answer at all. Entry 6 reorders the members of a
+supervariable, which are indistinguishable by construction, so the fill and the elimination forest
+are identical either way.
+
+Worth noting for the next layer: **the defect was the hardest of the six to find**, because it
+presented as a tie-break, which is what the other five were.
+
+### How it was actually done, including the wrong turns
+
+The method is a loop and it is deliberately slow: run mmd3 against the vendored routine, find the
+FIRST pivot where they differ, read both traces at that pivot, root-cause it, align that one
+thing, record it, repeat. What follows is the sequence as it happened, wrong turns included,
+because two of them were more instructive than the fixes.
+
+**Starting point.** mmd2 matched the vendored MMD on 2 of the 7 examples, and on grids diverged
+at pivot 60 of 1024 at 32 a side. MMD1 diverged at pivot 4 at every size from 3x3 up, which is
+expected, since it lacks the mechanisms; mmd2 was the one that should have matched and did not.
+
+**Choosing the case.** The smallest divergence was `graph1`, the 4-cycle, `n = 4`, where mmd2
+differs at pivot 2 and MMD1 does not. Four vertices is readable by hand. mmd1 gave `[3, 1, 2, 0]`
+and mmd2 `[3, 1, 0, 2]`: mmd1 mass-eliminates 0 into pivot 2, while mmd2's q2h pair merge folds 2
+into 0 first, so 0 survives and is eliminated next. genmmd agrees with mmd1, so its merge keeps 2
+and ours keeps 0.
+
+**Entry 1 to 4, one defect found four times.** genmmd threads a linked list through an integer
+array, pushes at the head, `list[nb] = h; h = nb`, and reads from the head, so the entry seen LAST
+is processed FIRST. We hold a vector and append: the same set in the opposite order, at the same
+cost. Only the winner among equals changes, and minimum degree is settled by exactly that.
+
+Reversing the q2h walk alone took the examples from 2 of 7 to 3 of 7. That looked like slow
+progress, and the next observation is what made it fast.
+
+**The first wrong turn, and what it taught.** With q2h reversed, graph2 still diverged at the same
+pivot as before. Instrumenting the q2h list showed why:
+
+```
+element 1   members=[0, 3]   reversed walk=[3, 0]   ->  3 survives
+element 4   members=[3, 0]   reversed walk=[0, 3]   ->  0 survives
+```
+
+The same pair `{0, 3}` stored in OPPOSITE orders in two cliques. So reversing the walk gives a
+different survivor depending on how that clique happened to get built, which meant the content
+order of the lists was wrong upstream, not just the direction they were read in. Sorting the
+element members was tried at that point and reached 5 of 7 examples. **It was rejected**, and the
+reason matters: genmmd never sorts. It walks `adjncy` in whatever order `mmdelm`'s compaction left
+it, which comes out ascending here only because the input is built from sorted columns and
+compaction preserves relative order. Sorting reproduces the EFFECT on these graphs without
+reproducing the MECHANISM, and costs a sort per element in a routine whose whole design rests on
+not needing one. Two things were learned: a scoring improvement is not evidence of a correct port,
+and the real problem was the order of `C[pivot]` itself.
+
+That pointed straight at `mmdelm`, which builds the pivot's new list as explicit neighbors written
+forward and then the ELEMENTS drained off a stack, `if (fwd[nb] < 0) { list[nb] = el; el = nb; }`.
+Our `neighbors` walked `for c in I[u]` forward. Reversing that fourth walk took the examples from
+4 of 7 to **7 of 7** in one step, and it is the deepest of the four: it fixes the order of
+`C[pivot]`, hence the content order of every list the other three walk. The other three cannot be
+judged without it, which is why they stalled at 4 of 7 on their own.
+
+**The second wrong turn: the symptom is not diagnostic.** With all four reversed, grids still
+parted company, at 67 to 78 percent of the pivots, a fraction FLAT in `n` rather than falling. The
+smallest case was the 5x5 grid at pivot 19 of 25, where our bucket held `6: [13 11 1]`, three
+vertices of equal degree, and we took the head, 13, where genmmd took 1. That reads exactly like
+another tie-break, and it was not.
+
+**Entry 5, found by instrumenting genmmd itself rather than reasoning.** Adding two `fprintf`
+calls to a scratch copy of `Mmd.cpp`, one at each pivot and one at each merge, gave:
+
+```
+PIVOT 9  mdeg 6  qsize 1
+PIVOT 5  mdeg 6  qsize 1
+  PAIR 21 into 1
+PIVOT 1  mdeg 5  qsize 2
+```
+
+genmmd files vertex 1 in bucket 5, we had it in bucket 6, and its true degree is the same, since
+genmmd files at `dg - qsize + 1` and `5 = 6 - 2 + 1`. A supervariable is filed LOWER by its own
+size minus one, so it is picked earlier than a singleton of equal degree. We merged 21 into 1 as
+well, so the merge was not missing. What differed was WHEN the weight is subtracted:
+
+```
+ours     degree = dg0 - weight(u)          snapshot BEFORE the walk
+genmmd   dg kept whole, then dg - qsize[en] + 1 at the END
+```
+
+Those agree until the walk MERGES a vertex into `u`, because genmmd's merge does
+`qsize[en] += qsize[nd]` in that same walk, so the weight it subtracts is the POST-merge one.
+Subtracting first files a supervariable one bucket too high per vertex merged into it, so it is
+never picked as early as its size has earned. Moving the subtraction to the end matched 5x5 and
+7x7 outright and **took the fill gap to zero at every size on the ladder**.
+
+**Entry 6, and the check that reframed what was left.** Fill was now exact everywhere while the
+permutation still diverged, at pivot 700 of 1024 at 32 a side. The right question was whether the
+PIVOTS differed or only the printed order, and comparing pivot sequences rather than permutations
+answered it: **identical at every size**, 788 of 788 at 32x32. So the algorithm was already
+aligned. The remainder was the 6x6 tail:
+
+```
+vendored   ... 20, 12, 13, 15, 17, 22
+mmd3       ... 20, 13, 12, 17, 22, 15
+```
+
+The same six vertices, and genmmd's trace showed them to be one supervariable: `PAIR 13/12/22/15
+into 20`, then `PIVOT 20 mdeg 1 qsize 6`. What differed is the order its members are listed when
+it expands. `mmdnum` numbers them root first, then by ASCENDING VERTEX INDEX, and gets that from a
+single ascending scan, `for nd = 1..neqns, if perm[nd] <= 0`, walking to the root and taking the
+next number. No sort: ascending falls out of the scan order. We listed them in merge order.
+
+Entry 6 cannot change the fill and does not pretend to, since supervariable members are
+indistinguishable by construction. It was closed anyway, because an exact permutation turns the
+comparison into an EQUALITY TEST rather than a judgement, and that is the instrument the next
+layer gets aligned with.
+
+### What it bought
+
+From `benchmarks/ordering`'s `make scale` on alpamayo, against the vendored MMD:
+
+```
+grid          n      MMD2 fill   MMD3 fill      MMD2 time   MMD3 time
+32x32      1024        1.6%        0.0%           1.30x       1.29x
+64x64      4096       12.0%        0.0%           1.17x       1.11x
+100x100   10000       16.2%        0.0%           1.23x       1.13x
+140x140   19600       21.6%        0.0%           1.26x       1.24x
+200x200   40000       18.4%        0.0%           1.41x       1.39x
+280x280   78400       21.2%        0.0%           1.44x       1.43x
+400x400  160000       25.2%        0.0%           1.47x       1.49x
+```
+
+**The entire fill gap was convention and two off-by-one defects, not missing mechanism.** That was
+not knowable before: with mmd2 the 20 percent could have been either, and the only way to tell was
+to make the permutations equal and see what was left. What is left is time, 1.1x to 1.5x, and it
+can now be profiled against an implementation known to compute the identical answer.
+
+### Method notes worth keeping
+
+- **Instrument the oracle, not just our side.** Entries 5 and 6 were both found by adding two
+  `fprintf` lines to a scratch copy of the vendored source. Reasoning from our trace alone had
+  produced a plausible and wrong diagnosis twice.
+- **A better score is not a correct port.** Sorting beat three of the four reversals and was
+  wrong. The question to ask of a candidate fix is which line of the vendored routine it
+  corresponds to.
+- **Compare the right object.** Comparing permutations said 70 percent aligned; comparing pivot
+  sequences said fully aligned. The first framing would have sent us looking for a mechanism that
+  was not missing.
+- **The symptom does not identify the cause.** Entry 5 presented as a tie-break among three
+  equal-degree vertices and was a filing defect. A different pivot at equal apparent degree is
+  what BOTH look like.
+
+### One production consequence worth knowing
+
+Three of the four reversed walks are in `Mmd3.cpp`. The fourth, the `I[u]` expansion, lives in
+`QuotientGraph::reachableSet`, which all six drivers share, so it is a flag, `setReverseIncidence`,
+off by default and turned on only by `Mmd3`, with the branch hoisted and per clique rather than per
+member. Entry 6 needed the same treatment for `QuotientGraph::order`, and became a second named
+method, `orderAscending`, a counting layout with one ascending pass and no sort. A mode flag and a
+parallel method on a shared class are not free to the reader; the alternatives were duplicating
+the walks or changing the permutation for every driver.
+
+mmd3 is in `LAYERS`, `GRID_LAYERS` and `PORTED`, so `make test` holds the twins to each other and
+production to the prototype. Production carries `Mmd3` and `Ordering::MMD3`, and `make scale` in
+`benchmarks/ordering` reports it beside MMD1 and MMD2.
+
 ## Grid mode, and what the missing features are actually worth
 
-Every prototype takes an example number; `mmd1`, `mmd2`, `amd1` and `amd2` also take a grid:
+Every prototype takes an example number, and since 2026-08-07 every one also takes a grid:
 
 ```
 ./amd1_cpp grid 22        one 22x22 grid Laplacian, counters only

@@ -58,6 +58,7 @@ const char* name(Ordering m) {
         case Ordering::MMD:     return "MMD";
         case Ordering::MMD1:    return "MMD1";
         case Ordering::MMD2:    return "MMD2";
+        case Ordering::MMD3:    return "MMD3";
         case Ordering::AMD:     return "AMD";
         case Ordering::AMD1:    return "AMD1";
         case Ordering::AMD2:    return "AMD2";
@@ -139,7 +140,8 @@ int main() {
            "--------");
 
     for (Ordering ordering : {Ordering::Natural, Ordering::MMD, Ordering::MMD1,
-                              Ordering::MMD2, Ordering::AMD, Ordering::AMD1,
+                              Ordering::MMD2, Ordering::MMD3,
+                              Ordering::AMD, Ordering::AMD1,
                               Ordering::AMD2, Ordering::AMD1B, Ordering::AMD2B}) {
         // Structural only, so one permutation, forest and symbolic factor serve both matrices.
         OrderEngine ordEng(ordering);

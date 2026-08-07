@@ -84,7 +84,7 @@ BINS   = $(addsuffix _cpp,$(LAYERS))
 # prototype's matrix1 has nothing to compare against on this side: it is the one example given as
 # a matrix rather than a graph, unsymmetric with duplicates and an unsorted column, and it exists
 # to exercise amd3Aat and amd3Preprocess.
-PORTED      = mmd1 mmd2 mmd3 amd1 amd2
+PORTED      = mmd1 mmd2 amd1 amd2
 PORTED_FILL =
 
 # The grid sides each ported layer is also compared on, beyond the seven examples. The examples

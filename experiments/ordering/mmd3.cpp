@@ -1,21 +1,101 @@
-// mmd2.cpp -- multiple minimum degree, complete.
+// mmd3.cpp -- multiple minimum degree, matching genmmd's permutation.
 //
-// mmd1 has the idea: a batch of independent pivots per degree refresh. What it
-// does not have is the rest of what genmmd does, and this file adds it, one pass
-// at a time. Section 5.11 of archive/sparse_factorization.md, plus the vendored
-// routine itself in vendored/vendored_mmd.cpp.
+// mmd2 has every mechanism genmmd has, and still returns a different permutation.
+// This layer adds no mechanism at all. It changes the ORDER FOUR LISTS ARE WALKED IN,
+// and that is the whole difference between the two files.
 //
-// The list, against the vendored routine that carries each:
+// THE ALIGNMENT LEDGER. One row per divergence found, root-caused and closed. It is kept
+// here rather than in a note because the code is where it will be read, and it is APPEND
+// ONLY: a row is never edited once closed, so the sequence stays a record of what was
+// actually wrong rather than a tidy summary written afterwards. The same table is in
+// mmd3.py and is summarized in the README's mmd3 section.
 //
-//   1. the PREPASS over head[1], numbering degree 0 and 1 vertices before the main
-//      loop and leaving their neighbors' degrees stale                    [done]
-//   2. mmdupd's q2h path, split on mmdelm's fwd[rn] = nq + 1 stash        [done]
-//   3. the pairwise merge inside the q2h walk, which folds a vertex into a
-//      LIVE one, so a candidate can stand for several vertices             [done]
-//   4. OUTMATCHED marking, bwd[nd] = -maxint                              [done]
-//   5. the filing convention, dg - qsize[en] + 1 floored at 1             [done]
-//   6. the counters: ncsub, and the early termination on num + qsize      [done]
+//   #  what diverged                where here            genmmd                nature
+//   -  ---------------------------  --------------------  --------------------  ----------
+//   1  element expansion            mmd3Neighbors, I[u]   mmdelm, the el stack  convention
+//   2  q2h walk                     the refresh           mmdupd, q2h           convention
+//   3  qxh walk                     the refresh           mmdupd, qxh           convention
+//   4  batch element order          the driver            genmmd, ehead         convention
+//   5  merged weight in a           the refresh, q2h      mmdupd, dg -          DEFECT
+//      supervariable's bucket                             qsize[en] + 1
+//   6  supervariable member order   the final expansion   mmdnum, the scan      cosmetic
 //
+// All six closed 2026-08-07. The nature column is the one to read first.
+//
+// DEFECT means wrong on its own terms, independent of genmmd: entry 5 filed a supervariable
+// one bucket too high per vertex merged into it, so it was never picked as early as its size
+// had earned, and the code did not do what its own comment said. It was FIXED IN mmd2 AND IN
+// PRODUCTION Mmd2 as well, where it had been costing fill since those were written; mmd2's
+// gap against genmmd fell from about 20 percent to about 7. mmd1 cannot have it, having no
+// q2h path and no live merges, and the amd layers cannot either, since AMD files at an
+// EXTERNAL degree, which excludes a vertex's own supervariable and so does not move when its
+// weight changes.
+//
+// CONVENTION means neither side is wrong. A tie-break has no right answer, and 1 to 4 only
+// change which of several equal-degree vertices wins. What they cost is not quality but
+// COMPARABILITY: while they differed, no measurement against genmmd could separate a
+// difference of mechanism from a difference of arbitrary choice.
+//
+// COSMETIC means it cannot change the answer at all. Entry 6 reorders the members of a
+// supervariable, which are indistinguishable by construction, so the fill and the elimination
+// forest are identical either way.
+//
+// 5 is a different kind, and the first real defect rather than a convention. In the q2h
+// refresh we subtracted u's own weight from dg0 BEFORE the walk; genmmd keeps dg0 whole and
+// subtracts at the end. Those differ exactly when the walk MERGES a vertex into u, since
+// genmmd's merge does `qsize[en] += qsize[nd]` in the same walk and the weight it then
+// subtracts is the post-merge one. Subtracting first files a supervariable one bucket too
+// high per vertex merged into it, so it is not picked as early as its size has earned.
+// Closing it took 32x32 from 1.5 percent fill above genmmd to ZERO, and matched 5x5 and 7x7
+// outright.
+//
+// 1 to 4 are one defect found four times, described under THE FOUR LISTS below. They were
+// closed together because none can be judged alone: with 2, 3 and 4 the seven examples
+// reach four of seven, and only 1 takes them to seven of seven, since 1 fixes the order of
+// C[pivot] and therefore the content order of what 2, 3 and 4 walk.
+//
+// 6 cannot change the fill and does not pretend to. A supervariable's members are
+// indistinguishable by construction, so any order among them gives the same factor, which
+// is why fill reached genmmd's exactly while the printed permutation still differed. It is
+// closed anyway, because an exact permutation makes the comparison an equality test rather
+// than a judgement, and that is the instrument the next layer will be aligned with.
+//
+// WHERE IT STANDS. Seven of seven examples. On grids, 67 to 78 percent of the pivots, a
+// fraction FLAT in n rather than falling, which says one more mechanism rather than
+// accumulating drift. Fill against genmmd went from about 20 percent to about 10.
+//
+// WHY THAT MATTERS AND IS NOT A DETAIL. Minimum degree is a tie-break algorithm. At
+// almost every iteration several vertices share the least degree, and which one is taken
+// is decided by whatever the data structure hands over first. Two codes can agree on
+// every rule and still part company on the first tie, and from there they are ordering
+// different graphs. Matching the permutation is the only way to tell a difference of
+// MECHANISM from a difference of ARBITRARY CHOICE; until it holds, a fill comparison
+// measures both at once.
+//
+// THE FOUR LISTS, all the same idiom. genmmd threads a linked list through an integer
+// array, pushes at the head, `list[nb] = h; h = nb`, then reads from the head, so the
+// entry seen LAST is processed FIRST. We hold a vector and append: same set, opposite
+// order, same cost.
+//
+//   mmd3Neighbors, the I[u] walk   mmdelm's element stack, list[nb] = el; el = nb
+//   the q2h walk                   mmdupd's, list[nb] = q2h; q2h = nb
+//   the qxh walk                   mmdupd's, list[nb] = qxh; qxh = nb
+//   the batch walk                 the driver's, list[mn] = ehead; ehead = mn
+//
+// The first is the deepest and the others cannot be judged without it: it fixes the order
+// of C[pivot], the content order of every list built downstream. The other three alone
+// reach four of seven examples; all four reach seven of seven.
+//
+// WHAT IS NOT DONE HERE. Grids still part company in the last third of the run, at a
+// fraction flat in n rather than growing, so one mechanism is unaccounted for and this is
+// the anchor it will be found against.
+//
+// NOT A SORT. genmmd never sorts and neither does this. Sorting the element members
+// reaches five of seven and reproduces the effect without the mechanism, at the cost of a
+// sort per element in a routine designed around not having one.
+//
+// Everything below this header is mmd2, unchanged.
+
 // PASS 1, THE PREPASS. genmmd numbers every vertex in the degree-1 list before the
 // main loop starts, marks each marker[mn] = maxint, and never refreshes a
 // neighbor. Two things travel with it. mmdint files a degree-0 vertex under degree
@@ -75,7 +155,7 @@
 // the degree lists rather than refiling it: bwd[nd] = -maxint. It is not merged and
 // not eliminated, just held out until something reaches it again, at which point
 // mmdelm restores it with bwd[rn] = 0. Here that is the `outmatched` flag, cleared
-// in mmd2Eliminate for every vertex the new clique reaches.
+// in mmd3Eliminate for every vertex the new clique reaches.
 //
 // PASS 4, THE FILING CONVENTION. mmdupd does not file a vertex under its degree.
 // It files under `dg = dg - qsize[en] + 1`, floored at 1, where dg was the weighted
@@ -105,9 +185,9 @@
 // reached there is nothing left to update, so genmmd skips the elimination and goes
 // straight to the numbering. Ours is the same test on numEliminatedVertices.
 //
-// Build:  g++ -std=c++17 -O3 mmd2.cpp -o mmd2_cpp  (or: make)
-// Run:    ./mmd2_cpp
-//         ./mmd2_cpp 3      just the third example
+// Build:  g++ -std=c++17 -O3 mmd3.cpp -o mmd3_cpp  (or: make)
+// Run:    ./mmd3_cpp
+//         ./mmd3_cpp 3      just the third example
 
 #include <cstdlib>
 #include <algorithm>
@@ -176,7 +256,7 @@ struct Cliques {
 // I[u] cliques that contain u
 // C[c] vertices that c contains
 
-std::vector<std::int32_t> mmd2Neighbors(const Graph& A, const Graph& I, const Cliques& C,
+std::vector<std::int32_t> mmd3Neighbors(const Graph& A, const Graph& I, const Cliques& C,
                                        const std::vector<bool>& eliminated,
                                        std::vector<std::int32_t>& mark, std::int32_t& tag,
                                        std::int32_t u);
@@ -216,7 +296,7 @@ struct Buckets {
 
 // Print a quotient graph: adjacency, incidence, cliques, in the order the
 // structure holds them.
-void mmd2Show(const Graph& A, const Graph& I, const Cliques& C,
+void mmd3Show(const Graph& A, const Graph& I, const Cliques& C,
              const std::vector<std::size_t>& degrees, const std::string& title = "",
              const std::vector<bool>* eliminated = nullptr) {
     const std::size_t n = A.size();
@@ -270,7 +350,7 @@ void mmd2Show(const Graph& A, const Graph& I, const Cliques& C,
 
 // Print the state arrays: degrees, buckets, min degree, members, eliminated,
 // and the order so far.
-void mmd2ShowState(const std::vector<std::size_t>& degrees, const Buckets& buckets,
+void mmd3ShowState(const std::vector<std::size_t>& degrees, const Buckets& buckets,
                   std::size_t minDegree,
                   const std::vector<std::vector<std::int32_t>>& superMembers,
                   const std::vector<bool>& eliminated,
@@ -343,7 +423,7 @@ void mmd2ShowState(const std::vector<std::size_t>& degrees, const Buckets& bucke
 // Entries actually stored. Each edge costs two, one per endpoint in A. Each
 // incidence costs two as well, the clique id in I and the member in C. Watch
 // the total fall monotonically; the naive graph's only rises.
-std::size_t mmd2Storage(const Graph& A, const Graph& I, const Cliques& C) {
+std::size_t mmd3Storage(const Graph& A, const Graph& I, const Cliques& C) {
     std::size_t total = 0;
     for (const std::vector<std::int32_t>& adjacency : A) total += adjacency.size();
     for (const std::vector<std::int32_t>& incidence : I) total += incidence.size();
@@ -356,7 +436,7 @@ std::size_t mmd2Storage(const Graph& A, const Graph& I, const Cliques& C) {
 // members of every clique that contains u, minus u itself, which the cliques
 // always carry. This is George and Liu's reachable set, and it is what the
 // elimination graph would hold explicitly.
-std::vector<std::int32_t> mmd2Neighbors(const Graph& A, const Graph& I, const Cliques& C,
+std::vector<std::int32_t> mmd3Neighbors(const Graph& A, const Graph& I, const Cliques& C,
                                        const std::vector<bool>& eliminated,
                                        std::vector<std::int32_t>& mark, std::int32_t& tag,
                                        std::int32_t u) {
@@ -378,8 +458,17 @@ std::vector<std::int32_t> mmd2Neighbors(const Graph& A, const Graph& I, const Cl
     mark[u] = tag;                          // never its own neighbor
     for (std::int32_t v : A[u])
         if (!eliminated[v]) { mark[v] = tag; neighbors.push_back(v); }
-    for (std::int32_t c : I[u])
-        for (std::int32_t v : C.at(c))
+    // THE ONE CHANGE FROM mmd2, AND IT IS NOT AN ALGORITHM. genmmd holds this list as a
+    // linked list pushed at the head, `list[nb] = el; el = nb`, then reads from the head,
+    // so the entry seen LAST is processed FIRST. We hold a vector and append, which is the
+    // same set in the opposite order. Same set, same cost; what differs is which of two
+    // equal candidates wins, and minimum degree is decided by exactly that. Walking
+    // backwards restores genmmd's order without paying for a head insertion.
+    //
+    // This one is mmdelm's ELEMENT stack, and it is the deepest of the four: it fixes the
+    // order of C[pivot], hence the content order of every list built from it.
+    for (auto c = I[u].rbegin(); c != I[u].rend(); ++c)
+        for (std::int32_t v : C.at(*c))
             if (mark[v] != tag && !eliminated[v]) { mark[v] = tag; neighbors.push_back(v); }
     return neighbors;
 }
@@ -394,13 +483,13 @@ std::vector<std::int32_t> mmd2Neighbors(const Graph& A, const Graph& I, const Cl
 // superMembers[v].size(), which is O(1), so no weight array is kept: md3 through
 // mmd1 have none for the same reason. One becomes necessary only when the members
 // are chains over a flat array, where a size stops being free.
-std::size_t mmd2Degree(const Graph& A, const Graph& I, const Cliques& C,
+std::size_t mmd3Degree(const Graph& A, const Graph& I, const Cliques& C,
                        const std::vector<bool>& eliminated,
                        const std::vector<std::vector<std::int32_t>>& superMembers,
                        std::vector<std::int32_t>& mark, std::int32_t& tag,
                        std::int32_t u) {
     std::size_t degree = 0;
-    for (std::int32_t v : mmd2Neighbors(A, I, C, eliminated, mark, tag, u))
+    for (std::int32_t v : mmd3Neighbors(A, I, C, eliminated, mark, tag, u))
         degree += superMembers[v].size();
     return degree;
 }
@@ -436,10 +525,10 @@ std::size_t mmd2Degree(const Graph& A, const Graph& I, const Cliques& C,
 //     C[pivot] = C[pivot] - merged
 std::tuple<std::vector<std::int32_t>, std::vector<std::int32_t>,
            std::vector<std::pair<std::int32_t, std::int32_t>>, std::vector<std::int32_t>>
-mmd2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
+mmd3Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
               std::vector<bool>& outmatched,
               std::vector<std::int32_t>& mark, std::int32_t& tag, std::int32_t pivot) {
-    const std::vector<std::int32_t> neighbors = mmd2Neighbors(A, I, C, eliminated, mark, tag, pivot);
+    const std::vector<std::int32_t> neighbors = mmd3Neighbors(A, I, C, eliminated, mark, tag, pivot);
     const std::vector<std::int32_t> absorbedCliques = I[pivot];
     for (std::int32_t c : absorbedCliques)
         C.erase(c);
@@ -480,7 +569,7 @@ mmd2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
     }
 
     // Mass elimination. u is INDISTINGUISHABLE from the pivot when the two have
-    // the same closed neighborhood, mmd2Neighbors(u) | {u} == mmd2Neighbors(pivot)
+    // the same closed neighborhood, mmd3Neighbors(u) | {u} == mmd3Neighbors(pivot)
     // | {pivot}, as it stood before the iteration. Equivalently, now that the clique is
     // formed, when everything u can still reach lies inside it. The test below is
     // a cheap sufficient condition for that: nothing explicit left and no clique
@@ -520,7 +609,7 @@ mmd2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
 // everything the picker asks of it. What it does not give is a minimum, which is
 // why minDegree walks. A sorted container would hand over the minimum directly and
 // charge a log on every file, and files outnumber picks.
-void mmd2Refile(Buckets& buckets, std::vector<std::size_t>& degrees,
+void mmd3Refile(Buckets& buckets, std::vector<std::size_t>& degrees,
                std::int32_t u, std::size_t newDegree) {
     buckets.unfile(degrees[u], u);
     degrees[u] = newDegree;
@@ -536,7 +625,7 @@ void mmd2Refile(Buckets& buckets, std::vector<std::size_t>& degrees,
 // delta is signed: negative means one pivot per iteration. It is compared against a
 // degree and its useful range stops at n - 1, so it is an index-like quantity by
 // Oblio's rule, a std::int32_t rather than a count.
-std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta = 0) {
+std::vector<std::int32_t> mmd3MinimumDegree(const Graph& G, std::int32_t delta = 0) {
     const std::size_t n = G.size();
     std::size_t nnzTrilA = 0;
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) nnzTrilA += G[u].size();
@@ -595,8 +684,8 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
     // NOT PRODUCTION: display only. The trace is what makes these files teachable and
     // is the whole reason they exist; nothing downstream reads it.
     if (n <= SHOW_THRESHOLD) {
-        mmd2Show(A, I, C, degrees, "start: every edge explicit, no clique yet", &eliminated);
-        mmd2ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
+        mmd3Show(A, I, C, degrees, "start: every edge explicit, no clique yet", &eliminated);
+        mmd3ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
     }
 
     // ---- the PREPASS -------------------------------------------------------
@@ -626,8 +715,8 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
         // NOT PRODUCTION: display only. The trace is what makes these files teachable and
         // is the whole reason they exist; nothing downstream reads it.
         if (n <= SHOW_THRESHOLD) {
-            mmd2Show(A, I, C, degrees, title.str(), &eliminated);
-            mmd2ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
+            mmd3Show(A, I, C, degrees, title.str(), &eliminated);
+            mmd3ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
         }
     }
     if (n > 2) minDegree = 2;                  // head[1] = 0, and mdeg starts at 2
@@ -678,7 +767,7 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
             // it, since a batch takes several pivots and each calls the eliminator.
             // Safe between eliminations because the eviction that follows stamps
             // touchedIteration and filed, which are separate arrays. Not inside
-            // mmd2Eliminate, which holds three stamps live in turn: cliqueTag and
+            // mmd3Eliminate, which holds three stamps live in turn: cliqueTag and
             // absorbedTag across the prune loop, then the merged set across the
             // C[pivot] compaction. Never observed to fire.
             if (tag > TAG_CEILING) {
@@ -687,7 +776,7 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
                 ++numTagSweeps;
             }
             auto [neighbors, absorbedCliques, prunedEdges, mergedVertices] =
-                mmd2Eliminate(A, I, C, eliminated, outmatched, mark, tag, pivot);
+                mmd3Eliminate(A, I, C, eliminated, outmatched, mark, tag, pivot);
             ++numEliminations;
             numCliqueEntries += C[pivot].size();
             batch.push_back(pivot);
@@ -797,7 +886,10 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
             tag = 0;
             ++numTagSweeps;
         }
-        for (std::int32_t element : batch) {
+        // The driver's element list, `list[mn] = ehead; ehead = mn`, so the LAST pivot of a
+        // batch is the FIRST element refreshed. See mmd3Neighbors.
+        for (auto ee = batch.rbegin(); ee != batch.rend(); ++ee) {
+            const std::int32_t element = *ee;
             elementMembers.clear();
             for (std::int32_t u : C[element])
                 if (!eliminated[u]) elementMembers.push_back(u);
@@ -820,7 +912,9 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
                 (otherSources == 1 ? q2h : qxh).push_back(u);
             }
 
-            for (std::int32_t u : q2h) {
+            // mmdupd's q2h list, a head-pushed stack in genmmd. See mmd3Neighbors.
+            for (auto uu = q2h.rbegin(); uu != q2h.rend(); ++uu) {
+                const std::int32_t u = *uu;
                 if (eliminated[u] || outmatched[u]) continue;   // merged or withheld
                                                                // by an earlier q2h
                 // Everything u reaches is in the element or comes from its one
@@ -830,14 +924,13 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
                 // so one q2h vertex cannot hide a neighbor from the next.
                 ++tag;
                 const std::int32_t vertexTag = tag;
-                // dg0 is kept WHOLE and u's own weight subtracted at the end, which is
-                // genmmd's `dg - qsize[en] + 1` and NOT the same as subtracting it now. The
+                // dg0 is kept WHOLE here and u's own weight subtracted at the end, which is
+                // genmmd's `dg - qsize[en] + 1` and not the same as subtracting it now. The
                 // walk below can MERGE a vertex into u, and genmmd's merge does
                 // `qsize[en] += qsize[nd]` in that same walk, so the weight it subtracts is
                 // the one AFTER the merge. Subtracting first files a supervariable one bucket
-                // too high per merged vertex, so it is never picked as early as its size has
-                // earned. This was a DEFECT here until 2026-08-07, found by aligning mmd3
-                // against genmmd; see that file's ledger, entry 5.
+                // too high per merged vertex, so it is not picked as early as its size has
+                // earned. See the ledger, entry 5.
                 std::size_t degree = dg0;
                 for (std::int32_t v : A[u]) {
                     if (eliminated[v] || mark[v] == vertexTag) continue;
@@ -886,9 +979,11 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
                 refreshedVertices.push_back(u);
             }
 
-            for (std::int32_t u : qxh) {
+            // mmdupd's qxh list, the same stack. See mmd3Neighbors.
+            for (auto uu = qxh.rbegin(); uu != qxh.rend(); ++uu) {
+                const std::int32_t u = *uu;
                 if (eliminated[u] || outmatched[u]) continue;
-                std::size_t degree = mmd2Degree(A, I, C, eliminated, superMembers, mark, tag, u);
+                std::size_t degree = mmd3Degree(A, I, C, eliminated, superMembers, mark, tag, u);
                 degrees[u] = std::max<std::size_t>(degree + 1, 1);  // dg - qsize + 1
                 buckets.file(degrees[u], u);
                 refreshedVertices.push_back(u);
@@ -917,14 +1012,29 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
         // NOT PRODUCTION: display only. The trace is what makes these files teachable and
         // is the whole reason they exist; nothing downstream reads it.
         if (n <= SHOW_THRESHOLD) {
-            mmd2Show(A, I, C, degrees, title.str(), &eliminated);
-            mmd2ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
+            mmd3Show(A, I, C, degrees, title.str(), &eliminated);
+            mmd3ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
         }
     }
 
-    std::vector<std::int32_t> order;
+    // mmdnum, and the last thing that differed from genmmd. A supervariable's members are
+    // indistinguishable by construction, so their order among themselves cannot change the
+    // fill; it does change the permutation, which is why every grid matched on FILL and on
+    // the PIVOT SEQUENCE while the printed order still diverged. genmmd numbers them root
+    // first, then by ASCENDING VERTEX INDEX, and gets that from a single ascending scan
+    // rather than a sort. See the ledger, entry 6.
+    std::vector<std::int32_t> rootOf(n, NIL);
     for (std::int32_t pivot : pivots)
-        for (std::int32_t u : superMembers[pivot]) order.push_back(u);
+        for (std::int32_t u : superMembers[pivot]) rootOf[u] = pivot;
+    std::vector<std::vector<std::int32_t>> membersOf(n);   // ascending, by the scan
+    for (std::int32_t v = 0; v < static_cast<std::int32_t>(n); ++v)
+        if (rootOf[v] != NIL && rootOf[v] != v) membersOf[rootOf[v]].push_back(v);
+
+    std::vector<std::int32_t> order;
+    for (std::int32_t pivot : pivots) {
+        order.push_back(pivot);
+        for (std::int32_t u : membersOf[pivot]) order.push_back(u);
+    }
     std::cout << "n = " << n << ", nnz(L) = " << nnzL
               << " against nnz(tril A) = " << nnzTrilA
               << ", fill = " << (nnzL - nnzTrilA) << "\n";
@@ -968,7 +1078,7 @@ static Graph gridGraph(int side) {
 
 void run(const std::string& name, const Graph& G) {
     std::cout << "=== " << name << " ===\n";
-    mmd2MinimumDegree(G);
+    mmd3MinimumDegree(G);
     std::cout << "\n";
 }
 
@@ -977,11 +1087,11 @@ int main(int argc, char** argv) {
     // at a size the seven examples cannot reach. Nothing is filtered: the run is silent above
     // SHOW_THRESHOLD and prints its closing lines as always.
     //
-    //   ./mmd2_cpp grid 22
+    //   ./mmd3_cpp grid 22
     if (argc > 2 && std::string(argv[1]) == "grid") {
         const int side = std::atoi(argv[2]);
         std::cout << "=== grid " << side << "x" << side << " (n = " << side * side << ") ===\n";
-        mmd2MinimumDegree(gridGraph(side));
+        mmd3MinimumDegree(gridGraph(side));
         return 0;
     }
 
@@ -1055,11 +1165,11 @@ int main(int argc, char** argv) {
 
     // graph5, five vertices and four edges, two paths joined at 4: 2-1-4-0-3.
     // Small and fill free, and here for one reason: it is the smallest graph on
-    // which mmd2's merge test declines a genuine supervariable. At the iteration whose
+    // which mmd3's merge test declines a genuine supervariable. At the iteration whose
     // pivot is 0 and whose clique is {4}, vertex 4 has nothing explicit left but
     // belongs to c1 as well as to the new clique, so I[4] == {pivot} fails even
     // though c1's only member is 4 itself and everything 4 reaches lies inside
-    // the new clique. The exact test mmd2Neighbors(A, I, C, u) contained in
+    // the new clique. The exact test mmd3Neighbors(A, I, C, u) contained in
     // C[pivot] would merge it. See the README section on mass elimination.
     //
     //   edges: 0-3 0-4 1-2 1-4
@@ -1118,7 +1228,7 @@ int main(int argc, char** argv) {
         {"graph7", graph7},
     };
 
-    // All of them by default. To run just one, pass its number: ./mmd2_cpp 3
+    // All of them by default. To run just one, pass its number: ./mmd3_cpp 3
     int selected = (argc > 1) ? std::atoi(argv[1]) : 0;
     for (int number = 1; number <= static_cast<int>(examples.size()); ++number) {
         if (selected != 0 && number != selected) continue;

@@ -763,7 +763,8 @@ int main() {
         double worstOrder   = 0.0;
         int    reachedOrder = 0;
         for (Ordering om : {Ordering::Natural, Ordering::MMD, Ordering::MMD1,
-                               Ordering::MMD2, Ordering::AMD, Ordering::AMD1,
+                               Ordering::MMD2, Ordering::MMD3,
+                               Ordering::AMD, Ordering::AMD1,
                                Ordering::AMD2, Ordering::AMD1B,
                                Ordering::AMD2B}) {
             DirectSolver<double> solver(om, Factorization::Cholesky, Traversal::LeftLooking);
@@ -773,16 +774,19 @@ int main() {
             worstOrder = std::max(worstOrder, solver.relativeResidual(A, b, x));
         }
 
-        // Two of the nine are the vendored routines, which are optional: without private/ they
+        // Two of the ten are the vendored routines, which are optional: without private/ they
         // refuse and the sweep skips them, so what is expected is every ordering the build has.
+        // The count is written out rather than taken from the list's size, deliberately: adding an
+        // enumerator should make this fail until someone has decided the new ordering belongs in
+        // the sweep, which is exactly what happened when MMD3 was added.
 #ifdef OBLIO_VENDORED_ORDERINGS
-        const int expectedOrderings = 9;
+        const int expectedOrderings = 10;
 #else
-        const int expectedOrderings = 7;
+        const int expectedOrderings = 8;
 #endif
         ck(reachedOrder == expectedOrderings, "Ordering       : every ordering built was reached");
         ck(reachedOrder == expectedOrderings && worstOrder < tol,
-           with("Ordering       : worst residual over all nine", worstOrder));
+           with("Ordering       : worst residual over all orderings", worstOrder));
 
         // The multifrontal child ordering is computed during analyze, so the traversal has to be
         // known by then. Switching between left- and right-looking reads the same forest and must

@@ -69,7 +69,12 @@ void QuotientGraph::reachableSet(std::int32_t u, std::vector<std::int32_t>& reac
         }
     }
     const std::int32_t* incidence = source + adjacencySize;
-    for (std::size_t i = 0; i < incidenceSize; ++i) {
+    // Hoisted like `live`, and for the same reason: a member load the compiler cannot prove is
+    // unaliased by the stores below. The branch is per CLIQUE, not per member, so it sits outside
+    // the loop that does the work. See the member's note for why the direction matters at all.
+    const bool reverse = mReverseIncidence;
+    for (std::size_t ii = 0; ii < incidenceSize; ++ii) {
+        const std::size_t   i           = reverse ? incidenceSize - 1 - ii : ii;
         const std::int32_t  c           = incidence[i];
         const std::int32_t* members     = mCliqueArena.data() + mCliquePtr[c];
         const std::size_t   membersSize = mCliqueSize[c];
@@ -351,6 +356,44 @@ void QuotientGraph::absorb(const std::vector<std::int32_t>& cliques,
             if (mMark[incidence[i]] != mTag) incidence[kept++] = incidence[i];
         mIncidenceSize[u] = kept;
     }
+}
+
+// genmmd's mmdnum numbering: each pivot first, then the members of its supervariable by
+// ASCENDING VERTEX INDEX rather than by the order they were merged. The members of a
+// supervariable are indistinguishable by construction, so this cannot change the fill or the
+// elimination forest; it changes only which permutation comes out, and it is here so that a
+// comparison against the vendored routine is an equality test rather than a judgement.
+//
+// One ascending scan and a counting layout, no sort, which is how mmdnum gets it: `for nd =
+// 1..neqns, if perm[nd] <= 0` walks to the root and takes the next number, so ascending falls
+// out of the scan order. See experiments/ordering/mmd3.py, ledger entry 6.
+std::vector<std::int32_t> QuotientGraph::orderAscending(
+        const std::vector<std::int32_t>& pivots) const {
+    const std::size_t n = size();
+    std::vector<std::int32_t> rootOf(n, NIL);
+    for (std::int32_t pivot : pivots)
+        for (std::int32_t u = pivot; u != NIL; u = mSuperNext[u]) rootOf[u] = pivot;
+
+    std::vector<std::size_t> start(n + 1, 0);
+    for (std::size_t v = 0; v < n; ++v)
+        if (rootOf[v] != NIL && rootOf[v] != static_cast<std::int32_t>(v))
+            ++start[static_cast<std::size_t>(rootOf[v]) + 1];
+    for (std::size_t k = 0; k < n; ++k) start[k + 1] += start[k];
+
+    std::vector<std::int32_t> members(start[n]);
+    std::vector<std::size_t>  fill = start;
+    for (std::size_t v = 0; v < n; ++v)                 // ascending, so members are too
+        if (rootOf[v] != NIL && rootOf[v] != static_cast<std::int32_t>(v))
+            members[fill[static_cast<std::size_t>(rootOf[v])]++] = static_cast<std::int32_t>(v);
+
+    std::vector<std::int32_t> order;
+    order.reserve(n);
+    for (std::int32_t pivot : pivots) {
+        order.push_back(pivot);
+        const std::size_t p = static_cast<std::size_t>(pivot);
+        for (std::size_t k = start[p]; k < fill[p]; ++k) order.push_back(members[k]);
+    }
+    return order;
 }
 
 std::vector<std::int32_t> QuotientGraph::order(const std::vector<std::int32_t>& pivots) const {

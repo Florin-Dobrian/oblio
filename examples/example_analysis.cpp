@@ -48,6 +48,7 @@ const char* name(Ordering ordering) {
         case Ordering::MMD:     return "MMD";
         case Ordering::MMD1:    return "MMD1";
         case Ordering::MMD2:    return "MMD2";
+        case Ordering::MMD3:    return "MMD3";
         case Ordering::AMD:     return "AMD";
         case Ordering::AMD1:    return "AMD1";
         case Ordering::AMD2:    return "AMD2";
@@ -117,7 +118,8 @@ void report(const char* what, const SparseMatrix<Val>& A) {
            "--------", "------", "----", "----------", "------");
 
     for (Ordering ordering : {Ordering::Natural, Ordering::MMD, Ordering::MMD1,
-                              Ordering::MMD2, Ordering::AMD, Ordering::AMD1,
+                              Ordering::MMD2, Ordering::MMD3,
+                              Ordering::AMD, Ordering::AMD1,
                               Ordering::AMD2, Ordering::AMD1B, Ordering::AMD2B}) {
         // The factorization and traversal are left at their defaults and never used: analyze reads
         // neither. Only the traversal would matter, and only across the multifrontal boundary,

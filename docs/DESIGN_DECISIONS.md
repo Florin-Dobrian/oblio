@@ -67,6 +67,56 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-08-07: The default ordering moves to MMD3, which reproduces genmmd exactly
+
+**MMD3 is mmd2 with genmmd's list order and one defect fixed, and it returns the vendored
+routine's permutation EXACTLY** on all seven examples and every square grid tested from 5 a side
+to 80. Six alignments got it there, four tie-break conventions, one cosmetic numbering, and one
+real defect; `experiments/ordering`'s README carries the full account and the ledger.
+
+**The default moves in `OrderEngine::mOrdering` and the `DirectSolver` constructor**, MMD2 to
+MMD3.
+
+**And the reason is not that it measured best, which is worth stating because the numbers invite
+the wrong conclusion.** MMD3's fill gap against genmmd is zero at every size, but that is
+guaranteed rather than earned: it IS genmmd's permutation, so identical fill is a tautology. The
+comparison that carries information is against the fixed MMD2, and it does not favor MMD3
+uniformly:
+
+```
+grid          n      MMD2 fill   MMD3 fill
+32x32      1024        -0.5%       0.0%
+100x100   10000        +5.9%       0.0%
+200x200   40000        +6.8%       0.0%
+400x400  160000        +8.3%       0.0%
+```
+
+MMD2 is very slightly BETTER at 32 a side and a few percent worse above it. So on the evidence we
+have, which is grids only, the two are close and MMD3 is ahead on most of the range.
+
+**The argument for the change is about the cases nobody has run.** A default is a bet on unseen
+inputs. MMD3 reproduces a reference implementation that has been in use for decades and exercised
+on far more than our grids, so its behavior on an unfamiliar matrix is whatever that history has
+established. MMD2's tie-break is ours and has been measured on square grid Laplacians and seven
+tiny examples. Reproducing the reference is the better bet, and it costs nothing measurable here.
+
+**A second reason, weaker but real.** With MMD3 as the default, any future divergence from genmmd
+shows up as a permutation difference in `make test` rather than as a fill number somebody has to
+judge. The default is then also the alignment check.
+
+**The defect was fixed in MMD2 as well**, since a defect found in one place is a defect wherever
+the code sits. It filed a supervariable one bucket too high per vertex merged into it, by
+subtracting the vertex's own weight before a walk that could increase it, where genmmd subtracts
+after. MMD2's own gap against genmmd fell from about 20 percent to about 7. `Mmd1` cannot have it,
+having no q2h path and no live merges, and the AMD drivers cannot, since AMD files at an external
+degree that excludes a vertex's own supervariable.
+
+**What did not change.** `Ordering::MMD2` is still there and still selectable, the examples still
+name their ordering explicitly rather than relying on the default, and the vendored `MMD` and
+`AMD` remain optional, so the default is still an ordering that is present in every build.
+
+---
+
 ## 2026-08-04: The vendored orderings move to private/ and become optional
 
 `src/Amd.cpp` (SuiteSparse AMD 3.3.4) and `src/Mmd.cpp` (Sparspak genmmd, via 0.9) are not our code
@@ -95,7 +145,9 @@ ordering being forgotten. `Ordering::MMD` and `Ordering::AMD` remain in the enum
 is what the phase's `bool` is for.
 
 **The default moves to `Ordering::MMD2`**, in `OrderEngine::mOrdering` and the `DirectSolver`
-constructor. A default that refuses on a fresh clone is the first thing a newcomer meets and gives
+constructor. (Superseded 2026-08-07: the default is now `Ordering::MMD3`. The reasoning below
+still applies, since MMD3 is also always present.)
+A default that refuses on a fresh clone is the first thing a newcomer meets and gives
 no hint why. MMD2 is the closest of ours to genmmd, which is what the default was, so the change is
 within the family rather than across it. The examples name `MMD2` explicitly rather than relying on
 the new default, so a reader sees a choice being made.

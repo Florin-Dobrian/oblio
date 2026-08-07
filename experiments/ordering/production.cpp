@@ -25,6 +25,7 @@
 #include "oblio/ElmForestEngine.h"
 #include "oblio/Mmd1.h"
 #include "oblio/Mmd2.h"
+#include "oblio/Mmd3.h"
 #include "oblio/Permutation.h"
 #include "oblio/SparseMatrix.h"
 #include "oblio/SymFactor.h"
@@ -96,6 +97,7 @@ static void run(const std::string& layer, const std::string& name, const Graph& 
     if (layer == "mmd1") printOrder(Oblio::orderMmd1(colPtr, rowIdx));
     if (layer == "amd1") printOrder(Oblio::orderAmd1(colPtr, rowIdx));
     if (layer == "mmd2") printOrder(Oblio::orderMmd2(colPtr, rowIdx));
+    if (layer == "mmd3") printOrder(Oblio::orderMmd3(colPtr, rowIdx));
     if (layer == "amd2") printOrder(Oblio::orderAmd2(colPtr, rowIdx));
     std::cout << "\n";
 }

@@ -35,7 +35,7 @@ Vector<double> b(n), x(n);
 for (std::size_t i = 0; i < n; ++i) b[i] = 1.0;
 
 // Ordering, factorization, traversal: the pipeline order. Each also has a setter.
-DirectSolver<double> solver(Ordering::MMD2, Factorization::Cholesky, Traversal::LeftLooking);
+DirectSolver<double> solver(Ordering::MMD3, Factorization::Cholesky, Traversal::LeftLooking);
 
 // The three phases have different lifetimes: analyze depends only on the pattern,
 // factor on the values, solve on the right-hand side.
@@ -353,8 +353,10 @@ experiments/        , frozen design studies, each answering one question with a 
 ```
 
 The ordering enum also carries Natural, the identity, and our own minimum-degree implementations
-under the names MMD1, MMD2, AMD1, AMD2, AMD1B and AMD2B. Those are work in progress; see
-`experiments/ordering/`.
+under the names MMD1, MMD2, MMD3, AMD1, AMD2, AMD1B and AMD2B. Those are work in progress; see
+`experiments/ordering/`. MMD3 is the default: it reproduces the vendored MMD's permutation
+exactly, so it behaves as a reference implementation with decades of use behind it rather than as
+a tie-break of our own.
 
 ## History
 

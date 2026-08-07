@@ -50,10 +50,14 @@ either a reference or a target.
    default when it is unclear is to answer and stop. An unasked change costs more than it saves:
    it has to be reviewed, it buries the change that was actually wanted, and a wrong one leaves
    the tree worse than doing nothing.
-4. **Present only the files touched in that step.** The output directory is cumulative, so
-   earlier uncommitted work sits there and gets presented again by accident, which buries the
-   files that actually changed and makes the review ambiguous. If older work is still
-   uncommitted, say so in one line rather than presenting the file a second time.
+4. **Present only the files touched in that step, and present all of them.** The output
+   directory is cumulative, so earlier uncommitted work sits there and gets presented again by
+   accident, which buries the files that actually changed and makes the review ambiguous. If
+   older work is still uncommitted, say so in one line rather than presenting the file a second
+   time. The other half matters as much: a file that is not presented cannot be collected, so
+   presenting a representative sample of a step is useless. If a previous answer failed to
+   present a file it touched, present exactly the missing files and say what they are
+   correcting, without re-presenting files that were already presented correctly.
 5. **Never discard uncommitted work to undo a mistake.** `git checkout` on a path, `git reset
    --hard`, `git clean` and `git stash drop` throw away everything uncommitted in what they
    touch, not just the change being undone, and a path argument that looks narrow may not be:

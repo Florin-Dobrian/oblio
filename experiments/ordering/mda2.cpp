@@ -101,6 +101,14 @@ constexpr std::int32_t NIL = -1;
 // own maximum, and the room left over is against a later layer wanting some of it.
 constexpr std::int32_t TAG_CEILING = (1 << 30) - 1;
 
+// Above this n, nothing is printed from inside the run: no initial state, no
+// per-iteration trace. That output is for reading a small example by eye, and at any
+// size worth calling large it is O(n) lines of O(n) each, so it is unreadable and slow
+// to produce. What still prints at every size is the end of the run, the counters and
+// the order, since each is O(1) lines and that is what the twin comparison comes down
+// to. To watch a larger run, raise this.
+constexpr std::size_t SHOW_THRESHOLD = 32;
+
 using Graph = std::vector<std::vector<std::int32_t>>;
 
 // C[c] holds the members of clique c, and cliqueLive[c] says whether c exists.
@@ -374,7 +382,9 @@ std::vector<std::int32_t> mda2MinimumDegree(const Graph& G) {
 
     // NOT PRODUCTION: display only. The trace is what makes these files teachable and
     // is the whole reason they exist; nothing downstream reads it.
-    mda2Show(A, I, C, mark, tag, "start: every edge explicit, no clique yet", &eliminated);
+    if (n <= SHOW_THRESHOLD) {
+        mda2Show(A, I, C, mark, tag, "start: every edge explicit, no clique yet", &eliminated);
+    }
     for (std::int32_t iteration = 0; iteration < static_cast<std::int32_t>(n); ++iteration) {
         ++numIterations;
         std::int32_t pivot = NIL;          // O(n) scan, O(live) additions, no unions
@@ -435,7 +445,9 @@ std::vector<std::int32_t> mda2MinimumDegree(const Graph& G) {
               << ", pruned edges: " << prunedEdgesText.str();
         // NOT PRODUCTION: display only. The trace is what makes these files teachable and
         // is the whole reason they exist; nothing downstream reads it.
-        mda2Show(A, I, C, mark, tag, title.str(), &eliminated);
+        if (n <= SHOW_THRESHOLD) {
+            mda2Show(A, I, C, mark, tag, title.str(), &eliminated);
+        }
     }
 
     std::size_t nnzL = degreeSum + n;
@@ -456,6 +468,26 @@ std::vector<std::int32_t> mda2MinimumDegree(const Graph& G) {
     return order;
 }
 
+// A square grid graph, four-neighbor, for running the counters at a size the seven examples
+// cannot reach. It is here rather than among them because it is not an example: nothing about it
+// illustrates a mechanism, and above SHOW_THRESHOLD its trace is not printed at all.
+//
+// It must match the Python twin's grid_graph exactly, vertex for vertex, or `make test` would be
+// diffing two different problems.
+static Graph gridGraph(int side) {
+    const int n = side * side;
+    Graph graph(n);
+    for (int r = 0; r < side; ++r)
+        for (int c = 0; c < side; ++c) {
+            const int u = r * side + c;
+            if (r > 0)        graph[u].push_back(u - side);
+            if (c > 0)        graph[u].push_back(u - 1);
+            if (c + 1 < side) graph[u].push_back(u + 1);
+            if (r + 1 < side) graph[u].push_back(u + side);
+        }
+    return graph;
+}
+
 void run(const std::string& name, const Graph& G) {
     std::cout << "=== " << name << " ===\n";
     mda2MinimumDegree(G);
@@ -463,6 +495,18 @@ void run(const std::string& name, const Graph& G) {
 }
 
 int main(int argc, char** argv) {
+    // Grid mode, spelled the same way in every layer and in both twins, so `make test` can diff
+    // at a size the seven examples cannot reach. Nothing is filtered: the run is silent above
+    // SHOW_THRESHOLD and prints its closing lines as always.
+    //
+    //   ./mda2_cpp grid 22
+    if (argc > 2 && std::string(argv[1]) == "grid") {
+        const int side = std::atoi(argv[2]);
+        std::cout << "=== grid " << side << "x" << side << " (n = " << side * side << ") ===\n";
+        mda2MinimumDegree(gridGraph(side));
+        return 0;
+    }
+
     // Two examples.
     //
     //   graph1, a 4-cycle: eliminating any vertex forces its two neighbors

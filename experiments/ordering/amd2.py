@@ -90,6 +90,14 @@ import sys
 # wanting some of it.
 TAG_CEILING = 2**30 - 1
 
+# Above this n, nothing is printed from inside the run: no initial state, no
+# per-iteration trace. That output is for reading a small example by eye, and at
+# any size worth calling large it is O(n) lines of O(n) each, so it is unreadable
+# and slow to produce. What still prints at every size is the end of the run, the
+# counters and the order, since each is O(1) lines and that is what the twin
+# comparison comes down to. To watch a larger run, raise this.
+SHOW_THRESHOLD = 32
+
 # I[u] cliques that contain u
 # C[c] vertices that c contains
 
@@ -424,10 +432,11 @@ def amd2_minimum_degree(G):
 
     # NOT PRODUCTION: display only. The trace is what makes these files teachable and
     # is the whole reason they exist; nothing downstream reads it.
-    amd2_show(A, I, C, degrees, exact,
-              "start: every edge explicit, no clique yet, degrees exact",
-              eliminated=eliminated)
-    amd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
+    if n <= SHOW_THRESHOLD:
+        amd2_show(A, I, C, degrees, exact,
+                  "start: every edge explicit, no clique yet, degrees exact",
+                  eliminated=eliminated)
+        amd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
     iteration = 0
     while num_eliminated_vertices < n:
         num_iterations += 1
@@ -716,17 +725,16 @@ def amd2_minimum_degree(G):
         refreshed_vertices_text = ", ".join(str(u) for u in refreshed_vertices) if refreshed_vertices else "none"
         # NOT PRODUCTION: display only. The trace is what makes these files teachable and
         # is the whole reason they exist; nothing downstream reads it.
-        amd2_show(A, I, C, degrees, exact,
-                  (f"iteration {iteration}: eliminate {pivot} (degree {degree}, size {super_size}, "
-                  f"external degree {external_degree}), "
-                  f"absorbed cliques: {absorbed_cliques_text}, "
-                  f"pruned edges: {pruned_edges_text}, "
-                  f"merged vertices: {merged_vertices_text}, "
-                  f"refreshed vertices: {refreshed_vertices_text}"),
-                 eliminated=eliminated)
-        # NOT PRODUCTION: display only. The trace is what makes these files teachable and
-        # is the whole reason they exist; nothing downstream reads it.
-        amd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
+        if n <= SHOW_THRESHOLD:
+            amd2_show(A, I, C, degrees, exact,
+                      (f"iteration {iteration}: eliminate {pivot} (degree {degree}, size {super_size}, "
+                      f"external degree {external_degree}), "
+                      f"absorbed cliques: {absorbed_cliques_text}, "
+                      f"pruned edges: {pruned_edges_text}, "
+                      f"merged vertices: {merged_vertices_text}, "
+                      f"refreshed vertices: {refreshed_vertices_text}"),
+                     eliminated=eliminated)
+            amd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
         iteration += 1
 
     order = [u for pivot in pivots for u in super_members[pivot]]
@@ -875,10 +883,13 @@ graph7 = [
     {0, 1, 2, 3},     # 4
 ]
 
+
+
+
+
 # A square grid graph, four-neighbor, for running the counters at a size the seven examples
 # cannot reach. It is here rather than among them because it is not an example: nothing about it
-# illustrates a mechanism and its trace is far too long to read. The grid mode below discards the
-# trace and keeps only the closing lines, which is what a comparison wants.
+# illustrates a mechanism, and above SHOW_THRESHOLD its trace is not printed at all.
 #
 # It must match the C++ twin's gridGraph exactly, vertex for vertex, or `make test` would be
 # diffing two different problems.
@@ -898,51 +909,21 @@ def grid_graph(side):
                 graph[u].append(u + side)
     return graph
 
-
-# Keep the closing lines and discard everything else, as it is written rather than afterwards.
-# A grid trace is far too large to hold: every iteration prints the whole quotient graph, so at
-# n = 10000 the captured text runs to gigabytes and the process dies holding it. This filters
-# line by line instead, so the memory is one line. The C++ twin does the same with a streambuf.
-class CounterSink:
-    def __init__(self, keys):
-        self.keys = keys
-        self.kept = []
-        self.line = ""
-
-    def write(self, text):
-        for character in text:
-            if character != "\n":
-                self.line += character
-                continue
-            if any(self.line.startswith(key) for key in self.keys):
-                self.kept.append(self.line)
-            self.line = ""
-
-    def flush(self):
-        pass
-
-
 examples = [("graph1", graph1), ("graph2", graph2),
             ("graph3", graph3), ("graph4", graph4),
             ("graph5", graph5), ("graph6", graph6),
             ("graph7", graph7)]
 
-# Grid mode: one square grid, the trace discarded, the closing lines kept. The C++ twin has the
-# same mode, spelled the same way, so `make test` can diff the two at a size the seven examples
-# cannot reach. That matters: two defects in amd2 left every example byte for byte identical
-# while the ordering was wrong on any grid of 10 a side or more.
+# Grid mode, spelled the same way in every layer and in both twins, so `make test` can diff at a
+# size the seven examples cannot reach. That matters: two defects in amd2 left every example byte
+# for byte identical while the ordering was wrong on any grid of 10 a side or more. Nothing is
+# filtered: the run is silent above SHOW_THRESHOLD and prints its closing lines as always.
 #
 #   python3 amd2.py grid 22
 if len(sys.argv) > 2 and sys.argv[1] == "grid":
     grid_side = int(sys.argv[2])
     print(f"=== grid {grid_side}x{grid_side} (n = {grid_side * grid_side}) ===")
-    grid_sink = CounterSink(["order:", "nnz(L)", "degree computations", "clique-member", "clique reads", "bound below exact", "bound was loose", "aggressively", "tag sweeps"])
-    saved_stdout = sys.stdout
-    sys.stdout = grid_sink
     amd2_minimum_degree(grid_graph(grid_side))
-    sys.stdout = saved_stdout
-    for kept_line in grid_sink.kept:
-        print(kept_line)
     sys.exit(0)
 
 # All of them by default. To run just one, pass its number: python3 amd2.py 3

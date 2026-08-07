@@ -1297,13 +1297,25 @@ The two directions are not symmetric, which is what should govern any revision: 
 amortized `O(n)` fill and is always inert for correct input, while too high is a silent wrong
 answer.
 
-**And one inconsistency was created rather than found, so it is ours to clean up.** Grid mode
-filters output through a per-file whitelist of counter prefixes, and `"tag sweeps"` had to be
-appended to five of them by hand, in both twins, ten edits for one line. The lists have no common
-source and already differ from each other for good reasons, so nothing detects a sixth file being
-missed; the layer that got it wrong first, mmd1, printed the counter to a filter that discarded
-it, and the grid check passed while proving nothing. Worth one small shared default that a file
-extends rather than restates.
+**The whitelist inconsistency this created is FIXED, 2026-08-07, by deleting the whitelist.**
+Grid mode used to run the trace in full and discard it through a per-file list of line prefixes,
+so `"tag sweeps"` needed appending to five of them by hand in both twins, ten edits for one line,
+with nothing detecting a file that was missed. Investigating it found the lists were worse than
+inconsistent: seven keys across the five layers matched nothing at all. `"nnz(L)"` was dead
+everywhere, since the line begins `n = 100, nnz(L) = ...` against a `startswith` test, so grid
+mode had never printed the fill; `"degree computations"` was dead in the three amd layers, which
+print `bound computations`.
+
+The replacement is a `SHOW_THRESHOLD` constant in each layer: above that `n` nothing prints from
+inside the run, and end-of-run counters and the order always print. What is not printed is not
+produced, so there is no filter to keep in step. The guard is written at the call sites, one
+spelling in every layer and both twins, rather than inside `show` and `show_state`. Guarding inside
+the functions would make a missed site impossible, which was the first attempt, but the
+per-iteration prints in mmd1 and mmd2 are inline in the driver and cannot be guarded that way, so
+it bought one invariant at the price of two mechanisms for one rule. A function that silently
+returns is also the wrong shape here, being the same invisible suppression the whitelist had. All
+thirteen layers now have grid mode and the same seven examples, where five had the mode and only in
+the C++ before.
 
 The mark array is how every set operation in the ordering is done: a set is a number, membership is
 `mMark[v] == mTag`, insertion is one store, and nothing is ever cleared because the next set uses a

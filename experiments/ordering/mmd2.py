@@ -123,6 +123,14 @@ import sys
 # wanting some of it.
 TAG_CEILING = 2**30 - 1
 
+# Above this n, nothing is printed from inside the run: no initial state, no
+# per-iteration trace. That output is for reading a small example by eye, and at
+# any size worth calling large it is O(n) lines of O(n) each, so it is unreadable
+# and slow to produce. What still prints at every size is the end of the run, the
+# counters and the order, since each is O(1) lines and that is what the twin
+# comparison comes down to. To watch a larger run, raise this.
+SHOW_THRESHOLD = 32
+
 # I[u] cliques that contain u
 # C[c] vertices that c contains
 
@@ -435,9 +443,10 @@ def mmd2_minimum_degree(G, delta=0):
 
     # NOT PRODUCTION: display only. The trace is what makes these files teachable and
     # is the whole reason they exist; nothing downstream reads it.
-    mmd2_show(A, I, C, degrees, "start: every edge explicit, no clique yet",
-              eliminated=eliminated)
-    mmd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
+    if n <= SHOW_THRESHOLD:
+        mmd2_show(A, I, C, degrees, "start: every edge explicit, no clique yet",
+                  eliminated=eliminated)
+        mmd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
 
     # ---- the PREPASS -------------------------------------------------------
     # Number everything in bucket 1, which after the floor above holds the
@@ -457,10 +466,11 @@ def mmd2_minimum_degree(G, delta=0):
         prepass_text = ", ".join(str(u) for u in prepass_vertices)
         # NOT PRODUCTION: display only. The trace is what makes these files teachable and
         # is the whole reason they exist; nothing downstream reads it.
-        mmd2_show(A, I, C, degrees,
-                  f"prepass: numbered {len(prepass_vertices)}: {prepass_text}",
-                  eliminated=eliminated)
-        mmd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
+        if n <= SHOW_THRESHOLD:
+            mmd2_show(A, I, C, degrees,
+                      f"prepass: numbered {len(prepass_vertices)}: {prepass_text}",
+                      eliminated=eliminated)
+            mmd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
     min_degree = 2 if n > 2 else min_degree     # head[1] = 0, and mdeg starts at 2
 
     while num_eliminated_vertices < n:
@@ -541,14 +551,16 @@ def mmd2_minimum_degree(G, delta=0):
                       + super_size * (super_size - 1) // 2
                       + super_size)
 
-            absorbed_cliques_text = ", ".join(f"c{c}" for c in absorbed_cliques) if absorbed_cliques else "none"
-            pruned_edges_text = ", ".join(f"{u}-{v}" for u, v in pruned_edges) if pruned_edges else "none"
-            merged_vertices_text = ", ".join(str(u) for u in merged_vertices) if merged_vertices else "none"
-            evicted_text = ", ".join(str(u) for u in C[pivot]) if C[pivot] else "none"
-            print(f"iteration {num_iterations}: eliminate {pivot} (degree {degree}, size {super_size}, "
-                  f"external degree {external_degree}), "
-                  f"absorbed cliques: {absorbed_cliques_text}, pruned edges: {pruned_edges_text}, "
-                  f"merged vertices: {merged_vertices_text}, evicted: {evicted_text}")
+            # NOT PRODUCTION: display only, and silent above the threshold.
+            if n <= SHOW_THRESHOLD:
+                absorbed_cliques_text = ", ".join(f"c{c}" for c in absorbed_cliques) if absorbed_cliques else "none"
+                pruned_edges_text = ", ".join(f"{u}-{v}" for u, v in pruned_edges) if pruned_edges else "none"
+                merged_vertices_text = ", ".join(str(u) for u in merged_vertices) if merged_vertices else "none"
+                evicted_text = ", ".join(str(u) for u in C[pivot]) if C[pivot] else "none"
+                print(f"iteration {num_iterations}: eliminate {pivot} (degree {degree}, size {super_size}, "
+                      f"external degree {external_degree}), "
+                      f"absorbed cliques: {absorbed_cliques_text}, pruned edges: {pruned_edges_text}, "
+                      f"merged vertices: {merged_vertices_text}, evicted: {evicted_text}")
             if num_eliminated_vertices >= n:            # genmmd's num + qsize[mn] > neqns:
                 break                          # nothing left to update
             if delta < 0:                      # one pivot per iteration, as md5 does
@@ -663,11 +675,12 @@ def mmd2_minimum_degree(G, delta=0):
         refreshed_vertices_text = ", ".join(str(u) for u in refreshed_vertices) if refreshed_vertices else "none"
         # NOT PRODUCTION: display only. The trace is what makes these files teachable and
         # is the whole reason they exist; nothing downstream reads it.
-        mmd2_show(A, I, C, degrees,
-                  (f"iteration {num_iterations - 1} done: batch of {len(batch)}: {batch_text}, "
-                   f"refreshed vertices: {refreshed_vertices_text}"),
-                  eliminated=eliminated)
-        mmd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
+        if n <= SHOW_THRESHOLD:
+            mmd2_show(A, I, C, degrees,
+                      (f"iteration {num_iterations - 1} done: batch of {len(batch)}: {batch_text}, "
+                       f"refreshed vertices: {refreshed_vertices_text}"),
+                      eliminated=eliminated)
+            mmd2_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
 
     order = [u for pivot in pivots for u in super_members[pivot]]
     print(f"n = {n}, nnz(L) = {nnz_L} against nnz(tril A) = {nnz_tril_A}, "
@@ -809,10 +822,13 @@ graph7 = [
     {0, 1, 2, 3},     # 4
 ]
 
+
+
+
+
 # A square grid graph, four-neighbor, for running the counters at a size the seven examples
 # cannot reach. It is here rather than among them because it is not an example: nothing about it
-# illustrates a mechanism and its trace is far too long to read. The grid mode below discards the
-# trace and keeps only the closing lines, which is what a comparison wants.
+# illustrates a mechanism, and above SHOW_THRESHOLD its trace is not printed at all.
 #
 # It must match the C++ twin's gridGraph exactly, vertex for vertex, or `make test` would be
 # diffing two different problems.
@@ -832,51 +848,21 @@ def grid_graph(side):
                 graph[u].append(u + side)
     return graph
 
-
-# Keep the closing lines and discard everything else, as it is written rather than afterwards.
-# A grid trace is far too large to hold: every iteration prints the whole quotient graph, so at
-# n = 10000 the captured text runs to gigabytes and the process dies holding it. This filters
-# line by line instead, so the memory is one line. The C++ twin does the same with a streambuf.
-class CounterSink:
-    def __init__(self, keys):
-        self.keys = keys
-        self.kept = []
-        self.line = ""
-
-    def write(self, text):
-        for character in text:
-            if character != "\n":
-                self.line += character
-                continue
-            if any(self.line.startswith(key) for key in self.keys):
-                self.kept.append(self.line)
-            self.line = ""
-
-    def flush(self):
-        pass
-
-
 examples = [("graph1", graph1), ("graph2", graph2),
             ("graph3", graph3), ("graph4", graph4),
             ("graph5", graph5), ("graph6", graph6),
             ("graph7", graph7)]
 
-# Grid mode: one square grid, the trace discarded, the closing lines kept. The C++ twin has the
-# same mode, spelled the same way, so `make test` can diff the two at a size the seven examples
-# cannot reach. That matters: two defects in amd2 left every example byte for byte identical
-# while the ordering was wrong on any grid of 10 a side or more.
+# Grid mode, spelled the same way in every layer and in both twins, so `make test` can diff at a
+# size the seven examples cannot reach. That matters: two defects in amd2 left every example byte
+# for byte identical while the ordering was wrong on any grid of 10 a side or more. Nothing is
+# filtered: the run is silent above SHOW_THRESHOLD and prints its closing lines as always.
 #
 #   python3 mmd2.py grid 22
 if len(sys.argv) > 2 and sys.argv[1] == "grid":
     grid_side = int(sys.argv[2])
     print(f"=== grid {grid_side}x{grid_side} (n = {grid_side * grid_side}) ===")
-    grid_sink = CounterSink(["order:", "nnz(L)", "degree computations", "tag sweeps"])
-    saved_stdout = sys.stdout
-    sys.stdout = grid_sink
     mmd2_minimum_degree(grid_graph(grid_side))
-    sys.stdout = saved_stdout
-    for kept_line in grid_sink.kept:
-        print(kept_line)
     sys.exit(0)
 
 # All of them by default. To run just one, pass its number: python3 mmd2.py 3

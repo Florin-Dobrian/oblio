@@ -150,7 +150,7 @@ seemed the worse trade.
 
 Each prototype also takes an example number, `python3 md3.py 3` or `./md3_cpp 3`, and runs every
 example when given none. Every layer above md5 takes a grid instead, `python3 amd2.py grid 22` or
-`./amd2_cpp grid 22`, which discards the trace and keeps the closing counters; `make test` diffs
+`./amd2_cpp grid 22`, which prints the closing counters and no trace; `make test` diffs
 the twins on grids as well as on the examples, since the examples are too small to fire some of
 the mechanisms at all. See the grid-mode section below.
 
@@ -382,27 +382,44 @@ Every prototype takes an example number; `mmd1`, `mmd2`, `amd1` and `amd2` also 
 ./amd1_cpp grid 22        one 22x22 grid Laplacian, counters only
 ```
 
-The trace is discarded as it is written rather than afterwards, a filtering streambuf keeping only
-the closing counter lines, because at n = 10000 a full trace runs to gigabytes and a process
-holding it is killed. The grid is not an eighth example: nothing about it illustrates a mechanism
-and its trace is unreadable. It exists so the counters can be read at a size the seven cannot
-reach.
+The grid is not an eighth example: nothing about it illustrates a mechanism and its trace is
+unreadable. It exists so the counters can be read at a size the seven cannot reach.
 
-**And, since 2026-08-03, so that the layers can be CHECKED at that size.** The filter keeps the
-closing `order:` line as well as the counters, and `make test` diffs the whole filtered output on
-sides 10 and 20: between the twins for every layer in `GRID_LAYERS`, and against production for
-every layer in `PORTED`. The counters are the mode's first purpose and this is its second; the
-order comes last in the output, below the counters, so a reader after the counters is unaffected.
-`tag sweeps` is on the whitelist for the same reason it exists at all, since a grid is the only
-size at which it could ever read anything but zero. Why the check is worth having is the amd2
-subsection below: two defects there left all seven
-examples byte for byte identical while the ordering was wrong on any grid of 10 a side or more.
+**Nothing is filtered. What is not printed is not produced.** `SHOW_THRESHOLD`, a constant at the
+top of every layer, decides it: above that `n` the run prints nothing from inside itself, no
+initial state and no per-iteration trace, and below it everything prints as before. The guard sits
+inside the `show` and `show_state` functions rather than at their call sites, so no site can be
+missed. The threshold is 32, comfortably above the largest example at n = 12 and far below the
+smallest grid at n = 100, so it never fires on anything read by eye. To watch a larger run, raise
+it.
 
-**The Python twins gained the mode at the same time, and did not have it before.** All five C++
-layers above md5 had a grid mode and none of the Python ones did, so the twin check could only ever
-compare on the examples. Both sides now spell it the same way, `python3 amd2.py grid 22` against
-`./amd2_cpp grid 22`, with the same whitelist and the same `grid_graph`, which has to match vertex
-for vertex or the two would be diffing different problems.
+The rule it encodes is worth stating on its own: **per-iteration output is O(n) lines of O(n) each
+and is for a human reading a small case; end-of-run output is O(1) lines and is what the twin
+comparison uses.** So the first is bounded by a threshold and the second always prints.
+
+**And, since 2026-08-03, so that the layers can be CHECKED at that size.** `make test` diffs the
+whole output on sides 10 and 20: between the twins for every layer, and against production for
+every layer in `PORTED`. Why the check is worth having is the amd2 subsection below: two defects
+there left all seven examples byte for byte identical while the ordering was wrong on any grid of
+10 a side or more.
+
+**This replaced a filtering sink, on 2026-08-07, and the replacement fixed a defect.** Grid mode
+used to run the trace in full and discard it through a whitelist of line prefixes, a `CounterSink`
+in Python and a streambuf in the C++, one hardcoded list per file and ten files. Seven of those
+keys matched nothing. `"nnz(L)"` was dead in all five layers that had the mode, because the line
+begins `n = 100, nnz(L) = ...` and the test was `startswith`, so **grid mode had never once printed
+the fill**, which is the number an ordering experiment exists to produce. `"degree computations"`
+was dead in all three amd layers, which print `bound computations`. Nothing detected either, since
+both twins dropped the same lines and agreed about output neither was producing.
+
+**All thirteen layers have the mode, and the same seven examples.** It used to be five layers, in
+the C++ only, so the twin check could compare only on the examples for those and not at all for the
+rest. Both sides now spell it the same way, `python3 amd2.py grid 22` against `./amd2_cpp grid 22`,
+sharing a `grid_graph` that must match vertex for vertex or the two would be diffing different
+problems. The one deliberate exception is `matrix1` in amd3, which is an eighth run there and
+nowhere else: it is malformed input, unsymmetric with duplicates and an unsorted column, and it
+exists to exercise `amd3_preprocess` and `amd3_aat`. No other layer has an input path for it to
+test, and cleaning it up to hand it over would delete the thing under test.
 
 **Why it was added.** `benchmarks/ordering` shows our production MMD1 and AMD1 running about 4.5x
 and 3.4x slower than the vendored routines. Two explanations were available and they call for
@@ -507,8 +524,8 @@ unbounded. With the check at the top of each pair, every inter-check advance in 
 
 **The `tag sweeps` counter is the witness.** It is expected to read 0 at every size we run, so it
 is there to make that claim checkable rather than to measure anything, which is the same reason
-`bound below exact` sits beside it in the amd layers. It is in the grid-mode whitelist too, since
-grid mode is the only size at which the number could ever be interesting.
+`bound below exact` sits beside it in the amd layers. Being a closing counter, it prints at every
+size, including the grids, which is the only place the number could ever be interesting.
 
 **Verified by forcing it.** With `TAG_CEILING` dropped to 2 or 3, so the sweep fires at nearly
 every check, every layer's whole trace is identical to the normal-ceiling run apart from the

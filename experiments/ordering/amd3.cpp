@@ -89,6 +89,14 @@ constexpr std::int32_t NIL = -1;
 // construction and cannot wrap.
 constexpr std::int32_t TAG_CEILING = (1 << 30) - 1;
 
+// Above this n, nothing is printed from inside the run: no initial state, no
+// per-iteration trace. That output is for reading a small example by eye, and at any
+// size worth calling large it is O(n) lines of O(n) each, so it is unreadable and slow
+// to produce. What still prints at every size is the end of the run, the counters and
+// the order, since each is O(1) lines and that is what the twin comparison comes down
+// to. To watch a larger run, raise this.
+constexpr std::size_t SHOW_THRESHOLD = 32;
+
 using Graph = std::vector<std::vector<std::int32_t>>;
 
 // C[c] holds the members of clique c, and cliqueLive[c] says whether c exists.
@@ -781,9 +789,11 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
 
     // NOT PRODUCTION: display only. The trace is what makes these files teachable and
     // is the whole reason they exist; nothing downstream reads it.
-    amd3Show(A, I, C, degrees, exact,
-             "start: every edge explicit, no clique yet, degrees exact", &eliminated);
-    amd3ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
+    if (n <= SHOW_THRESHOLD) {
+        amd3Show(A, I, C, degrees, exact,
+                 "start: every edge explicit, no clique yet, degrees exact", &eliminated);
+        amd3ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
+    }
     int iteration = 0;
     while (numEliminatedVertices < n) {
         ++numIterations;
@@ -1143,8 +1153,10 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
               << ", refreshed vertices: " << refreshedVerticesText.str();
         // NOT PRODUCTION: display only. The trace is what makes these files teachable and
         // is the whole reason they exist; nothing downstream reads it.
-        amd3Show(A, I, C, degrees, exact, title.str(), &eliminated);
-        amd3ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
+        if (n <= SHOW_THRESHOLD) {
+            amd3Show(A, I, C, degrees, exact, title.str(), &eliminated);
+            amd3ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
+        }
         ++iteration;
     }
 
@@ -1265,10 +1277,13 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
     return order;
 }
 
+
 // A square grid graph, four-neighbor, for running the counters at a size the seven examples
 // cannot reach. It is here rather than among them because it is not an example: nothing about it
-// illustrates a mechanism, and its trace is far too long to read. The grid mode below discards the
-// trace and prints only the closing counter lines, which is what a comparison between layers wants.
+// illustrates a mechanism, and above SHOW_THRESHOLD its trace is not printed at all.
+//
+// It must match the Python twin's grid_graph exactly, vertex for vertex, or `make test` would be
+// diffing two different problems.
 static Graph gridGraph(int side) {
     const int n = side * side;
     Graph graph(n);
@@ -1283,33 +1298,6 @@ static Graph gridGraph(int side) {
     return graph;
 }
 
-// Keep the trace's summary lines and discard everything else, as it is written rather than
-// afterwards. A grid trace is far too large to hold: every iteration prints the whole quotient graph,
-// so at n = 10000 the captured text runs to gigabytes and the process dies holding it. This
-// filters line by line instead, keeping only what the whitelist names, so the memory is one line.
-class CounterSink : public std::streambuf {
-public:
-    explicit CounterSink(std::vector<std::string> keys) : mKeys(std::move(keys)) {}
-
-protected:
-    int overflow(int ch) override {
-        if (ch == traits_type::eof()) return traits_type::not_eof(ch);
-        const char c = static_cast<char>(ch);
-        if (c != '\n') { mLine.push_back(c); return ch; }
-        for (const std::string& key : mKeys)
-            if (mLine.rfind(key, 0) == 0) { mKept.push_back(mLine); break; }
-        mLine.clear();
-        return ch;
-    }
-
-public:
-    const std::vector<std::string>& kept() const { return mKept; }
-
-private:
-    std::vector<std::string> mKeys;
-    std::vector<std::string> mKept;
-    std::string              mLine;
-};
 void run(const std::string& name, const Graph& G) {
     std::cout << "=== " << name << " ===\n";
     amd3MinimumDegree(G);
@@ -1350,17 +1338,15 @@ std::vector<std::int32_t> amd3OrderMatrix(std::size_t n,
 }
 
 int main(int argc, char** argv) {
-    // Grid mode: one square grid, the trace discarded, the counters kept.
+    // Grid mode, spelled the same way in every layer and in both twins, so `make test` can diff
+    // at a size the seven examples cannot reach. Nothing is filtered: the run is silent above
+    // SHOW_THRESHOLD and prints its closing lines as always.
     //
     //   ./amd3_cpp grid 22
     if (argc > 2 && std::string(argv[1]) == "grid") {
         const int side = std::atoi(argv[2]);
         std::cout << "=== grid " << side << "x" << side << " (n = " << side * side << ") ===\n";
-        CounterSink sink({"order:", "nnz(L)", "degree computations", "clique-member", "clique reads", "incidence entries", "bound below exact", "bound was loose", "aggressively", "dense threshold", "tag sweeps"});
-        std::streambuf* saved = std::cout.rdbuf(&sink);
         amd3MinimumDegree(gridGraph(side));
-        std::cout.rdbuf(saved);
-        for (const std::string& line : sink.kept()) std::cout << line << "\n";
         return 0;
     }
 

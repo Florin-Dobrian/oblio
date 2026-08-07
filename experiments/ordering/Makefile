@@ -107,13 +107,17 @@ PORTED_FILL =
 # share this variable today only because they happened to want the same numbers.
 GRID_SIDES  = 10 20
 
-# The layers that have a grid mode, in both twins, and so can be compared on one. It is every
-# layer above md5: a grid at these sizes is unreadable as a trace and pointless as an example, so
-# the md ladder has no use for it, while mmd1 upward all carry counters worth reading at a size
-# the seven examples cannot reach. amd3 is here although it is not in PORTED: it has no production
+# The layers that have a grid mode, in both twins, and so can be compared on one. Every layer has
+# it as of 2026-08-07, so this is LAYERS and is kept as its own variable only so the twin grid loop
+# can be narrowed without touching the example loop. It used to be mmd1 upward, on the reasoning
+# that a grid is unreadable as a trace and pointless as an example so the md ladder had no use for
+# one. The first half is still true and no longer costs anything, since a run above SHOW_THRESHOLD
+# prints no trace at all; the second half was answering the wrong question, because the grid is not
+# there to be read, it is there to be diffed, and the md layers had no check at any size the seven
+# examples cannot reach. amd3 is here although it is not in PORTED: it has no production
 # counterpart to be checked against, which makes its twin the only oracle it has, and that is a
 # reason to exercise it harder rather than less.
-GRID_LAYERS = mmd1 mmd2 amd1 amd2 amd3
+GRID_LAYERS = $(LAYERS)
 
 # The production sources those drivers need, linked directly rather than copied: the point of this
 # check is to notice when production and prototype come apart, and a copy would hide exactly that.

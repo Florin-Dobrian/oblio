@@ -27,6 +27,14 @@ import sys
 # wanting some of it.
 TAG_CEILING = 2**30 - 1
 
+# Above this n, nothing is printed from inside the run: no initial state, no
+# per-iteration trace. That output is for reading a small example by eye, and at
+# any size worth calling large it is O(n) lines of O(n) each, so it is unreadable
+# and slow to produce. What still prints at every size is the end of the run, the
+# counters and the order, since each is O(1) lines and that is what the twin
+# comparison comes down to. To watch a larger run, raise this.
+SHOW_THRESHOLD = 32
+
 def md1_show(A, title=None, eliminated=None):
     """Print a graph: adjacency lists, in the order the structure holds them."""
     n = len(A)
@@ -121,7 +129,8 @@ def md1_minimum_degree(G):
 
     # NOT PRODUCTION: display only. The trace is what makes these files teachable and
     # is the whole reason they exist; nothing downstream reads it.
-    md1_show(A, "start: every edge explicit, no fill yet", eliminated=eliminated)
+    if n <= SHOW_THRESHOLD:
+        md1_show(A, "start: every edge explicit, no fill yet", eliminated=eliminated)
     for iteration in range(n):
         num_iterations += 1
         # The scan asks every alive vertex for its degree, so the count is the alive
@@ -150,13 +159,14 @@ def md1_minimum_degree(G):
         total_fill += len(fill_edges)
         degree_sum += degree
 
-        fill_edges_text = ", ".join(f"{u}-{v}" for u, v in fill_edges) if fill_edges else "none"
         # NOT PRODUCTION: display only. The trace is what makes these files teachable and
         # is the whole reason they exist; nothing downstream reads it.
-        md1_show(A,
-             (f"iteration {iteration}: eliminate {pivot} (degree {degree}), "
-              f"fill edges: {fill_edges_text}, fill so far: {total_fill}"),
-             eliminated=eliminated)
+        if n <= SHOW_THRESHOLD:
+            fill_edges_text = ", ".join(f"{u}-{v}" for u, v in fill_edges) if fill_edges else "none"
+            md1_show(A,
+                     (f"iteration {iteration}: eliminate {pivot} (degree {degree}), "
+                      f"fill edges: {fill_edges_text}, fill so far: {total_fill}"),
+                     eliminated=eliminated)
 
     # The degree of a pivot at elimination is the count of its column of L, so
     # the degrees already computed give nnz(L) with no extra work (Section 5.1).
@@ -198,20 +208,11 @@ def md1_minimum_degree(G):
 #      edges: 0-1 0-3 0-8 1-2 1-6 1-8 2-3 2-5 3-4 4-5
 #             5-6 5-9 6-7 6-10 7-8 8-9 9-10 10-11
 graph1 = [
-    {1, 3},   # 0
-    {0, 2},   # 1
-    {1, 3},   # 2
-    {0, 2},   # 3
+    {1, 3}, {0, 2}, {1, 3}, {0, 2},
 ]
 graph2 = [
-    {1, 2},      # 0
-    {0, 3},      # 1
-    {0, 4},      # 2
-    {1, 4, 5},   # 3
-    {2, 3, 5},   # 4
-    {3, 4},      # 5
+    {1, 2}, {0, 3}, {0, 4}, {1, 4, 5}, {2, 3, 5}, {3, 4},
 ]
-
 graph3 = [
     {1, 3, 8},        # 0
     {0, 2, 6, 8},     # 1
@@ -304,10 +305,46 @@ graph7 = [
     {0, 1, 2, 3},     # 4
 ]
 
+
+
+# A square grid graph, four-neighbor, for running the counters at a size the seven examples
+# cannot reach. It is here rather than among them because it is not an example: nothing about it
+# illustrates a mechanism, and above SHOW_THRESHOLD its trace is not printed at all.
+#
+# It must match the C++ twin's gridGraph exactly, vertex for vertex, or `make test` would be
+# diffing two different problems.
+def grid_graph(side):
+    n = side * side
+    graph = [[] for _ in range(n)]
+    for r in range(side):
+        for c in range(side):
+            u = r * side + c
+            if r > 0:
+                graph[u].append(u - side)
+            if c > 0:
+                graph[u].append(u - 1)
+            if c + 1 < side:
+                graph[u].append(u + 1)
+            if r + 1 < side:
+                graph[u].append(u + side)
+    return graph
+
 examples = [("graph1", graph1), ("graph2", graph2),
             ("graph3", graph3), ("graph4", graph4),
             ("graph5", graph5), ("graph6", graph6),
             ("graph7", graph7)]
+
+# Grid mode, spelled the same way in every layer and in both twins, so `make test` can diff at a
+# size the seven examples cannot reach. That matters: two defects in amd2 left every example byte
+# for byte identical while the ordering was wrong on any grid of 10 a side or more. Nothing is
+# filtered: the run is silent above SHOW_THRESHOLD and prints its closing lines as always.
+#
+#   python3 md1.py grid 22
+if len(sys.argv) > 2 and sys.argv[1] == "grid":
+    grid_side = int(sys.argv[2])
+    print(f"=== grid {grid_side}x{grid_side} (n = {grid_side * grid_side}) ===")
+    md1_minimum_degree(grid_graph(grid_side))
+    sys.exit(0)
 
 # All of them by default. To run just one, pass its number: python3 md1.py 3
 selected = int(sys.argv[1]) if len(sys.argv) > 1 else 0

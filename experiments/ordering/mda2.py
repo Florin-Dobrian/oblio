@@ -166,9 +166,8 @@ def mda2_neighbors(A, I, C, mark, tag, u):
     mark[u] = tag                      # never its own neighbor
     neighbors = []
     for v in A[u]:
-        if mark[v] != tag:
-            mark[v] = tag
-            neighbors.append(v)
+        mark[v] = tag
+        neighbors.append(v)
     for c in I[u]:
         for v in C[c]:
             if mark[v] != tag:

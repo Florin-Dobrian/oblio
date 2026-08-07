@@ -27,6 +27,19 @@ Each adds exactly one mechanism to the one before. The right column cites
 | `amd1` | approximate degree: a bound instead of a set union | 5.13, 5.14 |
 | `amd2` | the rest of amd_1 and amd_2, one pass at a time | 5.13, 5.14 |
 
+**`amd3` is PARKED, and the four layers under investigation are `mmd1`, `mmd2`, `amd1`, `amd2`.**
+It was built to carry amd_1's input path, the dense-row removal and the postorder, and it answered
+what it was built to answer. It is not a comparison point and no question is open against it.
+
+Parked does not mean abandoned. It stays in `make test`, in `GRID_LAYERS` and in the twin check,
+because its Python and C++ twins are the only oracle it has, production having no counterpart to
+check it against, and a layer left to drift silently costs more later than one kept green. Its
+`matrix1` example stays with it for the same reason.
+
+What parked does mean is that it is not evidence. A result that holds in `amd3` and nowhere else
+settles nothing about the four, and a difference between `amd2` and `amd3` is not by itself a
+defect worth chasing.
+
 ## One word, before anything else
 
 An eliminated pivot's fill-in structure is a **clique** here, never an element. genmmd and AMD both
@@ -532,6 +545,67 @@ every check, every layer's whole trace is identical to the normal-ceiling run ap
 counter itself, in both twins, and the twins still agree with each other. On grids the forced
 sweeps run from 98 for `mmd2` to 2028 for `amd2` at side 20, and `bound below exact` stays 0
 throughout, which is the assertion that would catch a sweep landing inside the bound pass.
+
+
+### What the ceiling should be, worked out one layer at a time
+
+The code uses `2^30 - 1` everywhere and continues to. This subsection is the investigation
+running ahead of it: what the ceiling would be if it were derived rather than chosen, filled in
+as each layer is worked through. Nothing here has been applied.
+
+**The quantity to bound is the advance between two consecutive checks, not anything stored.** The
+test is `tag > TAG_CEILING` at the START of a region, so a tag that just passes the test still
+climbs through that whole region before the next check. If the region advances the tag by at most
+`A`, the largest value ever reached is `TAG_CEILING + A`, and the requirement is
+
+```
+TAG_CEILING = INT32_MAX - max over regions of A
+```
+
+which is AMD's `wbig = Int_MAX_VAL - n` at `Amd.cpp:1349` when the maximum is `n`. Note the
+maximum over ALL of a layer's regions, not one of them: a layer whose regions cost `n` and `3`
+needs `max(n, 3)`, and the constant is not redundant, since at `n = 2` it is the constant that
+binds and `INT32_MAX - n` overflows.
+
+```
+              eliminate   degree work   hash pairs   ceiling
+md1           n           N/A           N/A          INT32_MAX - n
+md2           3           n             N/A          INT32_MAX - max(n, 3)
+md3           ?           ?             N/A          ?
+md4           ?           ?             N/A          ?
+md5           ?           ?             N/A          ?
+mdm2          ?           ?             N/A          ?
+mda2          ?           N/A           N/A          ?
+mdam2         ?           ?             N/A          ?
+mmd1          ?           ?             N/A          ?
+mmd2          ?           ?             N/A          ?
+amd1          ?           ?             N/A          ?
+amd2          ?           ?             ?            ?
+amd3          ?           ?             ?            ?
+```
+
+The eliminate column is the only universal one, every layer having a check there. The middle
+column is one idea under two names, the pivot search in md2 and md3 and the refresh from md4 on,
+which is the same degree work moved to the other side of the pivot; `mda2` has no entry because
+its bound reads lengths and takes no tag, which is what the recomputing column of the square
+means here.
+
+**md1 spends `n` in the eliminator.** `tag += 1` sits inside the loop over the pivot's neighbors,
+because each neighbor's adjacency has to be tested against the pivot's set separately, so one
+call advances by `|A[pivot]|`, at most `n - 1`. Rounding to `n` is what leaves the margin: the
+worst case then lands at `INT32_MAX - 1` rather than exactly on `INT32_MAX`.
+
+**md2 spends 3 in the eliminator and `n` in the search, and the swap is the point of the layer.**
+The eliminator advances three times and none of them is in a loop: once inside `md2_neighbors`
+for the reachable set, then `clique_tag`, then `absorbed_tag`. Every loop after that only reads
+`mark` against those two stamps. That is the quotient graph paying off, one set built and many
+membership tests against it, where md1 built one set per neighbor. The cost moves to the pivot
+search, which calls `md2_neighbors` once per alive vertex, so up to `n`.
+
+**One consequence to note before this is applied.** The ceiling column differs by layer, so
+`TAG_CEILING` stops being one shared constant and becomes thirteen expressions. Today every file
+carries the same literal, which is exactly why the pragmatic value is easy to keep and the
+derived one will not be a search and replace.
 
 ## Four bugs this found, all ours
 

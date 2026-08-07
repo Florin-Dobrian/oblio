@@ -315,8 +315,7 @@ std::vector<std::int32_t> amd1Neighbors(const Graph& A, const Graph& I, const Cl
     ++tag;
     std::vector<std::int32_t> neighbors;
     mark[u] = tag;                          // never its own neighbor
-    for (std::int32_t v : A[u])
-        if (mark[v] != tag) { mark[v] = tag; neighbors.push_back(v); }
+    for (std::int32_t v : A[u]) { mark[v] = tag; neighbors.push_back(v); }
     for (std::int32_t c : I[u])
         for (std::int32_t v : C.at(c))
             if (mark[v] != tag) { mark[v] = tag; neighbors.push_back(v); }
@@ -635,7 +634,7 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
         for (std::int32_t c : touchedCliques) {
             std::size_t total = 0;
             for (std::int32_t v : C[c])
-                if (mark[v] != inClique && !eliminated[v]) total += superMembers[v].size();
+                if (mark[v] != inClique) total += superMembers[v].size();
             outside[c] = total;
             numMemberVisits += C[c].size();     // what an exact degree pays PER VERTEX
         }

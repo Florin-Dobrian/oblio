@@ -2,6 +2,7 @@
 #
 #:   make        build the benchmark
 #:   make run    build and run it, default grid sizes
+#:   make scale  build and run a wider ladder, MMD branch only, with gap columns
 #:   make clean
 #:   make help   print this list
 #:
@@ -59,7 +60,7 @@ ifneq ($(VENDOR_SRCS),)
   VENDOR_OBJS = Amd.o Mmd.o
 endif
 
-.PHONY: all run profile clean help
+.PHONY: all run scale profile clean help
 
 # Print the target list from this file's header. Those lines are marked with #: so there is one
 # source of truth: the header comment is the help text.
@@ -74,6 +75,14 @@ order_timing_cpp: order_timing.cpp $(OBLIO_SRCS) $(VENDOR_SRCS) .build-mode
 
 run: all
 	./order_timing_cpp
+
+# The same binary, asked a different question. `run` is what each method costs at four sizes;
+# `scale` is how far MMD1 and MMD2 sit from the vendored MMD and whether that distance moves with
+# n, over a ladder wide enough to tell a constant factor from a trend. MMD only, because that is
+# the branch the gap is currently being chased in, and because eight methods at 400 a side is a
+# long wait for columns nobody is reading.
+scale: all
+	./order_timing_cpp mmd
 
 # Built separately, with symbols and without NDEBUG's effect on inlining left to chance: a profile
 # has to describe the code that actually runs. See the header of order_profile.cpp for how to

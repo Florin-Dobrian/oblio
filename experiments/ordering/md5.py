@@ -167,9 +167,8 @@ def md5_neighbors(A, I, C, mark, tag, u):
     neighbors = []
     mark[u] = tag                      # never its own neighbor
     for v in A[u]:
-        if mark[v] != tag:
-            mark[v] = tag
-            neighbors.append(v)
+        mark[v] = tag
+        neighbors.append(v)
     for c in I[u]:
         for v in C[c]:
             if mark[v] != tag:

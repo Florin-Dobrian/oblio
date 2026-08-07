@@ -317,7 +317,7 @@ def amd3_neighbors(A, I, C, eliminated, mark, tag, u):
     neighbors = []
     mark[u] = tag                      # never its own neighbor
     for v in A[u]:
-        if mark[v] != tag and not eliminated[v]:
+        if not eliminated[v]:
             mark[v] = tag
             neighbors.append(v)
     for c in I[u]:

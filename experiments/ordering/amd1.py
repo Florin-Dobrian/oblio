@@ -163,9 +163,8 @@ def amd1_neighbors(A, I, C, mark, tag, u):
     neighbors = []
     mark[u] = tag                      # never its own neighbor
     for v in A[u]:
-        if mark[v] != tag:
-            mark[v] = tag
-            neighbors.append(v)
+        mark[v] = tag
+        neighbors.append(v)
     for c in I[u]:
         for v in C[c]:
             if mark[v] != tag:
@@ -465,7 +464,7 @@ def amd1_minimum_degree(G):
         for c in touched_cliques:
             total = 0
             for v in C[c]:
-                if mark[v] != in_clique and not eliminated[v]:
+                if mark[v] != in_clique:
                     total += len(super_members[v])
             outside[c] = total
             num_member_visits += len(C[c])      # what an exact degree pays PER VERTEX

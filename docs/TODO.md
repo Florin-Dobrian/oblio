@@ -1162,6 +1162,20 @@ oracle computes the same structure a different way, from a dense factor pattern.
 At that point both classes gain a `.cpp` holding the validation and nothing else, the accessors
 staying in the header. That is the trigger to watch for: a body no longer obviously worth inlining.
 
+### amd3 is parked, 2026-08-07
+
+**The ordering experiment's layers under investigation are `mmd1`, `mmd2`, `amd1` and `amd2`.**
+`amd3` is not one of them. It was built to carry amd_1's input path, the dense-row removal and the
+postorder, it answered that, and nothing is open against it.
+
+It stays in `make test`, in `GRID_LAYERS` and in the twin check, because its two twins are the
+only oracle it has, production having no counterpart, and a layer left to drift costs more later
+than one kept green. Its `matrix1` example stays with it.
+
+What parked means for the work: **amd3 is not evidence.** A result holding there and nowhere else
+settles nothing about the four, and an `amd2` against `amd3` difference is not by itself a defect
+worth chasing. Items below that mention it do so as history, not as open work.
+
 ### Five ordering questions, three still open and deliberately so
 
 Raised at the end of the ordering optimization work and parked rather than decided, each with the

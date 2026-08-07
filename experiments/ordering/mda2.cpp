@@ -255,8 +255,7 @@ std::vector<std::int32_t> mda2Neighbors(const Graph& A, const Graph& I, const Cl
     ++tag;
     std::vector<std::int32_t> neighbors;
     mark[u] = tag;                          // never its own neighbor
-    for (std::int32_t v : A[u])
-        if (mark[v] != tag) { mark[v] = tag; neighbors.push_back(v); }
+    for (std::int32_t v : A[u]) { mark[v] = tag; neighbors.push_back(v); }
     for (std::int32_t c : I[u])
         for (std::int32_t v : C.at(c))
             if (mark[v] != tag) { mark[v] = tag; neighbors.push_back(v); }

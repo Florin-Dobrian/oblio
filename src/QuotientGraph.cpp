@@ -63,7 +63,7 @@ void QuotientGraph::reachableSet(std::int32_t u, std::vector<std::int32_t>& reac
     const std::size_t   incidenceSize = mIncidenceSize[u];
     for (std::size_t k = 0; k < adjacencySize; ++k) {
         const std::int32_t v = source[k];
-        if (mMark[v] != mTag && (!live || mEliminated[v] == 0)) {
+        if (!live || mEliminated[v] == 0) {
             mMark[v] = mTag;
             reached.push_back(v);
         }
@@ -104,7 +104,7 @@ std::size_t QuotientGraph::reachableSize(std::int32_t u) {
     const std::size_t   incidenceSize = mIncidenceSize[u];
     for (std::size_t k = 0; k < adjacencySize; ++k) {
         const std::int32_t v = source[k];
-        if (mMark[v] != mTag && (!live || mEliminated[v] == 0)) { mMark[v] = mTag; ++reached; }
+        if (!live || mEliminated[v] == 0) { mMark[v] = mTag; ++reached; }
     }
     const std::int32_t* incidence = source + adjacencySize;
     for (std::size_t i = 0; i < incidenceSize; ++i) {
@@ -133,7 +133,7 @@ std::size_t QuotientGraph::reachableWeight(std::int32_t u) {
     const std::size_t   incidenceSize = mIncidenceSize[u];
     for (std::size_t k = 0; k < adjacencySize; ++k) {
         const std::int32_t v = source[k];
-        if (mMark[v] != mTag && (!live || mEliminated[v] == 0)) { mMark[v] = mTag; reached += mWeight[v]; }
+        if (!live || mEliminated[v] == 0) { mMark[v] = mTag; reached += mWeight[v]; }
     }
     const std::int32_t* incidence = source + adjacencySize;
     for (std::size_t i = 0; i < incidenceSize; ++i) {

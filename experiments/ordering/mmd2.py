@@ -519,7 +519,7 @@ def mmd2_minimum_degree(G, delta=0):
             # mmd2_eliminate, which holds three stamps live in turn: clique_tag and
             # absorbed_tag across the prune loop, then the merged set across the
             # C[pivot] compaction. Never observed to fire.
-            if tag >= TAG_CEILING:
+            if tag > TAG_CEILING:
                 mark = [-1] * n
                 tag = 0
                 num_tag_sweeps += 1
@@ -580,7 +580,7 @@ def mmd2_minimum_degree(G, delta=0):
         # and the outmatched case, with vertex_tag fresh per vertex nested inside
         # it. Two levels live at once, which is mmdupd's mt against its tag, so a
         # sweep within an element erases marks about to be read.
-        if tag >= TAG_CEILING:
+        if tag > TAG_CEILING:
             mark = [-1] * n
             tag = 0
             num_tag_sweeps += 1

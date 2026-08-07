@@ -681,7 +681,7 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
             // mmd2Eliminate, which holds three stamps live in turn: cliqueTag and
             // absorbedTag across the prune loop, then the merged set across the
             // C[pivot] compaction. Never observed to fire.
-            if (tag >= TAG_CEILING) {
+            if (tag > TAG_CEILING) {
                 std::fill(mark.begin(), mark.end(), NIL);
                 tag = 0;
                 ++numTagSweeps;
@@ -792,7 +792,7 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
         // and the outmatched case, with vertexTag fresh per vertex nested inside it.
         // Two levels live at once, which is mmdupd's mt against its tag, so a sweep
         // within an element erases marks about to be read.
-        if (tag >= TAG_CEILING) {
+        if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
             tag = 0;
             ++numTagSweeps;

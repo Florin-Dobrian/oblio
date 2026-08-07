@@ -148,7 +148,7 @@ def md1_minimum_degree(G):
         # it reads in the same pass, so there is nothing to erase. One elimination
         # advances the tag once per neighbor of the pivot, at most n, which is the
         # room the ceiling has to leave and does. Never observed to fire.
-        if tag >= TAG_CEILING:
+        if tag > TAG_CEILING:
             mark = [-1] * n
             tag = 0
             num_tag_sweeps += 1

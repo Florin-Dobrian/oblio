@@ -632,7 +632,7 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
         # amd3_eliminate, which holds three stamps live in turn: clique_tag and
         # absorbed_tag across the prune loop, then the merged set across the
         # C[pivot] compaction. Never observed to fire.
-        if tag >= TAG_CEILING:
+        if tag > TAG_CEILING:
             mark = [-1] * (2 * n)
             tag = 0
             num_tag_sweeps += 1
@@ -677,7 +677,7 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
         # loop's per-vertex amd3_exact_degree calls. in_clique is stamped here and
         # still read inside the outside[c] loop, so no sweep may land between them.
         # The whole region advances the tag by about n.
-        if tag >= TAG_CEILING:
+        if tag > TAG_CEILING:
             mark = [-1] * (2 * n)
             tag = 0
             num_tag_sweeps += 1
@@ -831,7 +831,7 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
                     # pass would leave the gap between checks unbounded. Safe at the
                     # top of a pair because the previous pair's stamps are spent and
                     # hash_bucket, used_keys and eliminated are separate structures.
-                    if tag >= TAG_CEILING:
+                    if tag > TAG_CEILING:
                         mark = [-1] * (2 * n)
                         tag = 0
                         num_tag_sweeps += 1

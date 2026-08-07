@@ -588,7 +588,7 @@ std::vector<std::int32_t> mmd1MinimumDegree(const Graph& G, std::int32_t delta =
             // mmd1Eliminate, which holds three stamps live in turn: cliqueTag and
             // absorbedTag across the prune loop, then the merged set across the
             // C[pivot] compaction. Never observed to fire.
-            if (tag >= TAG_CEILING) {
+            if (tag > TAG_CEILING) {
                 std::fill(mark.begin(), mark.end(), NIL);
                 tag = 0;
                 ++numTagSweeps;
@@ -685,7 +685,7 @@ std::vector<std::int32_t> mmd1MinimumDegree(const Graph& G, std::int32_t delta =
         // The second site, before the degree update pass. Safe here because the
         // batch's stamps are all spent, and because every mmd1Neighbors call stamps
         // what it reads in the same call.
-        if (tag >= TAG_CEILING) {
+        if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
             tag = 0;
             ++numTagSweeps;

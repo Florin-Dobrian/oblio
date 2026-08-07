@@ -624,7 +624,7 @@ std::vector<std::int32_t> amd2MinimumDegree(const Graph& G) {
         // holds three stamps live in turn: cliqueTag and absorbedTag across the
         // prune loop, then the merged set across the C[pivot] compaction. Never
         // observed to fire.
-        if (tag >= TAG_CEILING) {
+        if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
             tag = 0;
             ++numTagSweeps;
@@ -670,7 +670,7 @@ std::vector<std::int32_t> amd2MinimumDegree(const Graph& G) {
         // per-vertex amd2ExactDegree calls. inClique is stamped here and still read
         // inside the outside[c] loop, so no sweep may land between them. The whole
         // region advances the tag by about n.
-        if (tag >= TAG_CEILING) {
+        if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
             tag = 0;
             ++numTagSweeps;
@@ -809,7 +809,7 @@ std::vector<std::int32_t> amd2MinimumDegree(const Graph& G) {
                     // gap between checks unbounded. Safe at the top of a pair because
                     // the previous pair's stamps are spent and hashBucket, usedKeys
                     // and eliminated are separate structures.
-                    if (tag >= TAG_CEILING) {
+                    if (tag > TAG_CEILING) {
                         std::fill(mark.begin(), mark.end(), NIL);
                         tag = 0;
                         ++numTagSweeps;

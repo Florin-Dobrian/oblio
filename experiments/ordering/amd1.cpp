@@ -561,7 +561,7 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
         // bound pass, none of it touching mark. Not inside amd1Eliminate, which holds
         // three stamps live in turn: cliqueTag and absorbedTag across the prune loop,
         // then the merged set across the C[pivot] compaction. Never observed to fire.
-        if (tag >= TAG_CEILING) {
+        if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
             tag = 0;
             ++numTagSweeps;
@@ -608,7 +608,7 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
         // amd1ExactDegree calls further down advance the tag too, but they stamp
         // fresh per call and both region stamps are dead by then, so they need no
         // site of their own.
-        if (tag >= TAG_CEILING) {
+        if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
             tag = 0;
             ++numTagSweeps;

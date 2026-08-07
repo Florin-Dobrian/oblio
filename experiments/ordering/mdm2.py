@@ -287,7 +287,7 @@ def mdm2_minimum_degree(G):
         # first region is the elimination. Not inside mdm2_eliminate, which holds
         # clique_tag and absorbed_tag live across the whole prune loop. Never
         # observed to fire.
-        if tag >= TAG_CEILING:
+        if tag > TAG_CEILING:
             mark = [-1] * n
             tag = 0
             num_tag_sweeps += 1
@@ -307,7 +307,7 @@ def mdm2_minimum_degree(G):
         # The second site, before the refresh. Safe here because mdm2_eliminate's
         # stamps are spent, and because every mdm2_neighbors call stamps what it
         # reads in the same call.
-        if tag >= TAG_CEILING:
+        if tag > TAG_CEILING:
             mark = [-1] * n
             tag = 0
             num_tag_sweeps += 1

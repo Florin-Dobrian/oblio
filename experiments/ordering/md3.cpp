@@ -404,7 +404,7 @@ std::vector<std::int32_t> md3MinimumDegree(const Graph& G) {
         // live. Here the region is the pivot search, which calls md3Neighbors once per
         // alive vertex; every call stamps what it reads in the same call, so there is
         // nothing to erase. Never observed to fire.
-        if (tag >= TAG_CEILING) {
+        if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
             tag = 0;
             ++numTagSweeps;
@@ -421,7 +421,7 @@ std::vector<std::int32_t> md3MinimumDegree(const Graph& G) {
         // turn: cliqueTag and absorbedTag across the prune loop, then the merged set
         // across the C[pivot] compaction. A sweep in there erases marks about to be
         // read.
-        if (tag >= TAG_CEILING) {
+        if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
             tag = 0;
             ++numTagSweeps;

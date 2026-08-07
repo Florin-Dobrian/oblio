@@ -457,7 +457,7 @@ std::vector<std::int32_t> mdam2MinimumDegree(const Graph& G) {
         // first region is the elimination. Not inside mdam2Eliminate, which holds
         // cliqueTag and absorbedTag live across the whole prune loop. Never
         // observed to fire.
-        if (tag >= TAG_CEILING) {
+        if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
             tag = 0;
             ++numTagSweeps;
@@ -480,7 +480,7 @@ std::vector<std::int32_t> mdam2MinimumDegree(const Graph& G) {
         // The second site, before the refresh. Not inside mdam2RefreshBounds
         // either: it stamps once and reads that stamp across all three of its
         // passes, so a sweep in there erases marks about to be read.
-        if (tag >= TAG_CEILING) {
+        if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
             tag = 0;
             ++numTagSweeps;

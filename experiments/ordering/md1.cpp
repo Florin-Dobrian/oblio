@@ -195,7 +195,7 @@ std::vector<std::int32_t> md1MinimumDegree(const Graph& G) {
         // reads in the same pass, so there is nothing to erase. One elimination
         // advances the tag once per neighbor of the pivot, at most n, which is the
         // room the ceiling has to leave and does. Never observed to fire.
-        if (tag >= TAG_CEILING) {
+        if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
             tag = 0;
             ++numTagSweeps;

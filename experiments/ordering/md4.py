@@ -299,7 +299,7 @@ def md4_minimum_degree(G):
         # inside md4_eliminate, which holds three stamps live in turn: clique_tag and
         # absorbed_tag across the prune loop, then the merged set across the C[pivot]
         # compaction. Never observed to fire.
-        if tag >= TAG_CEILING:
+        if tag > TAG_CEILING:
             mark = [-1] * n
             tag = 0
             num_tag_sweeps += 1
@@ -324,7 +324,7 @@ def md4_minimum_degree(G):
         # The second site, before the degree update pass. Safe here because
         # md4_eliminate's stamps are spent and the copy above touches no mark, and
         # because every md4_neighbors call stamps what it reads in the same call.
-        if tag >= TAG_CEILING:
+        if tag > TAG_CEILING:
             mark = [-1] * n
             tag = 0
             num_tag_sweeps += 1

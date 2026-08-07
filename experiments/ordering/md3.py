@@ -289,7 +289,7 @@ def md3_minimum_degree(G):
         # live. Here the region is the pivot search, which calls md3_neighbors once
         # per alive vertex; every call stamps what it reads in the same call, so
         # there is nothing to erase. Never observed to fire.
-        if tag >= TAG_CEILING:
+        if tag > TAG_CEILING:
             mark = [-1] * n
             tag = 0
             num_tag_sweeps += 1
@@ -305,7 +305,7 @@ def md3_minimum_degree(G):
         # in turn: clique_tag and absorbed_tag across the prune loop, then the merged
         # set across the C[pivot] compaction. A sweep in there erases marks about to
         # be read.
-        if tag >= TAG_CEILING:
+        if tag > TAG_CEILING:
             mark = [-1] * n
             tag = 0
             num_tag_sweeps += 1

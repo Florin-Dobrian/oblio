@@ -444,7 +444,7 @@ def mmd1_minimum_degree(G, delta=0):
             # mmd1_eliminate, which holds three stamps live in turn: clique_tag and
             # absorbed_tag across the prune loop, then the merged set across the
             # C[pivot] compaction. Never observed to fire.
-            if tag >= TAG_CEILING:
+            if tag > TAG_CEILING:
                 mark = [-1] * n
                 tag = 0
                 num_tag_sweeps += 1
@@ -492,7 +492,7 @@ def mmd1_minimum_degree(G, delta=0):
         # The second site, before the degree update pass. Safe here because the
         # batch's stamps are all spent, and because every mmd1_neighbors call stamps
         # what it reads in the same call.
-        if tag >= TAG_CEILING:
+        if tag > TAG_CEILING:
             mark = [-1] * n
             tag = 0
             num_tag_sweeps += 1

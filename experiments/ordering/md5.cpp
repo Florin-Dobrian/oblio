@@ -521,7 +521,7 @@ std::vector<std::int32_t> md5MinimumDegree(const Graph& G) {
         // elimination. Not inside md5Eliminate, which holds three stamps live in
         // turn: cliqueTag and absorbedTag across the prune loop, then the merged set
         // across the C[pivot] compaction. Never observed to fire.
-        if (tag >= TAG_CEILING) {
+        if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
             tag = 0;
             ++numTagSweeps;
@@ -557,7 +557,7 @@ std::vector<std::int32_t> md5MinimumDegree(const Graph& G) {
         // md5Eliminate's stamps are spent and the bucket work between touches no
         // mark, and because every md5Neighbors call stamps what it reads in the
         // same call.
-        if (tag >= TAG_CEILING) {
+        if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
             tag = 0;
             ++numTagSweeps;

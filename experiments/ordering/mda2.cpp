@@ -401,7 +401,7 @@ std::vector<std::int32_t> mda2MinimumDegree(const Graph& G) {
         // the only region that spends a tag. Not inside mda2Eliminate, which holds
         // cliqueTag and absorbedTag live across the whole prune loop. Never
         // observed to fire.
-        if (tag >= TAG_CEILING) {
+        if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
             tag = 0;
             ++numTagSweeps;

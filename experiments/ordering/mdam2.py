@@ -417,7 +417,7 @@ def mdam2_minimum_degree(G):
         # first region is the elimination. Not inside mdam2_eliminate, which holds
         # clique_tag and absorbed_tag live across the whole prune loop. Never
         # observed to fire.
-        if tag >= TAG_CEILING:
+        if tag > TAG_CEILING:
             mark = [-1] * n
             tag = 0
             num_tag_sweeps += 1
@@ -440,7 +440,7 @@ def mdam2_minimum_degree(G):
         # The second site, before the refresh. Not inside mdam2_refresh_bounds
         # either: it stamps once and reads that stamp across all three of its
         # passes, so a sweep in there erases marks about to be read.
-        if tag >= TAG_CEILING:
+        if tag > TAG_CEILING:
             mark = [-1] * n
             tag = 0
             num_tag_sweeps += 1

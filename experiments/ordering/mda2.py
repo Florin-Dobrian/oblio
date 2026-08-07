@@ -351,7 +351,7 @@ def mda2_minimum_degree(G):
         # the only region that spends a tag. Not inside mda2_eliminate, which holds
         # clique_tag and absorbed_tag live across the whole prune loop. Never
         # observed to fire.
-        if tag >= TAG_CEILING:
+        if tag > TAG_CEILING:
             mark = [-1] * n
             tag = 0
             num_tag_sweeps += 1

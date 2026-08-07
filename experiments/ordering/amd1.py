@@ -396,7 +396,7 @@ def amd1_minimum_degree(G):
         # holds three stamps live in turn: clique_tag and absorbed_tag across the
         # prune loop, then the merged set across the C[pivot] compaction. Never
         # observed to fire.
-        if tag >= TAG_CEILING:
+        if tag > TAG_CEILING:
             mark = [-1] * n
             tag = 0
             num_tag_sweeps += 1
@@ -439,7 +439,7 @@ def amd1_minimum_degree(G):
         # amd1_exact_degree calls further down advance the tag too, but they stamp
         # fresh per call and both region stamps are dead by then, so they need no
         # site of their own.
-        if tag >= TAG_CEILING:
+        if tag > TAG_CEILING:
             mark = [-1] * n
             tag = 0
             num_tag_sweeps += 1

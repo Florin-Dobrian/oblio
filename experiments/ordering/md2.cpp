@@ -314,7 +314,7 @@ std::vector<std::int32_t> md2MinimumDegree(const Graph& G) {
         // live. Here the region is the pivot search, which calls md2Neighbors once per
         // alive vertex; every call stamps what it reads in the same call, so there is
         // nothing to erase. Never observed to fire.
-        if (tag >= TAG_CEILING) {
+        if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
             tag = 0;
             ++numTagSweeps;
@@ -330,7 +330,7 @@ std::vector<std::int32_t> md2MinimumDegree(const Graph& G) {
         // The second site. Not inside md2Eliminate: it holds cliqueTag and
         // absorbedTag live across the whole prune loop, so a sweep in there would
         // erase marks about to be read.
-        if (tag >= TAG_CEILING) {
+        if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
             tag = 0;
             ++numTagSweeps;

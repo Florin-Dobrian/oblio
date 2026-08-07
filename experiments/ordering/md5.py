@@ -378,7 +378,7 @@ def md5_minimum_degree(G):
         # elimination. Not inside md5_eliminate, which holds three stamps live in
         # turn: clique_tag and absorbed_tag across the prune loop, then the merged
         # set across the C[pivot] compaction. Never observed to fire.
-        if tag >= TAG_CEILING:
+        if tag > TAG_CEILING:
             mark = [-1] * n
             tag = 0
             num_tag_sweeps += 1
@@ -410,7 +410,7 @@ def md5_minimum_degree(G):
         # md5_eliminate's stamps are spent and the bucket work between touches no
         # mark, and because every md5_neighbors call stamps what it reads in the
         # same call.
-        if tag >= TAG_CEILING:
+        if tag > TAG_CEILING:
             mark = [-1] * n
             tag = 0
             num_tag_sweeps += 1

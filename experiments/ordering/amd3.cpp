@@ -77,6 +77,18 @@
 // and is a std::size_t.
 constexpr std::int32_t NIL = -1;
 
+// The mark array is a set and the tag names it, so a tag must never repeat: a
+// repeat makes a stale stamp read as a match, which is wrong silently. The tag
+// only ever climbs, so the ceiling is where it has to be swept back. Half the
+// positive range of std::int32_t, which is a pragmatic choice and not a derived
+// one: nothing here stores anything but a tag, so the true ceiling is the type's
+// own maximum, and the room left over is against a later layer wanting some of it.
+//
+// The rowMark of amd3Preprocess is a different scheme and needs no guard: it
+// stamps with a COLUMN INDEX rather than a counter, so it is bounded by n by
+// construction and cannot wrap.
+constexpr std::int32_t TAG_CEILING = (1 << 30) - 1;
+
 using Graph = std::vector<std::vector<std::int32_t>>;
 
 // C[c] holds the members of clique c, and cliqueLive[c] says whether c exists.
@@ -670,6 +682,9 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
     // clique set and so is exact; the bound becomes a bound from the first
     // elimination on.
     std::size_t numBoundUpdates = 0;
+    // Sweeps of the tag back to zero. Expected to be 0 at every size we run, so it
+    // is here as the witness that the guard is inert rather than as a statistic.
+    std::size_t numTagSweeps = 0;
     std::size_t numMemberVisits = 0;              // what an exact refresh would cost
     std::size_t numCliqueReads = 0;               // clique reads in the bound itself
     std::size_t numIncidenceReads = 0;            // incidence entries scan 1 walks
@@ -778,6 +793,18 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
         }
         ++numBucketProbes;
         std::int32_t pivot = buckets.head[minDegree];   // whatever was filed last
+        // Sweep the tag back before it can wrap. THREE sites in this layer, as in
+        // amd2, and each placed where nothing in mark is live. Note mark is 2n long:
+        // the hash pass stamps cliques at c + n. The dense-row pass, amd3Aat and the
+        // postorder add nothing here, none of them touching mark. Not inside
+        // amd3Eliminate, which holds three stamps live in turn: cliqueTag and
+        // absorbedTag across the prune loop, then the merged set across the C[pivot]
+        // compaction. Never observed to fire.
+        if (tag >= TAG_CEILING) {
+            std::fill(mark.begin(), mark.end(), NIL);
+            tag = 0;
+            ++numTagSweeps;
+        }
         auto [neighbors, absorbedCliques, prunedEdges, mergedVertices] =
             amd3Eliminate(A, I, C, eliminated, mark, tag, pivot);
         ++numEliminations;
@@ -816,6 +843,16 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
         // the exact degree recomputes a union per vertex. mark[v] == inClique is
         // the membership test for C[pivot]; a second tag makes touchedCliques a set
         // too, so a clique is listed once however many vertices reach it.
+        // The second site, guarding one contiguous region: inClique, seenClique, the
+        // outside[c] loop, aggressive absorption's deadTag, and the bound loop's
+        // per-vertex amd3ExactDegree calls. inClique is stamped here and still read
+        // inside the outside[c] loop, so no sweep may land between them. The whole
+        // region advances the tag by about n.
+        if (tag >= TAG_CEILING) {
+            std::fill(mark.begin(), mark.end(), NIL);
+            tag = 0;
+            ++numTagSweeps;
+        }
         const std::vector<std::int32_t> pivotClique = C[pivot];
         ++tag;
         const std::int32_t inClique = tag;      // membership of C[pivot], one test
@@ -960,6 +997,18 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
                     // Decided by stamping one side and counting matches on the
                     // other, as every other membership test in this file is, so it
                     // costs one pass and no sort.
+                    // The third site, and the reason this layer and amd2 have one more
+                    // than the others. `other` advances once per PAIR TESTED rather
+                    // than once per pass, and the pair count is quadratic in the bucket
+                    // sizes with no clean bound, so a check before the pass would leave
+                    // the gap between checks unbounded. Safe at the top of a pair
+                    // because the previous pair's stamps are spent and hashBucket,
+                    // usedKeys and eliminated are separate structures.
+                    if (tag >= TAG_CEILING) {
+                        std::fill(mark.begin(), mark.end(), NIL);
+                        tag = 0;
+                        ++numTagSweeps;
+                    }
                     ++tag;
                     const std::int32_t other = tag;
                     std::size_t sizeV = 0;
@@ -1208,6 +1257,7 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
     std::cout << "predicted: divides " << numDivides << ", multiply-subtracts LDL "
               << numMultsubsLdl << ", LU " << numMultsubsLu << ", largest front "
               << frontMax << "\n";
+    std::cout << "tag sweeps: " << numTagSweeps << "\n";
     std::cout << "order: [";
     for (std::size_t k = 0; k < order.size(); ++k)
         std::cout << (k == 0 ? "" : ", ") << order[k];
@@ -1306,7 +1356,7 @@ int main(int argc, char** argv) {
     if (argc > 2 && std::string(argv[1]) == "grid") {
         const int side = std::atoi(argv[2]);
         std::cout << "=== grid " << side << "x" << side << " (n = " << side * side << ") ===\n";
-        CounterSink sink({"order:", "nnz(L)", "degree computations", "clique-member", "clique reads", "incidence entries", "bound below exact", "bound was loose", "aggressively", "dense threshold"});
+        CounterSink sink({"order:", "nnz(L)", "degree computations", "clique-member", "clique reads", "incidence entries", "bound below exact", "bound was loose", "aggressively", "dense threshold", "tag sweeps"});
         std::streambuf* saved = std::cout.rdbuf(&sink);
         amd3MinimumDegree(gridGraph(side));
         std::cout.rdbuf(saved);

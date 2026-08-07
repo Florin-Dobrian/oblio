@@ -18,6 +18,15 @@
 # %%
 import sys
 
+# The mark array is a set and the tag names it, so a tag must never repeat: a
+# repeat makes a stale stamp read as a match, which is wrong silently. The tag
+# only ever climbs, so the ceiling is where it has to be swept back. Half the
+# positive range of the C++ twin's int32_t, which is a pragmatic choice and not
+# a derived one: nothing here stores anything but a tag, so the true ceiling is
+# the type's own maximum, and the room left over is against a later layer
+# wanting some of it.
+TAG_CEILING = 2**30 - 1
+
 def md1_show(A, title=None, eliminated=None):
     """Print a graph: adjacency lists, in the order the structure holds them."""
     n = len(A)
@@ -102,6 +111,9 @@ def md1_minimum_degree(G):
     # equals num_eliminations; from mmd1 up the two come apart.
     num_iterations = 0
     num_degree_computations = 0
+    # Sweeps of the tag back to zero. Expected to be 0 at every size we run, so it
+    # is here as the witness that the guard is inert rather than as a statistic.
+    num_tag_sweeps = 0
     eliminated = [False] * n
     order = []
     total_fill = 0
@@ -122,6 +134,15 @@ def md1_minimum_degree(G):
         alive = [u for u in range(n) if not eliminated[u]]
         num_degree_computations += len(alive)
         pivot = min(alive, key=lambda u: len(A[u]))
+        # Sweep the tag back before it can wrap. Here because nothing in mark is
+        # live between eliminations: every pass inside md1_eliminate stamps what
+        # it reads in the same pass, so there is nothing to erase. One elimination
+        # advances the tag once per neighbor of the pivot, at most n, which is the
+        # room the ceiling has to leave and does. Never observed to fire.
+        if tag >= TAG_CEILING:
+            mark = [-1] * n
+            tag = 0
+            num_tag_sweeps += 1
         neighbors, fill_edges, tag = md1_eliminate(A, mark, tag, eliminated, pivot)
         num_eliminations += 1
         degree = len(neighbors)
@@ -145,6 +166,7 @@ def md1_minimum_degree(G):
     print(f"iterations: {num_iterations}")
     print(f"eliminations: {num_eliminations}")
     print(f"degree computations: {num_degree_computations}")
+    print(f"tag sweeps: {num_tag_sweeps}")
     print(f"order: {order}")
     return order
 

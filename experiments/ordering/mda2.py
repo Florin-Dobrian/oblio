@@ -80,6 +80,15 @@
 # %%
 import sys
 
+# The mark array is a set and the tag names it, so a tag must never repeat: a
+# repeat makes a stale stamp read as a match, which is wrong silently. The tag
+# only ever climbs, so the ceiling is where it has to be swept back. Half the
+# positive range of the C++ twin's int32_t, which is a pragmatic choice and not
+# a derived one: nothing here stores anything but a tag, so the true ceiling is
+# the type's own maximum, and the room left over is against a later layer
+# wanting some of it.
+TAG_CEILING = 2**30 - 1
+
 # I[u] cliques that contain u
 # C[c] vertices that c contains
 
@@ -304,6 +313,9 @@ def mda2_minimum_degree(G):
     # nothing is maintained: the picker recomputes each candidate's bound from
     # scratch on every iteration, as md2 and md3 do with exact degrees.
     num_bound_computations = 0
+    # Sweeps of the tag back to zero. Expected to be 0 at every size we run, so it
+    # is here as the witness that the guard is inert rather than as a statistic.
+    num_tag_sweeps = 0
     eliminated = [False] * n
     order = []
     degree_sum = 0
@@ -324,6 +336,16 @@ def mda2_minimum_degree(G):
             candidate_bound = mda2_bound(A, I, C, u)
             if pivot == -1 or candidate_bound < best:
                 pivot, best = u, candidate_bound
+        # Sweep the tag back before it can wrap. One site in this layer, unlike its
+        # three neighbors in the square: mda2_bound reads lengths and takes no mark
+        # or tag, and the recomputing column has no refresh, so the elimination is
+        # the only region that spends a tag. Not inside mda2_eliminate, which holds
+        # clique_tag and absorbed_tag live across the whole prune loop. Never
+        # observed to fire.
+        if tag >= TAG_CEILING:
+            mark = [-1] * n
+            tag = 0
+            num_tag_sweeps += 1
         neighbors, absorbed_cliques, pruned_edges, tag = mda2_eliminate(
             A, I, C, mark, tag, eliminated, pivot)
         num_eliminations += 1
@@ -356,6 +378,7 @@ def mda2_minimum_degree(G):
     # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     print(f"loose picks = {loose_picks} of {n}")
     print(f"bound computations: {num_bound_computations}")
+    print(f"tag sweeps: {num_tag_sweeps}")
     print(f"order: {order}")
     return order
 

@@ -97,6 +97,7 @@
 // Run:    ./mdam2_cpp
 //         ./mdam2_cpp 3      just the third example
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstdint>
 #include <iomanip>
@@ -118,6 +119,14 @@
 // std::int32_t, with NIL for "none"; a POSITION locates something inside a vector
 // and is a std::size_t.
 constexpr std::int32_t NIL = -1;
+
+// The mark array is a set and the tag names it, so a tag must never repeat: a
+// repeat makes a stale stamp read as a match, which is wrong silently. The tag
+// only ever climbs, so the ceiling is where it has to be swept back. Half the
+// positive range of std::int32_t, which is a pragmatic choice and not a derived
+// one: nothing here stores anything but a tag, so the true ceiling is the type's
+// own maximum, and the room left over is against a later layer wanting some of it.
+constexpr std::int32_t TAG_CEILING = (1 << 30) - 1;
 
 using Graph = std::vector<std::vector<std::int32_t>>;
 
@@ -405,6 +414,9 @@ std::vector<std::int32_t> mdam2MinimumDegree(const Graph& G) {
     // clique set and so is exact; the bound becomes a bound from the first
     // elimination on.
     std::size_t numBoundUpdates = 0;
+    // Sweeps of the tag back to zero. Expected to be 0 at every size we run, so it
+    // is here as the witness that the guard is inert rather than as a statistic.
+    std::size_t numTagSweeps = 0;
     std::vector<bool> eliminated(n, false);
     std::vector<std::int32_t> order;
     std::size_t degreeSum = 0;
@@ -429,6 +441,17 @@ std::vector<std::int32_t> mdam2MinimumDegree(const Graph& G) {
             if (pivot == NIL || bounds[u] < bounds[pivot]) pivot = u;
         }
         const std::size_t picked = bounds[pivot];
+        // Sweep the tag back before it can wrap. Two sites in this layer, one before
+        // each region that advances the tag, and each placed where nothing in mark is
+        // live. The pivot search reads cached integers and spends no tag, so the
+        // first region is the elimination. Not inside mdam2Eliminate, which holds
+        // cliqueTag and absorbedTag live across the whole prune loop. Never
+        // observed to fire.
+        if (tag >= TAG_CEILING) {
+            std::fill(mark.begin(), mark.end(), NIL);
+            tag = 0;
+            ++numTagSweeps;
+        }
         auto [neighbors, absorbedCliques, prunedEdges] =
             mdam2Eliminate(A, I, C, eliminated, mark, tag, pivot);
         ++numEliminations;
@@ -444,6 +467,14 @@ std::vector<std::int32_t> mdam2MinimumDegree(const Graph& G) {
         // The refresh. Only the new clique's members get a new bound, and it is
         // stated against C[pivot], which is why it had to wait for the elimination.
         numBoundUpdates += neighbors.size();
+        // The second site, before the refresh. Not inside mdam2RefreshBounds
+        // either: it stamps once and reads that stamp across all three of its
+        // passes, so a sweep in there erases marks about to be read.
+        if (tag >= TAG_CEILING) {
+            std::fill(mark.begin(), mark.end(), NIL);
+            tag = 0;
+            ++numTagSweeps;
+        }
         mdam2RefreshBounds(A, I, C, bounds, outside, mark, tag, pivot, neighbors);
         bounds[pivot] = 0;
 
@@ -488,6 +519,7 @@ std::vector<std::int32_t> mdam2MinimumDegree(const Graph& G) {
     std::cout << "loose picks = " << loosePicks << " of " << n << "\n";
     std::cout << "bound computations: " << (numBoundUpdates + n)
               << ", bound updates: " << numBoundUpdates << "\n";
+    std::cout << "tag sweeps: " << numTagSweeps << "\n";
     std::cout << "order: [";
     for (std::size_t k = 0; k < order.size(); ++k)
         std::cout << (k == 0 ? "" : ", ") << order[k];

@@ -57,6 +57,15 @@
 # %%
 import sys
 
+# The mark array is a set and the tag names it, so a tag must never repeat: a
+# repeat makes a stale stamp read as a match, which is wrong silently. The tag
+# only ever climbs, so the ceiling is where it has to be swept back. Half the
+# positive range of the C++ twin's int32_t, which is a pragmatic choice and not
+# a derived one: nothing here stores anything but a tag, so the true ceiling is
+# the type's own maximum, and the room left over is against a later layer
+# wanting some of it.
+TAG_CEILING = 2**30 - 1
+
 # I[u] cliques that contain u
 # C[c] vertices that c contains
 
@@ -321,6 +330,9 @@ def md5_minimum_degree(G):
     # n vertices, is that plus n, so the report derives it rather than keeping a
     # second counter that could drift from this one.
     num_degree_updates = 0
+    # Sweeps of the tag back to zero. Expected to be 0 at every size we run, so it
+    # is here as the witness that the guard is inert rather than as a statistic.
+    num_tag_sweeps = 0
 
     # The buckets, and min_degree, a LOWER BOUND on the current minimum degree.
     # The search starts at min_degree rather than at 0, so it never looks at
@@ -351,6 +363,16 @@ def md5_minimum_degree(G):
         num_bucket_probes += 1
         pivot = buckets[min_degree][0]         # the head, whatever was filed last
 
+        # Sweep the tag back before it can wrap. Two sites in this layer, one before
+        # each region that advances the tag, and each placed where nothing in mark is
+        # live. The bucket walk above spends no tag, so the first region is the
+        # elimination. Not inside md5_eliminate, which holds three stamps live in
+        # turn: clique_tag and absorbed_tag across the prune loop, then the merged
+        # set across the C[pivot] compaction. Never observed to fire.
+        if tag >= TAG_CEILING:
+            mark = [-1] * n
+            tag = 0
+            num_tag_sweeps += 1
         neighbors, absorbed_cliques, pruned_edges, merged_vertices, tag = md5_eliminate(
             A, I, C, mark, tag, eliminated, pivot)
         num_eliminations += 1
@@ -375,6 +397,14 @@ def md5_minimum_degree(G):
         # change when a source of it changed, and the iteration touched no source
         # outside C[pivot].
         refreshed_vertices = list(C[pivot])
+        # The second site, before the degree update pass. Safe here because
+        # md5_eliminate's stamps are spent and the bucket work between touches no
+        # mark, and because every md5_neighbors call stamps what it reads in the
+        # same call.
+        if tag >= TAG_CEILING:
+            mark = [-1] * n
+            tag = 0
+            num_tag_sweeps += 1
         for u in refreshed_vertices:
             neighbors_u, tag = md5_neighbors(A, I, C, mark, tag, u)
             md5_refile(buckets, filed, degrees, u, len(neighbors_u))
@@ -421,6 +451,7 @@ def md5_minimum_degree(G):
     print(f"degree computations: {num_degree_updates + n}, "
           f"degree updates: {num_degree_updates}, "
           f"bucket probes: {num_bucket_probes}")
+    print(f"tag sweeps: {num_tag_sweeps}")
     print(f"order: {order}")
     return order
 

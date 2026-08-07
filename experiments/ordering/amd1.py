@@ -52,6 +52,15 @@
 # %%
 import sys
 
+# The mark array is a set and the tag names it, so a tag must never repeat: a
+# repeat makes a stale stamp read as a match, which is wrong silently. The tag
+# only ever climbs, so the ceiling is where it has to be swept back. Half the
+# positive range of the C++ twin's int32_t, which is a pragmatic choice and not
+# a derived one: nothing here stores anything but a tag, so the true ceiling is
+# the type's own maximum, and the room left over is against a later layer
+# wanting some of it.
+TAG_CEILING = 2**30 - 1
+
 # I[u] cliques that contain u
 # C[c] vertices that c contains
 
@@ -331,6 +340,9 @@ def amd1_minimum_degree(G):
     # clique set and so is exact; the bound becomes a bound from the first
     # elimination on.
     num_bound_updates = 0
+    # Sweeps of the tag back to zero. Expected to be 0 at every size we run, so it
+    # is here as the witness that the guard is inert rather than as a statistic.
+    num_tag_sweeps = 0
     num_member_visits = 0                      # what an exact refresh would cost
     num_clique_reads = 0                       # what the bound costs instead
     # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
@@ -368,6 +380,17 @@ def amd1_minimum_degree(G):
         num_bucket_probes += 1
         pivot = buckets[min_degree][0]         # the head, whatever was filed last
 
+        # Sweep the tag back before it can wrap. Two sites in this layer, one before
+        # each region that advances the tag, and each placed where nothing in mark is
+        # live. Only bucket and supervariable bookkeeping sits between this and the
+        # bound pass, none of it touching mark. Not inside amd1_eliminate, which
+        # holds three stamps live in turn: clique_tag and absorbed_tag across the
+        # prune loop, then the merged set across the C[pivot] compaction. Never
+        # observed to fire.
+        if tag >= TAG_CEILING:
+            mark = [-1] * n
+            tag = 0
+            num_tag_sweeps += 1
         neighbors, absorbed_cliques, pruned_edges, merged_vertices, tag = amd1_eliminate(
             A, I, C, mark, tag, eliminated, pivot)
         num_eliminations += 1
@@ -400,6 +423,17 @@ def amd1_minimum_degree(G):
         # the exact degree recomputes a union per vertex. mark[v] == in_clique is
         # the membership test for C[pivot]; a second tag makes touched_cliques a
         # set too, so a clique is listed once however many vertices reach it.
+        # The second site, before the bound pass, guarding the whole of it. in_clique
+        # is stamped here and still read much later, inside the outside[c] loop that
+        # is the point of this layer, with seen_clique stamped and consumed in
+        # between: two stamps overlapping across the region. The per-vertex
+        # amd1_exact_degree calls further down advance the tag too, but they stamp
+        # fresh per call and both region stamps are dead by then, so they need no
+        # site of their own.
+        if tag >= TAG_CEILING:
+            mark = [-1] * n
+            tag = 0
+            num_tag_sweeps += 1
         pivot_clique = list(C[pivot])
         tag += 1
         in_clique = tag                         # membership of C[pivot], one test
@@ -510,6 +544,7 @@ def amd1_minimum_degree(G):
     print(f"bound below exact {num_bounds_below_exact} times, "
           f"which must be zero")
     print(f"bound was loose {num_loose_bounds} times out of {num_bound_checks}")
+    print(f"tag sweeps: {num_tag_sweeps}")
     print(f"order: {order}")
     return order
 
@@ -699,7 +734,7 @@ examples = [("graph1", graph1), ("graph2", graph2),
 if len(sys.argv) > 2 and sys.argv[1] == "grid":
     grid_side = int(sys.argv[2])
     print(f"=== grid {grid_side}x{grid_side} (n = {grid_side * grid_side}) ===")
-    grid_sink = CounterSink(["order:", "nnz(L)", "degree computations", "clique-member", "clique reads", "bound below exact", "bound was loose"])
+    grid_sink = CounterSink(["order:", "nnz(L)", "degree computations", "clique-member", "clique reads", "bound below exact", "bound was loose", "tag sweeps"])
     saved_stdout = sys.stdout
     sys.stdout = grid_sink
     amd1_minimum_degree(grid_graph(grid_side))

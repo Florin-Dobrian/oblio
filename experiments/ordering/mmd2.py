@@ -114,6 +114,15 @@
 # %%
 import sys
 
+# The mark array is a set and the tag names it, so a tag must never repeat: a
+# repeat makes a stale stamp read as a match, which is wrong silently. The tag
+# only ever climbs, so the ceiling is where it has to be swept back. Half the
+# positive range of the C++ twin's int32_t, which is a pragmatic choice and not
+# a derived one: nothing here stores anything but a tag, so the true ceiling is
+# the type's own maximum, and the room left over is against a later layer
+# wanting some of it.
+TAG_CEILING = 2**30 - 1
+
 # I[u] cliques that contain u
 # C[c] vertices that c contains
 
@@ -404,6 +413,9 @@ def mmd2_minimum_degree(G, delta=0):
     # n vertices, is that plus n, so the report derives it rather than keeping a
     # second counter that could drift from this one.
     num_degree_updates = 0
+    # Sweeps of the tag back to zero. Expected to be 0 at every size we run, so it
+    # is here as the witness that the guard is inert rather than as a statistic.
+    num_tag_sweeps = 0
 
     # mmdint files a degree-0 vertex under degree 1, `if(dg==0)dg=1`, so the
     # bucket a vertex sits in is max(degree, 1) rather than its degree. From here
@@ -488,6 +500,19 @@ def mmd2_minimum_degree(G, delta=0):
             degree = degrees[pivot]
             mmd2_unfile(buckets, filed, degree, pivot)
 
+            # Sweep the tag back before it can wrap. Two sites in this layer, one
+            # before each region that advances the tag, and each placed where nothing
+            # in mark is live. This one is INSIDE the batch loop rather than before
+            # it, since a batch takes several pivots and each calls the eliminator.
+            # Safe between eliminations because the eviction that follows stamps
+            # touched_iteration and filed, which are separate arrays. Not inside
+            # mmd2_eliminate, which holds three stamps live in turn: clique_tag and
+            # absorbed_tag across the prune loop, then the merged set across the
+            # C[pivot] compaction. Never observed to fire.
+            if tag >= TAG_CEILING:
+                mark = [-1] * n
+                tag = 0
+                num_tag_sweeps += 1
             neighbors, absorbed_cliques, pruned_edges, merged_vertices, tag = mmd2_eliminate(
                 A, I, C, mark, tag, eliminated, outmatched, pivot)
             num_eliminations += 1
@@ -537,6 +562,16 @@ def mmd2_minimum_degree(G, delta=0):
         # everything else goes on qxh and pays for the full union. Same degrees,
         # different work, and a different filing order.
         refreshed_vertices = []
+        # The second site, before the refresh, and OUTSIDE the element loop rather
+        # than inside it. element_tag is stamped once per element and read all the
+        # way through that element's q2h walk, where it decides both the pair merge
+        # and the outmatched case, with vertex_tag fresh per vertex nested inside
+        # it. Two levels live at once, which is mmdupd's mt against its tag, so a
+        # sweep within an element erases marks about to be read.
+        if tag >= TAG_CEILING:
+            mark = [-1] * n
+            tag = 0
+            num_tag_sweeps += 1
         for element in batch:
             element_members = [u for u in C[element] if not eliminated[u]]
             tag += 1                            # dg0's members, marked once
@@ -645,6 +680,7 @@ def mmd2_minimum_degree(G, delta=0):
           f"bucket probes: {num_bucket_probes}, "
           f"pair merges: {pair_merges}, outmatched: {outmatched_count}, "
           f"ncsub: {ncsub}")
+    print(f"tag sweeps: {num_tag_sweeps}")
     print(f"order: {order}")
     return order
 
@@ -834,7 +870,7 @@ examples = [("graph1", graph1), ("graph2", graph2),
 if len(sys.argv) > 2 and sys.argv[1] == "grid":
     grid_side = int(sys.argv[2])
     print(f"=== grid {grid_side}x{grid_side} (n = {grid_side * grid_side}) ===")
-    grid_sink = CounterSink(["order:", "nnz(L)", "degree computations"])
+    grid_sink = CounterSink(["order:", "nnz(L)", "degree computations", "tag sweeps"])
     saved_stdout = sys.stdout
     sys.stdout = grid_sink
     mmd2_minimum_degree(grid_graph(grid_side))

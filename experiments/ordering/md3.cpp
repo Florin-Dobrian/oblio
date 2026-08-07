@@ -30,6 +30,7 @@
 // Run:    ./md3_cpp
 //         ./md3_cpp 3      just the third example
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstdint>
 #include <iomanip>
@@ -51,6 +52,14 @@
 // std::int32_t, with NIL for "none"; a POSITION locates something inside a vector
 // and is a std::size_t.
 constexpr std::int32_t NIL = -1;
+
+// The mark array is a set and the tag names it, so a tag must never repeat: a
+// repeat makes a stale stamp read as a match, which is wrong silently. The tag
+// only ever climbs, so the ceiling is where it has to be swept back. Half the
+// positive range of std::int32_t, which is a pragmatic choice and not a derived
+// one: nothing here stores anything but a tag, so the true ceiling is the type's
+// own maximum, and the room left over is against a later layer wanting some of it.
+constexpr std::int32_t TAG_CEILING = (1 << 30) - 1;
 
 using Graph = std::vector<std::vector<std::int32_t>>;
 
@@ -362,6 +371,9 @@ std::vector<std::int32_t> md3MinimumDegree(const Graph& G) {
     // equals numEliminations; from mmd1 up the two come apart.
     std::size_t numIterations = 0;
     std::size_t numDegreeComputations = 0;
+    // Sweeps of the tag back to zero. Expected to be 0 at every size we run, so it
+    // is here as the witness that the guard is inert rather than as a statistic.
+    std::size_t numTagSweeps = 0;
     std::vector<std::vector<std::int32_t>> superMembers(n);   // for the expansion
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u)
         superMembers[u].push_back(u);
@@ -377,6 +389,16 @@ std::vector<std::int32_t> md3MinimumDegree(const Graph& G) {
     int iteration = 0;
     while (numEliminatedVertices < n) {
         ++numIterations;
+        // Sweep the tag back before it can wrap. Two sites in this layer, one before
+        // each region that advances the tag, and each placed where nothing in mark is
+        // live. Here the region is the pivot search, which calls md3Neighbors once per
+        // alive vertex; every call stamps what it reads in the same call, so there is
+        // nothing to erase. Never observed to fire.
+        if (tag >= TAG_CEILING) {
+            std::fill(mark.begin(), mark.end(), NIL);
+            tag = 0;
+            ++numTagSweeps;
+        }
         std::int32_t pivot = NIL;
         std::size_t best = 0;
         for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) {
@@ -384,6 +406,15 @@ std::vector<std::int32_t> md3MinimumDegree(const Graph& G) {
             ++numDegreeComputations;
             std::size_t degree = md3Neighbors(A, I, C, mark, tag, u).size();
             if (pivot == NIL || degree < best) { pivot = u; best = degree; }
+        }
+        // The second site. Not inside md3Eliminate, which holds three stamps live in
+        // turn: cliqueTag and absorbedTag across the prune loop, then the merged set
+        // across the C[pivot] compaction. A sweep in there erases marks about to be
+        // read.
+        if (tag >= TAG_CEILING) {
+            std::fill(mark.begin(), mark.end(), NIL);
+            tag = 0;
+            ++numTagSweeps;
         }
         auto [neighbors, absorbedCliques, prunedEdges, mergedVertices] =
             md3Eliminate(A, I, C, eliminated, mark, tag, pivot);
@@ -461,6 +492,7 @@ std::vector<std::int32_t> md3MinimumDegree(const Graph& G) {
     std::cout << "eliminations: " << numEliminations << "\n";
     std::cout << "sum of |C[p]|: " << numCliqueEntries << "\n";
     std::cout << "degree computations: " << numDegreeComputations << "\n";
+    std::cout << "tag sweeps: " << numTagSweeps << "\n";
     std::cout << "order: [";
     for (std::size_t k = 0; k < order.size(); ++k)
         std::cout << (k == 0 ? "" : ", ") << order[k];

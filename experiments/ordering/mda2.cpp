@@ -70,6 +70,7 @@
 // Run:    ./mda2_cpp
 //         ./mda2_cpp 3      just the third example
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstdint>
 #include <iomanip>
@@ -91,6 +92,14 @@
 // std::int32_t, with NIL for "none"; a POSITION locates something inside a vector
 // and is a std::size_t.
 constexpr std::int32_t NIL = -1;
+
+// The mark array is a set and the tag names it, so a tag must never repeat: a
+// repeat makes a stale stamp read as a match, which is wrong silently. The tag
+// only ever climbs, so the ceiling is where it has to be swept back. Half the
+// positive range of std::int32_t, which is a pragmatic choice and not a derived
+// one: nothing here stores anything but a tag, so the true ceiling is the type's
+// own maximum, and the room left over is against a later layer wanting some of it.
+constexpr std::int32_t TAG_CEILING = (1 << 30) - 1;
 
 using Graph = std::vector<std::vector<std::int32_t>>;
 
@@ -354,6 +363,9 @@ std::vector<std::int32_t> mda2MinimumDegree(const Graph& G) {
     // nothing is maintained: the picker recomputes each candidate's bound from
     // scratch on every iteration, as md2 and md3 do with exact degrees.
     std::size_t numBoundComputations = 0;
+    // Sweeps of the tag back to zero. Expected to be 0 at every size we run, so it
+    // is here as the witness that the guard is inert rather than as a statistic.
+    std::size_t numTagSweeps = 0;
     std::vector<bool> eliminated(n, false);
     std::vector<std::int32_t> order;
     std::size_t degreeSum = 0;
@@ -372,6 +384,17 @@ std::vector<std::int32_t> mda2MinimumDegree(const Graph& G) {
             ++numBoundComputations;
             std::size_t candidateBound = mda2Bound(A, I, C, u);
             if (pivot == NIL || candidateBound < best) { pivot = u; best = candidateBound; }
+        }
+        // Sweep the tag back before it can wrap. One site in this layer, unlike its
+        // three neighbors in the square: mda2Bound reads lengths and takes no mark
+        // or tag, and the recomputing column has no refresh, so the elimination is
+        // the only region that spends a tag. Not inside mda2Eliminate, which holds
+        // cliqueTag and absorbedTag live across the whole prune loop. Never
+        // observed to fire.
+        if (tag >= TAG_CEILING) {
+            std::fill(mark.begin(), mark.end(), NIL);
+            tag = 0;
+            ++numTagSweeps;
         }
         auto [neighbors, absorbedCliques, prunedEdges] =
             mda2Eliminate(A, I, C, eliminated, mark, tag, pivot);
@@ -425,6 +448,7 @@ std::vector<std::int32_t> mda2MinimumDegree(const Graph& G) {
     // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     std::cout << "loose picks = " << loosePicks << " of " << n << "\n";
     std::cout << "bound computations: " << numBoundComputations << "\n";
+    std::cout << "tag sweeps: " << numTagSweeps << "\n";
     std::cout << "order: [";
     for (std::size_t k = 0; k < order.size(); ++k)
         std::cout << (k == 0 ? "" : ", ") << order[k];

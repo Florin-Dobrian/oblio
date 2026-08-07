@@ -57,6 +57,19 @@
 import math
 import sys
 
+# The mark array is a set and the tag names it, so a tag must never repeat: a
+# repeat makes a stale stamp read as a match, which is wrong silently. The tag
+# only ever climbs, so the ceiling is where it has to be swept back. Half the
+# positive range of the C++ twin's int32_t, which is a pragmatic choice and not
+# a derived one: nothing here stores anything but a tag, so the true ceiling is
+# the type's own maximum, and the room left over is against a later layer
+# wanting some of it.
+#
+# The row_mark of amd3_preprocess is a different scheme and needs no guard: it
+# stamps with a COLUMN INDEX rather than a counter, so it is bounded by n by
+# construction and cannot wrap.
+TAG_CEILING = 2**30 - 1
+
 # I[u] cliques that contain u
 # C[c] vertices that c contains
 
@@ -502,6 +515,9 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
     # clique set and so is exact; the bound becomes a bound from the first
     # elimination on.
     num_bound_updates = 0
+    # Sweeps of the tag back to zero. Expected to be 0 at every size we run, so it
+    # is here as the witness that the guard is inert rather than as a statistic.
+    num_tag_sweeps = 0
     num_member_visits = 0                      # what an exact refresh would cost
     num_clique_reads = 0                       # clique reads in the bound itself
     num_incidence_reads = 0                    # incidence entries scan 1 walks
@@ -600,6 +616,17 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
         num_bucket_probes += 1
         pivot = buckets[min_degree][0]         # the head, whatever was filed last
 
+        # Sweep the tag back before it can wrap. THREE sites in this layer, as in
+        # amd2, and each placed where nothing in mark is live. Note the sweep fills
+        # 2n: the hash pass stamps cliques at c + n. The dense-row pass, amd3_aat
+        # and the postorder add nothing here, none of them touching mark. Not inside
+        # amd3_eliminate, which holds three stamps live in turn: clique_tag and
+        # absorbed_tag across the prune loop, then the merged set across the
+        # C[pivot] compaction. Never observed to fire.
+        if tag >= TAG_CEILING:
+            mark = [-1] * (2 * n)
+            tag = 0
+            num_tag_sweeps += 1
         neighbors, absorbed_cliques, pruned_edges, merged_vertices, tag = amd3_eliminate(
             A, I, C, mark, tag, eliminated, pivot)
         num_eliminations += 1
@@ -636,6 +663,15 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
         # the exact degree recomputes a union per vertex. mark[v] == in_clique is
         # the membership test for C[pivot]; a second tag makes touched_cliques a
         # set too, so a clique is listed once however many vertices reach it.
+        # The second site, guarding one contiguous region: in_clique, seen_clique,
+        # the outside[c] loop, aggressive absorption's dead_tag, and the bound
+        # loop's per-vertex amd3_exact_degree calls. in_clique is stamped here and
+        # still read inside the outside[c] loop, so no sweep may land between them.
+        # The whole region advances the tag by about n.
+        if tag >= TAG_CEILING:
+            mark = [-1] * (2 * n)
+            tag = 0
+            num_tag_sweeps += 1
         pivot_clique = list(C[pivot])
         tag += 1
         in_clique = tag                         # membership of C[pivot], one test
@@ -779,6 +815,17 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
                     # Decided by stamping one side and counting matches on the
                     # other, as every other membership test in this file is, so it
                     # costs one pass and no sort.
+                    # The third site, and the reason this layer and amd2 have one
+                    # more than the others. `other` advances once per PAIR TESTED
+                    # rather than once per pass, and the pair count is quadratic in
+                    # the bucket sizes with no clean bound, so a check before the
+                    # pass would leave the gap between checks unbounded. Safe at the
+                    # top of a pair because the previous pair's stamps are spent and
+                    # hash_bucket, used_keys and eliminated are separate structures.
+                    if tag >= TAG_CEILING:
+                        mark = [-1] * (2 * n)
+                        tag = 0
+                        num_tag_sweeps += 1
                     tag += 1
                     other = tag
                     size_v = 0
@@ -981,6 +1028,7 @@ def amd3_minimum_degree(G, alpha=10.0, aggressive=True):
     # and this file has no pool to compact, so there is nothing to report.
     print(f"predicted: divides {num_divides}, multiply-subtracts LDL "
           f"{num_multsubs_ldl}, LU {num_multsubs_lu}, largest front {front_max}")
+    print(f"tag sweeps: {num_tag_sweeps}")
     print(f"order: {order}")
     return order
 
@@ -1188,7 +1236,7 @@ matrix1_Ai = [0, 1, 3,
 if len(sys.argv) > 2 and sys.argv[1] == "grid":
     grid_side = int(sys.argv[2])
     print(f"=== grid {grid_side}x{grid_side} (n = {grid_side * grid_side}) ===")
-    grid_sink = CounterSink(["order:", "nnz(L)", "degree computations", "clique-member", "clique reads", "incidence entries", "bound below exact", "bound was loose", "aggressively", "dense threshold"])
+    grid_sink = CounterSink(["order:", "nnz(L)", "degree computations", "clique-member", "clique reads", "incidence entries", "bound below exact", "bound was loose", "aggressively", "dense threshold", "tag sweeps"])
     saved_stdout = sys.stdout
     sys.stdout = grid_sink
     amd3_minimum_degree(grid_graph(grid_side))

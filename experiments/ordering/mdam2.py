@@ -114,6 +114,15 @@
 # %%
 import sys
 
+# The mark array is a set and the tag names it, so a tag must never repeat: a
+# repeat makes a stale stamp read as a match, which is wrong silently. The tag
+# only ever climbs, so the ceiling is where it has to be swept back. Half the
+# positive range of the C++ twin's int32_t, which is a pragmatic choice and not
+# a derived one: nothing here stores anything but a tag, so the true ceiling is
+# the type's own maximum, and the room left over is against a later layer
+# wanting some of it.
+TAG_CEILING = 2**30 - 1
+
 # I[u] cliques that contain u
 # C[c] vertices that c contains
 
@@ -366,6 +375,9 @@ def mdam2_minimum_degree(G):
     # clique set and so is exact; the bound becomes a bound from the first
     # elimination on.
     num_bound_updates = 0
+    # Sweeps of the tag back to zero. Expected to be 0 at every size we run, so it
+    # is here as the witness that the guard is inert rather than as a statistic.
+    num_tag_sweeps = 0
     eliminated = [False] * n
     order = []
     degree_sum = 0
@@ -390,6 +402,16 @@ def mdam2_minimum_degree(G):
             if pivot == -1 or bounds[u] < bounds[pivot]:
                 pivot = u
         picked = bounds[pivot]
+        # Sweep the tag back before it can wrap. Two sites in this layer, one before
+        # each region that advances the tag, and each placed where nothing in mark is
+        # live. The pivot search reads cached integers and spends no tag, so the
+        # first region is the elimination. Not inside mdam2_eliminate, which holds
+        # clique_tag and absorbed_tag live across the whole prune loop. Never
+        # observed to fire.
+        if tag >= TAG_CEILING:
+            mark = [-1] * n
+            tag = 0
+            num_tag_sweeps += 1
         neighbors, absorbed_cliques, pruned_edges, tag = mdam2_eliminate(
             A, I, C, mark, tag, eliminated, pivot)
         num_eliminations += 1
@@ -406,6 +428,13 @@ def mdam2_minimum_degree(G):
         # The refresh. Only the new clique's members get a new bound, and it is
         # stated against C[pivot], which is why it had to wait for the elimination.
         num_bound_updates += len(neighbors)
+        # The second site, before the refresh. Not inside mdam2_refresh_bounds
+        # either: it stamps once and reads that stamp across all three of its
+        # passes, so a sweep in there erases marks about to be read.
+        if tag >= TAG_CEILING:
+            mark = [-1] * n
+            tag = 0
+            num_tag_sweeps += 1
         tag = mdam2_refresh_bounds(A, I, C, bounds, outside, mark, tag, pivot, neighbors)
         bounds[pivot] = 0
 
@@ -429,6 +458,7 @@ def mdam2_minimum_degree(G):
     print(f"loose picks = {loose_picks} of {n}")
     print(f"bound computations: {num_bound_updates + n}, "
           f"bound updates: {num_bound_updates}")
+    print(f"tag sweeps: {num_tag_sweeps}")
     print(f"order: {order}")
     return order
 

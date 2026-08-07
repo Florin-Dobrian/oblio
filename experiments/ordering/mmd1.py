@@ -94,6 +94,15 @@
 # %%
 import sys
 
+# The mark array is a set and the tag names it, so a tag must never repeat: a
+# repeat makes a stale stamp read as a match, which is wrong silently. The tag
+# only ever climbs, so the ceiling is where it has to be swept back. Half the
+# positive range of the C++ twin's int32_t, which is a pragmatic choice and not
+# a derived one: nothing here stores anything but a tag, so the true ceiling is
+# the type's own maximum, and the room left over is against a later layer
+# wanting some of it.
+TAG_CEILING = 2**30 - 1
+
 # I[u] cliques that contain u
 # C[c] vertices that c contains
 
@@ -362,6 +371,9 @@ def mmd1_minimum_degree(G, delta=0):
     # n vertices, is that plus n, so the report derives it rather than keeping a
     # second counter that could drift from this one.
     num_degree_updates = 0
+    # Sweeps of the tag back to zero. Expected to be 0 at every size we run, so it
+    # is here as the witness that the guard is inert rather than as a statistic.
+    num_tag_sweeps = 0
 
     buckets = [[] for _ in range(n)]           # buckets[d] holds the live degree-d
     filed = [False] * n                        # whether u is in a bucket at all
@@ -414,6 +426,19 @@ def mmd1_minimum_degree(G, delta=0):
             degree = degrees[pivot]
             mmd1_unfile(buckets, filed, degree, pivot)
 
+            # Sweep the tag back before it can wrap. Two sites in this layer, one
+            # before each region that advances the tag, and each placed where nothing
+            # in mark is live. This one is INSIDE the batch loop rather than before
+            # it, since a batch takes several pivots and each calls the eliminator.
+            # Safe between eliminations because the eviction that follows stamps
+            # touched_iteration and filed, which are separate arrays. Not inside
+            # mmd1_eliminate, which holds three stamps live in turn: clique_tag and
+            # absorbed_tag across the prune loop, then the merged set across the
+            # C[pivot] compaction. Never observed to fire.
+            if tag >= TAG_CEILING:
+                mark = [-1] * n
+                tag = 0
+                num_tag_sweeps += 1
             neighbors, absorbed_cliques, pruned_edges, merged_vertices, tag = mmd1_eliminate(
                 A, I, C, mark, tag, eliminated, pivot)
             num_eliminations += 1
@@ -453,6 +478,13 @@ def mmd1_minimum_degree(G, delta=0):
 
         # ---- one REFRESH, for everything the batch reached -----------------
         refreshed_vertices = [u for u in touched if not eliminated[u]]
+        # The second site, before the degree update pass. Safe here because the
+        # batch's stamps are all spent, and because every mmd1_neighbors call stamps
+        # what it reads in the same call.
+        if tag >= TAG_CEILING:
+            mark = [-1] * n
+            tag = 0
+            num_tag_sweeps += 1
         for u in refreshed_vertices:
             neighbors_u, tag = mmd1_neighbors(A, I, C, mark, tag, u)
             degrees[u] = len(neighbors_u)
@@ -480,6 +512,7 @@ def mmd1_minimum_degree(G, delta=0):
     print(f"degree computations: {num_degree_updates + n}, "
           f"degree updates: {num_degree_updates}, "
           f"bucket probes: {num_bucket_probes}")
+    print(f"tag sweeps: {num_tag_sweeps}")
     print(f"order: {order}")
     return order
 
@@ -669,7 +702,7 @@ examples = [("graph1", graph1), ("graph2", graph2),
 if len(sys.argv) > 2 and sys.argv[1] == "grid":
     grid_side = int(sys.argv[2])
     print(f"=== grid {grid_side}x{grid_side} (n = {grid_side * grid_side}) ===")
-    grid_sink = CounterSink(["order:", "nnz(L)", "degree computations"])
+    grid_sink = CounterSink(["order:", "nnz(L)", "degree computations", "tag sweeps"])
     saved_stdout = sys.stdout
     sys.stdout = grid_sink
     mmd1_minimum_degree(grid_graph(grid_side))

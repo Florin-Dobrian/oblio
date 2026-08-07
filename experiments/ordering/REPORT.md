@@ -257,8 +257,11 @@ own, all unguarded. Measured on 2D and 3D grids, the stamp advances about 15n ov
 still worth recording is that our `mMark` carries no permanent sentinel, so a wrap would give a
 stale MATCH rather than a collision: silent, data-dependent, and benign-looking.
 
-The experiment README says only that the prototypes do not need the reset. That is true and is not
-the same statement as production not needing it.
+**The prototypes now have one, 2026-08-06**, at a `TAG_CEILING` of `2^30 - 1`, in all thirteen
+layers, with a `tag sweeps` counter as the witness that it stays inert. Production still does not,
+and the ceiling is a pragmatic placeholder rather than a derivation. The experiment README's "The
+tag guard" section carries the rule for where a check may land, which is the part that transfers;
+`docs/TODO.md` item 4 carries what is left.
 
 **3. The two vendored routines set the ceiling 256 times apart, and only one of them derives it.**
 AMD computes `wbig = Int_MAX_VAL - n`, with the header stating the rule outright: `wflg` may not

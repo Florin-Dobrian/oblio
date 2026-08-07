@@ -308,17 +308,17 @@ so every degree there becomes a weighted count taken from `len(super_members[v])
 
 ### What is deliberately excluded
 
-Two pieces of the vendored codes are consequences of packing state into reusable integer arrays
-rather than features of the ordering, and neither is modeled:
+One piece of the vendored codes is a consequence of packing state into reusable integer arrays
+rather than a feature of the ordering, and it is not modeled:
 
-- MMD's `maxint` overflow reset, `if (tag >= maxint) { tag = 1; for each i with marker[i] < maxint,
-  marker[i] = 0; }`. We use the same mark-and-tag idiom, so the reset would be needed only if the
-  tag could wrap, which it cannot at the sizes these prototypes run.
 - AMD's workspace with `iwlen`, `pfree` and the `ncmpa` garbage collection. That is a flat pool
-  being compacted when it fills, and our member lists grow on their own.
+  being compacted when it fills, and our member lists grow on their own. It is what the ordering
+  engine will need once the lists live in one pool.
 
-Both are what the ordering engine will need once the lists live in one pool; the mark arrays
-themselves are already here, in `mark` and `touched_round`.
+**MMD's `maxint` overflow reset used to be the second entry here, and it is now implemented.** The
+claim it rested on, that the tag cannot wrap at the sizes these prototypes run, is true and is not
+the point: a mark array is a set only while its tag is unique, and a wrapped tag makes a stale
+stamp read as a match, which is wrong with no symptom. See the section on the tag guard below.
 
 ### Tie-breaks, and what the acceptance test is
 
@@ -393,7 +393,9 @@ closing `order:` line as well as the counters, and `make test` diffs the whole f
 sides 10 and 20: between the twins for every layer in `GRID_LAYERS`, and against production for
 every layer in `PORTED`. The counters are the mode's first purpose and this is its second; the
 order comes last in the output, below the counters, so a reader after the counters is unaffected.
-Why the check is worth having is the amd2 subsection below: two defects there left all seven
+`tag sweeps` is on the whitelist for the same reason it exists at all, since a grid is the only
+size at which it could ever read anything but zero. Why the check is worth having is the amd2
+subsection below: two defects there left all seven
 examples byte for byte identical while the ordering was wrong on any grid of 10 a side or more.
 
 **The Python twins gained the mode at the same time, and did not have it before.** All five C++
@@ -442,6 +444,77 @@ a great deal to attribute to one, and it is worth confirming rather than assumin
 The AMD side has no such problem: `amd1` at 201856 is *better* than the vendored 206332, and
 `amd2` at 212496 is worse than both, which is the coarser-supervariables cost the pass 1 and 2
 subsection already measured on small graphs.
+
+## The tag guard, and where a sweep is allowed to land
+
+The mark array is a set and the tag names it, so a tag must never repeat. Ours only ever climbs,
+so the way it repeats is by overflowing its type, and the failure is the quiet kind: a wrapped tag
+makes a stale stamp read as a match, so a vertex is counted as already seen when it was not. No
+crash, no assertion, a slightly wrong ordering. Both vendored routines carry a guard against this,
+`genmmd` at its line 42 and AMD in `clear_flag`, and the port had dropped it.
+
+Every layer now carries one. The mechanism is three lines at each check site:
+
+```
+if tag >= TAG_CEILING:
+    mark = [-1] * n          # 2n in amd2 and amd3, which stamp cliques at c + n
+    tag = 0
+```
+
+**The sweep is unconditional, which neither vendored routine can afford.** `genmmd` sweeps
+`if (marker[i] < maxint) marker[i] = 0` and AMD sweeps `if (W[x] != 0) W[x] = 1`, both selective
+because both park a permanent state in the same array, `maxint` for a numbered vertex and zero for
+an absorbed element, so neither may rest at its own sentinel. Ours carries nothing but tags, so the
+sweep is a fill back to exactly what the constructor left and the invariant afterwards is the one
+at startup. AMD's `wbig = Int_MAX_VAL - n` headroom is not needed either, since that exists because
+`W[e]` can hold `wflg + size` and ours holds only tags.
+
+**`TAG_CEILING` is `2^30 - 1`, and it is a placeholder rather than a derivation.** Nothing in these
+files stores anything but a tag, so the true ceiling is the type's own maximum; half the positive
+range leaves room against a later layer wanting some of it, and is far enough above the observed
+rate that nothing fires. The two directions are not symmetric, which is worth knowing before the
+constant is revised: too low costs one `O(n)` fill per sweep, amortized to nothing, while too high
+is a correctness cliff with a silent wrong answer past it.
+
+**Where a check may go is the whole of the difficulty, and it is per layer.** A check is legal only
+where nothing in `mark` is live, and the eliminators are the obvious hazard: each holds `clique_tag`
+and `absorbed_tag` live across the prune loop and then the merged set across the `C[pivot]`
+compaction, so the guard goes before the call and never inside. Several other regions hold a stamp
+across a span the same way, and each was found by reading rather than assumed:
+
+- `mmd2`'s refresh stamps `element_tag` once per element and reads it throughout that element's
+  q2h walk, where it decides both the pair merge and the outmatched case, with `vertex_tag` fresh
+  per vertex nested inside it. Two levels live at once, which is `mmdupd`'s `mt` against its `tag`.
+- the amd bound pass stamps `in_clique` and still reads it inside the `outside[c]` loop, with
+  `seen_clique` stamped and consumed in between.
+- `mdam2_refresh_bounds` stamps once and reads that stamp across all three of its passes.
+
+So the count of sites varies, and the rule that produces it does not: **one check before each
+region that advances the tag, placed where nothing is live.**
+
+```
+one site      md1, mda2                    only the eliminator advances a tag
+two sites     md2 md3 md4 md5 mdm2 mdam2   the eliminator and the degree or bound pass
+              mmd1 mmd2 amd1
+three sites   amd2 amd3                    those two, plus the hash pair loop
+```
+
+**The third site in `amd2` and `amd3` is about a rate rather than about liveness.** Its `other` tag
+advances once per PAIR TESTED rather than once per pass, and the pair count is quadratic in the
+bucket sizes with no clean bound, so a check before the pass would leave the gap between two checks
+unbounded. With the check at the top of each pair, every inter-check advance in every layer is
+`O(n)` or better.
+
+**The `tag sweeps` counter is the witness.** It is expected to read 0 at every size we run, so it
+is there to make that claim checkable rather than to measure anything, which is the same reason
+`bound below exact` sits beside it in the amd layers. It is in the grid-mode whitelist too, since
+grid mode is the only size at which the number could ever be interesting.
+
+**Verified by forcing it.** With `TAG_CEILING` dropped to 2 or 3, so the sweep fires at nearly
+every check, every layer's whole trace is identical to the normal-ceiling run apart from the
+counter itself, in both twins, and the twins still agree with each other. On grids the forced
+sweeps run from 98 for `mmd2` to 2028 for `amd2` at side 20, and `bound below exact` stays 0
+throughout, which is the assertion that would catch a sweep landing inside the bound pass.
 
 ## Four bugs this found, all ours
 

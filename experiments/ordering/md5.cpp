@@ -71,6 +71,14 @@
 // and is a std::size_t.
 constexpr std::int32_t NIL = -1;
 
+// The mark array is a set and the tag names it, so a tag must never repeat: a
+// repeat makes a stale stamp read as a match, which is wrong silently. The tag
+// only ever climbs, so the ceiling is where it has to be swept back. Half the
+// positive range of std::int32_t, which is a pragmatic choice and not a derived
+// one: nothing here stores anything but a tag, so the true ceiling is the type's
+// own maximum, and the room left over is against a later layer wanting some of it.
+constexpr std::int32_t TAG_CEILING = (1 << 30) - 1;
+
 using Graph = std::vector<std::vector<std::int32_t>>;
 
 // C[c] holds the members of clique c, and cliqueLive[c] says whether c exists.
@@ -466,6 +474,9 @@ std::vector<std::int32_t> md5MinimumDegree(const Graph& G) {
     // n vertices, is that plus n, so the report derives it rather than keeping a
     // second counter that could drift from this one.
     std::size_t numDegreeUpdates = 0;
+    // Sweeps of the tag back to zero. Expected to be 0 at every size we run, so it
+    // is here as the witness that the guard is inert rather than as a statistic.
+    std::size_t numTagSweeps = 0;
 
     // The buckets, and minDegree, a LOWER BOUND on the current minimum degree.
     // The search starts at minDegree rather than at 0, so it never looks at
@@ -494,6 +505,17 @@ std::vector<std::int32_t> md5MinimumDegree(const Graph& G) {
         }
         ++numBucketProbes;
         std::int32_t pivot = buckets.head[minDegree];   // whatever was filed last
+        // Sweep the tag back before it can wrap. Two sites in this layer, one before
+        // each region that advances the tag, and each placed where nothing in mark is
+        // live. The bucket walk above spends no tag, so the first region is the
+        // elimination. Not inside md5Eliminate, which holds three stamps live in
+        // turn: cliqueTag and absorbedTag across the prune loop, then the merged set
+        // across the C[pivot] compaction. Never observed to fire.
+        if (tag >= TAG_CEILING) {
+            std::fill(mark.begin(), mark.end(), NIL);
+            tag = 0;
+            ++numTagSweeps;
+        }
         auto [neighbors, absorbedCliques, prunedEdges, mergedVertices] =
             md5Eliminate(A, I, C, eliminated, mark, tag, pivot);
         ++numEliminations;
@@ -521,6 +543,15 @@ std::vector<std::int32_t> md5MinimumDegree(const Graph& G) {
         // change when a source of it changed, and the iteration touched no source
         // outside C[pivot].
         const std::vector<std::int32_t> refreshedVertices = C[pivot];
+        // The second site, before the degree update pass. Safe here because
+        // md5Eliminate's stamps are spent and the bucket work between touches no
+        // mark, and because every md5Neighbors call stamps what it reads in the
+        // same call.
+        if (tag >= TAG_CEILING) {
+            std::fill(mark.begin(), mark.end(), NIL);
+            tag = 0;
+            ++numTagSweeps;
+        }
         for (std::int32_t u : refreshedVertices)
             md5Refile(buckets, degrees, u, md5Neighbors(A, I, C, mark, tag, u).size());
         numDegreeUpdates += refreshedVertices.size();
@@ -602,6 +633,7 @@ std::vector<std::int32_t> md5MinimumDegree(const Graph& G) {
     std::cout << "degree computations: " << (numDegreeUpdates + n)
               << ", degree updates: " << numDegreeUpdates
               << ", bucket probes: " << numBucketProbes << "\n";
+    std::cout << "tag sweeps: " << numTagSweeps << "\n";
     std::cout << "order: [";
     for (std::size_t k = 0; k < order.size(); ++k)
         std::cout << (k == 0 ? "" : ", ") << order[k];

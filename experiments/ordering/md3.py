@@ -30,6 +30,15 @@
 # %%
 import sys
 
+# The mark array is a set and the tag names it, so a tag must never repeat: a
+# repeat makes a stale stamp read as a match, which is wrong silently. The tag
+# only ever climbs, so the ceiling is where it has to be swept back. Half the
+# positive range of the C++ twin's int32_t, which is a pragmatic choice and not
+# a derived one: nothing here stores anything but a tag, so the true ceiling is
+# the type's own maximum, and the room left over is against a later layer
+# wanting some of it.
+TAG_CEILING = 2**30 - 1
+
 # I[u] cliques that contain u
 # C[c] vertices that c contains
 
@@ -249,6 +258,9 @@ def md3_minimum_degree(G):
     # equals num_eliminations; from mmd1 up the two come apart.
     num_iterations = 0
     num_degree_computations = 0
+    # Sweeps of the tag back to zero. Expected to be 0 at every size we run, so it
+    # is here as the witness that the guard is inert rather than as a statistic.
+    num_tag_sweeps = 0
     super_members = [[u] for u in range(n)]    # the vertices each pivot stands for
     eliminated = [False] * n
     pivots = []                                # the order over supervariables
@@ -263,6 +275,15 @@ def md3_minimum_degree(G):
     iteration = 0
     while num_eliminated_vertices < n:
         num_iterations += 1
+        # Sweep the tag back before it can wrap. Two sites in this layer, one before
+        # each region that advances the tag, and each placed where nothing in mark is
+        # live. Here the region is the pivot search, which calls md3_neighbors once
+        # per alive vertex; every call stamps what it reads in the same call, so
+        # there is nothing to erase. Never observed to fire.
+        if tag >= TAG_CEILING:
+            mark = [-1] * n
+            tag = 0
+            num_tag_sweeps += 1
         pivot, best = -1, 0
         for u in range(n):                 # the key advances the tag, so no lambda
             if eliminated[u]:
@@ -271,6 +292,14 @@ def md3_minimum_degree(G):
             candidate, tag = md3_neighbors(A, I, C, mark, tag, u)
             if pivot == -1 or len(candidate) < best:
                 pivot, best = u, len(candidate)
+        # The second site. Not inside md3_eliminate, which holds three stamps live
+        # in turn: clique_tag and absorbed_tag across the prune loop, then the merged
+        # set across the C[pivot] compaction. A sweep in there erases marks about to
+        # be read.
+        if tag >= TAG_CEILING:
+            mark = [-1] * n
+            tag = 0
+            num_tag_sweeps += 1
         neighbors, absorbed_cliques, pruned_edges, merged_vertices, tag = md3_eliminate(
             A, I, C, mark, tag, eliminated, pivot)
         num_eliminations += 1
@@ -318,6 +347,7 @@ def md3_minimum_degree(G):
     print(f"eliminations: {num_eliminations}")
     print(f"sum of |C[p]|: {num_clique_entries}")
     print(f"degree computations: {num_degree_computations}")
+    print(f"tag sweeps: {num_tag_sweeps}")
     print(f"order: {order}")
     return order
 

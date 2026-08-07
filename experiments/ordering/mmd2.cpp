@@ -132,6 +132,14 @@
 // and is a std::size_t.
 constexpr std::int32_t NIL = -1;
 
+// The mark array is a set and the tag names it, so a tag must never repeat: a
+// repeat makes a stale stamp read as a match, which is wrong silently. The tag
+// only ever climbs, so the ceiling is where it has to be swept back. Half the
+// positive range of std::int32_t, which is a pragmatic choice and not a derived
+// one: nothing here stores anything but a tag, so the true ceiling is the type's
+// own maximum, and the room left over is against a later layer wanting some of it.
+constexpr std::int32_t TAG_CEILING = (1 << 30) - 1;
+
 using Graph = std::vector<std::vector<std::int32_t>>;
 
 // C[c] holds the members of clique c, and cliqueLive[c] says whether c exists.
@@ -556,6 +564,9 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
     // n vertices, is that plus n, so the report derives it rather than keeping a
     // second counter that could drift from this one.
     std::size_t numDegreeUpdates = 0;
+    // Sweeps of the tag back to zero. Expected to be 0 at every size we run, so it
+    // is here as the witness that the guard is inert rather than as a statistic.
+    std::size_t numTagSweeps = 0;
 
     // mmdint files a degree-0 vertex under degree 1, `if(dg==0)dg=1`, so the
     // bucket a vertex sits in is max(degree, 1) rather than its degree. From here
@@ -649,6 +660,20 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
             std::size_t degree = degrees[pivot];
             buckets.unfile(degree, pivot);
 
+            // Sweep the tag back before it can wrap. Two sites in this layer, one
+            // before each region that advances the tag, and each placed where nothing
+            // in mark is live. This one is INSIDE the batch loop rather than before
+            // it, since a batch takes several pivots and each calls the eliminator.
+            // Safe between eliminations because the eviction that follows stamps
+            // touchedIteration and filed, which are separate arrays. Not inside
+            // mmd2Eliminate, which holds three stamps live in turn: cliqueTag and
+            // absorbedTag across the prune loop, then the merged set across the
+            // C[pivot] compaction. Never observed to fire.
+            if (tag >= TAG_CEILING) {
+                std::fill(mark.begin(), mark.end(), NIL);
+                tag = 0;
+                ++numTagSweeps;
+            }
             auto [neighbors, absorbedCliques, prunedEdges, mergedVertices] =
                 mmd2Eliminate(A, I, C, eliminated, outmatched, mark, tag, pivot);
             ++numEliminations;
@@ -746,6 +771,17 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
         // different work, and a different filing order.
         std::vector<std::int32_t> refreshedVertices;
         std::vector<std::int32_t> elementMembers, q2h, qxh;
+        // The second site, before the refresh, and OUTSIDE the element loop rather
+        // than inside it. elementTag is stamped once per element and read all the
+        // way through that element's q2h walk, where it decides both the pair merge
+        // and the outmatched case, with vertexTag fresh per vertex nested inside it.
+        // Two levels live at once, which is mmdupd's mt against its tag, so a sweep
+        // within an element erases marks about to be read.
+        if (tag >= TAG_CEILING) {
+            std::fill(mark.begin(), mark.end(), NIL);
+            tag = 0;
+            ++numTagSweeps;
+        }
         for (std::int32_t element : batch) {
             elementMembers.clear();
             for (std::int32_t u : C[element])
@@ -876,6 +912,7 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
               << ", pair merges: " << pairMerges
               << ", outmatched: " << outmatchedCount
               << ", ncsub: " << ncsub << "\n";
+    std::cout << "tag sweeps: " << numTagSweeps << "\n";
     std::cout << "order: [";
     for (std::size_t k = 0; k < order.size(); ++k)
         std::cout << (k == 0 ? "" : ", ") << order[k];
@@ -941,7 +978,7 @@ int main(int argc, char** argv) {
     if (argc > 2 && std::string(argv[1]) == "grid") {
         const int side = std::atoi(argv[2]);
         std::cout << "=== grid " << side << "x" << side << " (n = " << side * side << ") ===\n";
-        CounterSink sink({"order:", "nnz(L)", "degree computations"});
+        CounterSink sink({"order:", "nnz(L)", "degree computations", "tag sweeps"});
         std::streambuf* saved = std::cout.rdbuf(&sink);
         mmd2MinimumDegree(gridGraph(side));
         std::cout.rdbuf(saved);

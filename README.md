@@ -85,7 +85,7 @@ starting is that **macOS already has the BLAS**, in Accelerate, and Linux does n
 
 ### macOS
 
-Apple Silicon or Intel. The combination tested is Apple Silicon, macOS 26.5.2 with Apple clang
+Apple Silicon or Intel. The combination tested is Apple Silicon, macOS 26.6 with Apple clang
 21.0.0.
 
 - **Xcode Command Line Tools**: `xcode-select --install`. Provides `clang++`, `make`, and the

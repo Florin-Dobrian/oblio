@@ -148,6 +148,30 @@ That trade is worth taking eventually, with the arithmetic audited site by site,
 worth taking in a hurry. Correct code with a measured performance tax beats slightly faster code
 with a correctness question in it.
 
+**The general form of this decision, which outlives the particular question.** Every exception to a
+uniform rule buys computer time and spends CODER time, and the two are not interchangeable here.
+The tax is paid once per run by a machine; the exception is paid again by every reader on every
+visit, forever. On a decade-scale project with one author, coder time is the binding resource and
+machine time is the abundant one, so a design that spends the scarce resource to save the abundant
+one is simply wrong for THIS project, whatever it would be for a team of ten shipping to a
+supercomputer centre.
+
+The arithmetic supports it rather than merely excusing it. The width tax is about a fifth of the
+ordering, and the ordering is a fraction of a solve: at 140x140 the pipeline benchmark puts MMD3's
+ordering at 1.55 ms against a left-looking factorization of 7.01, so a fifth of the ordering is
+roughly four percent of an analyze-plus-factor, and less again whenever the factor is reused. That
+is what a singularity would buy.
+
+And the project's own history says which failures are expensive. The defect that cost the most was
+not slow code: `Mmd2` filed a supervariable one bucket too high for months, worth 13 percent of
+fill, MORE than the width tax, and it survived because a subtraction sat somewhere nobody
+re-derived. It was found by making the code COMPARABLE to a reference, not by making it fast.
+
+**One asymmetry worth keeping in view: the tax is reversible and the exception is not.** A uniform
+`std::size_t` can become a uniform `std::uint32_t` for counts later, mechanically, precisely
+BECAUSE it is uniform. A singularity introduced now is load-bearing forever. The convenient choice
+keeps the option; the fast one spends it.
+
 **What is NOT claimed here.** That the others are wrong. Their tax is paid only on large problems
 and ours is paid always, which is a real advantage for them on small ones. What they buy it with is
 a band in the middle where the contract is unclear, and a configuration choice the caller has to

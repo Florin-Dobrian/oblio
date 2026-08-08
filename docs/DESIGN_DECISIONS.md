@@ -67,6 +67,95 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-08-08: The integer model, one dimension against two, and what the convenience costs
+
+**Oblio splits integers by DIMENSION, not by role, and that is the whole design.** A quantity that
+counts along one side of the matrix is bounded by `n`; a quantity that offsets into an `n x n`
+object is bounded by an area. The two have different fates as problems grow, so they get different
+treatment:
+
+```
+one dimensional   indices and counts   bounded by n, held below 2^31
+two dimensional   positions            bounded by an area, held in 64 bits
+```
+
+The bound on the first is `2^31` rather than `2^32` because an index may be `NIL`, and giving up
+the sign bit costs one power of two. That bound is then enforced at the door, on `n` and on
+`nnz(A)`, and never has to be revisited.
+
+**Why the split is at that line and not another.** One-dimensional sizes above `2^32` are not
+reachable in any foreseeable machine: even `2^31` indices squared is `2^62` entries, about `5.5e10`
+GB. Two-dimensional sizes above `2^32` are ROUTINE. A real factor crosses `2^31` entries at 25.8
+GB and `2^32` at 51.5 GB, so both are reached on an ordinary large workstation, never mind a
+cluster. So one dimension can be bounded safely and two cannot, and a model that treats them alike
+must be wrong about one of them.
+
+**How the established libraries do it, and where it leaves them.** SuiteSparse and MUMPS carry one
+source with a width parameter, `using Int = int32_t` in SuiteSparse's case, and the caller selects
+32 or 64 at build time. Both dimensions move together. For `A` that works: `nnz(A)` is an INPUT, so
+a 32-bit build caps it in the constructor and refuses anything larger, which is a clean contract.
+For `L` it does not, because `nnz(L)` is an OUTPUT. A static factorization at least predicts it in
+the symbolic phase, so one test before allocation would serve. Under PIVOTING it is not
+predictable at all: a delayed column grows its parent's front, so the bound would have to be
+re-checked every time a column is delayed, in the most delicate code in the numeric factorization,
+and it would fire after real work had been done on an input that was accepted.
+
+**That leaves a fuzzy band, and the band is not exotic.** Between a factor of about 26 GB and about
+52 GB, `nnz(L)` has crossed what a 32-bit build can address while `n` is nowhere near any limit.
+Precisely the range where a user would reasonably choose the 32-bit build for speed, and precisely
+where that choice is wrong. Oblio never enters that band, because two-dimensional quantities are
+always 64 bits, so there is no configuration for a caller to get wrong and no failure that arrives
+mid-factorization.
+
+**And Oblio goes one step further than the split requires: one-dimensional sizes are `std::size_t`
+too.** Only the BOUND is one-dimensional; the TYPE is wide. That is convenience rather than
+necessity, and it has a price and a benefit, both now measured.
+
+**The price is width in the hot loops.** In `QuotientGraph` six arrays are `std::size_t` where the
+vendored genmmd's equivalents are `int`. Measured two ways in `experiments/ordering/REPORT.md`:
+widening genmmd to `int64_t` costs it 17 to 26 percent doing byte-for-byte identical work, and
+narrowing our four one-dimensional counts recovers most of it, 1.159x of genmmd against 1.373x at
+140x140. Roughly a fifth of the ordering's runtime, paid always.
+
+**The benefit is that the 1D-to-2D crossing cannot be got wrong.** `SymFactor` computes a
+supernode's storage as `f * (f + 1) / 2 + f * u`, two one-dimensional counts multiplied into a
+two-dimensional size. With `f` as a 32-bit type:
+
+```
+front f = 46341    f*(f+1)/2 = 1.07e9   fits
+front f = 65536    f*(f+1)/2 = 2.15e9   OVERFLOWS
+```
+
+A dense root of 65536 is ordinary for a large 3D problem, and the overflow is silent, in an
+arithmetic expression rather than at any boundary anyone would guard, producing a plausible small
+number instead of a fault. Narrow the one-dimensional sizes and every such expression needs a cast
+that a reader has to recognize as load-bearing. Keeping them wide makes the intermediate already
+wide, so the crossing is structurally safe.
+
+**The decision: stay wide, deliberately.** Consistency and a crossing that cannot silently
+overflow, against roughly a fifth of the ordering's time. The alternative is available and is
+written down rather than forgotten: narrow the one-dimensional COUNTS to `std::uint32_t`, which is
+what the type rules are missing a category for, keeping every position at `std::size_t`. That is
+most of the measured gain and none of the consistency cost.
+
+**And the reason it is not being done now is not only the effort, though the effort is real.** It
+would touch many places, since one-dimensional counts feed arithmetic all through the analysis and
+the numeric phases, and every site where a count is combined into a two-dimensional quantity would
+need a widening cast. **Each of those casts is a place to introduce the very overflow the wide
+types currently make impossible**, and one that is missed is silent. So the work is not only
+extensive, it spends effort adding hazards to code that is correct today, in exchange for time.
+That trade is worth taking eventually, with the arithmetic audited site by site, and it is not
+worth taking in a hurry. Correct code with a measured performance tax beats slightly faster code
+with a correctness question in it.
+
+**What is NOT claimed here.** That the others are wrong. Their tax is paid only on large problems
+and ours is paid always, which is a real advantage for them on small ones. What they buy it with is
+a band in the middle where the contract is unclear, and a configuration choice the caller has to
+make correctly without being able to predict the quantity it depends on. Oblio pays a known,
+uniform, measured tax to have neither.
+
+---
+
 ## 2026-08-07: The default ordering moves to MMD3, which reproduces genmmd exactly
 
 **MMD3 is mmd2 with genmmd's list order and one defect fixed, and it returns the vendored

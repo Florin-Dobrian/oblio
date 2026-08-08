@@ -364,34 +364,41 @@ void QuotientGraph::absorb(const std::vector<std::int32_t>& cliques,
 // elimination forest; it changes only which permutation comes out, and it is here so that a
 // comparison against the vendored routine is an equality test rather than a judgement.
 //
-// One ascending scan and a counting layout, no sort, which is how mmdnum gets it: `for nd =
-// 1..neqns, if perm[nd] <= 0` walks to the root and takes the next number, so ascending falls
-// out of the scan order. See experiments/ordering/mmd3.py, ledger entry 6.
+// Two passes and ONE scratch array. The first walks the pivots, giving each one its base slot,
+// and threads its chain marking every member with the root it belongs to. The second scans the
+// vertices ASCENDING and drops each member into its root's next slot, so ascending order falls
+// out of the scan and nothing is sorted, which is how mmdnum gets it too.
+//
+// `slot` carries two meanings, told apart by sign, so one array does the work of two. For a ROOT
+// it holds the next free position after that root, a non-negative index; for a MEMBER it holds
+// `-(root + 1)`, always negative since root is non-negative. A vertex is a root or a member and
+// never both, so the two never collide. That is the same trick genmmd plays on `perm`, which
+// holds a number for a numbered vertex and a negated parent for a merged one.
+//
+// The obvious version, written first, allocated four arrays of size n and made six passes; it
+// cost 244 ms of a 4.94 s profile where mmdint and mmdnum together cost 116 ms, which was the
+// whole reason to come back to it. See experiments/ordering/mmd3.py, ledger entry 6.
 std::vector<std::int32_t> QuotientGraph::orderAscending(
         const std::vector<std::int32_t>& pivots) const {
     const std::size_t n = size();
-    std::vector<std::int32_t> rootOf(n, NIL);
-    for (std::int32_t pivot : pivots)
-        for (std::int32_t u = pivot; u != NIL; u = mSuperNext[u]) rootOf[u] = pivot;
+    std::vector<std::int32_t> order(n);
+    std::vector<std::int32_t> slot(n, 0);
 
-    std::vector<std::size_t> start(n + 1, 0);
-    for (std::size_t v = 0; v < n; ++v)
-        if (rootOf[v] != NIL && rootOf[v] != static_cast<std::int32_t>(v))
-            ++start[static_cast<std::size_t>(rootOf[v]) + 1];
-    for (std::size_t k = 0; k < n; ++k) start[k + 1] += start[k];
-
-    std::vector<std::int32_t> members(start[n]);
-    std::vector<std::size_t>  fill = start;
-    for (std::size_t v = 0; v < n; ++v)                 // ascending, so members are too
-        if (rootOf[v] != NIL && rootOf[v] != static_cast<std::int32_t>(v))
-            members[fill[static_cast<std::size_t>(rootOf[v])]++] = static_cast<std::int32_t>(v);
-
-    std::vector<std::int32_t> order;
-    order.reserve(n);
+    std::size_t pos = 0;
     for (std::int32_t pivot : pivots) {
-        order.push_back(pivot);
-        const std::size_t p = static_cast<std::size_t>(pivot);
-        for (std::size_t k = start[p]; k < fill[p]; ++k) order.push_back(members[k]);
+        // The members first, so marking them cannot overwrite the root's own cursor: the chain
+        // starts AT the pivot, and the pivot is a root rather than a member of itself.
+        for (std::int32_t u = mSuperNext[pivot]; u != NIL; u = mSuperNext[u]) slot[u] = -(pivot + 1);
+        order[pos]  = pivot;
+        slot[pivot] = static_cast<std::int32_t>(pos) + 1;   // where its first member goes
+        pos += mWeight[pivot];                              // the whole supervariable's room
+    }
+
+    for (std::size_t v = 0; v < n; ++v) {                   // ascending, so the members are too
+        const std::int32_t s = slot[v];
+        if (s >= 0) continue;                               // a root, already placed
+        const std::int32_t root = -s - 1;
+        order[static_cast<std::size_t>(slot[root]++)] = static_cast<std::int32_t>(v);
     }
     return order;
 }

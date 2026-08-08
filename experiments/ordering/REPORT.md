@@ -188,9 +188,252 @@ to read a stored key so the tie-break is preserved. Two cautions before that is 
 an array of size n, which is exactly the footprint trade that made AMD1B slower at large n after
 being faster at small. And it would not touch the fill half below.
 
+## Where the ordering time gap comes from, measured 2026-08-07
+
+Once MMD3 matched genmmd's permutation exactly, fill stopped being a variable and the time gap
+became a clean question with a single answer available. This section records that answer, because
+the largest part of it is a DELIBERATE DESIGN CHOICE rather than a defect, and the point of
+writing it down is to be able to say where the difference comes from without re-deriving it.
+
+**The counters say there is no algorithmic difference left.** Instrumenting genmmd with the same
+counters the prototype prints, on square grids from 32 to 140 a side:
+
+```
+                 mmd3      genmmd
+degree updates   equal      equal      1575, 5515, 12644, 23861
+pair merges      equal      equal        236,  988,  2446,  4826
+outmatched       equal      equal        595, 2088,  4635,  8469
+ncsub            equal      equal
+bucket probes      289        193      the only counter that differs, and it is O(n) either way
+```
+
+Same permutation, same fill, same work. So the remaining time is implementation and nothing else.
+
+### The width of our arrays is the largest single contributor
+
+`QuotientGraph` stores positions and measures as `std::size_t`, eight bytes; genmmd stores
+everything in `int`, four. **Narrowing one of ours to test that is what we tried first and it
+proves nothing**: `mWeight` alone moved the total by nothing at 140x140 and about four percent at
+400x400, unreadable against noise, because it is one of five eight-byte arrays read in the same
+loop.
+
+So the experiment was inverted: widen the ORACLE. A scratch copy of genmmd with every working
+array retyped from `int` to `std::int64_t`, verified to return the identical permutation, doing
+byte-for-byte the same work and differing only in width. (`int64_t` and not `size_t`, because
+genmmd stores negatives as sentinels, `invp[mn] = -num` and `bwd[nd] = -maxint`.)
+
+```
+                          140x140     400x400
+genmmd, int                 1.000x      1.000x
+genmmd, int64_t             1.170x      1.255x
+our MMD3                    1.373x      1.619x
+```
+
+**Width alone costs 17 to 26 percent.** Confirmed from our own side afterwards, narrowing the four
+measures that are bounded by `n` and leaving the two positions alone:
+
+```
+                                    140x140     400x400
+MMD3, size_t                          1.373x      1.619x
+MMD3, four measures narrowed          1.159x      1.464x
+```
+
+Sixteen percent at 140x140 and ten at 400x400, from four member declarations. The two experiments
+agree: genmmd widened is 1.17x of itself, ours narrowed is 1.16x of genmmd. That agreement is the
+check that the mechanism was identified rather than a number being fitted.
+
+**It is not being taken, and that is the design trade.** `docs/CODING_RULES.md` defines a position
+as an offset into a vector which "measures, so it is never negative, never `NIL`, and free to
+exceed 2^31", and a measure is the same kind of quantity. Nothing in `QuotientGraph` violates that
+rule; the finding CONFLICTS with it. Keeping `std::size_t` for sizes and positions is a decision
+about what the code MEANS, not an oversight, and the price of it is now known rather than
+suspected. The subsection after next follows the question to where it actually leads, which is not
+the ordering at all but whether `A` and `L` can share one encoding.
+
+**And the one operational conclusion: this cannot be tested piecemeal.** One array at a time sits
+below the noise floor and will read as "no significant difference" every time it is tried, which
+has happened more than once. Only the whole set moves the number.
+
+**The six arrays are not one case but three**, which matters because only one of them is hard:
+
+```
+bounded by n         mAdjacencySize  mIncidenceSize  mCliqueSize  mWeight   int32 always safe
+bounded by nnz(A)    mSourcePtr                                        int32 if nnz(A) is capped
+bounded by nnz(L)    mCliquePtr                                             needs the width today
+```
+
+The first four can never exceed 2^31, `n` being an `int32` by construction, so narrowing them
+costs only the rule's wording. `mSourcePtr` indexes an arena laid out once at construction and
+never grown, so it follows `nnz(A)`. Only `mCliquePtr` follows the factor, and the next subsection
+is about why that is a choice rather than a necessity.
+
+### Why AMD does not have this problem, and what it costs to not have it
+
+The width question is really a storage question, and following it one step further explains why
+`mCliquePtr` is the one array that genuinely needs eight bytes.
+
+**AMD's arena cannot overflow, and that is a theorem rather than a margin.** Its workspace is
+allocated once at `slen = nzaat + nzaat/5 + 7n`, roughly `1.2 * nnz(A + A')`, and never grows.
+When `pfree` reaches `iwlen` it COMPACTS, reclaiming the space of absorbed elements and counting
+the compactions in `ncmpa`. That is sound because of the conservation bound in section 5.3 of
+`archive/sparse_factorization.md`: `|A_i| + |C_i| <= deg(i)`, since every elimination that reaches
+`i` replaces at least one source with the new clique and nothing manufactures a source, and every
+later mechanism either destroys sources or empties a list. So the live quotient graph never
+exceeds what the input occupied. The 20 percent elbow room buys fewer compactions, not
+correctness. **AMD refuses only at its entry guard, on `nnz(A)`, never at runtime.**
+
+**Ours grows to `nnz(L)` because we never reclaim, not because the cliques are that large.** The
+same theorem applies to us: the LIVE cliques fit in `nnz(A)`. `mCliqueArena` appends every clique
+ever formed and lets dead ones lie, so the difference between `nnz(A)` and `nnz(L)` is entirely
+garbage. At 400x400 that is 4.86 million entries against roughly 800 thousand, six times the
+memory, all of it dead.
+
+**Which means the width and the reclaim are one decision, not two.** `mCliquePtr` needs the width
+only because the arena tracks the factor. With compaction it would be bounded by `nnz(A)` like
+`mSourcePtr`, and a cap on the matrix would cover it. **You cannot take the narrowing without
+taking the reclaim**: the compaction is not a memory optimization there, it is what makes the
+narrower type sound.
+
+The experiment README lists AMD's `iwlen`/`pfree`/`ncmpa` machinery under "what is deliberately
+excluded", as a consequence of packing state into reusable arrays rather than a feature of the
+ordering. That is true of the mechanism and wrong about the consequence: it is exactly what bounds
+AMD's storage by the matrix instead of the factor.
+
+**But AMD's position is not available to us, and it is worth being exact about why.** AMD never
+factors. It sees only `A`, so `int32` throughout costs it nothing: one guard at the entry on a
+quantity the caller handed it, and the conservation bound guarantees that nothing downstream
+exceeds it. It never has to represent an OUTPUT. So AMD is not evidence about what a solver should
+do; it is evidence about what a routine that stops before the factor exists can do.
+
+**`nnz(A)` is an input and `nnz(L)` is an output, and that is the whole difficulty.** `A` can be
+capped once, before anything starts, and the caller learns immediately. `L` cannot. With a static
+factorization the symbolic phase at least predicts it, so one test before allocation would serve.
+With PIVOTING it is not predictable at all: a delayed column grows its parent's front, so the
+bound would have to be re-checked every time a column is delayed. That check would live in the
+delay path, which is the most delicate code in the numeric factorization, and it would fire after
+real work had been done on an input that was accepted. Aborting with a partial factor or unwinding
+are both poor answers to a question that should have been settled at the door.
+
+**So there are two consistent positions, not three, and the trade is consistency against speed.**
+
+```
+size_t positions everywhere    A and L alike, no cap on either, no exception anywhere.
+                               Costs the width in every hot loop: 17 to 26 percent here.
+int32 positions everywhere     Requires capping nnz(L) as well as nnz(A), which means a
+                               running check through the pivoting path, and a failure mode
+                               that arrives mid-factorization.
+```
+
+Encoding `L`'s positions differently from `A`'s is the third thing one could do, and it is not a
+boundary between phases but a SINGULARITY: `A` and `L` are the same kind of object, a sparse
+matrix, so a different encoding for one of them means every piece of code touching both has to
+know which it is holding. The libraries that ship do not do this. SuiteSparse carries ONE source
+with a width parameter, the `using Int = int32_t` alias visible in `private/Amd.cpp`, and the
+caller selects 32 or 64 at build time; MUMPS offers the same choice. `A` and `L` share a type in
+either configuration, so neither has the exception. Note that this does not answer the question,
+it relocates it: a 32-bit build still has to cap `nnz(L)` or overflow, and the decision moves to
+whoever configures the build.
+
+**Oblio holds the first, deliberately, as of 2026-08-07.** Consistency over the measured 17 to 26
+percent. The full reasoning is a statement about Oblio's integer model rather than about the
+ordering, so it lives in `docs/DESIGN_DECISIONS.md`, recorded 2026-08-08: the split is by
+DIMENSION, one dimensional quantities bounded below 2^31 and two dimensional ones held in 64
+bits, which is why the band between a 26 GB and a 52 GB factor that troubles a 32-bit build
+never arises here. What belongs in this report is the price, and the price is the measurement
+above.
+
+**One narrowing remains available without touching that decision**, and it is where most of the
+measured gain was: the four MEASURES, `mAdjacencySize`, `mIncidenceSize`, `mCliqueSize` and
+`mWeight`, are bounded by `n` rather than by any `nnz`, so they are not positions at all and could
+narrow while every position stays `std::size_t`. Measured on its own that configuration ran 1.159x
+of genmmd at 140x140 against 1.373x, so it is most of the width gain for none of the consistency
+cost. It is not being taken now, but it is the cheap half if the question returns.
+
+**And it points at a missing category in the type rules, 2026-08-07.** `docs/CODING_RULES.md` has
+two kinds of integer, an index that names an entity and may be `NIL`, and a position that offsets
+into a vector and is "free to exceed 2^31". Everything above falls between them. The distinction
+that actually holds is DIMENSIONAL:
+
+```
+kind       what it is                          bounded by      type
+index      one dimension, may be NIL           n <= 2^31       std::int32_t
+count      one dimension, never NIL            n <= 2^32       the missing one
+position   into an n x n object                may exceed      std::size_t
+```
+
+**A count is bounded by a SIDE, a position by an AREA.** That is a fact about the object rather
+than a convention, so unlike "free to exceed 2^31" it needs no defending. It also makes the two
+boundaries land in different places, which is right: an index gives up a bit to `NIL` and so caps
+at 2^31, while a count needs none and reaches 2^32, comfortably above any representable `n`.
+
+The taxonomy and the measurement agree about where the line falls, which is the reason to trust
+it. The four arrays that carried the 17 to 26 percent are all COUNTS by this reading;
+`mSourcePtr` and `mCliquePtr` are positions and stay wide. Front size and update size in
+`SymFactor` are counts too, and are `std::size_t` today for the same reason.
+
+**There is no 32-bit `std::size_t`**, by design: it is defined to be able to size any object. So a
+count would be `std::uint32_t`, or an alias over it, which has the additional merit of staying a
+distinct type from `std::int32_t` so counts and indices cannot silently interchange.
+
+**One caution, and it is already live.** Unsigned counts wrap on subtraction, and the ordering
+subtracts constantly. `Mmd3.cpp` has
+
+```cpp
+degrees[u] = std::max<std::size_t>(degree - qg.weight(u) + 1, 1);
+```
+
+which is safe by invariant, `dg0` including `u`'s own weight, but nothing guards it and the
+`std::max` actively hides it: if the subtraction ever went negative it would wrap to an enormous
+value and the clamp would select it, filing the vertex past the end of the bucket array. At 64
+bits a wrapped value is 1.8e19 and would fault immediately; at 32 bits it is 4e9, which is far
+more likely to look like a plausible degree. So narrowing counts is not only a width change. The
+subtractions want a signed temporary at the point of use, or the invariant wants asserting.
+
+**For reference, the sizes involved.** With `int32` row indices a matrix could in principle hold
+`2^62` entries, `n` being up to `2^31` with every column dense. AMD refuses above
+`2^31 / sizeof(Int)`, about 537 million, which is a 6.4 GB real matrix. `nnz = 2^31` is a 25.8 GB
+real matrix or a 42.9 GB complex one; as a FACTOR, `2^31` entries is reached by a 2D grid at
+`n = 5.6e7` or a 3D grid at 130 a side, both of which fit on a large workstation.
+
+### What the rest of the gap is
+
+At 400x400, `1.619 / 1.255 = 1.29x` remains after width. In descending order of what we know:
+
+1. **Vector against flat arena.** Our clique members live in `mCliqueArena` behind `mCliquePtr`
+   and `mCliqueSize`; genmmd's live in `adjncy` in a linked segment structure it walks in place.
+   Not measured separately.
+2. **Two arrays for one test.** Our membership test is `mMark[v] != mTag && (!live ||
+   mEliminated[v] == 0)`, two loads from two arrays. genmmd's is `marker[nb] < tag`, ONE load,
+   because its `marker` carries a permanent `maxint` sentinel for dead vertices, so a single
+   ordered comparison decides membership and liveness together. AMD does the same fusion by the
+   sign of `Nv[i]`. We are the only one of the three that separates them, and it is the price of
+   our unconditional tag sweep, which is only possible because our mark array has no sentinel.
+   Fusing would trade a load in the hot loop for a selective sweep and a derived ceiling, which is
+   genmmd's exact bargain.
+3. **Setup.** `QuotientGraph`'s constructor against `mmdint`, 194 ms against 57 in the
+   Instruments trace of 2026-08-07, the worst ratio at 3.4x though only four percent of the
+   run. This has NO independent fix: it initializes 61 bytes per vertex against genmmd's 28,
+   and narrowing the four measures makes it 15 to 20 percent faster on its own, so it is the
+   width item again rather than a separate one. Replacing its `reserve` plus `push_back` with
+   a sized write and an index was tried and is SLOWER, because `resize` value-initializes the
+   whole arena and then it is overwritten; the capacity check being removed is cheaper than the
+   zero-fill being added.
+
+### One thing that was fixed rather than documented
+
+`QuotientGraph::orderAscending`, written on 2026-08-07 for MMD3's numbering, cost 244 ms of a
+4.94 s profile where genmmd's `mmdint` and `mmdnum` together cost 116 ms, while doing strictly
+less work. It allocated four arrays of size `n` and made six passes. Rewritten to one scratch array
+and two passes, with the root's cursor and the member's root marker sharing that array by sign, it
+is 60 ms, level with `mmdnum`. That was 14 percent of the whole gap over vendored MMD, from one
+function, and it is the reason the numbers above are quoted against 1.373x rather than 1.43x.
+
 ## The gaps we cannot explain yet
 
-These are the open questions, and they are the reason this is a report and not a fix.
+These are the open questions, and they are the reason this is a report and not a fix. Two entries
+that stood here on 2026-08-03 have since been answered and are recorded above rather than below:
+the MMD fill gap, which was tie-break convention plus one defect and is now zero, and the largest
+part of the MMD time gap, which is array width.
 
 1. **Why AMD1 fills 12 to 14 percent more than vendored AMD in 3D while beating it in 2D.** The
    layer is the bound and nothing else, so the cause is in the base rather than the extras. This is
@@ -211,8 +454,10 @@ These are the open questions, and they are the reason this is a report and not a
 2. **Add 3D grids to `benchmarks/ordering`.** Every conclusion the benchmark currently supports is
    drawn from one problem family, and the other family disagrees with it. This is cheap and it
    changes what everything else is measured against.
-3. **Open question 3, the MMD2 fill gap.** Largest quality gap, and MMD2's time is already
-   competitive, so there is room to spend.
+3. **Open question 3, the MMD2 fill gap: CLOSED 2026-08-07.** It was tie-break convention plus one
+   defect, found by building MMD3 and aligning it to genmmd one divergence at a time. MMD3's fill
+   is now genmmd's exactly at every size and MMD2's gap fell from about 20 percent to 7. See the
+   experiment README's mmd3 section for the ledger and the wrong turns.
 4. **Open question 1, the AMD1 3D fill gap.** Hardest, because it is in the base, and most valuable
    for the same reason: everything above AMD1 inherits it.
 5. **Then the hash key fusion.** It is the best understood of the four and the only one with a

@@ -11,7 +11,8 @@
 //   make profile
 //   ./order_profile_cpp amd1 140 200      method, grid side, repeats
 //
-// The method may be one of ours (mmd1, amd1, amd2) or a vendored one (mmd, amd). Profiling both
+// The method may be one of ours (mmd1, mmd2, mmd3, amd1, amd2, amd1b, amd2b) or a vendored one
+// (mmd, amd). Profiling both
 // sides through the same driver is the point: the difference between them is what is being
 // investigated, and a comparison across two programs measures their differences too.
 //
@@ -34,6 +35,7 @@
 #include "oblio/Amd2B.h"
 #include "oblio/Mmd1.h"
 #include "oblio/Mmd2.h"
+#include "oblio/Mmd3.h"
 #include "oblio/OrderEngine.h"
 #include "oblio/Permutation.h"
 #include "oblio/SparseMatrix.h"
@@ -100,6 +102,7 @@ int main(int argc, char** argv) {
         else if (method == "amd1b") sum += orderAmd1B(colPtr, rowIdx).size();
         else if (method == "amd2b") sum += orderAmd2B(colPtr, rowIdx).size();
         else if (method == "mmd2") sum += orderMmd2(colPtr, rowIdx).size();
+        else if (method == "mmd3") sum += orderMmd3(colPtr, rowIdx).size();
         else if (vendored) { Permutation P; engine.compute(A, P); sum += P.size(); }
     }
     std::printf("%s, grid %dx%d, %d repeats, %zu\n", method.c_str(), side, side, repeats, sum);

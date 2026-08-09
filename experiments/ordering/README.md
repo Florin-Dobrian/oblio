@@ -633,8 +633,14 @@ included.
 **Note what this does NOT claim.** Our AMD3 is not a drop-in match for `amd_order`'s output vector.
 Same fill, same elimination order underneath, different labels, because we never compute their
 postorder. Anyone comparing output vectors directly will see a difference and it is the intended
-one. Fill is invariant under a postorder, so there is one nnz(L) to match and we match it: 206332 at
-100 a side and 474995 at 140.
+one. The fill agrees too, 206332 at 100 a side and 474995 at 140, though NOT by construction: a
+postorder of the ELIMINATION tree cannot change fill, and AMD postorders its ASSEMBLY tree, which
+its own header says need not be that tree because mass elimination under an approximate degree
+merges vertices that were never adjacent. Measured on 2026-08-09, the two agree on every square grid
+and on cubic grids from 7 a side up, and differ by one to three entries at 4^3, 5^3 and 6^3. This
+paragraph claimed the invariance until then. What the acceptance test compares is the PERMUTATION,
+so nothing here reaches it, and `benchmarks/ordering` carries an `AMDraw` column so the two fill
+figures can be seen side by side.
 
 **And the acceptance test was upgraded late.** It started as pivot sequences alone, because
 `AMD_2` postorders and we do not, so permutations could not be compared. The raw order turned out to

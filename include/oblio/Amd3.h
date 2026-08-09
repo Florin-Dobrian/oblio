@@ -21,10 +21,20 @@
 // benchmarks/ordering/README.md records for the vendored AMD.
 //
 // THE POSTORDER IS NOT DONE, AND THAT IS THE DESIGN. Amd.cpp ends by relabeling its output as a
-// postorder of the assembly tree it built while eliminating. That cannot change the fill, since a
-// node is numbered after all its descendants either way, and it cannot change correctness
+// postorder of the assembly tree it built while eliminating. That cannot change correctness
 // downstream, since every traversal needs only a TOPOLOGICAL order, which holds for any
-// permutation ElmForestEngine sees. What it buys is a smaller multifrontal stack peak, and
+// permutation ElmForestEngine sees.
+//
+// It NEARLY cannot change the fill either, and the qualifier was missing here until 2026-08-09. A
+// postorder of the ELIMINATION tree cannot: a node is numbered after all its descendants either
+// way, so the tree and its fill are unchanged. AMD postorders its ASSEMBLY tree, and its own header
+// says that need not be the precise supernodal elimination tree, because mass elimination under an
+// approximate degree merges vertices that were never adjacent. So its relabeling is not guaranteed
+// fill-neutral. Measured: it agrees on every square grid to 140 a side and on every cubic grid from
+// 7 a side up, and differs by one to three entries at 4^3, 5^3 and 6^3. What follows for the
+// figures below is one word: they are the RAW order's fill, which is what this layer computes, and
+// they equal the vendored routine's published fill everywhere the benchmarks report rather than by
+// construction. benchmarks/ordering carries an AMDraw column for exactly that reason. What it buys is a smaller multifrontal stack peak, and
 // ElmForest reaches that better from the other side, by Liu's rule on the supernodal tree with
 // real front and update sizes, which DirectSolver turns on whenever the traversal is multifrontal.
 // So AMD's postorder would be work done twice and then overwritten. See experiments/ordering/AMD3.md.

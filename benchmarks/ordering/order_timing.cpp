@@ -365,6 +365,16 @@ int main(int argc, char** argv) {
             for (std::size_t k = 0; k < methods.size(); ++k) if (methods[k].raw) base = k;
             const double baseTime = times[0];
             const double baseFill = static_cast<double>(fills[base]);
+            // In a PUBLISHED build the vendored routine refuses, so the baseline row is zero and
+            // every gap is a division by it. Printing `inf%` and a five-figure ratio is an
+            // instrument reporting nonsense rather than declining to measure, which is the failure
+            // this tree keeps recording. The gap columns are what need private/, not the table.
+            if (baseFill == 0.0 || baseTime == 0.0) {
+                std::printf("   (gap columns need private/: the vendored baseline refused)");
+                std::printf("\n");
+                std::fflush(stdout);
+                continue;
+            }
             for (std::size_t k = 1; k < methods.size(); ++k) {
                 if (methods[k].raw) continue;
                 const double f = static_cast<double>(fills[k]);

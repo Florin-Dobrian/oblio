@@ -105,8 +105,12 @@ list rather than of any code.
 
 **The object compared for amd is the RAW elimination order**, not `amd_order`'s output vector. The
 vendored routine relabels its result with a postorder that Oblio deliberately does not reproduce, so
-the output vectors differ by construction. Fill is invariant under a postorder, so nnz(L) is a
-single number and matches: 206332 at 100 a side, 474995 at 140.
+the output vectors differ by construction. The fill agrees anyway, 206332 at 100 a side and 474995
+at 140, but NOT by construction, which is a correction made on 2026-08-09. A postorder of the
+elimination tree cannot change fill; AMD postorders its assembly tree, which its own header says
+need not be that tree, so its relabeling is not guaranteed fill-neutral. It agrees on every square
+grid and on cubic grids from 7 a side up, and differs by one to three entries at 4^3, 5^3 and 6^3.
+The acceptance test compares the PERMUTATION, so none of this reaches it.
 
 Anyone extending the suite should know that the strongest evidence for the two orderings'
 correctness is not in it.

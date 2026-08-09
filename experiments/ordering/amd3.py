@@ -165,10 +165,15 @@
 # it is what this layer returns. The scratch probe that does it is not a
 # repository artifact; `NEXT.md` describes rebuilding it.
 #
-# **The postorder itself is not a gap on our side.** It cannot change the fill,
-# since any postorder of the assembly tree numbers a node after all its
-# descendants and no fill moves, which the two orders confirm by giving identical
-# nnz(L). Nor is it needed for CORRECTNESS by any traversal: what those require is
+# **The postorder itself is not a gap on our side.** It NEARLY cannot change the
+# fill, and the qualifier was added on 2026-08-09. A postorder of the ELIMINATION
+# tree cannot: every node is numbered after all its descendants either way, so the
+# tree and its fill are unchanged. AMD postorders its ASSEMBLY tree, which its own
+# header says need not be that tree, mass elimination under an approximate degree
+# merging vertices that were never adjacent, so its relabeling is not guaranteed
+# fill-neutral. The two orders give identical nnz(L) on every square grid and on
+# cubic grids from 7 a side up, and differ by one to three entries at 4^3, 5^3 and
+# 6^3. Nor is the postorder needed for CORRECTNESS by any traversal: what those require is
 # a TOPOLOGICAL order, children before parents, and that holds whatever permutation
 # arrives, since ElmForestEngine builds parent links from the permuted matrix and a
 # parent's column is numbered above its child's. Left-looking pulls from

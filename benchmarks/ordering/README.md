@@ -610,6 +610,12 @@ for "are we doing more work" and it cannot see a loop whose cost is decided by a
 timed repeat count; nnz(L) in entries. The first cubic figures this folder has ever carried, and
 the reason they exist is that every other number here is square.
 
+The default cubic ladder gained a 6 cube after this run, so a rerun has one more row than the
+tables below. It is there because 6 a side is the largest size at which `AMD` and `AMDraw`
+disagree, 3265 against 3266, and a pair of columns that always matches is a pair nobody reads. The
+ratio table in the section after this one comes from `make scale2d` and `make scale3d`, which run a
+wider ladder than these.
+
 ```
 grid3d      n      MMD    MMD1    MMD2    MMD3     AMD    AMD1    AMD2    AMD3
 12^3     1728     0.47    1.43    0.46    0.46    0.24    0.28    0.91    0.74
@@ -641,6 +647,70 @@ same signs, `+2.4, +3.0, -3.8, +2.6, -8.0`.
 That closes the question `experiments/ordering/REPORT.md` parks under "is LIFO actually better, or
 is genmmd merely good?", at least on the amd side: the 6.5 percent was the whole of the evidence
 for it, and it is a 2D artifact.
+
+## What the two families say about where the amd gap is, 2026-08-09
+
+The first cubic run answered the question it was built for, above, and then said something the
+square grids could not. It is recorded here rather than in `REPORT.md` because the evidence is a
+benchmark table, and it is the strongest hint this folder has produced about the amd constant
+factor.
+
+**Split each branch into its base and its extras**, ratios against the vendored routine of the same
+lineage, from `make scale2d` and `make scale3d` on alpamayo:
+
+```
+                2D, 32 to 400 a side       3D, 12 to 32 a side
+MMD1            1.47x  ->  2.85x           3.06x  ->  4.91x        base,   WORSE in 3D
+MMD3            1.17x  ->  1.51x           0.96x  ->  0.90x        extras, BETTER, and under 1
+
+AMD1            1.19x  ->  1.76x           1.22x  ->  1.55x        base,   FLAT
+AMD3            1.96x  ->  2.54x           3.42x  ->  3.23x        extras, WORSE
+```
+
+**`AMD1` costs the same on both families**, about 1.2 to 1.8x, and if anything slightly less in 3D
+at comparable n. So the whole of the amd branch's degradation on cubic grids is in the EXTRAS,
+aggressive absorption and hash supervariable detection, which take the branch from 1.5x to 3.0x in
+3D against 1.5x to 2.4x in 2D.
+
+**That is a hint about where the remaining gap is, and it points away from where we have been
+looking.** The parked proposal in `docs/DESIGN_DECISIONS.md`, giving cliques their own mark space
+so that liveness folds into the vertex marks, is a change to the SHARED QUOTIENT GRAPH. It would
+help `AMD1` exactly as much as `AMD3`, and `AMD1` is the half that is already fine on both
+families. The same is true of the locality hypothesis, one `Iw` pool against our two structures:
+whatever it costs, it is being paid by a driver whose ratio does not move between families. Neither
+is refuted by this, and both would still be worth what they are worth in 2D. But a fixed cost in
+the shared class cannot explain a gap that appears only when the extras are switched on and only on
+one family.
+
+**And the two branches move in mirror image**, which is `experiments/ordering/REPORT.md`'s finding
+2 in a new form: on mmd the base collapses in 3D and the extras rescue it, on amd the base holds
+and the extras spoil it.
+
+**One mechanism accounts for both directions, and it is CLIQUE SIZE.** A cubic grid makes far
+larger cliques than a square one at comparable n, so any cost proportional to clique MEMBERS grows
+with the family while any cost proportional to clique COUNT does not.
+
+- `MMD1` recomputes a reach per refreshed vertex, walking the members of every clique that vertex
+  names, so it pays members per vertex and reaches 4.9x.
+- `MMD2` and `MMD3` route through the q2h path, which computes per clique and shares the result
+  across its members. That is why they survive the family change, and apparently why they overtake:
+  genmmd has the same idea and we are executing it faster once the loop dominates.
+- `AMD1`'s bound reads one number per clique and never opens it, which is the whole content of
+  section 5.13. It cannot care how large a clique is, and the measurement says it does not.
+
+**Which leaves the amd extras, and the hash pass is the suspect.** Its pair loop costs the sum of
+SQUARED bucket sizes over `C[p]`, and `C[p]` is much larger in 3D, so the term that is quadratic in
+bucket size is exactly the one the family change inflates. Aggressive absorption is one test per
+touched clique, already computed for the bound, and cannot be it. The vendored routine carries both
+mechanisms and does not degrade, so this is our implementation rather than the idea.
+
+**The measurement that would settle it is a COUNT and not a profile**, which is worth saying since
+this folder's own advice is to profile: the question is whether we are doing more work, not whether
+we are doing it less efficiently, and a count answers that machine-independently. Pairs tested per
+iteration, and the bucket size distribution, 2D against 3D at comparable n. The prototypes already
+count hash merges, so pairs tested is one counter beside an existing one. If the pair count per
+pivot is flat across families the hypothesis dies and the extras' cost is elsewhere; if it grows
+with clique size, the fix is a better filter rather than a faster loop.
 
 **Three further readings, none of them expected.**
 

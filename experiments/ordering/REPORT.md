@@ -119,6 +119,23 @@ the refresh interleave. That was not where we expected to be looking.
 
 ## Finding 2: our two branches fail in mirror-image places
 
+**RESTATED IN A NEW FORM BY THE CUBIC BENCHMARK, 2026-08-09, and this time it points somewhere.**
+Split each branch into its base and its extras, ratios against the vendored routine of the same
+lineage: `MMD1` goes from about 1.5 to 2.9x in 2D to 3.1 to 4.9x in 3D, and `MMD3` goes from 1.2 to
+1.5x down to 0.90x, under one. `AMD1` is flat at 1.2 to 1.8x on both families, and `AMD3` goes from
+2.3x to 3.0x. So on mmd the base collapses on the harder family and the extras rescue it; on amd
+the base holds and the extras spoil it, which is the mirror image this finding names.
+
+One mechanism accounts for both, and it is CLIQUE SIZE: a cost proportional to clique members grows
+with the family and a cost proportional to clique count does not. `MMD1` recomputes a reach per
+vertex, so it pays members per vertex; the q2h path computes per clique and shares; `AMD1`'s bound
+reads one number per clique and never opens it. What that leaves unexplained is the amd extras, and
+`benchmarks/ordering/README.md` argues the hash pass is the suspect, its pair loop being quadratic
+in bucket size while `C[p]` grows with the family. It also observes that the parked constant-factor
+proposals all change the SHARED quotient graph, which would help `AMD1` equally, and `AMD1` is the
+half that is already fine.
+
+
 **In AMD the extras are the problem and the base is fine.** AMD1 is 1.19x to 1.83x of the vendored
 routine in 2D and beats it on fill; adding the extras to get AMD2 makes it slower everywhere and
 worse on fill in 2D.

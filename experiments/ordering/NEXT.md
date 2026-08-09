@@ -66,13 +66,23 @@ ordered that came from a real problem. That is the oldest open item on `docs/TOD
 the top of this list. `benchmarks/pipeline` is still square grids alone, so every break-even figure
 it carries is one family's.
 
-**2. The same widening is available to `make test`, cheaply.** Its prototype-against-production
+**2. Count the hash pass's pairs, 2D against 3D.** The cheapest measurement on this page and the
+one with the most behind it. `AMD1` is flat across both problem families at about 1.2 to 1.8x while
+`AMD3` goes 2.3x to 3.0x, so the amd branch's whole degradation on cubic grids is in the extras,
+and the hash pass is the only part of them whose cost is superlinear in clique size: its pair loop
+is the sum of squared bucket sizes over `C[p]`. Count pairs tested per iteration and the bucket
+size distribution at comparable n on both families. A flat count per pivot kills the hypothesis; a
+growing one says the fix is a better filter rather than a faster loop. One counter beside one the
+prototypes already keep. `benchmarks/ordering/README.md`, "What the two families say about where
+the amd gap is", carries the tables.
+
+**3. The same widening is available to `make test`, cheaply.** Its prototype-against-production
 comparison still runs on 2D grids at sides 10 and 20 alone, and `graphs.h` holds the 3D and random
 builders. Worth knowing before relying on that check: the prototypes carry no maintained clique
 degree, so a defect in production's encoding is invisible to it at any size. See `docs/TODO.md`,
 the first of the five ordering questions.
 
-**3. And only then the performance work below, which is a PARK rather than a queue.** One bounded
+**4. And only then the performance work below, which is a PARK rather than a queue.** One bounded
 attempt, worth an hour whenever the amd branch is picked up again. The branch is in a good state to
 leave without it: `Amd3` reproduces `AMD_2` at 2.32x, `Amd2` runs at 2.28x with better fill, `Mmd3`
 at 1.26x with fill matching genmmd. Nothing here blocks anything.
@@ -106,6 +116,20 @@ merge(), number() and massEliminate() write GONE where they now set the byte
 This deletes `mEliminated` and the `mLiveMerges` branch beside it: `(!live || mEliminated[v] == 0)`
 goes from all forty sites, and with it a dependent byte load that `Amd.cpp` does not have, because
 its liveness rides on `Nv`'s sign.
+
+**READ THIS BEFORE STARTING IT, added 2026-08-09.** The cubic benchmark says this may be aimed at
+the wrong half. Split the amd branch into its base and its extras, ratios against the vendored
+routine: `AMD1` costs about 1.2 to 1.8x on BOTH families, while `AMD3` goes from 2.3x in 2D to
+3.0x in 3D. So the degradation is entirely in aggressive absorption and hash supervariable
+detection, and this proposal changes the SHARED QUOTIENT GRAPH, which would help `AMD1` exactly as
+much and `AMD1` is the half that is already fine. The same objection applies to the locality
+hypothesis below. Neither is refuted, and both may still be worth their 2D value, but a fixed cost
+in the shared class cannot explain a gap that appears only with the extras on and only on one
+family. The suspect is the hash pass, whose pair loop is quadratic in bucket size while `C[p]`
+grows with the family, and the measurement that would settle it is a COUNT rather than a profile:
+pairs tested per iteration and the bucket size distribution, 2D against 3D at comparable n. That is
+one counter beside one the prototypes already keep. `benchmarks/ordering/README.md`, "What the two
+families say about where the amd gap is", has the tables and the argument.
 
 **Why it is expected to pay.** Forty byte loads in compiled `orderAmd3`, zero in the whole of
 `Amd.cpp`. Each is `ldrsw` for an index, `ldrb` at that index, branch on the result: a serial chain

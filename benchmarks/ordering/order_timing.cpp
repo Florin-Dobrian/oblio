@@ -267,9 +267,15 @@ int main(int argc, char** argv) {
     // faster here: a 26 cube is n = 17576 against a 140 square's 19600, and its factor is several
     // times larger. The sides below put the two families in the same range of WORK rather than the
     // same range of n, which is what makes the two tables readable beside each other.
+    // THE 6 CUBE IS IN THE DEFAULT LIST FOR ONE REASON, and it is not scale. It is the largest size
+    // at which `AMD` and `AMDraw` disagree, 3265 against 3266, so it is the only row that OBSERVES
+    // the postorder's effect on fill rather than merely being able to. Everything above 6 a side
+    // agrees, and a pair of columns that always match is a pair nobody reads. It was found by hand
+    // when the cubic builder went in, which is exactly the way a standing check should not have to
+    // be discovered. n = 216, so it costs nothing.
     std::vector<int> sides;
-    if (cubic) sides = branchOnly ? std::vector<int>{12, 16, 20, 26, 32}
-                                  : std::vector<int>{12, 16, 20, 26};
+    if (cubic) sides = branchOnly ? std::vector<int>{6, 12, 16, 20, 26, 32}
+                                  : std::vector<int>{6, 12, 16, 20, 26};
     else       sides = branchOnly ? std::vector<int>{32, 64, 100, 140, 200, 280, 400}
                                   : std::vector<int>{32, 64, 100, 140};
     if (argc > firstSide) {

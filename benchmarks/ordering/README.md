@@ -788,9 +788,10 @@ empties as the elimination proceeds and cubes reach that state sooner.
 one: `Amd3` refiles every survivor after the hash in a fixed clique order and comes out canonical,
 where `Amd2`'s last write to a bucket is the merge's own refile, so the hash partition reaches the
 degree buckets. `Amd2` reads `+1.4` percent of fill at 140x140 and `-3.1` at 26^3, two-sided, and
-it now beats the vendored routine at five of seven square sizes and four of six cubic ones. Every
-AMD2 and AMD2B fill figure recorded above predates this and should be read with it. `AMD3`'s column
-is unchanged and still exact, `make amdorder` matching on all 38 cases.
+it now beats the vendored routine at six of the seven square sizes, tying at the smallest, and at
+four of the six cubic ones. Every AMD2 and AMD2B fill figure recorded above predates this and should
+be read with it. `AMD3`'s column is unchanged and still exact, `make amdorder` matching on all 38
+cases.
 
 `docs/DESIGN_DECISIONS.md` (2026-08-09) carries the defect and the account of why five separate
 oracles were blind to it; `experiments/ordering/AMD3.md` iterations 21 to 24 are the narrative and

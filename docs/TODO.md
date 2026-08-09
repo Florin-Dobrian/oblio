@@ -1565,6 +1565,11 @@ dropping by exactly `weight(v)`.
 
 **What it was costing, measured on grid Laplacians through Oblio's symbolic factorization:**
 
+**SUPERSEDED A SECOND TIME, 2026-08-09.** The corrected AMD2 column below is itself now out of
+date: ledger entry 8 fixed the hash key, which moves `Amd2`'s tie-break and therefore its fill,
+to 11900, 199591 and 450190 at 32, 100 and 140 a side. `Amd3` is unaffected, its permutation
+being unchanged. See `docs/DESIGN_DECISIONS.md` (2026-08-09).
+
 ```
 grid        AMD (vendored)    AMD1      AMD2 before    AMD2 after
  32x32            11900      12074         12364         11900

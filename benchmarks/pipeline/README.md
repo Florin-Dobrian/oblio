@@ -61,6 +61,14 @@ size and the vendored AMD at the two larger ones. The figures below are kept as 
 run that produced them. `docs/DESIGN_DECISIONS.md` (2026-08-08) and `docs/TODO.md` carry the
 finding; nothing about MMD, AMD or AMD1 moved.
 
+**AND SUPERSEDED AGAIN, 2026-08-09.** Ledger entry 8 fixed the amd hash key, which is worth a
+factor of two to three on the ordering time of AMD2, AMD2B and AMD3 and moves AMD2's and
+AMD2B's fill a second time. Every `order` and `analyze` figure for those three below is
+therefore stale, and so is every break-even computed from them: AMD2 and AMD2B broke even at
+twenty-seven and seventy factorizations here and will now break even far sooner. This folder
+has not been re-run. `benchmarks/ordering/README.md` carries the new ordering times and
+`docs/DESIGN_DECISIONS.md` (2026-08-09) the finding.
+
 **alpamayo (Apple Silicon), macOS, Apple Clang, Accelerate, 2026-08-01.** Milliseconds, best of
 three, grid 140x140, n = 19600.
 

@@ -1169,6 +1169,11 @@ external degree does not move; the `- nvi` term does, and it is the term that de
 in production `Amd2` and `Amd2B` as well, where it had been costing fill since they were written.
 `amd1` and `Amd1B` cannot have it, having no live merges at all.
 
+**SUPERSEDED A SECOND TIME, 2026-08-09.** The corrected AMD2 column below is itself now out of
+date: ledger entry 8 fixed the hash key, which moves `Amd2`'s tie-break and therefore its fill,
+to 11900, 199591 and 450190 at 32, 100 and 140 a side. `Amd3` is unaffected, its permutation
+being unchanged. See `docs/DESIGN_DECISIONS.md` (2026-08-09).
+
 ```
 grid        AMD (vendored)    AMD1      AMD2 before    AMD2 after
  32x32            11900      12074         12364         11900
@@ -3189,6 +3194,9 @@ gain on fill and the coarser-supervariable cost this section describes was the f
 supervariables. Found by aligning `amd3` against the vendored routine, where the same timing is
 ledger entry 4; `docs/DESIGN_DECISIONS.md` (2026-08-08) carries it. The table below is kept as
 the record of the run that produced it.
+
+**And superseded a second time, 2026-08-09**, by ledger entry 8: the hash key fix moves
+`amd2`'s tie-break and so its fill again. The figures here are two corrections behind.
 
 **What these two cost in fill, which is not nothing.** amd2 against amd1 on grids, re-measured
 2026-08-03 after the two defects below were fixed, and every figure checked against a symbolic

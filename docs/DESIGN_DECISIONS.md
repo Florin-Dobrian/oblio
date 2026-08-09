@@ -194,6 +194,17 @@ that a defect found in one place is a defect wherever the code sits. The cost is
 published AMD2 fill figure moves again, and `Amd2B == Amd2` in `test_order` is the guard that says
 the pair moved together.
 
+**What this obliges elsewhere**, which is the same obligation the entry-4 fix incurred on
+2026-08-08 and is now owed a second time. Every AMD2 and AMD2B fill figure in
+`benchmarks/ordering/README.md`, `benchmarks/pipeline/README.md`,
+`experiments/ordering/README.md`, `REPORT.md`, `AMD3.md` and `docs/TODO.md` predates this, INCLUDING
+the corrected columns that entry produced: 11900, 199386 and 444191 at 32, 100 and 140 a side become
+11900, 199591 and 450190. Each carries a superseding note rather than being rewritten, since a dated
+measurement is a record of a run. The claims those tables support are unaffected, which is worth
+saying because it is not obvious: AMD2 still beats AMD1 at every square size, and it beats the
+vendored routine at six of the seven, tying at the smallest, where before the count was five.
+Nothing about MMD, AMD, AMD1 or AMD3 moves.
+
 ---
 
 ## 2026-08-09: the ordering read freed memory for a week, and the acceptance test is what found it

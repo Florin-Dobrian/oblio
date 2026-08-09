@@ -66,7 +66,7 @@ set rather than cache events, but identifying which events those eight columns a
 counts out of traces already taken. The event identities live in the PMU database under the
 Instruments app bundle, keyed by a cpufamily hash.
 
-**It costs wall time and that is the trade.** A full `make scale` is minutes rather than seconds
+**It costs wall time and that is the trade.** A full `make scale2d` is minutes rather than seconds
 now. The alternative is a benchmark that cannot answer the questions being asked of it, which is
 what it was.
 

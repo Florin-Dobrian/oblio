@@ -10,16 +10,22 @@ keep compiling as the tree moves, which is why `make` builds it without running 
 that silently stopped compiling would be discovered on the day it was wanted.
 
 ```
-make            build
-make run        build and run, all ten methods, grid sides 32, 64, 100, 140
-make scale      one branch at a time over the ladder to 400 a side, with the gap columns
-make scale-mmd  the MMD branch alone
-make scale-amd  the AMD branch alone
+make              build
+make run2d        build and run, every method, square grids at 32, 64, 100, 140
+make run3d        the same on CUBIC grids at 12, 16, 20, 26
+make scale2d      one branch at a time over the ladder to 400 a side, with the gap columns
+make scale3d      the same, cubic, to 32 a side
+make scale-mmd-2d, scale-amd-2d, scale-mmd-3d, scale-amd-3d    one branch
 make clean
 
-./order_timing_cpp 200 280      any grid sides
-./order_timing_cpp amd 200      one branch at chosen sides
+./order_timing_cpp 200 280         any square sides
+./order_timing_cpp amd 3d 20 26    one branch, one family, chosen sides
 ```
+
+**Every target names both axes**, the question and the problem family, and the targets were `run`
+and `scale` until 2026-08-09. The cubic half arrived then and left one shape named and the other
+implied, which is how every figure recorded below came to be 2D without anyone deciding it should
+be. A default invisible in the name is the kind that nobody revisits.
 
 **Why `scale` is per branch.** The gap columns are ratios against the vendored routine of the same
 lineage, so they only mean anything within one; and ten methods at 400 a side is a long wait for
@@ -31,10 +37,30 @@ question about the branch.
 
 ## What it measures, and how
 
-Grid Laplacians, since fill on a 2D grid is the case every minimum-degree paper reports and the
-one where the methods are known to separate. Ordering time only, not analysis or factorization:
-`OrderEngine::compute` and nothing else. Best of three after a warm-up run, because a single cold
-reading is a reading rather than a result, and `-O3 -DNDEBUG` for the same reason.
+Grid Laplacians in two families. **Square** grids, since fill on one is the case every
+minimum-degree paper reports and the one where the methods are known to separate. **Cubic** grids,
+because that case flatters us and the other does not: the same code beats the vendored AMD on fill
+in 2D and loses to it in 3D, so a conclusion drawn from squares alone is a conclusion about
+squares. Ordering time only, not analysis or factorization: `OrderEngine::compute` and nothing
+else. Timed as the best of however many repeats fit a fixed wall time, after a warm-up, because a
+single cold reading is a reading rather than a result, and `-O3 -DNDEBUG` for the same reason.
+
+**The two families are never rows of one table.** A row is a matrix, and a column read down across
+two problem families is exactly the error the second family exists to prevent.
+
+**`AMDraw` is a column and not a method.** `AMD` is `amd_order` as SuiteSparse ships it, which is
+what a caller selecting `Ordering::AMD` gets; `AMDraw` is the same routine with an additive hook
+reporting the order `AMD_2` would emit if it stopped at the end of its main loop, before
+`AMD_postorder` relabels it. It is there because `AMD3` reproduces that raw order and deliberately
+does not postorder, so `AMD` is the wrong thing for it to sit against: they are different
+permutations and their fill need not agree. It does agree on every size in these tables, and
+differs by one to three entries on cubes of 4, 5 and 6 a side, because a postorder of AMD's
+ASSEMBLY tree is not fill-neutral. Its own header says that tree need not be the precise supernodal
+elimination tree, mass elimination under an approximate degree merging vertices that were never
+adjacent. Against `AMDraw` the comparison is exact by construction, which is why the fill gap
+columns are taken against it while the time gaps stay against the shipped routine. Its own time is
+not reported: the hooked copy carries the hook's bookkeeping, so timing it would measure our
+instrumentation. The column needs `private/` and leaves the table with `AMD` in a published build.
 
 nnz(L) comes from the symbolic factor rather than from any ordering's own estimate, summing each
 supernode's triangle and its update rows. That is exact, it is computed from the permutation
@@ -577,6 +603,64 @@ weight. The SOURCE VIEW named the line, at 6.22 s of a 14.90 s run. When a drive
 symbol, the call tree bounds the search and only the source annotation ends it. And counting, which
 this folder recommends before profiling, was actively misleading here: it is the right instrument
 for "are we doing more work" and it cannot see a loop whose cost is decided by an early exit.
+
+## Cubic grids, 2026-08-09, and the 2D advantage does not survive
+
+**alpamayo (Apple Silicon), macOS, Apple Clang, Accelerate.** `make run3d`, milliseconds, best of a
+timed repeat count; nnz(L) in entries. The first cubic figures this folder has ever carried, and
+the reason they exist is that every other number here is square.
+
+```
+grid3d      n      MMD    MMD1    MMD2    MMD3     AMD    AMD1    AMD2    AMD3
+12^3     1728     0.47    1.43    0.46    0.46    0.24    0.28    0.91    0.74
+16^3     4096     1.66    4.77    1.70    1.62    0.76    0.95    2.76    2.29
+20^3     8000     3.66   11.02    3.65    3.48    1.76    2.24    6.09    5.29
+26^3    17576     8.89   34.60    8.18    7.78    4.07    5.76   14.88   12.30
+
+grid3d      n      MMD nnzL   MMD1 nnzL   MMD2 nnzL   MMD3 nnzL
+12^3     1728         75674       81415       77504       75674
+16^3     4096        295113      316502      303848      295113
+20^3     8000        840560      860800      808926      840560
+26^3    17576       2869267     3086339     2943504     2869267
+
+grid3d      n      AMD nnzL  AMDraw nnzL   AMD1 nnzL   AMD2 nnzL   AMD3 nnzL
+12^3     1728         76038        76038       77240       71848       76038
+16^3     4096        281014       281014      310541      287924      281014
+20^3     8000        842282       842282      877430      819997      842282
+26^3    17576       2836813      2836813     3225460     2907586     2836813
+```
+
+**The claim that our tie-break beats AMD's was a 2D result, and it does not survive.** `AMD2`
+against the vendored AMD reads `-5.5, +2.5, -2.6, +2.5` percent across the cubes, and `-4.6` at
+32 a side from `make scale-amd-3d`. Two-sided, and it does not settle with size. In 2D the same
+comparison is a clean monotone `-1.7` to `-6.5` percent, improving with n. So the honest statement
+is that our tie-break is **different, not better**, and the square grids were one problem family
+behaving consistently rather than a property of the ordering. `MMD2` is the same story with the
+same signs, `+2.4, +3.0, -3.8, +2.6, -8.0`.
+
+That closes the question `experiments/ordering/REPORT.md` parks under "is LIFO actually better, or
+is genmmd merely good?", at least on the amd side: the 6.5 percent was the whole of the evidence
+for it, and it is a 2D artifact.
+
+**Three further readings, none of them expected.**
+
+- **`MMD3` is FASTER than genmmd in 3D**, 7.78 ms against 8.89 at 26 a side, 0.88x, where it runs
+  about 1.2x in 2D. The first time one of ours has beaten a vendored routine on time here, and it
+  corroborates the 0.86x `REPORT.md` measured for `MMD2` at 32 a side on a different machine.
+- **`AMD3`'s time gap WIDENS in 3D**, 12.30 against 4.07, so about 3.0x where 2D gives 2.3x. The
+  parked constant-factor work is worth more on this family than the square figure suggested.
+- **"MMD is the ordering to beat" is 2D-only too.** MMD fills 13 percent below AMD on squares and
+  slightly ABOVE it on cubes, 2869267 against 2836813 at 26 a side. `benchmarks/pipeline/README.md`
+  states that conclusion without qualification and should not.
+
+**`MMD3` and `AMD3` are 0.0 percent at every size**, which is the alignment holding on a family it
+was never measured on, and `AMD nnzL == AMDraw nnzL` throughout, which is the postorder being
+fill-neutral at every size a table here reports.
+
+**And the fill columns reproduce across machines exactly**, digit for digit against a Linux run of
+the same binary. That has always been true of this benchmark's fill and is worth restating for the
+new family: fill is a deterministic function of the pattern, so it is a usable regression signal
+where timings never are.
 
 ## Results
 

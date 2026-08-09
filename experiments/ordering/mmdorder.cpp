@@ -16,7 +16,7 @@
 //   AMD gets it through a HOOK.       `amd_order` returns a vector AMD_postorder has relabeled, so
 //                                     the raw order has to be reconstructed upstream of it by a
 //                                     generated, hooked copy of the vendored source. That is the
-//                                     whole of hook_amd.py, and none of it is needed here.
+//                                     whole of tools/hook_amd.py, and none of it is needed here.
 //
 // The difference is genmmd's rather than ours, and it is written down here and in amdorder.cpp
 // rather than encoded in the target names, which say only which branch each checks.

@@ -104,6 +104,14 @@ follow, and the second is the uncomfortable one.
 The first is that our test set has been showing us the flattering half of the picture. Everything
 in `benchmarks/ordering` is a 2D grid.
 
+**REPRODUCED AND NO LONGER TRUE OF THE BENCHMARK, 2026-08-09.** `benchmarks/ordering` gained cubic
+grids, and `AMD1` there reads `+4.2, +13.7, +11.5` percent at 20, 26 and 32 a side, which is this
+table digit for digit on a different machine three sessions later. So the deficit is real, it is
+stable, and none of this year's fixes touched it: the entry-4 filing defect moved every `AMD2`
+figure and left `AMD1` alone, which is what it should have done, `Amd1` having no live merges. The
+sentence about the benchmark stands only as history now, and the finding it names is the one open
+item in this report that nothing has explained.
+
 The second is that **this gap is in AMD1, which is the bound and nothing else.** It is not in the
 late-stage extras, because AMD1 has none. Whatever produces it is in the base: the bound itself,
 the tie-break, the filing convention, the degree floor, or the order in which mass elimination and
@@ -561,6 +569,24 @@ part of the MMD time gap, which is array width.
    data point for the LIFO-against-FIFO question below.
 
 ## Open question: is LIFO actually better, or is genmmd merely good?
+
+**ANSWERED ON THE AMD SIDE, 2026-08-09, and the answer is no.** The whole of the evidence that our
+tie-break beats AMD's was `Amd2` filling 6.5 percent below the vendored routine at 140 a side, on
+square grids. Measured on cubic grids for the first time, `Amd2` reads `-5.5, +2.5, -2.6, +2.5,
+-4.6` percent across 12, 16, 20, 26 and 32 a side: two-sided, and it does not settle with size,
+against a clean monotone improvement in 2D. `Mmd2` is the same shape with the same signs. So the
+tie-break is DIFFERENT rather than better, which is what an arbitrary choice looks like once it is
+measured on more than one family, and it is the same conclusion the four filing orders reached at
+140 a side.
+
+What that leaves of the question is the mmd half, which is not settled by this. Aligning MMD
+improved our fill by 7 to 10 percent, and converging on genmmd would do that whether or not LIFO is
+inherently better, so the mmd evidence still does not separate the two. The experiment proposed
+below, flipping one walk at a time from an aligned baseline, is still the way to answer it, and it
+should now be run on both families rather than on squares.
+
+`benchmarks/ordering/README.md` carries the tables, under "Cubic grids, 2026-08-09".
+
 
 Raised by the mmd alignment, unanswered, and now with a second data point from amd. It was written
 down in the handover note between the two sessions and moved here when that note was deleted.

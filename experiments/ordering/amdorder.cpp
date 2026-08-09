@@ -32,10 +32,15 @@
 // algorithm, and production Amd3 reproduces it entry for entry.
 //
 // `make aligned` runs this and mmdorder.cpp together. See experiments/ordering/README.md, "The
-// comparison object for amd is the RAW ORDER", and hook_amd.py for the three numbering paths the
-// hook has to cover.
+// comparison object for amd is the RAW ORDER", and tools/hook_amd.py for the three
+// numbering paths the hook has to cover.
 
 #include "oblio/Amd3.h"
+#include "oblio/ElmForest.h"
+#include "oblio/ElmForestEngine.h"
+#include "oblio/Permutation.h"
+#include "oblio/SymFactor.h"
+#include "oblio/SymFactorEngine.h"
 
 #include "graphs.h"
 
@@ -87,6 +92,43 @@ static void toCscNoDiagonal(const Graph& graph,
         for (std::int32_t i : sorted) rowIdx.push_back(i);
         colPtr[j + 1] = static_cast<int>(rowIdx.size());
     }
+}
+
+// nnz(L) under a given elimination order, through Oblio's own symbolic factorization. The
+// structural overloads take the pattern rather than a matrix, so this needs no values and no BLAS.
+//
+// WHAT THIS COLUMN IS FOR, since it cannot fail on its own. Two identical permutations have
+// identical fill, so once the order comparison above passes, this one cannot do otherwise: it is
+// one fact stated twice. It is printed because the fill is the number every other document quotes
+// for AMD3, and a reader should be able to see it produced from the raw order rather than take it
+// on trust from a benchmark table.
+//
+// It is also NOT the vendored AMD's published figure, and the difference is the point. That figure
+// is the fill of `amd_order`'s OUTPUT vector, which AMD_postorder has relabeled, and a postorder of
+// AMD's ASSEMBLY tree is not guaranteed to be fill-neutral: its own header says that tree need not
+// be the precise supernodal elimination tree, because mass elimination under an approximate degree
+// merges vertices that were never adjacent. Measured on 2026-08-09, the two agree on every 2D grid
+// and from 7 a side up in 3D, and differ by one to three entries at 4^3, 5^3 and 6^3. So what this
+// check reports is the RAW order's fill, which is what AMD3 computes, and nothing here compares
+// against the postordered one.
+static std::size_t fillUnder(const std::vector<std::size_t>&  colPtr,
+                             const std::vector<std::int32_t>& rowIdx,
+                             const std::vector<std::int32_t>& order) {
+    Oblio::Permutation P;
+    if (!P.setNewToOld(order)) return 0;
+    const Oblio::ElmForestEngine fe;
+    Oblio::ElmForest ef;
+    if (!fe.compute(colPtr, rowIdx, P, ef)) return 0;
+    const Oblio::SymFactorEngine se;
+    Oblio::SymFactor sf;
+    if (!se.compute(colPtr, rowIdx, P, ef, sf)) return 0;
+
+    std::size_t nnz = 0;
+    for (std::int32_t kk = 0; kk < static_cast<std::int32_t>(sf.snodeSize()); ++kk) {
+        const std::size_t f = sf.frontSize(kk), u = sf.updateSize(kk);
+        nnz += f * (f + 1) / 2 + f * u;
+    }
+    return nnz;
 }
 
 static bool check(const std::string& name, const Graph& graph) {
@@ -145,7 +187,18 @@ static bool check(const std::string& name, const Graph& graph) {
             return false;
         }
     }
-    std::printf("  %-22s n = %6d   raw order matches\n", name.c_str(), n);
+    const std::vector<std::int32_t> raw(gRaw.begin(), gRaw.end());
+    const std::size_t ourFill = fillUnder(colPtr, rowIdx, ours);
+    const std::size_t rawFill = fillUnder(colPtr, rowIdx, raw);
+    if (ourFill != rawFill) {
+        std::printf("  %-22s FILL DIFFERS: ours %zu, raw order %zu. The orders matched, so this\n"
+                    "  %-22s cannot happen unless the fill computation is not a function of the\n"
+                    "  %-22s permutation alone.\n",
+                    name.c_str(), ourFill, rawFill, "", "");
+        return false;
+    }
+
+    std::printf("  %-22s n = %6d   raw order matches   nnz(L) %9zu\n", name.c_str(), n, ourFill);
     return true;
 }
 

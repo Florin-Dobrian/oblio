@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
 """Generate a hooked copy of the vendored AMD that emits its RAW elimination order.
 
-    python3 hook_amd.py ../../private/Amd.cpp amd_raw.cpp
+    python3 tools/hook_amd.py private/Amd.cpp <out>.cpp
+
+WHERE THIS LIVES, AND WHY NOT IN THE STUDY THAT FIRST NEEDED IT. It was written for
+`experiments/ordering` and moved here on 2026-08-09 when `benchmarks/ordering` wanted the same
+oracle. It could not simply be reached across: `benchmarks/README.md` states that the studies under
+`experiments/` are frozen and that nothing in benchmarks may depend on their contents staying
+current, so a benchmark rule invoking a script inside one would have broken the rule that keeps the
+two kinds of folder apart. Copying it into both was the other option and is worse: two copies of a
+generator whose whole job is to fail loudly when the vendored source moves, with nothing comparing
+them. Promoting it makes the dependency a TOOL that both consumers use, which is a direction that
+does not cross the boundary at all.
 
 WHY A GENERATOR AND NOT A CHECKED-IN COPY. `private/` holds the vendored routine as SuiteSparse
 ships it, and its whole value is being exactly that. A copy carrying our edits would be a third
@@ -17,6 +27,13 @@ elimination tree". Oblio replaces it with Liu's rule on the exact supernodal tre
 output vectors differ by construction. What we need is the order AMD_2 would emit if it stopped at
 the end of its main loop: the pivot sequence together with the member order inside each
 supervariable, which is the whole algorithm.
+
+AND IT CANNOT BE RECOVERED WITHOUT THIS, which is worth recording because the cheaper route is the
+first thing anyone looks for. `AMD_1` builds its permutation from `Pe`, `Nv` and the postorder
+ranks alone, and the elimination order is not among what `AMD_2` leaves behind: the assembly tree
+says which element absorbed which, and the order pivots were taken in is a linear extension of that
+tree rather than a property of it. Nor is there a knob: `Control` carries exactly two, `AMD_DENSE`
+and `AMD_AGGRESSIVE`, and the postorder is unconditional.
 
 WHAT IT CHANGES. Nothing about behaviour. Two containers and three statements:
 

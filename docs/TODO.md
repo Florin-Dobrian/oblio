@@ -214,6 +214,20 @@ number in `benchmarks/ordering` and `benchmarks/pipeline` comes from grid Laplac
 measures worst of the four while carrying the mechanisms the vendored routine is built on, which is
 exactly the result most likely to reverse on a matrix with real supernodal structure.
 
+**Half done, 2026-08-09, and the half that landed paid immediately.** `benchmarks/ordering` now
+measures CUBIC grids beside square ones, and the two families disagree about our orderings in the
+way the paragraph above predicted a wider set would. The standing claim that our tie-break beats
+AMD's, `Amd2` filling 6.5 percent below the vendored routine at 140 a side, is a square-grid
+artifact: on cubes it reads `-5.5, +2.5, -2.6, +2.5, -4.6` percent, two-sided and unsettled with
+size. So the tie-break is different rather than better. `benchmarks/ordering/README.md` carries the
+tables and two further corrections that came with them, and `experiments/ordering/REPORT.md`'s
+LIFO question is answered on the amd side.
+
+What is NOT done is the part this item is really about: **a matrix that is not a grid.** Two
+families of structured grid is two points on one axis, and nothing here has yet been ordered that
+came from a real problem. `benchmarks/pipeline` is still square grids alone, so every break-even
+figure below is one family's.
+
 **And `benchmarks/pipeline` has reframed what any of it is worth, 2026-08-01.** It measures the
 phases against each other rather than one phase against itself, and it corrects two guesses in
 opposite directions. Analysis is 27 to 40 percent of one analyze-plus-factor and the ordering is

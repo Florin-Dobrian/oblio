@@ -39,6 +39,14 @@ Getting there found three things, none of them visible before:
 
 `experiments/ordering/AMD3.md`, iterations 18 to 20, is the narrative.
 
+**And the ordering benchmark measures cubic grids.** `make run3d` and `make scale3d`, beside
+`run2d` and `scale2d`, both axes now named in every target. It also carries an `AMDraw` column, the
+vendored AMD's raw elimination order through the same hook the acceptance test uses, so `AMD3` has
+something to sit against that agrees by construction rather than nearly. What the first run found
+is in `benchmarks/ordering/README.md` under "Cubic grids, 2026-08-09", and the short version is
+that three standing claims were square-grid artifacts: our tie-break beating AMD's, MMD being the
+ordering to beat, and the LIFO question having an amd-side answer.
+
 **And the mmd branch has an acceptance test at last.** `make mmdorder` compares production `Mmd3`
 against genmmd's elimination order on the same four shapes, 38 cases, all matching. Until then the
 mmd alignment rested on a scratch probe from 2026-08-07 that died with its session and on the
@@ -50,15 +58,13 @@ genmmd emitting that order directly, which is why it is forty lines against the 
 
 ## Priority
 
-**1. 3D grids in the ordering BENCHMARK**, a separate task from the check above and now the top
-item. Every fill conclusion in this work is from square grids, which is one problem family and the
-flattering one. The specific claim waiting on it is that our tie-break beats AMD's: `Amd2` fills
-6.5 percent BELOW the vendored routine at 140 a side, while `Mmd3` matches genmmd exactly. If that
-advantage is a 2D artifact we should know, because fill drives the factorization and the
-factorization is where the time is. A 2x ordering costs well under 15 percent of a one-shot solve;
-a fill difference costs more than that, permanently, on every factorization.
-
-`graphs.h` now holds a 3D builder, so this is a case list rather than any new code.
+**1. A matrix that is not a grid.** Cubic grids landed on 2026-08-09 and answered what they were
+brought in for: the claim that our tie-break beats AMD's was a square-grid artifact, `Amd2` reading
+`-5.5, +2.5, -2.6, +2.5, -4.6` percent on cubes against a monotone `-1.7` to `-6.5` on squares. But
+two families of structured grid is two points on one axis, and nothing in this tree has yet been
+ordered that came from a real problem. That is the oldest open item on `docs/TODO.md` and it is now
+the top of this list. `benchmarks/pipeline` is still square grids alone, so every break-even figure
+it carries is one family's.
 
 **2. The same widening is available to `make test`, cheaply.** Its prototype-against-production
 comparison still runs on 2D grids at sides 10 and 20 alone, and `graphs.h` holds the 3D and random

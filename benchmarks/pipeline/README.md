@@ -134,7 +134,14 @@ number of factorizations. **AMD1 and AMD1B break even at about three, MMD2 at fi
 at twenty-seven and seventy.** A caller who factors once per pattern should use a vendored routine;
 one who factors a dozen times per analysis can use ours and not notice.
 
-**And MMD is the ordering to beat, not AMD.** It analyzes fastest of the two vendored routines,
+**And MMD is the ordering to beat, not AMD. ON SQUARE GRIDS, corrected 2026-08-09.** The fill half
+of that does not hold on cubic ones: `benchmarks/ordering` now measures both families, and MMD
+fills 13 percent BELOW AMD on squares and slightly ABOVE it on cubes, 2869267 against 2836813 at 26
+a side. The analysis-time half is untested outside squares, this folder having only the one family.
+So the claim below is a claim about square grids, which is what everything in this folder is, and
+the first item under "What this folder still needs" is what would settle it. As written:
+
+**MMD is the ordering to beat, not AMD.** It analyzes fastest of the two vendored routines,
 fills the least of all nine, and factors fastest. The closest of ours is MMD2, 0.68 ms behind on
 analysis and 0.12 ms ahead per factorization.
 

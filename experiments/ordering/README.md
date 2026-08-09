@@ -583,16 +583,16 @@ pattern as given and the vendored side sorted it, so the two parted company at t
 elimination and the divergence looked like a defect in the ordering. `graphs.h` builds ascending
 and says why at the site.
 
-The generated copy is `amd_raw.cpp`, written by `hook_amd.py` from whatever `private/Amd.cpp`
+The generated copy is `amd_raw.cpp`, written by `tools/hook_amd.py` from whatever `private/Amd.cpp`
 currently says. It is gitignored and removed by `clean`, exactly as the int64 copies the width study
 uses are, and for the same reason: a checked-in copy of vendored code carrying our edits would be a
 third thing, drifting from the original with nothing to notice. **A test comparing against a stale
 oracle is worse than no test**, and this tree has three recorded instances of an instrument quietly
 declining to do its job.
 
-`hook_amd.py` asserts every anchor it depends on. If the vendored source moves, generation FAILS
-with a message naming which anchor went, rather than producing a copy with the hook in the wrong
-place. Fix the anchor there; do not loosen it.
+`tools/hook_amd.py` asserts every anchor it depends on. If the vendored source moves, generation
+FAILS with a message naming which anchor went, rather than producing a copy with the hook in the
+wrong place. Fix the anchor there; do not loosen it.
 
 ### What the hook does, and the three paths it has to cover
 
@@ -759,9 +759,9 @@ at n = 2000. 38 cases. `make aligned` runs this and the amd one together, which 
 **It needs no hook, and the asymmetry with amd is genmmd's rather than ours.** `mmd_order` returns
 `perm`, the order genmmd eliminates in, and there is no postorder anywhere in the routine, so the
 vendored output vector IS the object to compare. `AMD_2` hides its raw order behind
-`AMD_postorder`, which is the entire reason `hook_amd.py` exists. There is no Control array here
-either, so the dense threshold that cost a day on the amd side has no counterpart to set wrong;
-genmmd's one tunable is the `maxint` ceiling our wrapper supplies for the marker sweep, and
+`AMD_postorder`, which is the entire reason `tools/hook_amd.py` exists. There is no Control array
+here either, so the dense threshold that cost a day on the amd side has no counterpart to set
+wrong; genmmd's one tunable is the `maxint` ceiling our wrapper supplies for the marker sweep, and
 `REPORT.md` records that sweep firing zero times at every size we run.
 
 **Until 2026-08-09 this check did not exist**, and that is the gap worth naming rather than the
@@ -878,7 +878,7 @@ layer gets aligned with.
 
 ### What it bought
 
-From `benchmarks/ordering`'s `make scale` on alpamayo, against the vendored MMD:
+From `benchmarks/ordering`'s `make scale2d` on alpamayo, against the vendored MMD:
 
 ```
 grid          n      MMD2 fill   MMD3 fill      MMD2 time   MMD3 time
@@ -922,7 +922,7 @@ parallel method on a shared class are not free to the reader; the alternatives w
 the walks or changing the permutation for every driver.
 
 mmd3 is in `LAYERS`, `GRID_LAYERS` and `PORTED`, so `make test` holds the twins to each other and
-production to the prototype. Production carries `Mmd3` and `Ordering::MMD3`, and `make scale` in
+production to the prototype. Production carries `Mmd3` and `Ordering::MMD3`, and `make scale2d` in
 `benchmarks/ordering` reports it beside MMD1 and MMD2.
 
 ## amd3, and the second alignment ledger

@@ -361,10 +361,11 @@ extern \"C\" void mmd_order64(std::int32_t n, const std::int32_t colPtr[], const
 # and refuses, while g++ accepts it silently and builds. So this breaks on macOS and passes on
 # Linux, which is the compiler asymmetry CLAUDE.md's Build section names, in the direction that
 # catches you out less often.
-amd_raw.cpp: ../../private/Amd.cpp hook_amd.py
-	@python3 hook_amd.py $< $@
+amd_raw.cpp: ../../private/Amd.cpp ../../tools/hook_amd.py
+	@python3 ../../tools/hook_amd.py $< $@
 
-amdorder_cpp: amdorder.cpp graphs.h $(VENDOR_SRCS) amd_raw.cpp ../../src/Amd3.cpp ../../src/QuotientGraph.cpp ../../src/Types.cpp
+amdorder_cpp: amdorder.cpp graphs.h $(VENDOR_SRCS) amd_raw.cpp ../../src/Amd3.cpp ../../src/QuotientGraph.cpp ../../src/Types.cpp \
+              ../../src/Permutation.cpp ../../src/ElmForestEngine.cpp ../../src/SymFactorEngine.cpp ../../src/SparseMatrix.cpp
 	$(CXX) -std=c++17 -O3 -DNDEBUG -w -I../../include $(filter-out %.h,$^) -o $@
 
 amdorder: amdorder_cpp
@@ -384,7 +385,7 @@ mmdorder: mmdorder_cpp
 	./mmdorder_cpp
 
 # One word for "is either ordering still aligned", which is the question a reader has. The same
-# shape as `make scale` over `scale-mmd` and `scale-amd`.
+# shape as `make scale2d` over `scale-mmd-2d` and `scale-amd-2d` in benchmarks/ordering.
 aligned: amdorder mmdorder
 
 width_cpp: width.cpp $(VENDOR_SRCS) amd_int64.cpp mmd_int64.cpp

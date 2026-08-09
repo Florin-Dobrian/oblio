@@ -879,7 +879,7 @@ measured and which `Amd3` inherits from.
 
 **The caution REPORT attached to it is now paid and not yet measured.** It needs an array of size
 `n`, which is the `explicitPart` footprint trade that made `Amd1B` slower at large `n` after being
-faster at small. Whether that eats the saving is the next `make scale-amd` and nothing here
+faster at small. Whether that eats the saving is the next `make scale-amd-2d` and nothing here
 predicts it.
 
 ---

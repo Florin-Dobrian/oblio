@@ -67,7 +67,91 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
-## 2026-08-08: what the vendored AMD's speed is made of, and which parts of it we can have
+## 2026-08-09: the ordering read freed memory for a week, and the acceptance test is what found it
+
+Two defects and one bug, all found by widening `make raworder` from one shape to four. The bug is
+the entry: it is the shared `QuotientGraph` rather than any driver, and it had been live since
+2026-08-08.
+
+**`reachableSet` held a pointer into the buffer it was appending to.** `beginElimination` writes
+the reach straight into the clique arena, `reachableSet(pivot, mCliqueArena)`, and that walk reads
+each clique's members through `mCliqueArena.data() + mCliquePtr[c]`. A `push_back` past the
+capacity moves the arena, and every such pointer already taken is then dangling for the rest of its
+clique. The constructor reserves `nnz(A)` and the arena grows to the sum of `|C[p]|` over the run,
+108705 against 97440 at 140 a side, so a reallocation is ORDINARY rather than exceptional.
+
+**It is every driver**, `Mmd1` through `Amd3`, on 2D grids as well as 3D, which AddressSanitizer
+reports in one run apiece.
+
+**Why it survived, and this is the part worth keeping.** A vector growth COPIES and then frees, so
+the stale pointer usually still finds the right values sitting in freed memory. The program is
+wrong and its answers are right, indefinitely, until an allocator recycles that block. So the
+failure is not merely rare, it is invisible to every check this tree has: the residual, the fill
+columns, the twin comparison and the prototype-against-production diff all pass, because nothing
+has gone wrong yet. It surfaced as **two machines disagreeing about integer code**, a 6x6x6 grid
+ordering differently on Apple Silicon than on x86-64, which an ordering with no floating point in
+it cannot legitimately do. That signature is what should send anyone to a sanitizer rather than to
+another hypothesis, and it is the only reason this was found at all.
+
+**The repair makes the arena unable to move rather than re-fetching per element.** A reach is at
+most `n` entries, so guaranteeing room for one before the walk guarantees it for the whole walk:
+one check per elimination, nothing in the innermost loop of the ordering, and the growth stays
+geometric. Re-fetching would have paid on every element for a hazard that occurs at most once per
+elimination.
+
+**Where it came from is a performance change that was read for speed and not for lifetime.**
+`experiments/ordering/AMD3.md` iteration 16 replaced a copy-into-the-arena with an
+append-in-place, worth a measured 111 ms, and nothing re-examined the pointers already held across
+that append. `beginElimination` even carries a comment saying its reach pointer is taken after the
+append "since that is what can move the arena". The hazard was seen, for the one pointer it
+happened to be about, one line later than the one that mattered.
+
+**And the rule was already written down, twice, for a different object.** The 2026-07-14 entries on
+storage and `experiments/storage-options` both state it: structural growth invalidates every
+pointer taken before it, so fetch at the moment of use, and the dynamic factor is built around
+exactly that. What the ordering shows is that knowing a rule for one object does not apply it to
+another. The general form, which is the transferable part: **a function that both reads a buffer
+and appends to it must own the invariant that the buffer cannot move, and the invariant belongs at
+the append site rather than in the caller's head.**
+
+**The two defects, recorded here in brief because their home is the experiment.**
+
+- **The stored clique degree was not rewritten after mass elimination**, in production `Amd3`
+  alone. `AMD_2` writes `Degree [me] = degme` twice, at its lines 1676 and 1940, and the second
+  write is the durable one, since by then scan 2 has run `degme -= nvi` for every mass-eliminated
+  vertex. We wrote it once, with the pre-merge value, so any pivot that mass-eliminated left a
+  clique degree permanently too large by the merged weight. It is ledger entry 7, and it is half a
+  mechanism in exactly the sense entry 6 was: ledger entry 3 moved mass elimination out of the
+  eliminator, which is what makes the second write necessary, and did not carry it. `Amd1` and
+  `Amd2` cannot have it. No published figure moves: 2D fill is unchanged digit for digit at every
+  size, because an inflated bound changes an ordering only when it changes the head of the minimum
+  bucket, and no 2D grid does that at any size to 140 a side.
+- **The dense threshold was turned off by undefined behavior.** `raworder.cpp` passed
+  `Control[AMD_DENSE] = 1e30`, and `dense = alpha * sqrt((double) n)` assigns a double to an `Int`,
+  so the conversion overflows: on x86-64 it lands on `INT_MIN` and `MAX (16, dense)` gives SIXTEEN,
+  which is dense removal fully ON at the strictest setting the code can express, while on arm64 it
+  saturates the other way and gives `n`. Two platforms, two different meanings for one line. The
+  threshold is now derived from `n`, which cannot overflow at any size we run, and
+  `Info[AMD_NDENSE]` is read and fails the case, so a mis-set threshold names itself instead of
+  arriving as a size mismatch to be diagnosed.
+
+**What this says about the prototypes, and it is the first time that divergence has cost
+anything.** The twin check could not have found the clique-degree defect at any size, because the
+prototypes obtain `|C[c] - C[p]|` by walking `C[c]` and maintain no clique degree at all. A
+prototype written to read as the algorithm does not carry the optimization, so it cannot model a
+hazard that lives in one, which leaves the prototype-against-production comparison blind to exactly
+the class of defect that optimization introduces. `experiments/ordering/REPORT.md` parked that as
+its fifth lead and could not decide whether it mattered; it does, and the answer is not to make the
+prototypes carry production's encoding, which would spend what makes them readable, but to know
+what the check does not cover and to cover it elsewhere. Here that is the acceptance test.
+
+**The method note, which is three lines and cost a day.** An acceptance test is worth widening
+while it is still passing, because what it cannot reach it cannot check. Two machines disagreeing
+about integer code is a sanitizer question, not a reasoning question. And a performance change that
+alters WHERE something is stored has to be read for lifetime as well as for speed, since no profile
+can see a pointer that is about to be invalidated.
+
+---
 
 After the alignment, `AMD3` returned `AMD_2`'s permutation exactly and took 2.55x its time. A day
 of profiling took that to 2.32x, and the interesting part is not the number but what the remaining

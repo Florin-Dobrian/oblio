@@ -1193,7 +1193,19 @@ in two sessions and will recur again. The fourth is now half closed: the prototy
 guard, production does not, and the ceiling is a placeholder rather than a derivation.
 
 **1. The prototypes and production have diverged in encoding, and the alignment check does not see
-it.** `experiments/ordering`'s `make test` compares four ported layers against production on the
+it. IT HAS NOW COST A DEFECT, 2026-08-09.** Production `Amd3` maintained a clique degree that went
+stale after mass elimination, and the twin check could not have caught it at any size, because the
+prototypes maintain no clique degree at all: they obtain `|C[c] - C[p]|` by walking `C[c]` and
+recompute it from the truth at every step. So the blindness is structural rather than a matter of
+the cases being small. **A prototype written to read as the algorithm does not carry the
+optimization, so it cannot model a hazard that lives in one**, which leaves the
+prototype-against-production comparison blind to exactly the class of defect that optimization
+introduces. What found it was the acceptance test, `make raworder`, widened to a shape the defect
+could move. The conclusion is not to give the prototypes production's encoding, which would spend
+what makes them readable; it is to know what this check does not cover and to cover it elsewhere.
+The rest of this item stands as written.
+
+`experiments/ordering`'s `make test` compares four ported layers against production on the
 same seven graphs, three by permutation and `amd2` by fill, and all four still agree. That check is
 about what is computed, and it was never about how. What has diverged is everything else:
 production now shares one run between `A[u]` and `I[u]`, holds its flags as `std::uint8_t`, chains
@@ -1566,6 +1578,26 @@ the vendored routine on grids, so `AMD3` fills more. Revisit if the 3D grids say
 
 **What is left of this work:** deleting `amd4` once nothing further is wanted from it, lifting its
 postorder block first if a permutation-level check is ever wanted.
+
+**Widened and closed properly, 2026-08-09.** `make raworder` ran eleven 2D grids, which is one
+shape at many sizes. It now runs four shapes, 38 cases: the seven examples, 2D grids to 140, 3D
+grids to 24, and nine random patterns at n = 2000, all matching on alpamayo. Getting there found
+three things, and only one of them was an ordering defect.
+
+- **A defect in production `Amd3`, ledger entry 7.** The stored clique degree was not rewritten
+  after mass elimination trimmed the clique, where `AMD_2` writes `Degree [me] = degme` a second
+  time for exactly that reason. Half a mechanism, from ledger entry 3, which moved mass elimination
+  out of the eliminator and did not carry the write the move makes necessary. `Amd1` and `Amd2`
+  cannot have it. No published fill figure moves.
+- **A use-after-free in the shared `QuotientGraph`, which every ordering had.** `reachableSet`
+  reads clique members through a pointer into the arena it is appending to, so a growth past the
+  reserve leaves it dangling. Benign until an allocator recycles the block, which is why it
+  surfaced as two machines disagreeing about integer code rather than as a failure.
+- **Two harness faults that looked like divergences**, a dense threshold turned off by undefined
+  behavior and a 3D grid builder emitting unsorted columns. Both are written up where they were
+  found.
+
+`docs/DESIGN_DECISIONS.md` (2026-08-09) carries all three and the method notes.
 
 ### Two extractions in the dynamic factorization code
 

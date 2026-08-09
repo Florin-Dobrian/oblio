@@ -49,7 +49,7 @@
 #        (cliques before explicit)                      element, knt1 loop
 #     3  mass elimination ran        the eliminator,    scan 2, after the     convention
 #        before absorption           now the driver     aggressive absorb
-#     4  the vertex's own weight     the bound loop,    the fourth pass,      convention
+#     4  the vertex's own weight     the bound loop,    the fourth pass,      DEFECT
 #        subtracted before the       now a fourth       `deg = Degree[i]
 #        hash merge that grows it    pass               + degme - nvi`
 #     5  the new clique appended     the eliminator     `Iw [p1] = me` and     convention
@@ -59,6 +59,53 @@
 #        new clique, which entry 5                      "skip the first
 #        had just made a guaranteed                     element in the list
 #        match at position zero                         (me)"
+#     7  the stored clique degree    beginElimination,  `Degree [me] = degme`,  DEFECT
+#        not rewritten after mass    PRODUCTION Amd3    written TWICE, at its
+#        elimination trimmed the     alone              lines 1676 and 1940
+#        clique
+#
+#
+# **Entry 4's nature said `convention` here until 2026-08-09, and it is a DEFECT.**
+# The README, `AMD3.md` and `docs/DESIGN_DECISIONS.md` have all said DEFECT since
+# the day it was closed, and it is one by this ledger's own definition: it filed
+# every supervariable one bucket too high per vertex a hash merge absorbed, which
+# is wrong on its own terms with no appeal to AMD_2, and it was fixed in `amd2`,
+# `Amd2` and `Amd2B` where it had been costing 3 to 9 percent of fill. The column
+# is corrected rather than left, and the correction dated rather than made
+# silently: append-only protects the record from being rewritten as a tidy summary
+# afterwards, not from being wrong about itself. Worth knowing that the copy called
+# authoritative had drifted from its mirrors in exactly the column the ledger tells
+# a reader to look at first, and that nothing compares them.
+#
+# **Entry 7 is PRODUCTION'S ALONE, which is why its middle column says so.** These
+# prototypes cannot have it: they obtain `|C[c] - C[p]|` by walking the members of
+# C[c] and counting the live ones outside C[p], so they recompute it from the truth
+# at every step and there is nothing to go stale. Production maintains a clique
+# degree and obtains the same quantity by subtraction, which is amd2's pass 3 and
+# is the encoding the prototypes deliberately do not carry.
+#
+# So the twin check could not have caught it, and not merely for want of a bigger
+# case: a prototype written to read as the algorithm cannot model a hazard that
+# lives in an optimization only production has, which makes it blind to exactly the
+# class of defect that optimization introduces. That is the divergence
+# `REPORT.md` parked as its fifth lead, and this is the first time it has cost
+# anything.
+#
+# What the entry is. AMD_2 writes `Degree [me] = degme` twice, before scan 1 and
+# again after supervariable detection, and the second write is the durable one:
+# by then scan 2 has run `degme -= nvi` for every vertex mass elimination took, so
+# what a later step reads as |C[me]| is the post-merge size. Production wrote it
+# once, with the pre-merge value, so any pivot that mass-eliminated left a clique
+# degree permanently too large by the merged weight and every later bound taken
+# through that clique inherited it. It is half a mechanism again, as entry 6 was:
+# ledger entry 3 moved mass elimination out of the eliminator and did not carry the
+# second write that the move is the whole reason for. `Amd1` and `Amd2` are
+# unaffected, mass-eliminating inside the eliminator, so their single write already
+# sees a trimmed clique.
+#
+# It moves an ordering only when an inflated bound moves the head of the minimum
+# bucket, which no 2D grid does at any size to 140 a side. A 3D grid at 16 finds
+# it. That is what widened the acceptance test to four shapes.
 #
 #
 # **Entry 6 is a fourth NATURE, and the ledger needs the word.** It is neither a

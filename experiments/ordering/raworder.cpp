@@ -16,12 +16,18 @@
 
 #include "oblio/Amd3.h"
 
+#include "graphs.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
 #include <string>
 #include <vector>
+
+// Amd.cpp's own index into Info[], repeated here rather than included: the vendored header is
+// not ours and this driver takes nothing else from it.
+static constexpr int AMD_NDENSE = 6;
 
 // The hooked vendored routine hands its raw order back through this, once per call.
 static std::vector<int> gRaw;
@@ -30,25 +36,12 @@ extern "C" int amd_order_raw(int n, const int* Ap, const int* Ai, int* P,
 // C linkage: the generated copy declares this from inside an `extern "C"` entry point.
 extern "C" void pbRawOrder(const int* raw, int n) { gRaw.assign(raw, raw + n); }
 
-// The prototypes' shape for a graph: adjacency lists, no diagonal. The seven example graphs live
-// in production.cpp and should be shared through a graphs.h rather than copied a third time; see
-// NEXT.md, which also records why the wider shapes are not here yet.
-using Graph = std::vector<std::vector<std::int32_t>>;
-
-// A square grid, five-point.
-static Graph gridGraph(int side) {
-    const int n = side * side;
-    Graph graph(n);
-    for (int r = 0; r < side; ++r)
-        for (int c = 0; c < side; ++c) {
-            const int u = r * side + c;
-            if (r > 0)        graph[u].push_back(u - side);
-            if (c > 0)        graph[u].push_back(u - 1);
-            if (c + 1 < side) graph[u].push_back(u + 1);
-            if (r + 1 < side) graph[u].push_back(u + side);
-        }
-    return graph;
-}
+// The graphs come from graphs.h, shared with vendored.cpp and production.cpp, so a graph added
+// for one driver is available to the others and none of them can drift.
+using OrderingExperiment::Graph;
+using OrderingExperiment::grid3dGraph;
+using OrderingExperiment::gridGraph;
+using OrderingExperiment::randomGraph;
 
 // A graph, two ways: ours takes the diagonal, AMD takes a pattern without it.
 static void toCsc(const Graph& graph, std::vector<std::size_t>& colPtr,
@@ -84,9 +77,39 @@ static bool check(const std::string& name, const Graph& graph) {
     toCscNoDiagonal(graph, ap, ai);
     const int n = static_cast<int>(graph.size());
     std::vector<int> perm(n);
-    double control[5] = {1e30, 1.0, 0, 0, 0};   // dense-row threshold off, aggressive absorption on
+
+    // THE DENSE THRESHOLD IS DERIVED FROM n, AND `1e30` HERE WAS A DEFECT. Dense-row removal is
+    // the one mechanism amd3 does not have, so it must not fire: if it does, the oracle has
+    // ordered a different problem and no comparison of the two orders means anything.
+    //
+    // Amd.cpp turns it off through `dense = alpha * sqrt((double) n)`, then `MAX (16, dense)` and
+    // `MIN (n, dense)`, and its header says to pass "a number larger than sqrt (n)". It does not
+    // say how much larger, and it matters: `dense` is an `Int`, so an alpha that drives the
+    // product past `INT32_MAX` makes the conversion undefined. Measured on x86-64, `1e30` lands
+    // on `INT_MIN`, `MAX (16, INT_MIN)` is 16, and the threshold comes out at SIXTEEN rather than
+    // n: dense removal fully on, at the strictest setting the code can express. On arm64 the same
+    // conversion saturates the other way and the threshold comes out at n, so the two platforms
+    // disagree about what this line does. Neither grid family can show it, both being far below
+    // degree 16, and it surfaced as a size mismatch on the random patterns below.
+    //
+    // `alpha = n` is the largest value that cannot overflow at any size we run: `n * sqrt(n)`
+    // fits an `int32_t` to about n = 2.6e5, and `MIN (n, dense)` clamps it to n throughout, so
+    // `deg > dense` is unreachable for a simple graph.
+    double control[5] = {static_cast<double>(n), 1.0, 0, 0, 0};   // dense off, aggressive on
     double info[20]   = {0};
     amd_order_raw(n, ap.data(), ai.data(), perm.data(), control, info);
+
+    // AND THE THRESHOLD IS CHECKED RATHER THAN TRUSTED. AMD reports what it removed, so the
+    // claim above costs one read. Without it a mis-set threshold shows up as a size mismatch to
+    // be diagnosed, which is how the whole of the note above was found; with it, the instrument
+    // says what went wrong instead of that something did. An instrument that silently declines
+    // to measure is worse than one that is absent (AMD3.md, iteration 12).
+    if (info[AMD_NDENSE] != 0) {
+        std::printf("  %-22s DENSE ROWS REMOVED: %d. The threshold is wrong, so the oracle\n"
+                    "  %-22s ordered a different problem; this is not a divergence.\n",
+                    name.c_str(), static_cast<int>(info[AMD_NDENSE]), "");
+        return false;
+    }
 
     if (ours.size() != gRaw.size()) {
         std::printf("  %-22s SIZE MISMATCH: ours %zu, vendored %zu\n",
@@ -119,23 +142,35 @@ int main(int argc, char** argv) {
                                gridGraph(side));
         }
     } else {
-        // FOUR SHAPES, not one shape at four sizes. Widening a square grid from 4 to 140 exercises
-        // scale and not mechanism, and a defect that only appears on a structure grids do not
-        // produce would pass every one of them.
+        // FOUR SHAPES, not one shape at eleven sizes. Widening a square grid from 4 to 140
+        // exercises scale and not mechanism, and a defect that only appears on a structure grids
+        // do not produce passes every one of them. This is not hypothetical: the 2D-only version
+        // of this list was green while `Amd3` carried a stale clique degree that a 3D grid at 16
+        // a side finds, which is the defect fixed in Amd3.cpp on 2026-08-09.
         //
         // the seven examples   small and irregular, and where several ledger entries were found
         // 2D grids             regular structure at size
-        // 3D grids             a different shape: faster fill, larger supernodes
-        // random patterns      irregular structure AT SIZE, which is where an unhandled path shows
-        //                      up as a deficit that varies across cases
-        // 2D grids only, for now. Widening to the seven examples, 3D grids and random patterns
-        // was attempted on 2026-08-09 and found divergences whose cause is not established: one
-        // of them is a SIZE MISMATCH, which says the hook misses a numbering path rather than
-        // that Amd3 is wrong. NEXT.md has the detail. A checker that fails for unknown reasons is
-        // worse than one with narrow coverage, so the wider shapes stay out until that is found.
+        // 3D grids             a different shape: faster fill, larger cliques, mass elimination
+        //                      firing far more often
+        // random patterns      irregular structure AT SIZE, and the only family here that reaches
+        //                      a degree the dense threshold could act on
+        for (const auto& example : OrderingExperiment::exampleGraphs())
+            cases.emplace_back(example.first, example.second);
+
         for (int side : {4, 5, 8, 10, 16, 20, 32, 40, 64, 100, 140})
             cases.emplace_back("grid " + std::to_string(side) + "x" + std::to_string(side),
                                gridGraph(side));
+
+        for (int side : {2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24})
+            cases.emplace_back("grid3d " + std::to_string(side) + "^3", grid3dGraph(side));
+
+        // Three degrees and three seeds each: the degree decides how uneven the structure is and
+        // the seed decides which structure, and both matter.
+        for (int degree : {3, 6, 12})
+            for (unsigned seed : {1u, 2u, 3u})
+                cases.emplace_back("random d" + std::to_string(degree) + " s" +
+                                       std::to_string(seed),
+                                   randomGraph(2000, degree, seed));
     }
 
     int failed = 0;

@@ -15,19 +15,24 @@
 // Run:    ./vendored_cpp
 //         ./vendored_cpp 3      just the third example
 
+#include "graphs.h"
+
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
-#include <set>
 #include <string>
 #include <vector>
+
+using OrderingExperiment::Graph;
 
 void mmd_order(int n, const int colPtr[], const int rowIdx[], int perm[], int invp[]);
 extern "C" int amd_order(int32_t n, const int32_t Ap[], const int32_t Ai[],
                          int32_t P[], double Control[], double Info[]);
 
-// Off-diagonal-only symmetric CSC, which is what both routines expect.
-static void toCsc(const std::vector<std::set<int>>& graph,
+// Off-diagonal-only symmetric CSC, which is what both routines expect. The graphs used to be
+// held here as `std::vector<std::set<int>>` and are now the shared `Graph`; a set iterates
+// ascending and those lists are ascending, so this produces the identical pattern.
+static void toCsc(const Graph& graph,
                   std::vector<int>& colPtr, std::vector<int>& rowIdx) {
     int n = static_cast<int>(graph.size());
     colPtr.assign(n + 1, 0);
@@ -46,7 +51,7 @@ static void printOrder(const std::string& label, const std::vector<int>& order) 
     std::cout << "]\n";
 }
 
-static void run(const std::string& name, const std::vector<std::set<int>>& graph) {
+static void run(const std::string& name, const Graph& graph) {
     int n = static_cast<int>(graph.size());
     std::cout << "=== " << name << " ===\n";
     std::vector<int> colPtr, rowIdx;
@@ -68,72 +73,9 @@ static void run(const std::string& name, const std::vector<std::set<int>>& graph
 }
 
 int main(int argc, char** argv) {
-    std::vector<std::set<int>> graph1 = {
-        {1, 3},
-        {0, 2},
-        {1, 3},
-        {0, 2},
-    };
-    std::vector<std::set<int>> graph2 = {
-        {1, 2},
-        {0, 3},
-        {0, 4},
-        {1, 4, 5},
-        {2, 3, 5},
-        {3, 4},
-    };
-    std::vector<std::set<int>> graph3 = {
-        {1, 3, 8},
-        {0, 2, 6, 8},
-        {1, 3, 5},
-        {0, 2, 4},
-        {3, 5},
-        {2, 4, 6, 9},
-        {1, 5, 7, 10},
-        {6, 8},
-        {0, 1, 7, 9},
-        {5, 8, 10},
-        {6, 9, 11},
-        {10},
-    };
-    std::vector<std::set<int>> graph4 = {
-        {2, 3, 4, 7},
-        {3, 4, 6, 7},
-        {0, 3, 5},
-        {0, 1, 2, 6, 7},
-        {0, 1, 5},
-        {2, 4, 6},
-        {1, 3, 5},
-        {0, 1, 3},
-    };
-    std::vector<std::set<int>> graph5 = {
-        {3, 4},
-        {2, 4},
-        {1},
-        {0},
-        {0, 1},
-    };
-    std::vector<std::set<int>> graph6 = {
-        {2, 3, 4},
-        {3},
-        {0, 3, 4, 5},
-        {0, 1, 2, 4},
-        {0, 2, 3},
-        {2},
-    };
-    std::vector<std::set<int>> graph7 = {
-        {1, 2, 4},
-        {0, 4},
-        {0, 3, 4},
-        {2, 4},
-        {0, 1, 2, 3},
-    };
-    std::vector<std::pair<std::string, std::vector<std::set<int>>>> examples = {
-        {"graph1", graph1}, {"graph2", graph2},
-        {"graph3", graph3}, {"graph4", graph4},
-        {"graph5", graph5}, {"graph6", graph6},
-        {"graph7", graph7},
-    };
+    // The seven examples come from graphs.h, which vendored.cpp, production.cpp and raworder.cpp
+    // all read, so a graph cannot drift between the drivers whose outputs `make test` compares.
+    const auto& examples = OrderingExperiment::exampleGraphs();
     int selected = (argc > 1) ? std::atoi(argv[1]) : 0;
     for (int number = 1; number <= static_cast<int>(examples.size()); ++number) {
         if (selected != 0 && number != selected) continue;

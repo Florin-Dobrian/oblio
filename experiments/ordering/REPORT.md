@@ -677,11 +677,26 @@ separate counter. This is the same observation as item 1 seen from the other sid
 trade is not obviously in either direction: theirs is denser, ours cannot suffer this class of
 aliasing bug and is far easier to reason about.
 
-**5. A stale claim in the experiment README.** It says amd1 obtains `|C[c] - C[p]|` by walking each
-touched clique's members while amd2 obtains it by subtraction. Production `Amd1.cpp` does the
-subtraction, same as `Amd2.cpp`. Either the prototype and production have diverged here or the
-sentence predates a change to one of them. Worth checking before that paragraph is trusted again,
-since a 3.7x work ratio is quoted from it.
+**5. A stale claim in the experiment README. ANSWERED, 2026-08-09, and it was not stale.** It says
+amd1 obtains `|C[c] - C[p]|` by walking each touched clique's members while amd2 obtains it by
+subtraction. Production `Amd1.cpp` does the subtraction, same as `Amd2.cpp`. Either the prototype
+and production have diverged here or the sentence predates a change to one of them. Worth checking
+before that paragraph is trusted again, since a 3.7x work ratio is quoted from it.
+
+They have diverged, and the sentence is right about the prototypes: all three amd layers walk the
+members and maintain no clique degree at all, where all five production drivers subtract from one.
+So this lead was correct to be suspicious and the divergence is real.
+
+**What it cost, which is why this is now an answer rather than a lead.** Production `Amd3` let its
+maintained clique degree go stale after mass elimination, and the twin check could not have caught
+it at any size, because the prototype has nothing to go stale. A prototype written to read as the
+algorithm does not carry the optimization, so it cannot model a hazard that lives in one. The
+acceptance test found it instead, once widened to 3D grids. `docs/DESIGN_DECISIONS.md`
+(2026-08-09) carries the account, and `docs/TODO.md`'s first ordering question carries what
+follows for the twins.
+
+The 3.7x work ratio is unaffected: it compares the two ways of obtaining the quantity, which is
+what pass 3 is about, and both codes still do what that paragraph says they do.
 
 ## What was not measured, and should not be assumed
 

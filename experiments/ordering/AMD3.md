@@ -19,6 +19,11 @@ Companion documents:
 
 ## Read this first: what the whole thing came to
 
+**Iterations 18 to 20 are a later session, 2026-08-09**, and they are the ones to read if the
+question is whether the alignment holds: the acceptance test was widened from one shape to four,
+and the widening found two defects and one bug. Two of its three initial failures were the harness
+rather than the ordering, which is the caution to carry into any similar exercise.
+
 **The alignment is iterations 0 to 9 and it succeeded.** `amd3` returns `AMD_2`'s permutation
 exactly, up to the postorder it deliberately does not do, and production `Amd3` is extracted from
 it. Six ledger entries, five of them tie-break conventions and one a real defect that had been
@@ -1034,6 +1039,155 @@ hottest line in the ordering. It needs the invariant repaired, not asserted.
 **And it is the fifth structural guess of mine to fail**, against two wins that came from reading
 `Amd.cpp` and two from opening the profile. The pattern is now unambiguous enough to state as a
 rule rather than a tendency, and it is written into the method notes above.
+
+---
+
+## Iteration 18: widening the acceptance test, and two of the three failures were the harness
+
+**The situation, 2026-08-09.** `make raworder` was committed running eleven 2D grids, which is ONE
+SHAPE at many sizes. An attempt to widen it to the seven examples, 3D grids and random patterns
+had found divergences and had NOT been committed, because a checker that fails for unknown reasons
+is worse than one with narrow coverage. Three failures, and they turned out to have three
+different causes, only one of which is ours.
+
+**The random patterns: a SIZE MISMATCH, and the hook was not what was incomplete.** The vendored
+side came up short, which says a vertex is numbered on a path the hook does not see. There are
+four such paths, not three: empty variables in the initialization, mass elimination in scan 2, the
+hash merge, and DENSE-ROW REMOVAL at `Amd.cpp:1387`, which the driver believed it had switched off.
+
+It had not. `dense = alpha * sqrt((double) n)` assigns a double to an `Int`, so `1e30` overflows
+and the conversion is undefined; on x86-64 it lands on `INT_MIN` and `MAX (16, dense)` then gives
+SIXTEEN, which is dense removal fully on at the strictest setting the code can express. The
+measurement that settled it in one line:
+
+```
+                        maxdeg    raw    deficit  ndense
+alpha 1e30  2D grid 40       4   1600          0       0
+            3D grid 12       6   1728          0       0
+            random d6       21   1915         85      85
+            random d12      39     19       1981    1981
+
+alpha = n   random d12      39   2000          0       0
+```
+
+**The deficit EQUALS `ndense`, on every row.** That is the whole of it, and it explains the shape:
+invisible on 2D grids at degree 4 and on 3D grids at degree 6, both under the threshold, and
+appearing only on patterns dense enough to cross it. With a threshold that cannot overflow there is
+no fourth path and the hook is complete.
+
+Worth recording that the repair is not to teach the hook the dense path. If dense removal fires,
+the oracle is running a mechanism `amd3` does not have, so the two are ordering different problems
+and no member-order comparison means anything. The threshold now comes from `n`, and
+`Info[AMD_NDENSE]` is read and fails the case, so a mis-set threshold names itself.
+
+**The 3D grids, first cause: the builder emitted an invalid pattern.** Sizes matched there, so
+every vertex was accounted for and only the order differed, first at position 32 of a 4x4x4 grid.
+Tracing both sides showed it starts at the FIRST elimination. Pivot 63 is the far corner, and the
+two refile its neighbours in opposite orders:
+
+```
+ours       REFILE 62, 59, 47
+vendored   REFILE 47, 59, 62
+```
+
+which is the row order inside column 63. The builder pushed `x-1, x+1, y-1, y+1, z-1, z+1`,
+descending for that vertex; our side took the pattern as given and the vendored side sorted it. A
+column's rows must be ascending, which is the CSC precondition `SparseMatrix` states and which is
+also a tie-break input, since the order within a column decides the content order of `C[pivot]`.
+The 2D builder is ascending by construction, which is exactly why 2D could never expose it.
+
+**The lesson is the one this ladder keeps relearning, from the other side.** Every earlier entry
+was found by asking which line of the vendored routine we failed to reproduce. Here two of three
+failures were not divergences at all, and the time went on the assumption that a red check means a
+defect in the thing under test. A check is a program too.
+
+---
+
+## Iteration 19: the third cause was real, and it is ledger entry 7
+
+**With the harness corrected, 3D grids matched from 2 a side through 12, and 16 and 24 still
+failed.** A different signature: not order but VALUE. Several vertices filed one degree too high,
+late in the run, at line 31097 of 33381.
+
+**The cap was the clue.** Some vertices in the same pass agreed and some were plus one, which is
+what `deg = MIN (deg, nleft - nvi)` binding looks like, and a cap binds only when a bound
+approaches what is left, which is why it surfaces at 88 percent of the run. But `numLeft` and
+`degme` agreed at every iteration, so it was not the cap's operands.
+
+**One vertex, all the way through.** Vertex 982 has fourteen bound computations. Thirteen agree
+exactly; the fourteenth has our freshly accumulated degree at 40 against 39, at the point where 982
+has weight 6. Splitting that number into its halves named a single clique:
+
+```
+ours       clique 1509   dext 40
+vendored   element 1509  dext 39
+```
+
+Both obtain `dext` by subtraction from a maintained clique degree, so the difference is in that
+degree. `Amd.cpp` writes `Degree [me] = degme` at its line 1676 AND AGAIN at 1940, after scan 2 has
+run `degme -= nvi` for every mass-eliminated vertex; the second write is what every later step
+reads as `|C[me]|`. We wrote it once, with the pre-merge value.
+
+**Half a mechanism, again, and from ledger entry 3.** That entry moved mass elimination out of the
+eliminator, which is what makes the second write necessary, and did not carry it. `Amd1` and
+`Amd2` mass-eliminate inside the eliminator, so their single write already sees a trimmed clique
+and they are unaffected. The prototypes cannot have it at all, obtaining the quantity by walking
+`C[c]` rather than maintaining anything.
+
+**So the twin check was structurally incapable of catching this**, which is worth separating from
+"the cases were too small". A prototype written to read as the algorithm does not carry the
+optimization, so it cannot model a hazard that lives in one. `REPORT.md` parked that divergence as
+its fifth lead and could not decide whether it mattered. It does.
+
+One line, and the widened check goes to 38 of 38. Mutation-tested both ways: with the write
+removed, `grid3d 16^3` and `24^3` fail and nothing else does; with the threshold put back to
+`1e30`, six random cases report the dense removal instead of a mismatch.
+
+---
+
+## Iteration 20: and the acceptance test found a bug that is not the ordering's
+
+**`make raworder` failed on alpamayo at `grid3d 6^3` and passed on the Linux sandbox.** Same
+source, same deterministic input, no floating point anywhere in an ordering, so a difference
+between two machines cannot be a legitimate result. Something unspecified was being read.
+
+**AddressSanitizer named it in one run**, which is the right instrument for "two machines disagree
+about integer code" and was reached for instead of a sixth hypothesis:
+
+```
+heap-use-after-free   QuotientGraph::reachableSet   QuotientGraph.cpp:122
+  freed by:  vector<int>::_M_realloc_insert        a push_back that outgrew its reserve
+```
+
+`beginElimination` calls `reachableSet(pivot, mCliqueArena)`, so the walk appends to the very
+buffer it is reading clique members from, through `mCliqueArena.data() + mCliquePtr[c]`. A
+`push_back` past the capacity moves the arena and that pointer dangles for the rest of its clique.
+The constructor reserves `nnz(A)` and the arena grows to the sum of `|C[p]|`, 108705 against 97440
+at 140 a side, so a reallocation is ordinary rather than exceptional.
+
+**It is every driver, not `amd3`**: mmd1, mmd2, mmd3, amd1, amd2 and amd3 all trip it, on 2D grids
+as well as 3D. And it is normally harmless, which is why it survived: a vector growth copies and
+then frees, so the stale pointer usually still finds the right values sitting in freed memory. It
+stops being harmless when the allocator recycles that block, which is what one machine did and the
+other did not.
+
+**Where it came from is iteration 16 of this document.** That change wrote the reach straight into
+the arena, for a measured 111 ms, and nothing re-checked the pointers already being held across the
+append. `beginElimination` even carries a comment saying the reach pointer is taken after the
+append "since that is what can move the arena": the hazard was seen there, for the one pointer it
+happened to be about, one line later than the one that mattered.
+
+The repair is to make the arena unable to move rather than to re-fetch per element, which would put
+a load in the innermost loop of the whole ordering for a hazard that occurs at most once per
+elimination. A reach is at most `n` entries, so guaranteeing room for one before the walk
+guarantees it for the walk. `docs/DESIGN_DECISIONS.md` (2026-08-09) carries the entry, since it
+belongs to the shared class rather than to the alignment.
+
+**Three method notes, and the third is the one that generalizes.** An acceptance test is worth
+widening even when it is passing, because what it cannot reach it cannot check. A disagreement
+between two machines on integer code is a sanitizer question and not a reasoning question. And a
+performance change that alters WHERE something is stored has to be read for lifetime as well as for
+speed, because the profile cannot see a pointer that is about to be invalidated.
 
 ---
 

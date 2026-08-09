@@ -242,11 +242,44 @@ void QuotientGraph::beginElimination(std::int32_t pivot,
     //
     // Measured before: 111 ms for the copy and 59 ms in the push_backs' capacity checks, of an
     // 8.38 s run.
+    //
+    // AND THE ARENA MUST NOT MOVE WHILE THAT WALK RUNS, which is what the reserve below is for and
+    // is not an optimization. `reachableSet` reads each clique's members through a pointer into
+    // the arena, `mCliqueArena.data() + mCliquePtr[c]`, while appending the reach to that same
+    // arena. A push_back that outgrows the capacity reallocates, and every such pointer already
+    // taken is then dangling for the rest of its clique. The constructor's reserve is nnz(A) and
+    // the arena grows to the sum of |C[p]| over the run, 108705 against 97440 at 140 a side, so a
+    // reallocation is ordinary rather than exceptional.
+    //
+    // It read as harmless for as long as it did because a vector growth COPIES and then frees, so
+    // the stale pointer usually still finds the right values sitting in freed memory. That is a
+    // property of the allocator and not of the program: on Apple Silicon a 6x6x6 grid came out
+    // with a different ordering from the same source on the same input, which is what an ordering
+    // with no floating point in it cannot legitimately do. Address sanitizer reports it on every
+    // one of the six drivers, on 2D grids as well as 3D, so it is the shared class's and not any
+    // driver's.
+    //
+    // The remedy is to make the arena unable to move rather than to re-fetch per element, which
+    // would put a load in the innermost loop of the whole ordering for a hazard that occurs once
+    // per elimination at most. A reach is at most `size()` entries, so room for one is room for
+    // the whole walk, and the growth stays geometric so nothing is given back to the doubling this
+    // reserve exists to avoid.
+    //
+    // The rule is already this tree's, stated for the dynamic factor in DESIGN_DECISIONS and
+    // rehearsed in experiments/storage-options: structural growth invalidates every pointer taken
+    // before it. What made it easy to miss here is that the pointer and the growth are in
+    // DIFFERENT functions, and that the comment two lines below already names the hazard for the
+    // one pointer it happens to be about.
+    if (mCliqueArena.capacity() - mCliqueArena.size() < size())
+        mCliqueArena.reserve(std::max(2 * mCliqueArena.capacity(), mCliqueArena.size() + size()));
+
     mCliquePtr[pivot] = mCliqueArena.size();
     reachableSet(pivot, mCliqueArena);          // appends; see its note
     mCliqueSize[pivot] = mCliqueArena.size() - mCliquePtr[pivot];
 
-    // Taken AFTER the append, since that is what can move the arena.
+    // Taken AFTER the append, since that is what can move the arena. With the reserve above it
+    // cannot have moved, and this stays as it is regardless: it costs nothing and it is the shape
+    // that remains correct if the reserve is ever revised.
     const std::int32_t* reached     = mCliqueArena.data() + mCliquePtr[pivot];
     const std::size_t   reachedSize = mCliqueSize[pivot];
 

@@ -8,7 +8,8 @@
 #:   make width        what the integer width costs, measured on the vendored AMD by retyping it
 #:                     to int64_t and timing the two against each other. Needs private/.
 #:   make raworder     production Amd3 against the vendored AMD's RAW elimination order, which is
-#:                     the acceptance test for the amd alignment. Needs private/.
+#:                     the acceptance test for the amd alignment. Four shapes: the seven
+#:                     examples, 2D grids, 3D grids, random patterns. Needs private/.
 #:   make vendored     the vendored MMD and AMD on the same graphs, for reference. This is the
 #:                 only target here that needs private/, and it reports rather than fails without
 #:                 it; OBLIO_PUBLIC=1 makes it behave as though private/ were absent
@@ -244,7 +245,7 @@ test: all production_cpp
 
 # Oblio's own ordering drivers, run on the same graphs as the prototypes. The mirror image of
 # vendored_cpp: that one runs what we are reading against, this one runs what we extracted.
-production_cpp: production.cpp $(PROD_SRCS) $(PROD_HDRS)
+production_cpp: production.cpp graphs.h $(PROD_SRCS) $(PROD_HDRS)
 	$(CXX) $(CXXFLAGS) -I../../include -DOBLIO_BLAS_UNDERSCORE production.cpp \
 	  $(PROD_SRCS) $(BLAS_LIBS) -o $@
 
@@ -263,7 +264,7 @@ vendored:
 width:
 	@echo "width: skipped, private/ is not present"
 else
-vendored_cpp: vendored.cpp $(VENDOR_SRCS)
+vendored_cpp: vendored.cpp graphs.h $(VENDOR_SRCS)
 	$(CXX) -std=c++17 -O3 -w vendored.cpp $(VENDOR_SRCS) -o $@
 
 vendored: vendored_cpp
@@ -332,11 +333,24 @@ extern \"C\" void mmd_order64(std::int32_t n, const std::int32_t colPtr[], const
 # The hook is additive: two containers and three lines, no behaviour change. PB_members[i]
 # accumulates what supervariable i stands for, growing at the hash merge; PB_raw takes a pivot's
 # members once per elimination, at FINALIZE THE NEW ELEMENT, before AMD_postorder ever runs.
+#
+# It runs FOUR SHAPES, not one shape at many sizes: the seven examples, 2D grids, 3D grids and
+# random patterns. The 2D-only version of this list was green while Amd3 carried a stale clique
+# degree that a 3D grid at 16 a side finds, which is what the widening is for. It takes under a
+# second, so there is no reason to run less of it.
+#
+# `graphs.h` is a prerequisite so that editing it rebuilds, and `$(filter-out %.h,$^)` keeps it
+# out of the compiler's argument list, which is not optional and not tidiness. A header named as
+# a source is a header to PRECOMPILE, so the command then generates two outputs and `-o` is no
+# longer meaningful: Apple Clang says "cannot specify -o when generating multiple output files"
+# and refuses, while g++ accepts it silently and builds. So this breaks on macOS and passes on
+# Linux, which is the compiler asymmetry CLAUDE.md's Build section names, in the direction that
+# catches you out less often.
 amd_raw.cpp: ../../private/Amd.cpp hook_amd.py
 	@python3 hook_amd.py $< $@
 
-raworder_cpp: raworder.cpp $(VENDOR_SRCS) amd_raw.cpp ../../src/Amd3.cpp ../../src/QuotientGraph.cpp ../../src/Types.cpp
-	$(CXX) -std=c++17 -O3 -DNDEBUG -w -I../../include $^ -o $@
+raworder_cpp: raworder.cpp graphs.h $(VENDOR_SRCS) amd_raw.cpp ../../src/Amd3.cpp ../../src/QuotientGraph.cpp ../../src/Types.cpp
+	$(CXX) -std=c++17 -O3 -DNDEBUG -w -I../../include $(filter-out %.h,$^) -o $@
 
 raworder: raworder_cpp
 	./raworder_cpp

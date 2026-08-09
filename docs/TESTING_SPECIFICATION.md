@@ -69,12 +69,25 @@ README under "The comparison object for amd is the RAW ORDER". In short:
 experiments/ordering:  make test          63 checks, twins against each other and
                                           prototype against production
                        make raworder      production Amd3 against the vendored AMD's raw
-                                          elimination order, 11 grids from 4 a side to 140
+                                          elimination order, 38 cases over four shapes
 ```
 
 `make raworder` generates a hooked copy of `private/Amd.cpp` on demand, since the vendored routine
 does not emit that order. The copy is gitignored and removed by `make clean`, so it cannot become a
 stale oracle.
+
+**Four shapes, not one shape at many sizes**: the seven examples, 2D grids from 4 a side to 140, 3D
+grids from 2 to 24, and nine random patterns at n = 2000. The distinction is load bearing rather
+than thorough for its own sake. Widening a square grid exercises scale and never mechanism, and
+the 2D-only version of this check was green while production `Amd3` carried a stale clique degree
+that a 3D grid at 16 a side finds. It also found a use-after-free in the shared `QuotientGraph`
+that every ordering had, which no assertion in this suite could see because the program was reading
+its own freed memory and getting the right answer back. Both are in `docs/DESIGN_DECISIONS.md`
+(2026-08-09).
+
+The same widening is available to `make test`, whose prototype-against-production comparison still
+runs on 2D grids alone; `graphs.h` now holds the 3D and random builders, so that is a change of one
+list rather than of any code.
 
 **The object compared for amd is the RAW elimination order**, not `amd_order`'s output vector. The
 vendored routine relabels its result with a postorder that Oblio deliberately does not reproduce, so

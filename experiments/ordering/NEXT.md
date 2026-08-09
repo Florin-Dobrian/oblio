@@ -1,14 +1,16 @@
-# NEXT: 3D grids first, and one last bounded attempt at the amd constant factor
+# NEXT: 3D grids in the benchmark, and one last bounded attempt at the amd constant factor
 
-A handover note between sessions, written 2026-08-09. **It is meant to be deleted** once the change
-below is done or abandoned. Everything in it that outlives the task has already been written
-somewhere durable, and this file only points at those places:
+A handover note between sessions, rewritten 2026-08-09 when its first priority closed. **It is
+meant to be deleted** once the items below are done or abandoned. Everything in it that outlives
+the task has already been written somewhere durable, and this file only points at those places:
 
 - `docs/DESIGN_DECISIONS.md`, entry "what the vendored AMD's speed is made of", has the
-  measurements, the three blocked routes and why each is blocked, and the proposal restated
+  measurements, the three blocked routes and why each is blocked, and the parked proposal restated
   properly.
+- `docs/DESIGN_DECISIONS.md`, entry "the ordering read freed memory for a week", has what the
+  widened acceptance test found and the three method notes that came with it.
 - `experiments/ordering/README.md`, section "Aligning a layer against a vendored routine", has the
-  method both alignments used.
+  method both alignments used, and its `make raworder` section has what the check now covers.
 - `benchmarks/README.md` has what Instruments can and cannot be made to do from the command line,
   and the two rules about counting against profiling that cost a day between them.
 
@@ -18,47 +20,44 @@ belonged elsewhere.
 
 ---
 
+## Closed since the last note
+
+**The alignment check is widened, and the alignment holds.** `make raworder` ran eleven 2D grids
+and now runs 38 cases over four shapes: the seven examples, 2D grids to 140, 3D grids to 24, and
+nine random patterns at n = 2000. All match on alpamayo, so `Amd3` reproduces `AMD_2`'s raw
+elimination order, member order included, on something far wider than the shape it was built
+against.
+
+Getting there found three things, none of them visible before:
+
+- a defect in production `Amd3`, ledger entry 7, the stored clique degree not rewritten after mass
+  elimination trimmed the clique;
+- a use-after-free in the shared `QuotientGraph` that every ordering had, benign until an allocator
+  recycled the block, which is why it surfaced as two machines disagreeing about integer code;
+- two harness faults that looked like divergences, a dense threshold turned off by undefined
+  behavior and a 3D grid builder emitting unsorted columns.
+
+`experiments/ordering/AMD3.md`, iterations 18 to 20, is the narrative.
+
+---
+
 ## Priority
 
-**1. Widen the alignment check, and finish it before anything else.** `make raworder` compares
-production `Amd3` against the vendored AMD's raw elimination order. As committed it runs the seven
-example graphs and 2D grids from 4 a side to 140, all matching. That is one SHAPE at many sizes,
-which exercises scale and not mechanism.
-
-An attempt to widen it on 2026-08-09 found divergences immediately, and was NOT committed because
-the cause is unestablished:
-
-```
-3D grids, 4^3 to 24^3      sizes MATCH, contents DIFFER   (4^3 first differs at position 32)
-random n=2000, deg 3, 6    sizes match, contents differ at position 0
-random n=2000, deg 12      SIZE MISMATCH, vendored short by about 186 of 2000
-```
-
-**The size mismatch says the HOOK is incomplete**, not that `Amd3` is wrong. Every pivot's member
-count equals `nvpiv`, instrumented and checked, so the main loop is fully covered and yet 186
-vertices are numbered on a path `hook_amd.py` does not see. Find that path first: until it is
-found, the random cases mean nothing either way.
-
-**The 3D failures are a different matter and may be real.** Sizes match there, so every vertex is
-accounted for and only the ORDER differs. That is either a genuine `Amd3` divergence on a shape
-never tested, or the hook mis-ordering members while counting them correctly. The smallest failing
-case is a 4x4x4 grid diverging at position 32, small enough to read in full.
-
-A re-schedule is only safe if the oracle is sound. Optimizing against an alignment never checked
-outside 2D would be building on sand.
-
-The widening also wants a `graphs.h`: the seven example graphs exist twice already, in
-`vendored.cpp` and `production.cpp`, and a third copy was about to go into `raworder.cpp`. One
-definition, so a graph added for one driver is available to the others. The drivers answer
-different questions; their inputs are not a reason to diverge.
-
-**2. Then 3D grids in the ordering BENCHMARK**, which is a separate task from the check above.
-Every fill conclusion in this work is from square grids, which is one problem family and the
+**1. 3D grids in the ordering BENCHMARK**, a separate task from the check above and now the top
+item. Every fill conclusion in this work is from square grids, which is one problem family and the
 flattering one. The specific claim waiting on it is that our tie-break beats AMD's: `Amd2` fills
 6.5 percent BELOW the vendored routine at 140 a side, while `Mmd3` matches genmmd exactly. If that
 advantage is a 2D artifact we should know, because fill drives the factorization and the
 factorization is where the time is. A 2x ordering costs well under 15 percent of a one-shot solve;
 a fill difference costs more than that, permanently, on every factorization.
+
+`graphs.h` now holds a 3D builder, so this is a case list rather than any new code.
+
+**2. The same widening is available to `make test`, cheaply.** Its prototype-against-production
+comparison still runs on 2D grids at sides 10 and 20 alone, and `graphs.h` holds the 3D and random
+builders. Worth knowing before relying on that check: the prototypes carry no maintained clique
+degree, so a defect in production's encoding is invisible to it at any size. See `docs/TODO.md`,
+the first of the five ordering questions.
 
 **3. And only then the performance work below, which is a PARK rather than a queue.** One bounded
 attempt, worth an hour whenever the amd branch is picked up again. The branch is in a good state to
@@ -68,12 +67,11 @@ at 1.26x with fill matching genmmd. Nothing here blocks anything.
 ## The state, in one paragraph
 
 `amd3` is aligned: production `Amd3` returns `AMD_2`'s permutation exactly, up to the postorder it
-deliberately does not do, ON THE SEVEN EXAMPLES AND ON 2D GRIDS. Outside those two shapes it is
-unverified, which is the priority above. Both alignments are committed. AMD3 runs at about 2.32x
-the vendored routine at 140 a side and MMD3 at about 1.26x its own. The gap is NOT algorithmic,
-NOT integer
-width, NOT the number of arrays touched, NOT instruction count, and NOT any single line: all five
-measured and rejected. What is left is IPC, and the profile is stall-shaped.
+deliberately does not do, on the seven examples, 2D grids to 140, 3D grids to 24 and nine random
+patterns. AMD3 runs at about 2.32x the vendored routine at 140 a side and MMD3 at about 1.26x its
+own. The gap is NOT algorithmic, NOT integer width, NOT the number of arrays touched, NOT
+instruction count, and NOT any single line: all five measured and rejected. What is left is IPC,
+and the profile is stall-shaped.
 
 ## The parked attempt
 
@@ -111,7 +109,7 @@ The oracle is exact and it is the whole safety net:
 make test                        283 with private/, 269 without
 experiments/ordering:
   make test                      63 twin and prototype-against-production checks
-  ./production_cpp amd3 grid N   must equal the probe's raworder at 32, 100, 140
+  make raworder                  38 cases over four shapes
 ```
 
 Every ordering's permutation must be UNCHANGED. This is a re-schedule, not an algorithm change.
@@ -120,6 +118,11 @@ Every ordering's permutation must be UNCHANGED. This is a re-schedule, not an al
 liveness into the weight instead, looked exactly equivalent and produced 201 entries for 200
 vertices on a random `mmd2` pattern: an eliminated vertex with weight 1, sitting in a live adjacency
 list. `make test` catches it, but check `mmd2` specifically and early.
+
+**And run it under a sanitizer once**, which is cheap and is now known to be worth it:
+`-fsanitize=address,undefined` over the six drivers on 2D and 3D grids. That is what found the
+arena use-after-free, and a change that moves what a mark array means is exactly the shape that
+would introduce another.
 
 Also needed: an overflow guard on `mTag`, as `Amd3`'s `w` array has with `clearFlag`, since `mTag`
 only ever increments and `GONE` must stay above it.
@@ -140,7 +143,13 @@ routine's. `benchmarks/README.md` records how far an attempt to get them got and
 - **Whether LIFO is genuinely better than FIFO**, or genmmd is simply a good ordering. The two
   branches now disagree: aligning MMD improved our fill, aligning AMD costs us 6.5 percent on
   grids, which is what makes it worth answering. `experiments/ordering/REPORT.md` has the question,
-  the experiment and the caution that both figures are 2D.
+  the experiment and the caution that both figures are 2D. Priority 1 above is what it waits on.
+- **The clique arena still never reclaims.** The reserve added on 2026-08-09 stops it moving under
+  a walk, which was a correctness matter, and it does nothing about the arena growing toward
+  nnz(L) where the live cliques fit in nnz(A). `Amd.cpp` compacts in place and counts it in
+  `AMD_NCMPA`, which reads 1 for a whole 140x140 run. Section 5.3 of
+  `archive/sparse_factorization.md` has the conservation argument that makes that possible, and the
+  constructor's own comment already names reclaiming as the real fix.
 - **The counter sweep.** Loop counters against sizes should be `std::int32_t` with the bound cast
   once; the size ARRAYS stay `std::size_t` because they are arithmetic operands and narrowing them
   buys a cast at every one. Measured at zero for speed at the hottest loop, so this is a clarity

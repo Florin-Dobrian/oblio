@@ -264,6 +264,27 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
         degme = 0;
         for (std::size_t k = 0; k < pivotCliqueSize; ++k) degme += qg.weight(pivotClique[k]);
 
+        // AND THE STORED CLIQUE DEGREE IS WRITTEN AGAIN, which is not a tidy-up. `Amd.cpp` writes
+        // `Degree [me] = degme` TWICE, at its lines 1676 and 1940, and the second write is the
+        // durable one: by then scan 2 has run `degme -= nvi` for every vertex mass elimination
+        // took, so what a later step reads as |C[me]| is the post-merge size. The write above the
+        // scan holds the pre-merge size, which is what the scan itself must subtract from, since
+        // it runs over the untrimmed clique.
+        //
+        // We had only the first write, so any pivot that mass-eliminated left a clique degree
+        // permanently too large by the merged weight, and every later `dext = cliqueDegree[c] -
+        // ...` taken through that clique inherited it. That inflates a bound, and an inflated
+        // bound moves the ordering only when it moves the head of the minimum bucket, which is
+        // why it is invisible on 2D grids at every size to 140 a side and first surfaces on a 3D
+        // grid at 16.
+        //
+        // It is this driver's alone. Amd1 and Amd2 mass-eliminate inside the eliminator, so their
+        // clique is already trimmed when they take `degme` and their single write is correct. The
+        // defect arrived with ledger entry 3, which moved mass elimination out and did not carry
+        // the second write that placement is the whole reason for. Half a mechanism, as entry 6
+        // was. See experiments/ordering/AMD3.md.
+        cliqueDegree[pivot] = degme;
+
         const std::size_t numLeft = numLive;
 
         // The bound is formed in TWO halves here, where Amd2 forms it in one, and that split is

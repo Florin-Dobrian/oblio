@@ -106,6 +106,16 @@ direction, and both are noticeably faster.
 
 ## The test graphs
 
+**One definition, in `graphs.h`.** The seven examples were written out twice, in `vendored.cpp`
+and in `production.cpp`, and a third copy was about to go into `raworder.cpp`. Three copies of a
+literal is not a style complaint here: the drivers answer different questions about the SAME
+graphs and `make test` compares their outputs line for line, so a graph that drifted in one copy
+would make two drivers disagree for a reason that is not the code, and that would read exactly
+like a defect in an ordering. The header also holds the grid builders, so a shape added for one
+driver is available to the others, which is what the acceptance test's widening needed. Each
+driver keeps its own conversion to CSC, deliberately: ours takes a full-symmetric pattern with the
+diagonal present, and the vendored routines take the off-diagonal pattern alone.
+
 `graph1` is a 4-cycle, the smallest graph that fills at all: eliminating any vertex forces its
 two neighbors together, for one fill edge. It is also where md3 merges everything that is left
 in a single iteration, 1 taking 2 and 3, which makes it the simplest case for reading the cost of
@@ -503,8 +513,49 @@ make raworder
 ```
 
 That generates a hooked copy of the vendored source, builds the checker, and compares production
-`Amd3` against it on eleven grids from 4 a side to 140. `make clean` removes both the generated
-source and the binary; `./raworder_cpp 20 50` after building runs chosen sizes instead.
+`Amd3` against it on **four shapes**: the seven examples, 2D grids from 4 a side to 140, 3D grids
+from 2 to 24, and nine random patterns at n = 2000. `make clean` removes both the generated source
+and the binary; `./raworder_cpp 20 50` after building runs chosen 2D sizes instead, for bisecting a
+failure.
+
+**Four shapes and not one shape at many sizes, which is the whole point of the list.** Widening a
+square grid from 4 to 140 exercises scale and never mechanism, so a defect that needs a structure
+grids do not produce passes every size of it. That is not hypothetical here: the 2D-only version of
+this check was green while production `Amd3` carried the stale clique degree of ledger entry 7, and
+a 3D grid at 16 a side finds it. Each shape earns its place differently. The examples are small
+enough to read by hand and are where most ledger entries were found. 2D grids give regular
+structure at size. 3D grids fill faster, make larger cliques and mass-eliminate far more often.
+The random patterns give irregular structure at size, and they are the only family here that
+reaches a degree the dense threshold could act on.
+
+**Two settings the driver must get right, and both were wrong when the wider shapes first went in.**
+
+- **The dense threshold has to be derived from `n`.** Dense-row removal is the one mechanism amd3
+  does not have, so if it fires the oracle has ordered a different problem and no comparison means
+  anything. `Amd.cpp` turns it off through `dense = alpha * sqrt((double) n)`, then `MAX (16,
+  dense)` and `MIN (n, dense)`, and its header says to pass "a number larger than sqrt (n)" without
+  saying how much larger. It matters: `dense` is an `Int`, so an alpha that drives the product past
+  `INT32_MAX` makes the conversion undefined. `1e30` lands on `INT_MIN` on x86-64, `MAX (16,
+  INT_MIN)` is 16, and the threshold comes out at SIXTEEN rather than `n`, which is dense removal
+  fully on at the strictest setting the code can express; on arm64 the same conversion saturates
+  the other way and gives `n`. So the two platforms disagreed about what that line did. Neither
+  grid family can show it, both being far below degree 16. `alpha = n` cannot overflow at any size
+  we run and clamps to `n` throughout.
+- **And it is checked rather than trusted.** `Info[AMD_NDENSE]` reports what was removed, so the
+  claim costs one read, and the driver fails the case and says so. Without it a mis-set threshold
+  arrives as a size mismatch to be diagnosed, which is how the paragraph above was found; with it
+  the instrument names the fault instead of reporting that there is one. An instrument that
+  silently declines to measure is worse than one that is absent.
+
+**A third thing the widening turned up, and it is in the graph builders rather than the check.** A
+column's row indices must be ascending. It is the CSC precondition `SparseMatrix` states in its own
+header, and it is also a TIE-BREAK INPUT, since the order within a column decides the content order
+of `C[pivot]` and so which of several equal-degree vertices a bucket hands over first. The 2D
+builder is ascending by construction; a 3D builder written the natural way, `x-1, x+1, y-1, y+1,
+z-1, z+1`, is not, and the far corner of a 4x4x4 grid comes out `62, 59, 47`. Ours consumed the
+pattern as given and the vendored side sorted it, so the two parted company at the FIRST
+elimination and the divergence looked like a defect in the ordering. `graphs.h` builds ascending
+and says why at the site.
 
 The generated copy is `amd_raw.cpp`, written by `hook_amd.py` from whatever `private/Amd.cpp`
 currently says. It is gitignored and removed by `clean`, exactly as the int64 copies the width study
@@ -889,7 +940,42 @@ mirrored in `amd3.cpp`.
    clique, which entry 5 had just                       "skip the first element
    made a guaranteed match at                           in the list (me)"
    position zero
+7  the stored clique degree not     beginElimination,   Degree [me] = degme,        DEFECT
+   rewritten after mass             PRODUCTION Amd3     written TWICE, at its
+   elimination trimmed the clique   alone               lines 1676 and 1940
 ```
+
+**Entry 7 is production's alone, and that is the interesting half.** These prototypes obtain
+`|C[c] - C[p]|` by walking the members of `C[c]` and counting the live ones outside `C[p]`, so
+they recompute it from the truth at every step and nothing can go stale. Production maintains a
+clique degree and reaches the same quantity by subtraction, which is amd2's pass 3, and only
+production carries that encoding. `AMD_2` writes `Degree [me] = degme` twice, before scan 1 and
+again after supervariable detection; the second write is the durable one, because by then scan 2
+has run `degme -= nvi` for every vertex mass elimination took, so what a later step reads as
+`|C[me]|` is the post-merge size. Production wrote it once, with the pre-merge value, so any
+pivot that mass-eliminated left a clique degree permanently too large by the merged weight, and
+every later bound taken through that clique inherited it.
+
+It is half a mechanism again, exactly as entry 6 was. Ledger entry 3 moved mass elimination out
+of the eliminator and did not carry the second write that the move is the whole reason for.
+`Amd1` and `Amd2` cannot have it, mass-eliminating inside the eliminator, so their single write
+already sees a trimmed clique.
+
+**And the twin check could not have found it**, which is a limit rather than an oversight. A
+prototype written to read as the algorithm does not carry the optimization, so it cannot model a
+hazard that lives in one, which leaves the prototype-against-production comparison blind to
+precisely the class of defect that optimization introduces. That is the divergence `REPORT.md`
+parks as its fifth lead, and this is the first time it has cost anything. What found it was the
+acceptance test widened to a shape the defect can move: an inflated bound changes an ordering
+only when it changes the head of the minimum bucket, which no 2D grid does at any size to 140 a
+side, and a 3D grid at 16 does.
+
+**Entry 4's nature read `convention` in the prototype headers until 2026-08-09**, where this
+ledger, `AMD3.md` and `docs/DESIGN_DECISIONS.md` have all said DEFECT since the day it closed.
+The column is corrected there and the correction is dated rather than made silently: append-only
+protects the record from being rewritten as a tidy summary afterwards, not from being wrong about
+itself. Worth knowing that the copy called authoritative had drifted from its mirrors in the one
+column this section tells a reader to look at first, and that nothing compares them.
 
 **Entry 6 is a fourth NATURE and the word is needed.** It is neither convention nor defect nor
 cosmetic: it changes no ordering, no fill and no permutation, only the COST. Entry 5 put the new

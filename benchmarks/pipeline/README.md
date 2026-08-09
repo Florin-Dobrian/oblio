@@ -52,6 +52,15 @@ than of the orderings. Widening the matrices is the first thing this folder need
 
 ## Results
 
+**SUPERSEDED IN PART, 2026-08-08.** Every AMD2 figure below predates a defect fix: `Amd2` and
+`Amd2B` filed a supervariable one bucket too high per vertex a hash merge absorbed, because the
+bound subtracts the vertex's own weight before the merge that grows it, where `AMD_2` subtracts
+it after supervariable detection. Corrected, AMD2's fill is 11900 at 32 a side, 199386 at 100 and
+444191 at 140, against the 12364, 212496 and 487111 recorded here, so it now beats AMD1 at every
+size and the vendored AMD at the two larger ones. The figures below are kept as the record of the
+run that produced them. `docs/DESIGN_DECISIONS.md` (2026-08-08) and `docs/TODO.md` carry the
+finding; nothing about MMD, AMD or AMD1 moved.
+
 **alpamayo (Apple Silicon), macOS, Apple Clang, Accelerate, 2026-08-01.** Milliseconds, best of
 three, grid 140x140, n = 19600.
 

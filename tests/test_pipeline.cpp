@@ -765,7 +765,7 @@ int main() {
         for (Ordering om : {Ordering::Natural, Ordering::MMD, Ordering::MMD1,
                                Ordering::MMD2, Ordering::MMD3,
                                Ordering::AMD, Ordering::AMD1,
-                               Ordering::AMD2, Ordering::AMD1B,
+                               Ordering::AMD2, Ordering::AMD3, Ordering::AMD1B,
                                Ordering::AMD2B}) {
             DirectSolver<double> solver(om, Factorization::Cholesky, Traversal::LeftLooking);
             if (!solver.analyze(A) || !solver.factor(A) || !solver.solve(b, x))
@@ -780,9 +780,9 @@ int main() {
         // enumerator should make this fail until someone has decided the new ordering belongs in
         // the sweep, which is exactly what happened when MMD3 was added.
 #ifdef OBLIO_VENDORED_ORDERINGS
-        const int expectedOrderings = 10;
+        const int expectedOrderings = 11;
 #else
-        const int expectedOrderings = 8;
+        const int expectedOrderings = 9;
 #endif
         ck(reachedOrder == expectedOrderings, "Ordering       : every ordering built was reached");
         ck(reachedOrder == expectedOrderings && worstOrder < tol,

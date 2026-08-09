@@ -10,12 +10,24 @@ keep compiling as the tree moves, which is why `make` builds it without running 
 that silently stopped compiling would be discovered on the day it was wanted.
 
 ```
-make        build
-make run    build and run, grid sides 32, 64, 100, 140
+make            build
+make run        build and run, all ten methods, grid sides 32, 64, 100, 140
+make scale      one branch at a time over the ladder to 400 a side, with the gap columns
+make scale-mmd  the MMD branch alone
+make scale-amd  the AMD branch alone
 make clean
 
 ./order_timing_cpp 200 280      any grid sides
+./order_timing_cpp amd 200      one branch at chosen sides
 ```
+
+**Why `scale` is per branch.** The gap columns are ratios against the vendored routine of the same
+lineage, so they only mean anything within one; and ten methods at 400 a side is a long wait for
+columns nobody is reading. The AMD list is AMD, AMD1, AMD2, AMD3, with the vendored routine first
+because the gap columns take the first entry as their baseline. The B variants are left out: they
+are their originals' permutations on a different schedule, so their fill column carries no
+information and their time column belongs to the question about the seam rather than to the
+question about the branch.
 
 ## What it measures, and how
 
@@ -41,6 +53,15 @@ measurement being read as a result when it was a reading of something else.
 
 ## AMD2, added 2026-07-31
 
+**SUPERSEDED IN PART, 2026-08-08.** Every AMD2 figure below predates a defect fix: `Amd2` and
+`Amd2B` filed a supervariable one bucket too high per vertex a hash merge absorbed, because the
+bound subtracts the vertex's own weight before the merge that grows it, where `AMD_2` subtracts
+it after supervariable detection. Corrected, AMD2's fill is 11900 at 32 a side, 199386 at 100 and
+444191 at 140, against the 12364, 212496 and 487111 recorded here, so it now beats AMD1 at every
+size and the vendored AMD at the two larger ones. The figures below are kept as the record of the
+run that produced them. `docs/DESIGN_DECISIONS.md` (2026-08-08) and `docs/TODO.md` carry the
+finding; nothing about MMD, AMD or AMD1 moved.
+
 AMD1 plus aggressive absorption and hash supervariable detection. Measured on the Linux sandbox at
 140x140, as ratios to the vendored routines, the machine being too loaded for the milliseconds to
 mean anything: **AMD2 about 2.9x AMD, against AMD1's 1.5x**, with fill of 487111 against AMD1's
@@ -56,6 +77,14 @@ That is worth stating plainly rather than burying: **AMD2 is currently the worst
 this test set**, and the test set is one problem family. Whether hash detection earns itself on a
 matrix with real supernodal structure is the question the grids cannot answer, and it is now the
 strongest argument for widening the benchmark's matrices.
+
+**No longer true on fill, 2026-08-08.** AMD2 is now the BEST of ours on every grid size measured,
+11900 at 32 a side against AMD1's 12074, 199386 against 201856 at 100 and 444191 against 455472 at
+140, and it beats the vendored AMD at the two larger sizes. The paragraph above was measuring a
+defect in the filing rather than the cost of the mechanism: the bound subtracted a vertex's own
+weight before the hash merge that grows it, so every supervariable the hash produced was filed one
+bucket too high. On time nothing has changed and AMD2 remains the slowest of ours, so the argument
+for widening the matrices stands on that half and on the 3D result in `REPORT.md`.
 
 ## Where the gap actually is, 2026-07-31
 
@@ -498,6 +527,56 @@ more walk of `A[u]`, which is a third variant nobody has asked for. Recorded rat
 **Both B variants are kept**, on the oracle and on the seam being reusable, not on speed. Their
 collapse condition, written before either was built, was that a B variant replaces its original
 when permutation-identical and faster; neither is faster, so neither fires.
+
+## AMD3, added 2026-08-08, and the one line that was 75 percent of it
+
+AMD2 with the vendored routine's list order, adding no mechanism, so its fill is the vendored AMD's
+exactly at every size and the only question it poses is cost.
+
+**alpamayo, `make scale-amd`, ratios against the vendored AMD in the same row:**
+
+```
+grid          AMD ms    AMD1     AMD2     AMD3        AMD nnzL   AMD3 nnzL
+ 32x32          0.07    1.16x    2.06x    2.18x          11900       11900
+100x100         0.66    1.52x    2.46x    2.56x         206332      206332
+140x140         1.27    1.51x    2.42x    2.55x         474995      474995
+400x400        10.60    1.80x    2.58x    2.81x        5663298     5663298
+```
+
+**Before entry 6 those AMD3 ratios were 3.54x, 4.41x, 4.07x and 4.63x**, and the whole difference
+was one line. The alignment's fifth entry put the new clique at the front of every `I[u]`, which is
+what `Amd.cpp` does, and did not also skip that entry in the hash pass's exact test, which
+`Amd.cpp` does in the same breath. So a guaranteed match sat at the head of a short-circuiting walk
+and every failing pair paid one extra iteration.
+
+**Four hypotheses were built or argued before the right one, and three were wrong**, which is worth
+recording because each was plausible and each had a mechanism:
+
+- a `std::rotate` in the prune, `O(|A[u]|)` per reached vertex. Real extra work, folded into the
+  compaction, and worth nothing: the sandbox reading that suggested it was noise.
+- `partial`, a size-`n` array the entry-4 split carries, argued twice from the `explicitPart`
+  precedent in the AMD1B entry above, which it resembles exactly. The trace never implicated it.
+- the hash pair count, measured and equal within 7 percent.
+- and the one that was right, which no count could see: **the pair loops short-circuit, so what
+  they cost depends on WHERE the mismatch is.** Every counter measured what the test COULD cost.
+  Counting iterations actually executed gave 2.08 per pair against AMD2's 1.21, exactly one extra,
+  which is what a guaranteed match at position zero predicts. 1.08 after.
+
+```
+                        AMD2      AMD3 before    AMD3 after
+Time Profiler total    8.90 s        14.90 s        9.44 s
+orderAmdN SELF         4.76 s        10.46 s        4.76 s
+```
+
+Self weight identical to AMD2's to the millisecond. The residual 6 to 9 percent is a fourth pass
+AMD2 does not have plus 7 percent more pairs tested, which is about its size.
+
+**The method note, since this folder exists for it.** Instruments' call tree could not find this:
+everything is inlined into one symbol, so the tree said only that 5.70 s sat in `orderAmd3`'s self
+weight. The SOURCE VIEW named the line, at 6.22 s of a 14.90 s run. When a driver is one inlined
+symbol, the call tree bounds the search and only the source annotation ends it. And counting, which
+this folder recommends before profiling, was actively misleading here: it is the right instrument
+for "are we doing more work" and it cannot see a loop whose cost is decided by an early exit.
 
 ## Results
 

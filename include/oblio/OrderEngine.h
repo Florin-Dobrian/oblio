@@ -9,6 +9,7 @@
 //   AMD,     Approximate Minimum Degree (SuiteSparse 3.3.4, BSD-3)
 //   AMD1,    Approximate Minimum Degree, Oblio's own, the bound alone (src/Amd1.cpp)
 //   AMD2,    AMD1 plus aggressive absorption and hash detection (src/Amd2.cpp)
+//   AMD3,    AMD2 with the vendored routine's list order, to match its permutation (src/Amd3.cpp)
 //   AMD1B,   AMD1's ordering with the eliminator and the first scan fused (src/Amd1B.cpp)
 //   AMD2B,   the same fusion applied to AMD2 (src/Amd2B.cpp)
 //
@@ -34,7 +35,8 @@
 
 namespace Oblio {
 
-enum class Ordering { Natural, MMD, MMD1, MMD2, MMD3, AMD, AMD1, AMD2, AMD1B, AMD2B };
+
+enum class Ordering { Natural, MMD, MMD1, MMD2, MMD3, AMD, AMD1, AMD2, AMD3, AMD1B, AMD2B };
 
 class OrderEngine {
 public:
@@ -92,6 +94,10 @@ private:
                    const std::vector<std::int32_t>& rowIdx,
                    Permutation& P) const;
     bool orderMMD3(std::size_t size,
+                   const std::vector<std::size_t>&  colPtr,
+                   const std::vector<std::int32_t>& rowIdx,
+                   Permutation& P) const;
+    bool orderAMD3(std::size_t size,
                    const std::vector<std::size_t>&  colPtr,
                    const std::vector<std::int32_t>& rowIdx,
                    Permutation& P) const;

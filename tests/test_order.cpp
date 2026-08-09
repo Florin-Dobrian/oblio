@@ -47,6 +47,7 @@ int main(){
       checkOrder(A,Ordering::MMD3,"arrow 6x6      : MMD3 valid");
       checkOrder(A,Ordering::AMD1,"arrow 6x6      : AMD1 valid");
       checkOrder(A,Ordering::AMD2,"arrow 6x6      : AMD2 valid");
+      checkOrder(A,Ordering::AMD3,"arrow 6x6      : AMD3 valid");
       checkOrder(A,Ordering::AMD1B,"arrow 6x6      : AMD1B valid");
       checkOrder(A,Ordering::AMD2B,"arrow 6x6      : AMD2B valid");
       checkSameOrder(A,Ordering::AMD1,Ordering::AMD1B,"arrow 6x6      : AMD1B == AMD1");
@@ -62,6 +63,7 @@ int main(){
       checkOrder(A,Ordering::MMD3,"tridiag n="+std::to_string(size)+" : MMD3 valid");
       checkOrder(A,Ordering::AMD1,"tridiag n="+std::to_string(size)+" : AMD1 valid");
       checkOrder(A,Ordering::AMD2,"tridiag n="+std::to_string(size)+" : AMD2 valid");
+      checkOrder(A,Ordering::AMD3,"tridiag n="+std::to_string(size)+" : AMD3 valid");
       checkOrder(A,Ordering::AMD1B,"tridiag n="+std::to_string(size)+" : AMD1B valid");
       checkOrder(A,Ordering::AMD2B,"tridiag n="+std::to_string(size)+" : AMD2B valid");
       checkSameOrder(A,Ordering::AMD1,Ordering::AMD1B,
@@ -81,6 +83,7 @@ int main(){
       checkOrder(A,Ordering::MMD3,"diagonal 5x5   : MMD3 valid");
       checkOrder(A,Ordering::AMD1,"diagonal 5x5   : AMD1 valid");
       checkOrder(A,Ordering::AMD2,"diagonal 5x5   : AMD2 valid");
+      checkOrder(A,Ordering::AMD3,"diagonal 5x5   : AMD3 valid");
       checkOrder(A,Ordering::AMD1B,"diagonal 5x5   : AMD1B valid");
       checkOrder(A,Ordering::AMD2B,"diagonal 5x5   : AMD2B valid");
       checkSameOrder(A,Ordering::AMD1,Ordering::AMD1B,"diagonal 5x5   : AMD1B == AMD1");
@@ -98,6 +101,7 @@ int main(){
       checkOrder(C,Ordering::MMD3,"arrow complex  : MMD3 valid");
       checkOrder(C,Ordering::AMD1,"arrow complex  : AMD1 valid");
       checkOrder(C,Ordering::AMD2,"arrow complex  : AMD2 valid");
+      checkOrder(C,Ordering::AMD3,"arrow complex  : AMD3 valid");
       checkOrder(C,Ordering::AMD1B,"arrow complex  : AMD1B valid");
       checkOrder(C,Ordering::AMD2B,"arrow complex  : AMD2B valid");
       checkSameOrder(C,Ordering::AMD1,Ordering::AMD1B,"arrow complex  : AMD1B == AMD1");

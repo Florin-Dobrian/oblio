@@ -38,6 +38,12 @@ endif
 # so they live in ../../private and are optional. Absent, this benchmark still builds and any row
 # that asks for Ordering::MMD or Ordering::AMD reports a refusal.
 OBLIO_SRCS  = $(wildcard ../../src/*.cpp)
+
+# The headers are prerequisites too, and leaving them out was a real defect: a change to
+# include/oblio/QuotientGraph.h alone left `make run` reporting the OLD binary, silently, because
+# every source was older than the target. The library's own Makefile has always carried LIB_HDRS
+# for this reason; the benchmarks link ../../src directly and had never been given the same.
+OBLIO_HDRS  = $(wildcard ../../include/oblio/*.h)
 # OBLIO_PUBLIC=1 builds as everyone else does, ignoring private/ even when it is there. Same word
 # in every Makefile here that links the library, so one habit covers all of them.
 ifdef OBLIO_PUBLIC
@@ -69,7 +75,7 @@ help:
 
 all: order_timing_cpp
 
-order_timing_cpp: order_timing.cpp $(OBLIO_SRCS) $(VENDOR_SRCS) .build-mode
+order_timing_cpp: order_timing.cpp $(OBLIO_SRCS) $(OBLIO_HDRS) $(VENDOR_SRCS) .build-mode
 	$(if $(VENDOR_SRCS),$(CXX) $(CXXFLAGS) -w -c $(VENDOR_SRCS))
 	$(CXX) $(CXXFLAGS) $(VENDOR_DEFS) $< $(OBLIO_SRCS) $(VENDOR_OBJS) $(BLAS_LIBS) -o $@
 
@@ -77,19 +83,24 @@ run: all
 	./order_timing_cpp
 
 # The same binary, asked a different question. `run` is what each method costs at four sizes;
-# `scale` is how far MMD1 and MMD2 sit from the vendored MMD and whether that distance moves with
-# n, over a ladder wide enough to tell a constant factor from a trend. MMD only, because that is
-# the branch the gap is currently being chased in, and because eight methods at 400 a side is a
-# long wait for columns nobody is reading.
-scale: all
+# `scale` is how far ours sit from the vendored routine of the same lineage and whether that
+# distance moves with n, over a ladder wide enough to tell a constant factor from a trend. One
+# branch at a time, because ten methods at 400 a side is a long wait for columns nobody is reading
+# and because the two branches are chased separately.
+scale: scale-mmd scale-amd
+
+scale-mmd: all
 	./order_timing_cpp mmd
+
+scale-amd: all
+	./order_timing_cpp amd
 
 # Built separately, with symbols and without NDEBUG's effect on inlining left to chance: a profile
 # has to describe the code that actually runs. See the header of order_profile.cpp for how to
 # attach a profiler.
 profile: order_profile_cpp
 
-order_profile_cpp: order_profile.cpp $(OBLIO_SRCS) $(VENDOR_SRCS) .build-mode
+order_profile_cpp: order_profile.cpp $(OBLIO_SRCS) $(OBLIO_HDRS) $(VENDOR_SRCS) .build-mode
 	$(if $(VENDOR_SRCS),$(CXX) $(CXXFLAGS) -g -fno-omit-frame-pointer -w -c $(VENDOR_SRCS))
 	$(CXX) $(CXXFLAGS) -g -fno-omit-frame-pointer $(VENDOR_DEFS) order_profile.cpp $(OBLIO_SRCS) \
 	  $(VENDOR_OBJS) $(BLAS_LIBS) -o $@

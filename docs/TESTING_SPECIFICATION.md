@@ -25,13 +25,16 @@ below: it catches an example that crashes, that returns a failure, or that has q
 being built, and says nothing about whether the numbers it prints are right. The stronger version,
 checking deterministic output, is open in docs/TODO.md and is awkward while residuals are in the
 output, since those legitimately differ in the last bits across BLAS
-implementations. Totals today: **269 assertions across 8 suites** with the vendored orderings
-present, **255 without**.
+implementations. Totals today: **283 assertions across 8 suites** with the vendored orderings
+present, **269 without**. Corrected 2026-08-08 from 269 and 255, which had drifted: `MMD3` landed
+in `test_order` on 2026-08-07 and this file was not moved with it, which is exactly the failure
+the invariant above exists to prevent, and it went unnoticed because both counts are self
+consistent and the suite passes either way.
 
 **The count depends on the build, and that is deliberate.** The vendored MMD and AMD live in
 `private/`, which is not published, and both builds detect rather than require it. Fourteen
 assertions in `test_order` check those two routines and compile only when they are there, so that
-suite reports 77 or 63. Nothing else varies: every other suite asserts the same thing either way,
+suite reports 91 or 77. Nothing else varies: every other suite asserts the same thing either way,
 everything they use being ours. The one place the difference shows outside `test_order` is the
 nine-ordering sweep in `test_pipeline`, which expects every ordering the build has rather than a
 fixed nine.
@@ -40,7 +43,7 @@ fixed nine.
 |---|---|---|
 | `smoke` | 5 | the tree builds and the basic objects work |
 | `test_permutation` | 11 | the index map and its composition |
-| `test_order` | 77 / 63 | the orderings are valid, and each B pair reproduces its original (63 without `private/`) |
+| `test_order` | 91 / 77 | the orderings are valid, and each B pair reproduces its original (77 without `private/`) |
 | `test_forest` | 29 | elimination forest, supernodes, amalgamation, multifrontal child order |
 | `test_symfactor` | 29 | supernodal index sets against a dense oracle |
 | `test_numfactor` | 18 | the numeric factor, by oracle and by reconstruction |
@@ -95,11 +98,11 @@ inverse it gives the identity, it is order sensitive in both directions, it is n
 identity on either side is neutral, and a size mismatch is refused. A random sweep of 500 checks
 composition against direct application and the inverse against the identity.
 
-### test_order, 49 assertions (14 of the suite's total are the vendored pair's, and optional)
+### test_order, 91 assertions (14 of them the vendored pair's, and optional)
 
-Seven matrices, each checked for structural symmetry and then ordered by all eight non-trivial
-methods, AMD, AMD1, AMD1B, AMD2, AMD2B, MMD, MMD1 and MMD2, with the result checked for validity as
-a permutation. Matrices: a 6x6 arrow, tridiagonals at n = 1, 2, 10 and 100, a 5x5 diagonal, and a
+Seven matrices, each checked for structural symmetry and then ordered by all ten non-trivial
+methods, AMD, AMD1, AMD1B, AMD2, AMD2B, AMD3, MMD, MMD1, MMD2 and MMD3, with the
+result checked for validity as a permutation. Matrices: a 6x6 arrow, tridiagonals at n = 1, 2, 10 and 100, a 5x5 diagonal, and a
 complex arrow.
 
 **Fourteen further assertions compare each B variant against its original entry for entry**, seven
@@ -359,7 +362,7 @@ error, and it is why the count is asserted separately from the residual: a silen
 combination would otherwise leave the worst residual looking perfect.
 
 **Two assertions cover the ordering methods**, on the same tier 0 matrix and through the same
-facade: that all nine are reached, and that the worst residual over them is at machine precision.
+facade: that all eleven are reached, and that the worst residual over them is at machine precision.
 Validity, which `test_order` checks, says a permutation is well formed; it does not say the rest of
 the pipeline can use it. This is the assertion that says so, and it is what a new ordering method
 has to pass before it counts as working. Fill is not asserted here either.

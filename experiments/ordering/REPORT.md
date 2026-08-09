@@ -125,6 +125,22 @@ The two branches therefore need opposite work, which is worth knowing before eit
 
 ## Finding 3: AMD2's extras are a net loss, and the hash is almost all of it
 
+**REVERSED ON FILL, 2026-08-08, and it was a defect rather than a mechanism.** The alignment method said to
+treat this finding as unresolved until the permutations matched, and they now do. `Amd2` and
+`Amd2B` filed a supervariable one bucket too high per vertex a hash merge absorbed, the bound
+having subtracted the vertex's own weight before the merge that grows it. Corrected, AMD2's fill
+is 11900 at 32 a side, 199386 at 100 and 444191 at 140, so it beats AMD1 at every size by 1 to 3
+percent where this section records it as worse. The extras were not costing fill; the filing was,
+and the hash was being charged for it, which is exactly the attribution alignment was supposed to
+buy.
+
+**The time half stands.** Nothing here makes the hash cheaper, and its 72 to 92 percent share of
+AMD2's overhead is unaffected. The gating measurement in "The one gap we can explain" is still
+the right one.
+
+The numbers below are kept as the record of the run that produced them.
+
+
 AMD2 adds aggressive absorption and hash supervariable detection to AMD1. Gating each independently
 in the prototype, on 2D grids:
 
@@ -375,6 +391,74 @@ it. The four arrays that carried the 17 to 26 percent are all COUNTS by this rea
 count would be `std::uint32_t`, or an alias over it, which has the additional merit of staying a
 distinct type from `std::int32_t` so counts and indices cannot silently interchange.
 
+**Both branches measured together, alpamayo, 2026-08-08.** `make width` in this folder builds a
+second copy of each vendored routine with its integer type widened to `int64_t` and times the two
+against each other in one run, with AMD's fill and MMD's permutation asserted equal on every row so
+the work is known to be identical.
+
+**Read this as a RANGE and not as digits.** Two runs of the identical binary disagreed by a factor
+of two on MMD at 140 a side, 14.5 percent against 6.6, and both reported the WIDER build as faster
+at the smallest sizes. The harness now picks its repeat count from a timed probe so every row runs
+for about the same wall time, which was the cause; before that, the small rows were four
+milliseconds of measurement and the large ones seven orderings. What survives across runs:
+
+```
+                     AMD          MMD
+n up to ~10000    within noise, both signs seen
+n = 19600         10 to 19%    7 to 15%
+n = 40000+        14 to 33%   13 to 37%
+```
+
+**Width is a shared effect and it explains none of the branch gap.** The two branches pay within
+noise of each other at every size, and MMD3 runs at 1.2x its vendored routine where AMD3 runs at
+2.55x. Whatever separates them, it is not the width of the arrays.
+
+**Three claims of mine died here and all were one error.** I measured this on the Linux sandbox
+first and read AMD's penalty as larger and steeper than MMD's, projecting that a count sweep would
+take AMD3 from 2.55x to about 2.1x. On alpamayo the penalty at 140 is around 10 to 19 percent, not
+the 19 to 31 the sandbox showed, so the sweep is worth a few percent there and not half the gap.
+The "AMD's is worse than MMD's" comparison was made across two harnesses run at different times,
+which measures the harnesses as well; running them together reverses it. And I then quoted single
+digits off one run of a harness too coarse to support them.
+
+**Comparing a fresh number against a recorded one is not a comparison**, and a number is not a
+measurement until the harness has been shown to reproduce it. Both are worth more than the result.
+
+The count sweep remains worth doing, for the reason it was always worth doing: a count is not a
+position and the code should say so. It is not a performance item at the sizes that matter here.
+
+**Two harness notes, because each cost a misreading.** The first routine timed at the smallest size
+carried the core's clock ramp and reported 0.19 ms against the second routine's 0.07 on the same
+work; taking the minimum does not remove that, since the ramp outlasts the loop at n = 1024, so one
+untimed call per routine per row is discarded. And the repeat count is chosen from a timed probe
+targeting 400 ms per row, which is 1596 repeats at n = 1024 and 20 at n = 160000, where a fixed
+count gave 25 and 7.
+
+**A second instance, 2026-08-08, and it is smaller and sharper than the width one.** The amd hash
+pass walks a vertex's incidence list with an `std::size_t` counter and stamps cliques at
+`c + static_cast<std::int32_t>(size)`. Neither quantity is two dimensional: the counter is bounded
+by `deg(v)` and so by `n`, and `size` is the matrix order. Both are counts. With a count type the
+line would read `mark[incidenceV[i] + size]` with no cast at all, and the counter would be the
+width of what it holds.
+
+The cast was named as `cliqueStamp`, one crossing per driver rather than four, which is worth doing
+whatever type the counts eventually get. **The counters are simply wrong and are owed a sweep**:
+`std::size_t` is for a position into an area, these are bounded by a side, and until a count type
+exists the honest spelling is `std::int32_t` with the bound cast in the condition.
+
+**One argument against that sweep was made here and withdrawn, and it is recorded because it was
+nearly convincing.** `benchmarks/ordering/README.md` measures hoisting these loops' bounds at 2.3
+percent worse for AMD2, since they exit on the first mismatch. That is a fact about HOISTING THE
+LOAD and says nothing about the counter's type: an `std::int32_t` counter with the call left in the
+condition performs the same load and the same comparison at a different width, and the cast folds
+into the compare. Reading a measurement of one change as evidence about a different change is the
+same error as the entry-4 sentence that ruled the amd branch out by an argument that reached past
+where it was checked.
+
+That is the useful shape of the finding: **the missing category shows up first as casts nobody can
+place and loop counters nobody can type**, well before it shows up as time. The width measurement
+was 17 to 26 percent and is the reason to care; this is the reason it will keep being noticed.
+
 **One caution, and it is already live.** Unsigned counts wrap on subtraction, and the ordering
 subtracts constantly. `Mmd3.cpp` has
 
@@ -458,11 +542,55 @@ part of the MMD time gap, which is array width.
    defect, found by building MMD3 and aligning it to genmmd one divergence at a time. MMD3's fill
    is now genmmd's exactly at every size and MMD2's gap fell from about 20 percent to 7. See the
    experiment README's mmd3 section for the ledger and the wrong turns.
-4. **Open question 1, the AMD1 3D fill gap.** Hardest, because it is in the base, and most valuable
-   for the same reason: everything above AMD1 inherits it.
-5. **Then the hash key fusion.** It is the best understood of the four and the only one with a
-   known repair, which is exactly why it should not go first. It is a constant factor on a layer
-   whose fill behavior we do not yet understand.
+4. **Open question 2, why our hash costs fill where the vendored one saves it: CLOSED 2026-08-08.**
+   It was not the hash. `Amd2` and `Amd2B` filed a supervariable one bucket too high per vertex a
+   hash merge absorbed, the bound having subtracted the vertex's own weight before the merge that
+   grows it. Corrected, AMD2 beats AMD1 at every grid size and the vendored AMD at the two larger
+   ones. Found by building AMD3 and aligning it to `AMD_2` one divergence at a time; see the
+   experiment README's amd3 section. Finding 3 reverses on fill and stands on time.
+5. **Open question 1, the AMD1 3D fill gap.** Hardest, because it is in the base, and most valuable
+   for the same reason: everything above AMD1 inherits it. Note that AMD2's fill is no longer
+   evidence about it in either direction, the defect above having moved every AMD2 figure.
+6. **Then the hash key fusion.** It is the best understood of the remaining items and the only one
+   with a known repair. Its fill behavior is now understood, which was the reason given for not
+   taking it first; what is left is the constant factor, and the time half of finding 3 is
+   untouched by anything done since.
+7. **And a new one, from the alignment.** AMD3 fills more than the corrected AMD2 on grids, 474995
+   against 444191 at 140 a side, so our tie-break now beats AMD's by 6.5 percent where aligning
+   MMD improved ours. Whether that survives outside 2D grids is item 2 above, and it is the second
+   data point for the LIFO-against-FIFO question below.
+
+## Open question: is LIFO actually better, or is genmmd merely good?
+
+Raised by the mmd alignment, unanswered, and now with a second data point from amd. It was written
+down in the handover note between the two sessions and moved here when that note was deleted.
+
+**The mmd evidence.** The tie-break entries alone took mmd2's fill gap from about 20 percent to
+about 10, and entry 5's defect alone took it from 20 to 7. So the tie-break is worth roughly 7 to 10
+percent of fill on its own, which is a real effect and not noise. But converging on genmmd would
+lower fill whether or not LIFO is inherently better, so the measurement does not separate the two.
+
+**The amd evidence, and it points the OTHER WAY.** `amd3` is aligned, so its fill is the vendored
+routine's: 474995 at 140 a side, where the corrected `Amd2` reaches 444191. On grids our tie-break
+beats AMD's by 6.5 percent. Aligning MMD improved our fill; aligning AMD costs it.
+
+**So the two branches disagree**, which is what makes the question worth answering rather than
+assuming. Either LIFO is not inherently better and genmmd is simply a good ordering, or the two
+vendored routines differ in ways the tie-break label does not capture.
+
+**The experiment is cheap and is worth running once, from an ALIGNED baseline.** Take mmd3, flip ONE
+walk back to FIFO, measure fill, restore it, repeat for each of the four; then the same for amd3's
+six entries. From a matched baseline that isolates each walk's contribution and answers whether the
+direction itself carries quality. Doing it before alignment would have been meaningless, which is
+why it was not done.
+
+**And it wants 3D grids, not 2D.** Both figures above are from square grids, which is one problem
+family and the flattering one. The 3D result in this report is the reason to distrust a 2D-only
+conclusion about fill.
+
+That minimum degree is tie-break sensitive is well established, and is why the vendored routines are
+used as oracles rather than reimplemented. Whether LIFO against FIFO specifically is characterized
+in the literature has NOT been checked and should not be asserted either way.
 
 ## Leads and observations parked, 2026-08-06
 

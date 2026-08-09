@@ -5,6 +5,8 @@
 #:   make test     build them, run each, check the C++ agrees with its Python twin, and check
 #:                 each ported layer agrees with the production driver extracted from it
 #:   make production   the production drivers on these graphs, linked from ../../src
+#:   make width        what the integer width costs, measured on the vendored AMD by retyping it
+#:                     to int64_t and timing the two against each other. Needs private/.
 #:   make vendored     the vendored MMD and AMD on the same graphs, for reference. This is the
 #:                 only target here that needs private/, and it reports rather than fails without
 #:                 it; OBLIO_PUBLIC=1 makes it behave as though private/ were absent
@@ -69,23 +71,28 @@ PYTHON   ?= python3
 # in the README section "Zooming in on md2": exact against bounded on one axis, recomputed against
 # maintained on the other. They are not rungs and nothing is extracted from them, so they never
 # join PORTED below; their oracle is each other and their own twins.
-LAYERS = md1 md2 md3 md4 md5 mmd1 mmd2 mmd3 amd1 amd2 amd3 mdm2 mda2 mdam2
+LAYERS = md1 md2 md3 md4 md5 mmd1 mmd2 mmd3 amd1 amd2 amd3 amd4 mdm2 mda2 mdam2
 BINS   = $(addsuffix _cpp,$(LAYERS))
 
 # The layers that have been pulled into the main tree, and so have a production driver to be
 # checked against. Grows as the extraction proceeds; empty would simply skip that check.
 # Layers checked by permutation, and layers checked by fill. PORTED_FILL is empty and the weaker
 # check exists only in case a future layer needs it: amd2 was in it until the postorder moved to
-# amd3, and every ported layer now matches production entry for entry.
+# what is now amd4, and every ported layer now matches production entry for entry.
 #
-# amd3 is not here at all and is not expected to be. Its four items are input conditioning, the
+# amd4 is not here at all and is not expected to be. Its four items are input conditioning, the
 # postorder and a control interface, none of which Oblio has or wants, so there is no production
 # counterpart to compare it against. Its oracle is its own C++ twin. That is also why the
 # prototype's matrix1 has nothing to compare against on this side: it is the one example given as
 # a matrix rather than a graph, unsymmetric with duplicates and an unsorted column, and it exists
-# to exercise amd3Aat and amd3Preprocess.
-PORTED      = mmd1 mmd2 mmd3 amd1 amd2
+# to exercise amd4Aat and amd4Preprocess.
+#
+# The digit is not the chain here: amd4 forks sideways from amd2 and is temporary, renamed out of
+# the way so that amd3 can be the layer aligned to the vendored routine, which is what mmd3
+# already is on the other branch. Its own header says so and says when it goes.
+PORTED      = mmd1 mmd2 mmd3 amd1 amd2 amd3
 PORTED_FILL =
+
 
 # The grid sides each ported layer is also compared on, beyond the seven examples. The examples
 # are at most twelve vertices, which is too small to fire a mechanism that needs real structure:
@@ -114,7 +121,7 @@ GRID_SIDES  = 10 20
 # one. The first half is still true and no longer costs anything, since a run above SHOW_THRESHOLD
 # prints no trace at all; the second half was answering the wrong question, because the grid is not
 # there to be read, it is there to be diffed, and the md layers had no check at any size the seven
-# examples cannot reach. amd3 is here although it is not in PORTED: it has no production
+# examples cannot reach. amd4 is here although it is not in PORTED: it has no production
 # counterpart to be checked against, which makes its twin the only oracle it has, and that is a
 # reason to exercise it harder rather than less.
 GRID_LAYERS = $(LAYERS)
@@ -129,6 +136,11 @@ GRID_LAYERS = $(LAYERS)
 # OrderEngine.cpp once declared their entry points unconditionally and the linker therefore
 # demanded them.
 PROD_SRCS   = $(wildcard ../../src/*.cpp)
+
+# The headers too. Without them a change to include/oblio/QuotientGraph.h alone leaves
+# production_cpp stale, and `make test` then compares this session's prototype against LAST
+# session's production and reports agreement. See benchmarks/ordering/Makefile.
+PROD_HDRS   = $(wildcard ../../include/oblio/*.h)
 #
 # VENDOR_SRCS is spelled the same here, in ../../Makefile and in both benchmark Makefiles, so
 # `make <target> VENDOR_SRCS=` builds the published configuration from any of them.
@@ -143,7 +155,7 @@ else
   VENDOR_SRCS = $(wildcard ../../private/Amd.cpp ../../private/Mmd.cpp)
 endif
 
-.PHONY: all test production vendored clean help
+.PHONY: all test production vendored width clean help
 
 # Print the target list from this file's header. Those lines are marked with #: so there is one
 # source of truth: the header comment is the help text.
@@ -230,7 +242,7 @@ test: all production_cpp
 
 # Oblio's own ordering drivers, run on the same graphs as the prototypes. The mirror image of
 # vendored_cpp: that one runs what we are reading against, this one runs what we extracted.
-production_cpp: production.cpp $(PROD_SRCS)
+production_cpp: production.cpp $(PROD_SRCS) $(PROD_HDRS)
 	$(CXX) $(CXXFLAGS) -I../../include -DOBLIO_BLAS_UNDERSCORE production.cpp \
 	  $(PROD_SRCS) $(BLAS_LIBS) -o $@
 
@@ -246,12 +258,64 @@ production: production_cpp
 ifeq ($(VENDOR_SRCS),)
 vendored:
 	@echo "vendored: skipped, private/ is not present"
+width:
+	@echo "width: skipped, private/ is not present"
 else
 vendored_cpp: vendored.cpp $(VENDOR_SRCS)
 	$(CXX) -std=c++17 -O3 -w vendored.cpp $(VENDOR_SRCS) -o $@
 
 vendored: vendored_cpp
+
+# The width study. A SECOND copy of the vendored AMD is generated here with its one `using Int`
+# line retyped to int64_t and its entry point renamed, so both widths can be linked into one
+# program and timed against each other. Generated rather than committed: it is a mechanical
+# transform of a file that is not ours and not tracked, and a stale copy of private/ living in the
+# experiment would be worse than no copy at all.
+amd_int64.cpp: ../../private/Amd.cpp
+	@sed -e 's/using Int = int32_t;/#include <vector>\nusing Int = int64_t;/' \
+	     -e 's/^extern "C" int amd_order(/extern "C" int amd_order64(/' $< > $@.tmp
+	@python3 -c "import sys;\
+p='$@.tmp';s=open(p).read();\
+old='    return AMD_order(n, Ap, Ai, P, Control, Info);';\
+new='    std::vector<Int> ap(n + 1), ai(Ap[n]), p_(n);\n\
+    for (int32_t k = 0; k <= n; ++k) ap[k] = Ap[k];\n\
+    for (int32_t k = 0; k < Ap[n]; ++k) ai[k] = Ai[k];\n\
+    const int status = AMD_order(static_cast<Int>(n), ap.data(), ai.data(), p_.data(), Control, Info);\n\
+    for (int32_t k = 0; k < n; ++k) P[k] = static_cast<int32_t>(p_[k]);\n\
+    return status;';\
+assert s.count(old)==1, 'the entry point moved; width.cpp needs updating';\
+open('$@','w').write(s.replace(old,new))"
+	@rm -f $@.tmp
+
+# genmmd has no `using Int` line: it is plain `int` throughout, all of them the arithmetic type,
+# so its transform is a blanket rename to a typedef rather than a one-line change. Mechanical for
+# that file, and it would not be for one mixing widths.
+mmd_int64.cpp: ../../private/Mmd.cpp
+	@python3 -c "import re;\
+s=open('$<').read();\
+s=re.sub(r'\\bint\\b','MmdInt',s);\
+assert s.count('void mmd_order64_inner(')==0 and s.count('void mmd_order(')==1, 'the entry point moved';\
+s=s.replace('void mmd_order(','void mmd_order64_inner(',1);\
+open('$@','w').write('#include <cstdint>\n#include <vector>\nusing MmdInt = int64_t;\n'+s+'''\n\
+extern \"C\" void mmd_order64(std::int32_t n, const std::int32_t colPtr[], const std::int32_t rowIdx[],\n\
+                            std::int32_t perm[], std::int32_t invp[])\n\
+{\n\
+    if (n <= 0) return;\n\
+    const std::int32_t nnz = colPtr[n];\n\
+    std::vector<MmdInt> cp(n + 1), ri(nnz), p(n), ip(n);\n\
+    for (std::int32_t k = 0; k <= n; ++k) cp[k] = colPtr[k];\n\
+    for (std::int32_t k = 0; k < nnz; ++k) ri[k] = rowIdx[k];\n\
+    mmd_order64_inner(n, cp.data(), ri.data(), p.data(), ip.data());\n\
+    for (std::int32_t k = 0; k < n; ++k) { perm[k] = static_cast<std::int32_t>(p[k]);\n\
+                                           invp[k] = static_cast<std::int32_t>(ip[k]); }\n\
+}\n''')"
+
+width_cpp: width.cpp $(VENDOR_SRCS) amd_int64.cpp mmd_int64.cpp
+	$(CXX) -std=c++17 -O3 -DNDEBUG -w width.cpp $(VENDOR_SRCS) amd_int64.cpp mmd_int64.cpp -o $@
+
+width: width_cpp
+	./width_cpp
 endif
 
 clean:
-	rm -f $(BINS) vendored_cpp production_cpp Amd.o Mmd.o
+	rm -f $(BINS) vendored_cpp production_cpp width_cpp amd_int64.cpp mmd_int64.cpp Amd.o Mmd.o

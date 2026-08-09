@@ -39,7 +39,7 @@ std::vector<std::int32_t> orderAmd1(const std::vector<std::size_t>&  colPtr,
     // allocates and zeroes it per pivot, which reads better and is O(n) per step, O(n^2) over the
     // run in bookkeeping alone, independent of the graph. Only the entries this step wrote are
     // touched, and they are exactly the ones it will read.
-    std::vector<std::size_t>  outside(size, 0);
+    std::vector<std::size_t> outside(size, 0);
     std::vector<std::int32_t> touchedCliques;
 
     // |C[c]| per live clique, weighted, which is what the scan below subtracts from. Exact rather

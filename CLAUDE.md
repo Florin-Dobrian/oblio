@@ -171,8 +171,8 @@ include them, or use the Makefile, which detects the directory itself.
 nobody else can. To build as they do, put `OBLIO_PUBLIC=1` in front of any make command:
 
 ```
-make test                          # this machine: 252 assertions
-OBLIO_PUBLIC=1 make test           # everyone else:  238
+make test                          # this machine: 283 assertions
+OBLIO_PUBLIC=1 make test           # everyone else:  269
 ```
 
 `make help` in any of those directories prints its target list and this note, so the reminder is a
@@ -208,15 +208,16 @@ cd /tmp/oblio-clone
 make test
 ```
 
-Expect `238/238 assertions across 8 suites, 7 examples run`, against 252 in the working tree. Then
+Expect `269/269 assertions across 8 suites, 8 examples run`, against 283 in the working tree. Then
 
 ```
 cd -
 rm -rf /tmp/oblio-clone
 ```
 
-Run 2026-08-04 on alpamayo, after making the vendored orderings private: 252 in the tree, 238 in the
-clone, as expected.
+Run 2026-08-04 on alpamayo, after making the vendored orderings private: 252 in the tree, 238 in
+the clone, as expected. The counts have since grown to 283 and 269, with `MMD3`, `AMD3` and the amd
+alignment work; the figures above are the current ones.
 
 Worth extending to the other directories when something there has changed, all of which should
 work in the clone with no `private/` present:
@@ -383,3 +384,10 @@ file, Makefile rule or README reference is affected by it.
   (`template-instantiation/`, `friend-access/`, `storage-options/`). Each validates a
   coding standard; build standalone with `make test`. Not part of the main build. See
   DESIGN_DECISIONS.
+- **experiments/ordering/**, the minimum-degree ladder, and the largest of these by some way. Its
+  own README is the durable record and holds both alignment ledgers. Beside it, `MMD3.md` and
+  `AMD3.md` record the two alignments ITERATION BY ITERATION: what each step established,
+  discovered and decided, the wrong turns at full length, and the defects each found in the layer
+  below. Narrative, read once. They live here rather than under docs/ because they are the record
+  of experiment work, not guidance for a reader of the library. The README's method section is where the
+  alignment procedure itself is written down, `REPORT.md` the measurements.

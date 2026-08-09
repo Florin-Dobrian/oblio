@@ -47,3 +47,6 @@ private/
 
 REPO_MAP.md
 reference/
+
+experiments/ordering/amd_int64.cpp
+experiments/ordering/mmd_int64.cpp

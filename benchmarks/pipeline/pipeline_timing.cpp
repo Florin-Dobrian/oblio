@@ -168,6 +168,7 @@ int main(int argc, char** argv) {
         {"MMD3", Ordering::MMD3},
         {"AMD", Ordering::AMD},         {"AMD1", Ordering::AMD1},
         {"AMD1B", Ordering::AMD1B},     {"AMD2", Ordering::AMD2},
+        {"AMD3", Ordering::AMD3},
         {"AMD2B", Ordering::AMD2B},
     };
 

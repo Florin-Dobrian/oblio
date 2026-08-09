@@ -1,53 +1,260 @@
-// amd3.cpp -- approximate minimum degree, complete.
+// amd3.cpp -- approximate minimum degree, iteration 3: aligned to the vendored AMD.
 //
-// amd1 has the idea: the degree bound, computed once per clique and read once per
-// vertex. What it does not have is the rest of what amd_1 and amd_2 do, and this
-// file adds it, one pass at a time. All seven are in. Section 5.13 of
-// archive/sparse_factorization.md, plus the vendored routine itself in
-// vendored/vendored_amd.cpp.
+// **amd3 adds no mechanism. It is amd2 with the vendored routine's list order, and
+// it exists to return AMD_2's pivot sequence.** mmd3 is its counterpart on the
+// other branch and the digit means the same thing on both: 3 is the layer aligned
+// to the vendored code. What amd2 has, this file has, and nothing else has been
+// added.
 //
-// The list, split by where each item now lives:
+// WHY A WHOLE LAYER FOR A TIE-BREAK. Minimum degree is a tie-break algorithm: at
+// almost every iteration several vertices share the least degree and the winner is
+// whichever the data structure hands over first. So two codes can agree on every
+// rule and part company on the first tie, and from there they are ordering
+// different graphs. While that is true, every comparison against the vendored
+// routine measures two things at once, a difference of MECHANISM and a difference
+// of ARBITRARY CHOICE, and a fill gap cannot be attributed to either. Alignment
+// turns the comparison into an equality test.
 //
-//   in amd1 already, and NOT something this file adds:
-//      the two-pass degree update, scan 1 obtaining |C[c] - C[p]| by
-//      subtraction from a maintained clique degree
+// WHAT IS COMPARED, and it is not the permutation. AMD_2 ends with a postorder of
+// the assembly tree, which Oblio does not want and this file does not do: a
+// postorder relabels the output after elimination has finished and cannot touch
+// which pivot was chosen when. So the acceptance test is the PIVOT SEQUENCE, which
+// is the algorithm, and the permutations legitimately differ by that relabeling.
+// mmd learned this the expensive way: with fill exact at every size and the
+// permutation still diverging at pivot 700 of 1024, the pivot sequences were
+// identical, 788 of 788.
 //
-//   in amd2, the two mechanisms that ride along with the bound:
-//      AGGRESSIVE ABSORPTION, which kills a clique the moment the bound work
-//      shows it lies inside the new one
-//      HASH SUPERVARIABLE DETECTION, which finds vertices indistinguishable
-//      from EACH OTHER rather than from the pivot
+// THE ORACLE is `amd_order` on a scratch copy of private/Amd.cpp with
+// `Control[AMD_DENSE]` raised above sqrt(n), which drives the dense threshold into
+// its `MIN(n, dense)` clamp so `deg > dense` is unreachable. Dense-row removal is
+// the one thing amd2 lacks that AMD_2 does and that the Control array can switch
+// off; at the default it never fires here anyway, the floor being MAX(16, dense)
+// against a grid's maximum degree of four. `Control[AMD_AGGRESSIVE]` stays at its
+// default, aggressive absorption being a mechanism amd2 already has.
 //
-//   here in amd3, and nowhere else:
-//   1. dense row and column detection by the alpha ratio, held out and
-//      placed last                                                        [done]
-//   2. amd_aat and amd_preprocess, forming the pattern of A + A'          [done]
-//   3. amd_postorder, so the output is a postorder of the assembly tree   [done]
-//   4. amd_valid and the Control/Info interface                           [done]
+// THE LEDGER
 //
-// **amd3 has no production counterpart and is not expected to get one.** Its four
-// items are not ordering ideas: three are input conditioning and output ordering
-// that Oblio does elsewhere or does not need, and the fourth is a control
-// interface Oblio has no equivalent of. It is here to complete the reading of the
-// vendored routine, checked against its own C++ twin and against nothing else.
+// Append only. A row is never edited once closed, so the sequence stays a record
+// of what was wrong rather than a summary written afterwards. The nature column is
+// the one to read first: CONVENTION means neither side is wrong and only the
+// winner among equals moves, DEFECT means wrong on its own terms and must be fixed
+// wherever the same code sits, COSMETIC means it cannot change the answer at all.
 //
-// PASSES 1 AND 2, THE TWO MECHANISMS THAT RIDE ALONG WITH THE BOUND. Neither is
-// about the degree, and both are cheap only because the bound's work has already
-// been done.
+//     #  what diverged              where in ours      AMD_2                 nature
+//     -  --------------------------  -----------------  --------------------  ----------
+//     1  hash bucket walk            the hash pass      the head push at      convention
+//                                                       its line 1940
+//     2  reachable set layout        amd3Neighbors     construct new         convention
+//        (cliques before explicit)                      element, knt1 loop
+//     3  mass elimination ran        the eliminator,    scan 2, after the     convention
+//        before absorption           now the driver     aggressive absorb
+//     4  the vertex's own weight     the bound loop,    the fourth pass,      convention
+//        subtracted before the       now a fourth       `deg = Degree[i]
+//        hash merge that grows it    pass               + degme - nvi`
+//     5  the new clique appended     the eliminator     `Iw [p1] = me` and     convention
+//        to I[u] instead of                             the two moves above
+//        prepended, with a rotation                     it
+//     6  the exact test walked the    the hash pass      `for (p = Pe[j] + 1`,  COST
+//        new clique, which entry 5                      "skip the first
+//        had just made a guaranteed                     element in the list
+//        match at position zero                         (me)"
 //
-// AGGRESSIVE ABSORPTION. |C[c] - C[p]| has just been computed for every clique c
-// that the new one touched. If it is zero, C[c] lies entirely inside C[p], so that
-// clique is dead and can be absorbed at once. Ordinary absorption only kills the
-// cliques the PIVOT touched; this kills cliques that any reached vertex touched,
-// and it costs nothing extra because the quantity was needed anyway.
 //
-// HASH SUPERVARIABLE DETECTION. Mass elimination merges a vertex into the pivot.
-// Two vertices can be indistinguishable from EACH OTHER without either being
-// absorbable into the pivot, and no pivot test can see that. AMD hashes (A[u],
-// I[u]),
-// compares only within a hash bucket, and merges on an exact match. The hash is a
-// filter, never the decision. MMD reaches the same vertices through mmdupd's q2h
-// list, so the goal is shared and the mechanism is not.
+// **Entry 6 is a fourth NATURE, and the ledger needs the word.** It is neither a
+// convention nor a defect nor cosmetic: it changes no ordering, no fill and no
+// permutation, and it changes the COST. Entry 5 put the new clique at the front of
+// every I[u], which is right; it did not also skip that entry in the exact test,
+// which Amd.cpp does in the same breath. So a guaranteed match sat at the head of a
+// short-circuiting walk and every failing pair paid one extra iteration of the
+// hottest line in the run. Measured at 2.08 incidence iterations per pair against
+// amd2's 1.21, and 1.08 after, with Instruments putting that one line at 6.22 s of
+// a 14.90 s run.
+//
+// The lesson is about porting rather than about AMD: **half a mechanism can be
+// correct and still be wrong.** Entry 5 alone gives the right answer and pays for
+// it, and nothing in the output could ever have shown that. Only the profile could.
+//
+// **Entry 2 is the deep one and entry 1 cannot be judged without it.** Entry 1
+// alone took the examples from 2 of 7 to 2 of 7, closing graph1 and opening
+// graph7; with entry 2 beneath it they went to 4 of 7. That is the same shape mmd
+// had, where three reversed walks stalled at 4 of 7 until the element expansion
+// was fixed under them, and the reason is the same: entry 2 fixes the content
+// order of C[pivot], which is the order entry 1's buckets are built from.
+//
+// **Entry 3 closed two graphs at once**, which is what its shape predicted: graph4
+// and graph6 each matched the oracle for their whole prefix and then took one
+// extra pivot, and one cause was likelier than two. It was the same cause.
+//
+//     after entry 1        2 of 7      graph1 graph5
+//     after entry 2        4 of 7      graph1 graph2 graph5 graph7
+//     after entry 3        6 of 7      all but graph3
+//     after entry 4        7 of 7      every example
+//     after entry 5        7 of 7      and every grid tested
+//
+// nnz(L) is exact against the oracle throughout, at every entry and every size, so
+// all five entries moved the tie-break and nothing else.
+//
+// ## Where it stands: ALIGNED
+//
+// **amd3 returns AMD_2's permutation exactly, up to the postorder.** Not merely
+// its pivot sequence: the full expanded order agrees, member order within each
+// supervariable included, on the seven examples and on every square grid tested
+// from 3 a side to 40, `n = 1600`. The mechanism counters agree too, hash merges
+// and aggressive absorptions alike, and `bound below exact` stays 0 throughout,
+// which is the invariant a wrong bound would break.
+//
+// The strongest single check is against numbers this experiment did not produce:
+// nnz(L) comes out 206332 at 100 a side and 474995 at 140, which is what
+// `benchmarks/ordering/README.md` records for the vendored AMD, digit for digit.
+//
+// **How that is checked without the postorder, since AMD_2 always postorders.**
+// Its `PIVOT` selection and its supervariable finalization both sit inside the
+// main loop, and AMD_postorder runs after it, so the raw elimination order can be
+// reconstructed upstream of the relabeling: track membership alongside, a hash
+// merge moving j's members to i and a mass elimination moving i's to me, and emit
+// each pivot's supervariable as its iteration closes. Concatenating those is what
+// the vendored routine would return if it stopped at the end of its main loop, and
+// it is what this layer returns. The scratch probe that does it is not a
+// repository artifact; the README's method section describes rebuilding it.
+//
+// **The postorder itself is not a gap on our side.** It cannot change the fill,
+// since any postorder of the assembly tree numbers a node after all its
+// descendants and no fill moves, which the two orders confirm by giving identical
+// nnz(L). Nor is it needed for CORRECTNESS by any traversal: what those require is
+// a TOPOLOGICAL order, children before parents, and that holds whatever permutation
+// arrives, since ElmForestEngine builds parent links from the permuted matrix and a
+// parent's column is numbered above its child's. Left-looking pulls from
+// descendants already factored, right-looking pushes to ancestors not yet reached,
+// multifrontal consumes children at the parent, and a raw elimination order serves
+// all three exactly as well.
+//
+// What a postorder buys is a smaller multifrontal STACK PEAK, and nothing else.
+// The raw order is consistent with the assembly tree but its subtrees interleave,
+// because minimum degree jumps around the graph, so a contribution block stays live
+// across more of the numbering than it needs to. Left- and right-looking hold one
+// update block at a time and never keep a standing Schur complement, so they have
+// no peak for contiguity to shrink; and left-looking does not even gain locality
+// from it, its relay hopping to whichever supernode owns a descendant's next
+// remaining row rather than climbing the tree.
+//
+// AMD has to bake it into the permutation because the permutation is all it
+// returns, having built the assembly tree and thrown it away. Oblio does not,
+// because ElmForest holds the forest and reorders it directly, which
+// `setOptimizeMultifrontal` does by Liu's rule on the supernodal tree with real
+// front and update sizes.
+//
+// And that option is not something a multifrontal run can miss on the ordinary
+// path: `DirectSolver` constructs the forest engine with
+// `mTraversal == Traversal::Multifrontal`, so choosing multifrontal turns it on.
+// `labelDepthFirst` then relabels the SUPERNODES into Liu's postorder, and the
+// drivers loop over those labels, so the peak is set by that relabeling and not by
+// the column permutation the ordering produced. AMD's postorder is redone in full
+// and this layer's absence of one costs nothing. The engine default of off reaches
+// only a caller wiring the engines by hand who intends multifrontal, which is that
+// caller's obligation and is unaffected by which ordering ran.
+//
+// One second-order effect is left, and it is not special to this layer. A
+// relabeling can change which columns are consecutive, and amalgamation is greedy
+// with a tie-break on list position, so two permutations differing only by a
+// postorder could in principle amalgamate differently. That would be a different
+// supernode partition rather than a different peak, it applies to any pair of
+// orderings related that way, and it is unmeasured.
+//
+// **What alignment bought, which is the reason for the whole layer.** Any future
+// divergence from the vendored routine is now a named pivot in a small grid rather
+// than a fill number somebody has to interpret. And the gap against amd2 can now be
+// attributed: whatever it is, it is not a difference of arbitrary choice.
+//
+// **What it turned up about the layers below, recorded and NOT acted on.** Two of
+// these entries look like defects in amd2 and in production Amd2 and Amd2B rather
+// than conventions, entry 4 above all, which is mmd's entry 5 in a different array.
+// Nothing outside this file has been touched: the mmd work fixed Mmd2 only after
+// mmd3 was fully aligned, and the same order applies. `docs/TODO.md` carries the
+// two items and two corrections this work owes the README.
+//
+//
+// Run: ./amd3_cpp            every example
+//      ./amd3_cpp 3          just the third
+//      ./amd3_cpp grid 20
+//
+// What follows is amd2's own description, which stands unchanged: this file adds
+// no mechanism to it.
+//
+// amd1 has the idea, the degree bound. This file adds the two mechanisms the
+// vendored amd_2 carries beyond it, and nothing else. Both ride along with the
+// bound rather than being about the degree at all, and both are cheap only because
+// the bound's work has already been done. Section 5.13 of
+// archive/sparse_factorization.md.
+//
+//   1. AGGRESSIVE ABSORPTION, which kills a clique the moment the bound work shows
+//      it lies inside the new one. |C[c] - C[pivot]| has just been computed for
+//      every touched clique; if it is zero, C[c] lies entirely inside C[pivot], so
+//      that clique is dead. Ordinary absorption kills only the cliques the PIVOT
+//      touched; this kills cliques that ANY reached vertex touched.
+//
+//   2. HASH SUPERVARIABLE DETECTION, which finds vertices indistinguishable from
+//      EACH OTHER rather than from the pivot. Mass elimination merges into the
+//      pivot, and two vertices can match each other while neither matches the
+//      pivot. The hash is a filter and never the decision: a collision costs a
+//      comparison, and no merge is ever missed, since equal sets give equal keys.
+//
+// **This file is production's Amd2, layer for layer**, and `make test` checks it by
+// PERMUTATION rather than by fill. What amd3 adds beyond here is not ordering ideas
+// at all: dense row detection, the pattern of A + A', the postorder and the
+// Control/Info interface, none of which production has or wants.
+//
+// **One thing comes from amd3 and not from amd1**, and it is not optional. A hash
+// merge leaves the merged vertex in place with weight zero rather than removing it
+// from every list, so the walks must skip eliminated vertices. amd1 has no such
+// vertices and its core takes no `eliminated` argument; this file's does. That is
+// the prototype's version of what production calls live merges.
+//
+// The other fork from md5. Section 5.13 of archive/sparse_factorization.md.
+//
+// The other fork from md5. Section 5.13 of archive/sparse_factorization.md.
+//
+// md5 has the quotient graph, supervariables, maintained degrees and buckets, and
+// returns exactly md1's ordering. What is left costing anything is the refresh
+// itself, which for each reached vertex u unites the members of every clique in
+// I[u] and counts the result. That union is the expensive object.
+//
+// MMD made the refresh RARE. AMD makes each one CHEAP, and the two are the same
+// answer reached from opposite ends: do the expensive thing less.
+//
+// THE BOUND. Rather than uniting the cliques, sum their separate contributions:
+//
+//   degree(u) <= min( n - k - weight(u),                nothing exceeds what remains
+//                     degree_old[u] + |C[p] - {u}|,     it can only grow by the new clique
+//                     |A[u] - C[p]| + |C[p] - {u}|
+//                                   + sum |C[c] - C[p]| )   over c in I[u] - {p}
+//
+// where p is the pivot, so C[p] is the new clique, k is the count of original vertices
+// eliminated so far, and weight(u) is the size of u's supervariable. The third line
+// OVERCOUNTS, because two cliques may overlap outside C[p] and the overlap is counted
+// twice. So it is an upper bound, not the degree.
+//
+// WHY THAT IS FAST, which is the entire point and is easy to miss. The quantity
+// |C[c] - C[p]| depends only on the clique c, not on the vertex u, so it is
+// computed ONCE PER CLIQUE and then read by every vertex whose incidence list
+// holds c. The exact degree costs, per vertex, a walk over the members of all its
+// cliques. The bound costs, per vertex, one addition per clique. Both are counted
+// below, and the gap widens with the size of the cliques, which is to say with the
+// amount of fill, which is to say exactly where it matters.
+//
+// WHAT IS GIVEN UP, and it is a different kind of loss from mmd1's. Every layer up
+// to here picks a true minimum-degree vertex and differs only in how it finds one
+// or how ties fall. This one can pick the WRONG vertex outright, because an
+// overcounted bound can hide the true minimum. It is the first layer whose
+// heuristic changes rather than its implementation, and the first whose pivot is
+// not guaranteed to be minimal at all.
+//
+// The trace prints the exact degree beside the bound, so the gap is visible at
+// every iteration, and the closing lines count how often the bound was loose.
+//
+// THIS FILE IS THE IDEA ALONE. Aggressive absorption, hash supervariable
+// detection, the two-pass update, dense row handling and the rest of amd_1 and
+// amd_2 are amd3's business, exactly as mmd1 held only the batching and mmd2 took
+// the rest of genmmd.
 //
 // Build:  g++ -std=c++17 -O3 amd3.cpp -o amd3_cpp  (or: make)
 // Run:    ./amd3_cpp
@@ -55,7 +262,6 @@
 
 #include <cstdlib>
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
@@ -83,10 +289,6 @@ constexpr std::int32_t NIL = -1;
 // positive range of std::int32_t, which is a pragmatic choice and not a derived
 // one: nothing here stores anything but a tag, so the true ceiling is the type's
 // own maximum, and the room left over is against a later layer wanting some of it.
-//
-// The rowMark of amd3Preprocess is a different scheme and needs no guard: it
-// stamps with a COLUMN INDEX rather than a counter, so it is bounded by n by
-// construction and cannot wrap.
 constexpr std::int32_t TAG_CEILING = (1 << 30) - 1;
 
 // Above this n, nothing is printed from inside the run: no initial state, no
@@ -307,154 +509,6 @@ std::size_t amd3Storage(const Graph& A, const Graph& I, const Cliques& C) {
 // members of every clique that contains u, minus u itself, which the cliques
 // always carry. This is George and Liu's reachable set, and it is what the
 // elimination graph would hold explicitly.
-// The three statuses amd_valid can return, and the two Control knobs.
-const int AMD_OK = 0;
-const int AMD_OK_BUT_JUMBLED = 1;
-const int AMD_INVALID = -2;
-
-// What amd_valid checks before anything else touches the input: the column
-// pointers start at zero and ascend, and every row index is in range. It is not a
-// yes or no. Unsorted columns and duplicate entries return a THIRD answer,
-// AMD_OK_BUT_JUMBLED, which is not an error but a request: it is what tells
-// amd_order to run amd_preprocess rather than use the pattern directly.
-//
-// So pass 7 and pass 5 are one mechanism seen from two sides. The validity check
-// decides whether the conditioning pass is needed, and the conditioning pass exists
-// because the check tolerates what it tolerates.
-//
-// For Oblio the whole of this is a constructor invariant. A SparseMatrix is sorted,
-// duplicate free and in range before anything is asked of it, so there is nothing
-// here to decide at ordering time.
-int amd3Valid(std::size_t n, const std::vector<std::int32_t>& Ap,
-              const std::vector<std::int32_t>& Ai) {
-    if (Ap.size() != n + 1 || Ap[0] != 0 || Ap[n] < 0) return AMD_INVALID;
-    if (Ai.size() != static_cast<std::size_t>(Ap[n])) return AMD_INVALID;
-    int result = AMD_OK;
-    for (std::int32_t j = 0; j < static_cast<std::int32_t>(n); ++j) {
-        if (Ap[j] > Ap[j + 1]) return AMD_INVALID;      // pointers must ascend
-        std::int32_t last = NIL;
-        for (std::int32_t p = Ap[j]; p < Ap[j + 1]; ++p) {
-            const std::int32_t i = Ai[p];
-            if (i < 0 || i >= static_cast<std::int32_t>(n)) return AMD_INVALID;
-            if (i <= last) result = AMD_OK_BUT_JUMBLED;  // unsorted, or a duplicate
-            last = i;
-        }
-    }
-    return result;
-}
-
-// R, the row form of the pattern of A with duplicates removed.
-//
-// Amd.cpp calls this when the input may be unsorted or hold duplicates, since
-// A + A' can be formed from R without either problem. R is the pattern of A
-// transposed, so R + R' is A + A' and nothing is lost by working from it.
-//
-// The diagonal is NOT dropped here; amd3Aat deals with it, because it has to count
-// it anyway.
-//
-// Set view: R[i] = { j : A(i,j) != 0 }, and flag[i] == j is the membership test
-// that makes the deduplication one comparison rather than a search.
-void amd3Preprocess(std::size_t n, const std::vector<std::int32_t>& Ap,
-                    const std::vector<std::int32_t>& Ai,
-                    std::vector<std::int32_t>& Rp, std::vector<std::int32_t>& Ri) {
-    std::vector<std::int32_t> counts(n, 0), flag(n, NIL);
-    for (std::int32_t j = 0; j < static_cast<std::int32_t>(n); ++j)
-        for (std::int32_t p = Ap[j]; p < Ap[j + 1]; ++p) {
-            const std::int32_t i = Ai[p];
-            if (flag[i] != j) {                 // i has not appeared in column j yet
-                ++counts[i];
-                flag[i] = j;
-            }
-        }
-    Rp.assign(n + 1, 0);
-    for (std::size_t i = 0; i < n; ++i) Rp[i + 1] = Rp[i] + counts[i];
-    std::vector<std::int32_t> position(Rp.begin(), Rp.begin() + n);
-    std::fill(flag.begin(), flag.end(), NIL);
-    Ri.assign(static_cast<std::size_t>(Rp[n]), 0);
-    for (std::int32_t j = 0; j < static_cast<std::int32_t>(n); ++j)
-        for (std::int32_t p = Ap[j]; p < Ap[j + 1]; ++p) {
-            const std::int32_t i = Ai[p];
-            if (flag[i] != j) {
-                Ri[position[i]++] = j;
-                flag[i] = j;
-            }
-        }
-}
-
-// The pattern of A + A' with the diagonal dropped, as adjacency lists, plus the
-// statistics Amd.cpp reports about the input. (Ap, Ai) is the column form and
-// (Rp, Ri) its row form, both free of duplicates, as amd3Preprocess leaves them.
-//
-// The ordering is defined on a symmetric structure and a general matrix is not
-// one, so this is where an arbitrary pattern becomes a graph. Two things go: the
-// diagonal, which is a self loop and says nothing about fill, and the distinction
-// between A(i,j) and A(j,i), since either one forces the same elimination.
-//
-// The symmetry reported is the vendored definition, with B the strictly triangular
-// parts of A:
-//
-//     sym = nnz(B & B') / nnz(B),   or 1 when nnz(B) is zero
-//
-// Amd.cpp computes it with a two-pointer scan that walks the two triangles
-// together, which needs sorted columns and saves a pass. Ours asks the row form
-// whether the transposed entry exists, one stamp and one comparison, which is what
-// the rest of this file does and works on unsorted input. That is a deviation from
-// the vendored code, and it is stated rather than hidden.
-struct AatInfo {
-    std::size_t nz;
-    std::size_t numDiagonal;
-    std::size_t numBoth;
-    double symmetry;
-    std::size_t nzaat;
-};
-
-Graph amd3Aat(std::size_t n, const std::vector<std::int32_t>& Ap,
-              const std::vector<std::int32_t>& Ai,
-              const std::vector<std::int32_t>& Rp,
-              const std::vector<std::int32_t>& Ri, AatInfo& info) {
-    const std::size_t nz = static_cast<std::size_t>(Ap[n]);
-    std::vector<std::int32_t> rowMark(n, NIL);  // rowMark[k] == j: A(j,k) present
-    std::size_t numDiagonal = 0;
-    std::size_t numBoth = 0;
-    Graph A(n);
-    for (std::int32_t j = 0; j < static_cast<std::int32_t>(n); ++j) {
-        for (std::int32_t p = Rp[j]; p < Rp[j + 1]; ++p)   // row j, the transposed
-            rowMark[Ri[p]] = j;
-        for (std::int32_t p = Ap[j]; p < Ap[j + 1]; ++p) {
-            const std::int32_t i = Ai[p];
-            if (i == j) {                       // a self loop, dropped
-                ++numDiagonal;
-                continue;
-            }
-            if (i > j && rowMark[i] == j) ++numBoth;   // below and above both there
-            A[j].push_back(i);                  // both directions, deduplicated below
-            A[i].push_back(j);
-        }
-    }
-
-    std::vector<std::int32_t> stamp(n, NIL);    // one pass per list, as everywhere
-    std::vector<std::int32_t> kept;
-    for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) {
-        kept.clear();
-        for (std::int32_t v : A[u])
-            if (stamp[v] != u) {
-                stamp[v] = u;
-                kept.push_back(v);
-            }
-        A[u].swap(kept);
-    }
-
-    std::size_t nzaat = 0;
-    for (std::size_t u = 0; u < n; ++u) nzaat += A[u].size();
-    info = {nz, numDiagonal, numBoth,
-            (nz == numDiagonal) ? 1.0
-                                : (2.0 * static_cast<double>(numBoth))
-                                      / static_cast<double>(nz - numDiagonal),
-            nzaat};
-    return A;
-}
-
-
 std::vector<std::int32_t> amd3Neighbors(const Graph& A, const Graph& I, const Cliques& C,
                                        const std::vector<bool>& eliminated,
                                        std::vector<std::int32_t>& mark, std::int32_t& tag,
@@ -471,14 +525,30 @@ std::vector<std::int32_t> amd3Neighbors(const Graph& A, const Graph& I, const Cl
     // One pass per source, with the mark array doing the deduplication, so the
     // cost is linear in what is touched. Nothing is sorted: the order is the order
     // the sources were walked in.
+    //
+    // LEDGER ENTRY 2, convention, and it is the DEEP one. The cliques are walked
+    // BEFORE the explicit adjacency, which is the opposite of every other layer
+    // here and is what AMD_2 does: its construct-new-element loop runs
+    // `for (knt1 = 1; knt1 <= elenme + 1; knt1++)`, taking the ELEMENTS of me for
+    // knt1 <= elenme and the supervariables only on the last pass, so Lme comes
+    // out cliques-then-explicit where ours came out explicit-then-cliques. genmmd
+    // is the other way round, variables first and elements last, which is why md1
+    // through mmd3 are laid out as they are and why this is an amd convention
+    // rather than a correction to the ladder.
+    //
+    // This fixes the CONTENT order of C[pivot], which is the order every later
+    // walk reads: the hash buckets of entry 1, the pair comparisons, the degree
+    // update. So entry 1 cannot be judged without it, exactly as mmd's three
+    // reversed walks stalled at 4 of 7 until the element expansion was fixed
+    // beneath them.
     ++tag;
     std::vector<std::int32_t> neighbors;
     mark[u] = tag;                          // never its own neighbor
-    for (std::int32_t v : A[u])
-        if (!eliminated[v]) { mark[v] = tag; neighbors.push_back(v); }
-    for (std::int32_t c : I[u])
+    for (std::int32_t c : I[u])             // elements first, as AMD_2 lays out Lme
         for (std::int32_t v : C.at(c))
             if (mark[v] != tag && !eliminated[v]) { mark[v] = tag; neighbors.push_back(v); }
+    for (std::int32_t v : A[u])             // then the supervariables, its last pass
+        if (mark[v] != tag && !eliminated[v]) { mark[v] = tag; neighbors.push_back(v); }
     return neighbors;
 }
 
@@ -503,9 +573,8 @@ std::size_t amd3ExactDegree(const Graph& A, const Graph& I, const Cliques& C,
 // indistinguishable. Identical to md5Eliminate: this layer changes how a degree is
 // estimated afterwards, not what an elimination does.
 //
-// Returns (neighbors, absorbedCliques, prunedEdges, mergedVertices): as in md2,
-// plus the vertices folded into the pivot by mass elimination. The last three
-// are reported for display; only neighbors is used by the caller.//
+// Returns (neighbors, absorbedCliques, prunedEdges), as in md2. The last two are
+// reported for display; only neighbors is used by the caller.//
 // Set view of the whole function, in the order the code does it:
 //
 //     C[pivot] = reach(pivot)                    absorb into C[pivot]
@@ -523,13 +592,24 @@ std::size_t amd3ExactDegree(const Graph& A, const Graph& I, const Cliques& C,
 // of the subtrahend followed by one compaction pass over the minuend, which turns
 // |A[u]| * |C[pivot]| comparisons into |A[u]| + |C[pivot]|.
 //
-// Mass elimination adds two more lines, and breaks the identity in the first one:
-// from here C[pivot] is reach(pivot) minus what the pivot absorbed.
+// LEDGER ENTRY 3, convention. Mass elimination used to be the last thing this
+// function did, and it is now the driver's, run after aggressive absorption. The
+// TEST is unchanged and is textually AMD_2's `Elen[i] == 1 && p3 == pn`, one
+// element left and no supervariables; what moved is WHERE it runs. AMD_2 makes it
+// in scan 2, over an element list from which aggressive absorption has already
+// dropped every clique lying inside the new one, and says as much in its own
+// comment: with aggressive absorption, `deg == 0` is identical to that structural
+// test. Running it first, as this function did, asks the question of an I[u] that
+// still holds cliques the absorption is about to remove, so the cheap test
+// declines vertices AMD merges. graph6 is the case: at its third pivot the
+// vendored routine mass-eliminates all three members of the new clique and
+// finishes in three pivots, where we merged two, left vertex 2 behind and took a
+// fourth.
 //
-//     merged   = { u in C[pivot] : A[u] == {} and I[u] == {pivot} }
-//     C[pivot] = C[pivot] - merged
+// So this function now stops at the prune, and C[pivot] is reach(pivot) exactly,
+// which is the md2 identity restored. The driver trims it after the merges.
 std::tuple<std::vector<std::int32_t>, std::vector<std::int32_t>,
-           std::vector<std::pair<std::int32_t, std::int32_t>>, std::vector<std::int32_t>>
+           std::vector<std::pair<std::int32_t, std::int32_t>>>
 amd3Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
              std::vector<std::int32_t>& mark, std::int32_t& tag, std::int32_t pivot) {
     const std::vector<std::int32_t> neighbors =
@@ -575,40 +655,45 @@ amd3Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
         kept.clear();                            // I[u] loses the absorbed cliques
         for (std::int32_t c : I[u])
             if (mark[c] != absorbedTag) kept.push_back(c);
-        kept.push_back(pivot);                   // u joins the new clique, id = pivot
-        I[u].swap(kept);
-    }
 
-    // Mass elimination. u is INDISTINGUISHABLE from the pivot when the two have
-    // the same closed neighborhood, amd3Neighbors(u) | {u} == amd3Neighbors(pivot)
-    // | {pivot}, as it stood before the iteration. Equivalently, now that the clique is
-    // formed, when everything u can still reach lies inside it. The test below is
-    // a cheap sufficient condition for that: nothing explicit left and no clique
-    // but the new one means u sees exactly what the pivot sees, so eliminating it
-    // next would cost no fill. Fold it into the pivot now and strip it from the
-    // cliques, since it is no longer a vertex.
-    // merged = { u in C[pivot] : A[u] == {} and I[u] == {pivot} }
-    std::vector<std::int32_t> mergedVertices;
-    for (std::int32_t u : neighbors) {
-        if (A[u].empty() && I[u].size() == 1 && I[u][0] == pivot) {
-            I[u].clear();
-            eliminated[u] = true;
-            mergedVertices.push_back(u);
+        // LEDGER ENTRY 5, convention. The new clique goes to the FRONT of the
+        // incidence list, not the back, and the displaced entries ROTATE rather
+        // than shift. AMD_2 makes room for me in one move at the end of its scan 2:
+        //
+        //     Iw [pn] = Iw [p3] ;   /* move first supervariable to end of list */
+        //     Iw [p3] = Iw [p1] ;   /* move first element to end of element part */
+        //     Iw [p1] = me ;        /* add new element, me, to front of list */
+        //
+        // Its two lists live back to back in one run, elements then supervariables,
+        // so inserting at the front of the elements would mean shifting everything
+        // right. Instead it lifts the two entries sitting at the boundaries to the
+        // two ends: the elements come out [me, e2, ..., ek, e1] and the
+        // supervariables [j2, ..., jm, j1]. That is a data-structure trick with no
+        // meaning of its own, and it decides the order every later walk reads.
+        //
+        // Both rotations are load-bearing here, because entry 2 made the reachable
+        // set walk the cliques and then the adjacency, so both feed C[pivot]'s
+        // content order, and that order decides the hash survivor of entry 1. The
+        // empty cases fall out as they do there: with no surviving element the
+        // first two moves are self-assignments and the list is just [pivot].
+        if (!A[u].empty())
+            std::rotate(A[u].begin(), A[u].begin() + 1, A[u].end());
+        I[u].clear();
+        I[u].push_back(pivot);
+        if (!kept.empty()) {
+            I[u].insert(I[u].end(), kept.begin() + 1, kept.end());
+            I[u].push_back(kept.front());
         }
     }
-    if (!mergedVertices.empty()) {           // C[pivot] - merged, one compaction pass
-        ++tag;
-        for (std::int32_t u : mergedVertices) mark[u] = tag;
-        kept.clear();
-        for (std::int32_t v : C[pivot])
-            if (mark[v] != tag) kept.push_back(v);
-        C[pivot].swap(kept);
-    }
+
+    // Mass elimination is NOT here. It is the driver's, run after aggressive
+    // absorption, which is where AMD_2's scan 2 makes the same test. See the
+    // comment block above, ledger entry 3.
 
     A[pivot].clear();
     I[pivot].clear();
     eliminated[pivot] = true;
-    return {neighbors, absorbedCliques, prunedEdges, mergedVertices};
+    return {neighbors, absorbedCliques, prunedEdges};
 }
 
 // Move u from the bucket for its old degree to the one for newDegree. Filing
@@ -627,16 +712,9 @@ void amd3Refile(Buckets& buckets, std::vector<std::size_t>& degrees,
     buckets.file(newDegree, u);
 }
 
-// amd1 plus the mechanisms that ride along with the bound: aggressive absorption
-// and hash supervariable detection.
-// amd1 plus the passes of amd_1 and amd_2, one at a time. See the header.
-//
-// alpha and aggressive are amd_order's Control array. alpha is the dense row and
-// column ratio, AMD_DEFAULT_DENSE, with a negative value removing only completely
-// dense rows. aggressive switches aggressive absorption off, which is the only
-// other thing the vendored routine lets a caller change.
-std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
-                                            bool aggressive = true) {
+// Same as md5, with the exact refresh replaced by the approximate bound.
+// Everything else, the quotient graph, mass elimination, the buckets, is md5's.
+std::vector<std::int32_t> amd3MinimumDegree(const Graph& G) {
     const std::size_t n = G.size();
     std::size_t nnzTrilA = 0;
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) nnzTrilA += G[u].size();
@@ -644,9 +722,15 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
     Graph A = G;                                  // explicit vertex neighbors
     Graph I(n);                                   // cliques that contain each vertex
     Cliques C(n);      // clique id -> member list
-    // Twice n, because the hash test stamps cliques at c + n so a clique and a
-    // vertex of the same index cannot be confused. Everything else uses the first n.
-    std::vector<std::int32_t> mark(2 * n, NIL);       // scratch for membership, with tag
+    // Twice n: vertices are stamped below n and cliques at c + n, so the exact
+    // comparison in the hash pass cannot confuse a vertex with a clique.
+    std::vector<std::int32_t> mark(2 * n, NIL);   // scratch for membership
+    // The stride separating the two halves of `mark`, and the one place a COUNT becomes an offset
+    // in the INDEX space: the hash comparison stamps a clique at c + cliqueStamp so that vertices
+    // and cliques share one stamp. Named once rather than cast at each site that makes the
+    // crossing. It exists only because there is no type for a count, which is one dimensional and
+    // bounded by a SIDE where a position is bounded by an AREA; see REPORT.md.
+    const std::int32_t cliqueStamp = static_cast<std::int32_t>(n);
     std::int32_t tag = 0;
     // Calls to the eliminate procedure, one per pivot. Not the count of vertices
     // removed: a pivot can carry mass-merged vertices out with it, and from mmd1 up
@@ -668,13 +752,21 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
         superMembers[u].push_back(u);
     std::vector<bool> eliminated(n, false);
     std::vector<std::int32_t> pivots;             // the order over supervariables
-    std::size_t numEliminatedVertices = 0;
+    std::size_t numEliminatedVertices = 0;                // a counter, not a scan of eliminated
     // Live ORIGINAL vertices, which is not n - numEliminatedVertices. numEliminatedVertices counts
     // what has left the SELECTION, and a hash merge folds v into a LIVE u, so v
     // stops being selectable while the vertices it stands for are still live inside
     // u. The first cap of the bound needs the second reading, so it gets its own
-    // counter: only an elimination and a dense removal reduce it.
-    std::size_t numLive = n;                // a counter, not a scan of eliminated
+    // counter: only an elimination reduces it.
+    //
+    // amd1 has no such counter and does not need one, since it has no hash merges
+    // and every increment of numEliminatedVertices really is an original leaving. This file
+    // inherited that line along with the driver, which made the cap too tight and
+    // drove the bound BELOW the true degree, 22 times on a 10 by 10 grid. The
+    // vendored amd_2 is the oracle here: its nel is advanced only at the pivot and
+    // at mass elimination, never at the hash merge, which moves the weight with
+    // Nv[i] += Nv[j] and leaves nel alone.
+    std::size_t numLive = n;
     std::size_t nnzL = 0;
 
     // The cache, and the count of degree computations, which is what this layer
@@ -694,33 +786,14 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
     // is here as the witness that the guard is inert rather than as a statistic.
     std::size_t numTagSweeps = 0;
     std::size_t numMemberVisits = 0;              // what an exact refresh would cost
-    std::size_t numCliqueReads = 0;               // clique reads in the bound itself
-    std::size_t numIncidenceReads = 0;            // incidence entries scan 1 walks
+    std::size_t numCliqueReads = 0;               // what the bound costs instead
     // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
+    std::size_t numAbsorbed = 0;                 // cliques killed aggressively
+    std::size_t numHashMerges = 0;               // pairs found by the hash
+    std::vector<std::vector<std::int32_t>> hashBucket(n + 1);   // Amd.cpp's Head[hval]
     std::size_t numBoundChecks = 0;
     std::size_t numLooseBounds = 0;
     std::size_t numBoundsBelowExact = 0;   // an invariant, not a measurement
-    std::size_t numAbsorbed = 0;                  // cliques killed aggressively
-    // |C[c]| for every live clique, weighted. Exact, not an estimate, and the
-    // invariants that keep it so are worth stating because they are not obvious:
-    // a live clique never holds an eliminated vertex, since eliminating v absorbs
-    // every clique in I[v]; mass elimination only ever removes a vertex whose I[u]
-    // is {pivot}, so no other clique is touched; and a hash merge folds v into u
-    // where I[u] == I[v], so every clique holding v holds u and its weighted size
-    // does not move.
-    std::vector<std::size_t> cliqueDegree(n, 0);
-    Graph hashBucket(n + 1);                      // Amd.cpp's Head[hval], reused
-    // The assembly tree, for the postorder. parent[c] is the clique that absorbed
-    // c, and frontSize[e] is the front e would form, its pivots plus what it
-    // reaches. Amd.cpp keeps the same two in Pe and Elen.
-    std::vector<std::int32_t> parent(n, NIL);
-    std::vector<std::size_t> frontSize(n, 0);
-    std::vector<bool> isElement(n, false);
-    std::size_t numHashMerges = 0;                // pairs found by the hash
-    std::size_t numDivides = 0;                   // AMD_NDIV, one per off-diagonal
-    std::size_t numMultsubsLdl = 0;               // AMD_NMULTSUBS_LDL
-    std::size_t numMultsubsLu = 0;                // AMD_NMULTSUBS_LU
-    std::size_t frontMax = 0;                     // AMD_DMAX, the largest front
 
     // The buckets, and minDegree, a LOWER BOUND on the current minimum degree.
     // The search starts at minDegree rather than at 0, so it never looks at
@@ -731,61 +804,19 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
     // degree is at most n - 1, and the walk stops at the first non-empty bucket,
     // which exists while anything is live.
     Buckets buckets(n);
-
-    // ---- DENSE ROWS AND COLUMNS, before anything is filed -------------------
-    // A row whose INITIAL degree exceeds the threshold is taken out of the graph
-    // and placed last. One dense row touches nearly everything, so it inflates the
-    // degree of nearly everything, and the ordering spends its effort avoiding a
-    // vertex it cannot avoid. Removing it is cheaper than ordering around it.
-    //
-    // The threshold is the vendored one, dense = alpha * sqrt(n), floored at 16 and
-    // capped at n, with a negative alpha meaning n - 2, which removes only rows
-    // that are completely dense. It is computed from the INITIAL degrees and never
-    // revisited: a vertex that becomes dense later is not caught.
-    std::size_t denseThreshold = (alpha < 0)
-        ? (n >= 2 ? n - 2 : 0)
-        : static_cast<std::size_t>(alpha * std::sqrt(static_cast<double>(n)));
-    denseThreshold = std::max<std::size_t>(16, denseThreshold);
-    denseThreshold = std::min<std::size_t>(n, denseThreshold);
-    std::vector<std::int32_t> denseVertices;
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u)
-        if (degrees[u] > denseThreshold) denseVertices.push_back(u);
-
-    // Amd.cpp sets Nv[i] = 0 and Pe[i] = EMPTY, which leaves the vertex in other
-    // lists while contributing zero weight to every degree. Clearing its own lists
-    // and purging it from the rest is the same statement in our representation,
-    // since a weight of zero and an absence are indistinguishable to every count
-    // this file makes.
-    for (std::int32_t u : denseVertices) {
-        A[u].clear();
-        I[u].clear();
-        superMembers[u].clear();               // weight 0, as Nv[i] = 0
-        eliminated[u] = true;
-        ++numEliminatedVertices;
-        --numLive;                             // out of the graph, not merged
-    }
-    if (!denseVertices.empty()) {
-        std::vector<std::int32_t> keptAdjacency;
-        for (std::int32_t w = 0; w < static_cast<std::int32_t>(n); ++w) {
-            if (eliminated[w]) continue;
-            keptAdjacency.clear();
-            for (std::int32_t v : A[w])
-                if (!eliminated[v]) keptAdjacency.push_back(v);
-            A[w].swap(keptAdjacency);
-            degrees[w] = A[w].size();
-            exact[w] = degrees[w];
-        }
-    }
-
-    for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u)
-        if (!eliminated[u]) buckets.file(degrees[u], u);
-    std::size_t minDegree = 0;
-    bool haveMin = false;
-    for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) {
-        if (eliminated[u]) continue;
-        if (!haveMin || degrees[u] < minDegree) { minDegree = degrees[u]; haveMin = true; }
-    }
+        buckets.file(degrees[u], u);
+    std::size_t minDegree = n > 0 ? *std::min_element(degrees.begin(), degrees.end()) : 0;
     std::size_t numBucketProbes = 0;
+
+    // |C[c] - C[pivot]| per clique, indexed by clique id, hoisted out of the loop it is used in.
+    // Allocating and zeroing it per pivot reads better and is O(n) per iteration, hence O(n * n) over
+    // the run in bookkeeping alone, independent of the graph, which would swamp the very cost the
+    // bound exists to save. Only the entries an iteration writes are touched, and they are exactly the
+    // ones it reads, so the iteration clears what it wrote rather than the array being rebuilt. The
+    // Python twin has no such line, its outside being a dict over the cliques the iteration touched,
+    // which is already the right shape.
+    std::vector<std::size_t> outside(n, 0);
 
     // NOT PRODUCTION: display only. The trace is what makes these files teachable and
     // is the whole reason they exist; nothing downstream reads it.
@@ -803,40 +834,26 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
         }
         ++numBucketProbes;
         std::int32_t pivot = buckets.head[minDegree];   // whatever was filed last
-        // Sweep the tag back before it can wrap. THREE sites in this layer, as in
-        // amd2, and each placed where nothing in mark is live. Note mark is 2n long:
-        // the hash pass stamps cliques at c + n. The dense-row pass, amd3Aat and the
-        // postorder add nothing here, none of them touching mark. Not inside
-        // amd3Eliminate, which holds three stamps live in turn: cliqueTag and
-        // absorbedTag across the prune loop, then the merged set across the C[pivot]
-        // compaction. Never observed to fire.
+        // Sweep the tag back before it can wrap. THREE sites in this layer, unlike
+        // the two everywhere else, and each placed where nothing in mark is live.
+        // Note mark is 2n long here: the hash pass stamps cliques at c + n, so this
+        // is the one layer whose array is not n. Not inside amd3Eliminate, which
+        // holds three stamps live in turn: cliqueTag and absorbedTag across the
+        // prune loop, then the merged set across the C[pivot] compaction. Never
+        // observed to fire.
         if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
             tag = 0;
             ++numTagSweeps;
         }
-        auto [neighbors, absorbedCliques, prunedEdges, mergedVertices] =
+        auto [neighbors, absorbedCliques, prunedEdges] =
             amd3Eliminate(A, I, C, eliminated, mark, tag, pivot);
         ++numEliminations;
-        numCliqueEntries += C[pivot].size();
-        isElement[pivot] = true;
-        for (std::int32_t c : absorbedCliques) parent[c] = pivot;   // its children
         std::size_t degree = neighbors.size();
         pivots.push_back(pivot);
-        numEliminatedVertices += 1 + mergedVertices.size();
-        for (std::int32_t u : mergedVertices) {   // the pivot now stands for them too
-            superMembers[pivot].insert(superMembers[pivot].end(),
-                                       superMembers[u].begin(), superMembers[u].end());
-            superMembers[u].clear();
-        }
-        numLive -= superMembers[pivot].size();  // every original the pivot stands for
 
         buckets.unfile(degrees[pivot], pivot);  // the pivot has left the graph
         degrees[pivot] = 0;
-        for (std::int32_t u : mergedVertices) { // and so have the merged vertices
-            buckets.unfile(degrees[u], u);
-            degrees[u] = 0;
-        }
 
         // ---- the BOUND, in place of md5's exact refresh --------------------
         // C[pivot] is the new clique. Everything it reached needs a new degree, and
@@ -863,50 +880,40 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
             tag = 0;
             ++numTagSweeps;
         }
-        const std::vector<std::int32_t> pivotClique = C[pivot];
+        std::vector<std::int32_t> pivotClique = C[pivot];
         ++tag;
         const std::int32_t inClique = tag;      // membership of C[pivot], one test
         for (std::int32_t v : pivotClique) mark[v] = inClique;
-        std::size_t degme = 0;
-        for (std::int32_t v : pivotClique) degme += superMembers[v].size();
-        cliqueDegree[pivot] = degme;            // what scan 1 subtracts from
+        // degme is NOT taken here. It is |C[pivot]| after mass elimination, and mass
+        // elimination now runs below, after the absorption; see entry 3. The scan
+        // over the cliques that follows is deliberately over the UNTRIMMED clique,
+        // which is what AMD_2's scan 1 walks: it runs over the whole of Lme before
+        // any of it has been mass eliminated. Nothing is lost by that, since a
+        // vertex the merge will take belongs to no clique but the new one, so it
+        // cannot appear in any touched clique's member list either way.
 
-        // ---- SCAN 1, |C[c] - C[pivot]| ONCE PER CLIQUE ---------------------
-        // This is the whole reason the bound is cheap: the quantity depends on c
-        // alone, so every vertex whose incidence list holds c reads it rather than
-        // recomputing it.
-        //
-        // And it is obtained by SUBTRACTION, never by looking at C[c] at all:
-        //
-        //     |C[c] - C[pivot]| = |C[c]| - sum of weight(u) over u in C[c] & C[pivot]
-        //
-        // cliqueDegree[c] supplies the first term, and the members of C[pivot]
-        // supply the second, since c is in I[u] exactly when u is in C[c]. So the
-        // scan walks the INCIDENCE lists of the new clique's members and pays
-        // sum |I[u]|, where amd1 walked the member lists of every touched clique
-        // and paid sum |C[c]|. Amd.cpp's scan 1 does the same thing at
-        // `we = Degree[e] + wnvi` then `we -= nvi`.
+        // |C[c] - C[pivot]| ONCE PER CLIQUE. This is the whole reason the bound is
+        // cheap: the quantity depends on c alone, so every vertex whose incidence
+        // list holds c reads it rather than recomputing it.
         std::vector<std::int32_t> touchedCliques;
-        std::vector<std::size_t> outside(n, 0);
         ++tag;
         const std::int32_t seenClique = tag;
-        for (std::int32_t u : pivotClique) {
-            const std::size_t weightU = superMembers[u].size();
-            for (std::int32_t c : I[u]) {
-                if (c == pivot) continue;
-                if (mark[c] != seenClique) {    // first sighting: start from |C[c]|
+        for (std::int32_t u : pivotClique)
+            for (std::int32_t c : I[u])
+                if (c != pivot && mark[c] != seenClique) {
                     mark[c] = seenClique;
                     touchedCliques.push_back(c);
-                    outside[c] = cliqueDegree[c] - weightU;
-                } else {                        // every later member just subtracts
-                    outside[c] -= weightU;
                 }
-                ++numIncidenceReads;
-                numMemberVisits += C[c].size();
-            }
+        for (std::int32_t c : touchedCliques) {
+            std::size_t total = 0;
+            for (std::int32_t v : C[c])
+                if (mark[v] != inClique && !eliminated[v]) total += superMembers[v].size();
+            outside[c] = total;
+            numMemberVisits += C[c].size();     // what an exact degree pays PER VERTEX
         }
 
-        // AGGRESSIVE ABSORPTION. Set view: dead = { c : C[c] <= C[pivot] }, the
+        // AGGRESSIVE ABSORPTION, the first of amd3's two extras. Set view:
+        // dead = { c : C[c] <= C[pivot] }, the
         // containment decided by the count already computed for the bound, since
         // |C[c] - C[pivot]| == 0 IS C[c] <= C[pivot]. Then I[u] = I[u] - dead for
         // every u in C[pivot], one stamp and one compaction pass, the same shape as
@@ -914,9 +921,8 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
         // pivot touched; this kills what any reached vertex touched, and it is free
         // because the quantity was computed for the bound anyway.
         std::vector<std::int32_t> deadCliques;
-        if (aggressive)
-            for (std::int32_t c : touchedCliques)
-                if (outside[c] == 0) deadCliques.push_back(c);
+        for (std::int32_t c : touchedCliques)
+            if (outside[c] == 0) deadCliques.push_back(c);
         if (!deadCliques.empty()) {
             ++tag;
             const std::int32_t deadTag = tag;
@@ -928,44 +934,115 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
                     if (mark[c] != deadTag) keptCliques.push_back(c);
                 I[u].swap(keptCliques);         // I[u] - dead
             }
-            for (std::int32_t c : deadCliques) parent[c] = pivot;  // same tree
             numAbsorbed += deadCliques.size();
         }
 
+        // MASS ELIMINATION, and it runs HERE rather than in the eliminator, which is
+        // ledger entry 3. u is INDISTINGUISHABLE from the pivot when the two have
+        // the same closed neighborhood, so that everything u can still reach lies
+        // inside the new clique. The test is a cheap sufficient condition for that
+        // and is textually AMD_2's `Elen[i] == 1 && p3 == pn`: nothing explicit left
+        // and no clique but the new one.
+        //
+        // It has to come AFTER the absorption above, because absorption is what
+        // makes the cheap test agree with the true one. A clique whose members all
+        // lie inside C[pivot] contributes nothing to what u can reach, yet its
+        // presence in I[u] makes `I[u] == [pivot]` false, so the test declines a
+        // genuine merge. AMD_2 says this itself: with aggressive absorption,
+        // `deg == 0` is identical to the structural test. Asking first, as this
+        // layer's parent does, is asking of an I[u] that still holds cliques about
+        // to be removed.
+        //
+        //     merged   = { u in C[pivot] : A[u] == {} and I[u] == {pivot} }
+        //     C[pivot] = C[pivot] - merged
+        std::vector<std::int32_t> mergedVertices;
+        for (std::int32_t u : pivotClique) {
+            if (A[u].empty() && I[u].size() == 1 && I[u][0] == pivot) {
+                I[u].clear();
+                eliminated[u] = true;
+                mergedVertices.push_back(u);
+            }
+        }
+        if (!mergedVertices.empty()) {      // C[pivot] - merged, one compaction pass
+            ++tag;
+            const std::int32_t mergedTag = tag;
+            for (std::int32_t u : mergedVertices) mark[u] = mergedTag;
+            std::vector<std::int32_t> keptClique;
+            for (std::int32_t v : C[pivot])
+                if (mark[v] != mergedTag) keptClique.push_back(v);
+            C[pivot].swap(keptClique);
+            pivotClique = C[pivot];
+        }
+
+        numCliqueEntries += C[pivot].size();
+        numEliminatedVertices += 1 + mergedVertices.size();
+        for (std::int32_t u : mergedVertices) {   // the pivot now stands for them too
+            superMembers[pivot].insert(superMembers[pivot].end(),
+                                       superMembers[u].begin(), superMembers[u].end());
+            superMembers[u].clear();
+        }
+        numLive -= superMembers[pivot].size();  // every original the pivot stands for
+        for (std::int32_t u : mergedVertices) { // and so have the merged vertices
+            buckets.unfile(degrees[u], u);
+            degrees[u] = 0;
+        }
+
+        // |C[pivot]| weighted, taken AFTER the merges, which is the value AMD_2
+        // reads. Its `degme` is decremented inside scan 2 as each vertex is mass
+        // eliminated, but it is not consumed there: the term enters a survivor's
+        // degree only in the later pass that restores the degree lists,
+        // `deg = Degree[i] + degme - nvi`, by which point degme is final. So every
+        // survivor sees the same number, which is what this line gives.
+        std::size_t degme = 0;
+        for (std::int32_t v : pivotClique) degme += superMembers[v].size();
+
         const std::size_t numLeft = numLive;
         const std::vector<std::int32_t>& refreshedVertices = pivotClique;
+        // LEDGER ENTRY 4, convention. This loop no longer finishes a bound. It
+        // computes the part that does not involve u's own weight and stores it, and
+        // the fourth pass below adds the new clique's size and subtracts the weight.
+        // That split is AMD_2's: scan 2 forms `deg = sum dext(e) + sum nvj` and keeps
+        // `Degree[i] = MIN(Degree[i], deg)`, and only the later pass that restores
+        // the degree lists finishes it with `deg = Degree[i] + degme - nvi` and
+        // `deg = MIN(deg, nleft - nvi)`.
+        //
+        // Why the split is load-bearing rather than a rearrangement: supervariable
+        // detection runs BETWEEN the two, and a hash merge does `Nv[i] += Nv[j]`, so
+        // `nvi` in the fourth pass is the weight AFTER the merge. Subtracting it here
+        // would use the weight u had before absorbing v, which files a supervariable
+        // one bucket too high per vertex merged into it, and it is never picked as
+        // early as its size has earned. graph3 is the case: 8 absorbs 5, the vendored
+        // routine files it at 2 and we filed 3, and from that pivot the two runs
+        // order different graphs.
+        //
+        // This is mmd's ledger entry 5 in a different array, which the README says
+        // cannot happen on the amd branch because AMD files at an external degree
+        // that does not move when a weight changes. The external degree does not; the
+        // `- nvi` term does, and it is the term that decides the bucket.
+        std::vector<std::size_t> partial(n, 0);
         for (std::int32_t u : refreshedVertices) {
             // bound = |A[u]| + |C[pivot] - {u}| + sum |C[c] - C[pivot]| over the
             // cliques in I[u] - {pivot}, against the exact
             // |( A[u] | C[c] for c in I[u] ) - {u}|. The bound replaces the union
             // by a sum, so an overlap outside C[pivot] is counted once per clique
-            // that holds it, which is exactly where it overcounts.
+            // that holds it, which is exactly where it overcounts. The middle term
+            // and the caps are the fourth pass's; what is formed here is the rest.
             std::size_t explicitPart = 0;
             for (std::int32_t v : A[u]) explicitPart += superMembers[v].size();
-            std::size_t bound = explicitPart + degme - superMembers[u].size();
+            std::size_t deg = explicitPart;
             for (std::int32_t c : I[u]) {
                 if (c == pivot) continue;
-                bound += outside[c];
+                deg += outside[c];
                 ++numCliqueReads;               // what the bound pays instead
             }
-            bound = std::min(bound, numLeft - superMembers[u].size());
-            bound = std::min(bound, degrees[u] + degme - superMembers[u].size());
-            // NOT PRODUCTION: instrumentation. This computes the very union the bound exists to
-            // avoid, and its only purpose is to show the truth beside the estimate.
-            exact[u] = amd3ExactDegree(A, I, C, eliminated, superMembers, mark, tag, u);
-            ++numBoundChecks;
-            if (bound > exact[u]) ++numLooseBounds;
-            // The other direction, which is not a quality signal but an INVARIANT. A bound
-            // may exceed the degree by any amount and still be a bound; falling below it is
-            // the one thing it must never do, since the picker would then be told a vertex is
-            // cheaper than it is. Counted because it was not: the layer measured looseness
-            // only, and a cap taken from the wrong counter drove this negative 22 times on a
-            // 10 by 10 grid while every example stayed green. Anything but zero here is a
-            // defect. See the amd2 subsection of README.md.
-            if (bound < exact[u]) ++numBoundsBelowExact;
-            amd3Refile(buckets, degrees, u, bound);
+            // AMD_2's `Degree[i] = MIN (Degree[i], deg)`. The stored degree is a full
+            // one from a previous iteration and this is a partial, so the two are
+            // comparable only once the fourth pass adds `degme - nvi` to whichever
+            // won. That is why the minimum is taken here and the common term added
+            // there, rather than the other way round.
+            partial[u] = std::min(deg, degrees[u]);
         }
-        // HASH SUPERVARIABLE DETECTION. Vertices indistinguishable from EACH
+        // HASH SUPERVARIABLE DETECTION, the second extra. Vertices indistinguishable from EACH
         // OTHER, which the pivot test cannot see. Hash first so the exact
         // comparison runs only within a bucket; the hash is a filter, never the
         // decision.
@@ -996,10 +1073,27 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
         for (std::size_t k : usedKeys) {
             std::vector<std::int32_t>& group = hashBucket[k];
             if (group.size() < 2) continue;
-            for (std::size_t x = 0; x < group.size(); ++x) {
+            // LEDGER ENTRY 1, convention. The bucket is walked BACKWARD, because
+            // Amd.cpp builds it by pushing at the head while scan 2 walks Lme
+            // FORWARD, `Next[i] = Head[hval]; Head[hval] = i` at its line 1940,
+            // so its chain comes out reversed against C[p] and the pair loop then
+            // takes the head. The survivor of an indistinguishable pair is
+            // therefore the member of C[p] seen LAST, where appending and walking
+            // forward keeps the one seen FIRST. Same set of merges either way;
+            // only which of the two absorbs the other moves, and minimum degree
+            // is settled by exactly that.
+            //
+            // The walk is reversed rather than the fill, which is the same order
+            // at O(1) per insertion instead of O(bucket). `usedKeys` keeps its
+            // forward order deliberately: Amd.cpp reaches a bucket by rescanning
+            // Lme forward and taking the first member it meets whose bucket is
+            // still full, so buckets are PROCESSED in C[p] order while their
+            // CONTENTS are reversed. The two orders are independent and only the
+            // second decides a merge.
+            for (std::size_t x = group.size(); x-- > 0; ) {
                 std::int32_t u = group[x];
                 if (eliminated[u]) continue;
-                for (std::size_t y = x + 1; y < group.size(); ++y) {
+                for (std::size_t y = x; y-- > 0; ) {
                     std::int32_t v = group[y];
                     if (eliminated[v]) continue;
                     // The exact test, which the hash only filters for:
@@ -1007,13 +1101,13 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
                     // Decided by stamping one side and counting matches on the
                     // other, as every other membership test in this file is, so it
                     // costs one pass and no sort.
-                    // The third site, and the reason this layer and amd2 have one more
-                    // than the others. `other` advances once per PAIR TESTED rather
-                    // than once per pass, and the pair count is quadratic in the bucket
-                    // sizes with no clean bound, so a check before the pass would leave
-                    // the gap between checks unbounded. Safe at the top of a pair
-                    // because the previous pair's stamps are spent and hashBucket,
-                    // usedKeys and eliminated are separate structures.
+                    // The third site, and the reason this layer has one more than the
+                    // others. `other` advances once per PAIR TESTED rather than once
+                    // per pass, and the pair count is quadratic in the bucket sizes
+                    // with no clean bound, so a check before the pass would leave the
+                    // gap between checks unbounded. Safe at the top of a pair because
+                    // the previous pair's stamps are spent and hashBucket, usedKeys
+                    // and eliminated are separate structures.
                     if (tag > TAG_CEILING) {
                         std::fill(mark.begin(), mark.end(), NIL);
                         tag = 0;
@@ -1024,8 +1118,25 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
                     std::size_t sizeV = 0;
                     for (std::int32_t w : A[v])
                         if (w != u && !eliminated[w]) { mark[w] = other; ++sizeV; }
-                    for (std::int32_t c : I[v]) {        // stamped past the vertices
-                        mark[c + static_cast<std::int32_t>(n)] = other;
+                    // LEDGER ENTRY 6, and it is the other half of entry 5 rather than a new
+                    // idea. Both walks skip I[..][0], the NEW CLIQUE. Entry 5 put it at the front
+                    // of every I[u], and u and v are both members of C[pivot], so both lists begin
+                    // with the same entry and it can never discriminate. Amd.cpp skips it outright,
+                    // `for (p = Pe[j] + 1; ...)` with the comment "skip the first element in the
+                    // list (me)", and that skip is part of the same mechanism as putting me first:
+                    // porting one without the other leaves a guaranteed match at the head of a
+                    // short-circuiting walk, so every FAILING pair pays one extra iteration before
+                    // it can fail.
+                    //
+                    // Measured in production on a 140x140 grid: 2.08 incidence iterations per pair
+                    // against amd2's 1.21, on the line Instruments put at 6.22 s of a 14.90 s run,
+                    // and 1.08 after. Exactly one extra iteration per pair, which is what a
+                    // guaranteed match at position zero predicts.
+                    //
+                    // Skipped on BOTH sides, since the two walks feed sizeV and sizeU and those are
+                    // compared: dropping it from one alone would make every pair fail on the count.
+                    for (std::size_t ci = 1; ci < I[v].size(); ++ci) {   // stamped past the vertices
+                        mark[I[v][ci] + cliqueStamp] = other;
                         ++sizeV;
                     }
                     std::size_t sizeU = 0;
@@ -1036,9 +1147,9 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
                         if (mark[w] != other) { same = false; break; }
                     }
                     if (same)
-                        for (std::int32_t c : I[u]) {
+                        for (std::size_t ci = 1; ci < I[u].size(); ++ci) {   // skip the new clique
                             ++sizeU;
-                            if (mark[c + static_cast<std::int32_t>(n)] != other) {
+                            if (mark[I[u][ci] + cliqueStamp] != other) {
                                 same = false;
                                 break;
                             }
@@ -1070,9 +1181,42 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
 
         for (std::size_t k : usedKeys) hashBucket[k].clear();  // only what was used
 
+        // THE FOURTH PASS, which finishes the bounds and files them. AMD_2 spells it
+        // `deg = Degree[i] + degme - nvi` and `deg = MIN (deg, nleft - nvi)`, under
+        // its RESTORE DEGREE LISTS heading, and it runs here for the reason in entry
+        // 4: `nvi` is read after supervariable detection, so a vertex that absorbed
+        // another subtracts the combined weight.
+        //
+        // `degme` is |C[pivot]| after the merges and is the same for everyone, and
+        // `numLeft` is the live original count, both settled before this loop, so the
+        // pass is one addition and two comparisons per survivor.
+        for (std::int32_t u : refreshedVertices) {
+            if (eliminated[u]) continue;        // absorbed by the hash a moment ago
+            const std::size_t weightU = superMembers[u].size();  // POST-merge, the point
+            std::size_t bound = partial[u] + degme - weightU;
+            bound = std::min(bound, numLeft - weightU);
+            // NOT PRODUCTION: instrumentation. This computes the very union the bound exists to
+            // avoid, and its only purpose is to show the truth beside the estimate. It is taken
+            // here rather than in the pass above so that it sees the same graph the bound does,
+            // supervariable detection having run in between.
+            exact[u] = amd3ExactDegree(A, I, C, eliminated, superMembers, mark, tag, u);
+            ++numBoundChecks;
+            if (bound > exact[u]) ++numLooseBounds;
+            // The other direction, which is not a quality signal but an INVARIANT. A bound
+            // may exceed the degree by any amount and still be a bound; falling below it is
+            // the one thing it must never do, since the picker would then be told a vertex is
+            // cheaper than it is. Counted because it was not: the layer measured looseness
+            // only, and a cap taken from the wrong counter drove this negative 22 times on a
+            // 10 by 10 grid while every example stayed green. Anything but zero here is a
+            // defect. See the amd3 subsection of README.md.
+            if (bound < exact[u]) ++numBoundsBelowExact;
+            amd3Refile(buckets, degrees, u, bound);
+        }
+
         numBoundUpdates += refreshedVertices.size();
-        for (std::int32_t u : refreshedVertices)
-            if (!eliminated[u]) minDegree = std::min(minDegree, degrees[u]);
+        for (std::int32_t u : refreshedVertices) minDegree = std::min(minDegree, degrees[u]);
+
+        for (std::int32_t c : touchedCliques) outside[c] = 0;   // clear what this iteration wrote
 
         // A supervariable of size w is w consecutive columns of L. Its external
         // degree is what remains of the clique after the merges, since a merged
@@ -1081,28 +1225,15 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
         // column then holds ext + w - 1 entries below its diagonal, the next
         // ext + w - 2, down to ext, and each column contributes its own diagonal.
         std::size_t superSize = superMembers[pivot].size();
+        // Weighted, because hash detection folds a vertex into a LIVE one, so a
+        // member of the new clique can stand for several original vertices, and a
+        // merged one stands for none and is still lying there. amd1 can use the
+        // plain count and this file cannot, which is the same inheritance the
+        // numLive counter above records.
         std::size_t externalDegree = 0;
         for (std::int32_t v : C[pivot])
             if (!eliminated[v]) externalDegree += superMembers[v].size();
-        // The dense rows were taken out but they still sit below every column of
-        // L, so each one adds an entry to each. Amd.cpp does the same at
-        // r = degme + ndense, which makes nnz(L) an upper bound rather than a count
-        // once anything is dense: a dense row is assumed nonzero everywhere.
-        const std::size_t reachSize = externalDegree + denseVertices.size();
-        nnzL += superSize * reachSize + superSize * (superSize - 1) / 2 + superSize;
-        frontSize[pivot] = superSize + externalDegree;   // Amd.cpp: nvpiv + degme
-        // Amd.cpp's Info, with f the pivots of this front and r what it reaches.
-        {
-            const std::size_t f = superSize;
-            const std::size_t r = reachSize;
-            const std::size_t lnzMe = f * r + (f - 1) * f / 2;
-            numDivides += lnzMe;
-            const std::size_t multsubs = f * r * r + r * (f - 1) * f
-                                       + (f - 1) * f * (2 * f - 1) / 6;
-            numMultsubsLu += multsubs;
-            numMultsubsLdl += (multsubs + lnzMe) / 2;
-            frontMax = std::max(frontMax, f + r);
-        }
+        nnzL += superSize * externalDegree + superSize * (superSize - 1) / 2 + superSize;
 
         std::ostringstream absorbedCliquesText;
         if (absorbedCliques.empty()) {
@@ -1160,80 +1291,9 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
         ++iteration;
     }
 
-    // ---- THE POSTORDER, in place of raw elimination order -------------------
-    // The elements form the assembly tree, and any postorder of it gives the same
-    // factor: a node is numbered after all its descendants either way, so no fill
-    // moves. What a postorder buys is locality. Children finish before their parent
-    // starts, so the update from a child is consumed while it is still warm, and a
-    // supernode's columns come out contiguous instead of scattered.
-    //
-    // Two details from Amd.cpp, both about which child goes first. The child lists
-    // are built by walking the elements DOWNWARD, so a list comes out ascending.
-    // Then the BIGGEST child by front size is moved to the end, so the largest
-    // subtree is traversed last and the stack of pending updates stays small.
-    std::vector<std::int32_t> child(n, NIL), sibling(n, NIL);
-    for (std::int32_t e = static_cast<std::int32_t>(n) - 1; e >= 0; --e)
-        if (isElement[e] && parent[e] != NIL) {   // downward, so lists end ascending
-            sibling[e] = child[parent[e]];
-            child[parent[e]] = e;
-        }
-    for (std::int32_t e = 0; e < static_cast<std::int32_t>(n); ++e) {
-        if (!isElement[e] || child[e] == NIL) continue;
-        std::int32_t biggest = NIL, biggestPrevious = NIL, previous = NIL;
-        std::size_t largest = 0;
-        bool haveBiggest = false;
-        for (std::int32_t f = child[e]; f != NIL; f = sibling[f]) {
-            if (!haveBiggest || frontSize[f] >= largest) {  // the LAST maximal one
-                largest = frontSize[f];
-                biggestPrevious = previous;
-                biggest = f;
-                haveBiggest = true;
-            }
-            previous = f;
-        }
-        if (sibling[biggest] != NIL) {            // already last means nothing to do
-            if (biggestPrevious == NIL) child[e] = sibling[biggest];
-            else sibling[biggestPrevious] = sibling[biggest];
-            sibling[biggest] = NIL;
-            sibling[previous] = biggest;
-        }
-    }
-
-    std::vector<std::int32_t> postorder, stack;
-    for (std::int32_t root = 0; root < static_cast<std::int32_t>(n); ++root) {
-        if (!isElement[root] || parent[root] != NIL) continue;   // roots in order
-        stack.push_back(root);
-        while (!stack.empty()) {                  // explicit stack, no recursion
-            const std::int32_t e = stack.back();
-            if (child[e] != NIL) {
-                const std::int32_t f = child[e];
-                child[e] = sibling[f];            // each child pushed exactly once
-                stack.push_back(f);
-            } else {
-                postorder.push_back(e);           // all descendants done, number it
-                stack.pop_back();
-            }
-        }
-    }
-
     std::vector<std::int32_t> order;
-    for (std::int32_t e : postorder)
-        for (std::int32_t u : superMembers[e]) order.push_back(u);
-    // The dense rows go last, in index order, and Amd.cpp counts the block they
-    // form as completely full, which it is in the worst case and usually is not.
-    if (!denseVertices.empty()) {
-        const std::size_t numDense = denseVertices.size();
-        order.insert(order.end(), denseVertices.begin(), denseVertices.end());
-        nnzL += numDense * (numDense - 1) / 2 + numDense;
-        const std::size_t lnzDense = numDense * (numDense - 1) / 2;  // counted full
-        numDivides += lnzDense;
-        const std::size_t denseMultsubs =
-            (numDense - 1) * numDense * (2 * numDense - 1) / 6;
-        numMultsubsLu += denseMultsubs;
-        numMultsubsLdl += (denseMultsubs + lnzDense) / 2;
-        frontMax = std::max(frontMax, numDense);
-    }
-
+    for (std::int32_t pivot : pivots)
+        for (std::int32_t u : superMembers[pivot]) order.push_back(u);
     std::cout << "n = " << n << ", nnz(L) = " << nnzL
               << " against nnz(tril A) = " << nnzTrilA
               << ", fill = " << (nnzL - nnzTrilA) << "\n";
@@ -1247,28 +1307,14 @@ std::vector<std::int32_t> amd3MinimumDegree(const Graph& G, double alpha = 10.0,
               << numMemberVisits << "\n";
     std::cout << "clique reads the bound needed:                    "
               << numCliqueReads << "\n";
-    std::cout << "incidence entries scan 1 walked:                  "
-              << numIncidenceReads << "\n";
+    // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
+    std::cout << "aggressively absorbed: " << numAbsorbed
+              << ", hash merges: " << numHashMerges << "\n";
     // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     std::cout << "bound below exact " << numBoundsBelowExact
               << " times, which must be zero\n";
     std::cout << "bound was loose " << numLooseBounds << " times out of "
               << numBoundChecks << "\n";
-    std::cout << "aggressively absorbed: " << numAbsorbed
-              << ", hash merges: " << numHashMerges << "\n";
-    std::cout << "dense threshold: " << denseThreshold << ", dense rows removed: "
-              << denseVertices.size() << "\n";
-    // The rest of Amd.cpp's Info array, which is a factorization cost PREDICTION
-    // and so belongs to a symbolic phase rather than to an ordering. It is here for
-    // the record: nnz(L) above is AMD_LNZ, computed from the same expression, and
-    // the three below come from the same f and r with no extra structure.
-    //
-    // Two fields are deliberately missing. AMD_MEMORY and AMD_NCMPA report the peak
-    // workspace and the number of garbage collections in the vendored flat pool,
-    // and this file has no pool to compact, so there is nothing to report.
-    std::cout << "predicted: divides " << numDivides << ", multiply-subtracts LDL "
-              << numMultsubsLdl << ", LU " << numMultsubsLu << ", largest front "
-              << frontMax << "\n";
     std::cout << "tag sweeps: " << numTagSweeps << "\n";
     std::cout << "order: [";
     for (std::size_t k = 0; k < order.size(); ++k)
@@ -1302,39 +1348,6 @@ void run(const std::string& name, const Graph& G) {
     std::cout << "=== " << name << " ===\n";
     amd3MinimumDegree(G);
     std::cout << "\n";
-}
-
-// Order a general sparse matrix given in column form, which is what amd_order
-// takes. The pattern may be unsorted, may hold duplicates, may carry a diagonal
-// and need not be symmetric. Two preprocess passes give the deduplicated row and
-// column forms, amd3Aat turns them into a graph, and the ordering runs on that.
-//
-// alpha and aggressive are the whole of amd_order's Control array, AMD_DENSE and
-// AMD_AGGRESSIVE. Everything else it takes is the matrix.
-std::vector<std::int32_t> amd3OrderMatrix(std::size_t n,
-                                          const std::vector<std::int32_t>& Ap,
-                                          const std::vector<std::int32_t>& Ai,
-                                          double alpha = 10.0,
-                                          bool aggressive = true) {
-    const int status = amd3Valid(n, Ap, Ai);
-    if (status == AMD_INVALID) {
-        std::cout << "status: invalid input\n";
-        return {};
-    }
-    std::cout << "status: " << (status ? "ok but jumbled" : "ok") << "\n";
-    std::vector<std::int32_t> Rp, Ri, Cp, Ci;
-    amd3Preprocess(n, Ap, Ai, Rp, Ri);          // row form of A
-    amd3Preprocess(n, Rp, Ri, Cp, Ci);          // and back, so the column form is clean
-    AatInfo info;
-    Graph A = amd3Aat(n, Cp, Ci, Rp, Ri, info);
-    // The one sort, at construction, exactly as the Graph path sorts its input:
-    // outside every loop, and only so the two twins hold the same order.
-    for (std::size_t u = 0; u < n; ++u) std::sort(A[u].begin(), A[u].end());
-    std::cout << "n = " << n << ", nz = " << info.nz << ", symmetry = "
-              << std::fixed << std::setprecision(3) << info.symmetry
-              << std::defaultfloat << ", nz diagonal = " << info.numDiagonal
-              << ", nz(A+A\') = " << info.nzaat << "\n";
-    return amd3MinimumDegree(A, alpha, aggressive);
 }
 
 int main(int argc, char** argv) {
@@ -1483,34 +1496,11 @@ int main(int argc, char** argv) {
         {"graph7", graph7},
     };
 
-    // matrix1, the one example given as a MATRIX rather than as a graph, so the
-    // input path has something to chew on. Six by six in column form, and
-    // deliberately awful: unsymmetric, with a diagonal, with duplicate entries, and
-    // with one column whose rows are out of order. amd_order accepts exactly this,
-    // and amd3Preprocess and amd3Aat are what turn it into a graph.
-    //
-    //   column 0: rows 0 1 3          column 3: rows 3 0 2   (unsorted)
-    //   column 1: rows 1 2 2          column 4: rows 4 5
-    //   column 2: rows 0 2 5          column 5: rows 1 5
-    const std::size_t matrix1N = 6;
-    const std::vector<std::int32_t> matrix1Ap = {0, 3, 6, 9, 12, 14, 16};
-    const std::vector<std::int32_t> matrix1Ai = {0, 1, 3,
-                                                 1, 2, 2,
-                                                 0, 2, 5,
-                                                 3, 0, 2,
-                                                 4, 5,
-                                                 1, 5};
-
     // All of them by default. To run just one, pass its number: ./amd3_cpp 3
     int selected = (argc > 1) ? std::atoi(argv[1]) : 0;
     for (int number = 1; number <= static_cast<int>(examples.size()); ++number) {
         if (selected != 0 && number != selected) continue;
         run(examples[number - 1].first, examples[number - 1].second);
-    }
-    if (selected == 0 || selected == static_cast<int>(examples.size()) + 1) {
-        std::cout << "=== matrix1 ===\n";
-        amd3OrderMatrix(matrix1N, matrix1Ap, matrix1Ai);
-        std::cout << "\n";
     }
     return 0;
 }

@@ -1,17 +1,25 @@
-#include "oblio/Amd2.h"
+#include "oblio/Amd3.h"
 
 #include <algorithm>
+#include <limits>
 #include <utility>
 
 namespace Oblio {
 
-std::vector<std::int32_t> orderAmd2(const std::vector<std::size_t>&  colPtr,
+std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
                                     const std::vector<std::int32_t>& rowIdx) {
     if (colPtr.empty()) return std::vector<std::int32_t>();
     const std::size_t size = colPtr.size() - 1;
     if (size == 0) return std::vector<std::int32_t>();
 
     QuotientGraph qg(colPtr, rowIdx);
+
+    // The two shared-class conventions this layer differs by. Both are off for every other driver
+    // and neither changes which sets are computed, only which permutation comes out. See the
+    // setters, and experiments/ordering/AMD3.md for ledger entries 2, 3 and 5.
+    qg.setVendoredListOrder(true);      // cliques before adjacency; the new clique at the front
+    qg.setLateMassElimination(true);    // and mass elimination becomes this driver's, below
+
     std::vector<std::int32_t> pivots;               // the order over supervariables
     pivots.reserve(size);
     std::size_t numEliminated = 0;                  // a counter, not a scan of the flags
@@ -78,7 +86,6 @@ std::vector<std::int32_t> orderAmd2(const std::vector<std::size_t>&  colPtr,
     // allocates and zeroes it per pivot, which reads better and is O(n) per step, O(n^2) over the
     // run in bookkeeping alone, independent of the graph. Only the entries this step wrote are
     // touched, and they are exactly the ones it will read.
-    std::vector<std::size_t> outside(size, 0);
     std::vector<std::int32_t> touchedCliques;
     std::vector<std::int32_t> deadCliques;
 
@@ -90,21 +97,72 @@ std::vector<std::int32_t> orderAmd2(const std::vector<std::size_t>&  colPtr,
     // already-trimmed member list.
     std::vector<std::size_t> cliqueDegree(size, 0);
 
+    // Amd.cpp's W ARRAY, and this file used to keep the same three facts in three places.
+    //
+    // The old shape kept THREE facts about a clique in three places: `mark[c]` says whether this step has
+    // seen it, `outside[c]` carries |C[c] - C[p]|, and a clique is dead when it has been stripped
+    // from the incidence lists. Its scan 1 therefore loads and stores `mark[c]` AND loads and
+    // stores `outside[c]` for every incidence element, two cache lines per element, and clears
+    // `outside` over the touched list at the end of every step.
+    //
+    // Amd.cpp keeps all three in ONE array, with a tag:
+    //
+    //     w[c] == 0            the clique is absorbed and gone
+    //     0 < w[c] < wflg      alive, not seen this step; the value is stale
+    //     w[c] >= wflg         seen this step, and w[c] - wflg is |C[c] - C[p]|
+    //
+    // so its scan 1 is one load and one store into one array, and `cliqueDegree` is touched only
+    // on first sighting. Its inner body is four lines and this is a transcription of them:
+    //
+    //     we = W [e] ;
+    //     if      (we >= wflg) we -= nvi ;
+    //     else if (we != 0)    we = Degree [e] + wnvi ;
+    //     W [e] = we ;
+    //
+    // The tag advances by `lemax` at the end of each step, which is the largest clique this run
+    // has built. That is what makes the stale range safe without a clearing pass: after scan 1 no
+    // entry exceeds wflg + lemax, so advancing by lemax puts every one of them below the new wflg,
+    // and the whole array is invalidated in a single addition.
+    //
+    // SIGNED, and int32 to match. `wnvi = wflg - weight(u)` is negative whenever the tag is still
+    // small and the weight is not, which is exactly the case on the first eliminations, and the
+    // arithmetic only comes right again at `w[c] - wflg`. An unsigned type wraps there and the
+    // bound comes out enormous. Amd.cpp's `Int` is signed for the same reason.
+    std::vector<std::int32_t> w(size, 1);       // every clique alive and unseen, Amd.cpp's W
+    std::int32_t wflg  = 2;                     // the tag, Amd.cpp's wflg
+    std::int32_t lemax = 0;                     // the largest clique so far, Amd.cpp's lemax
+    // wflg + n must not overflow, which is the whole of Amd.cpp's wbig.
+    const std::int32_t wbig = std::numeric_limits<std::int32_t>::max() - static_cast<std::int32_t>(size);
+    std::size_t numFlagSweeps = 0;              // how often the guard below actually fires
+
+    // Amd.cpp's clear_flag: reset the array and the tag when the tag can no longer be advanced
+    // safely. Every live clique goes back to 1, which is the alive-and-unseen state, and the dead
+    // ones stay 0. Called once per elimination, and almost never does anything.
+    const auto clearFlag = [&]() {
+        if (wflg < 2 || wflg >= wbig) {
+            for (std::size_t x = 0; x < size; ++x)
+                if (w[x] != 0) w[x] = 1;
+            wflg = 2;
+            ++numFlagSweeps;
+        }
+    };
+
+    // The half of each bound that does not involve the vertex's own weight, carried from the pass
+    // that forms it across supervariable detection to the pass that finishes it. Amd.cpp keeps the
+    // same quantity in Degree[i] between its scan 2 and its degree-list pass. See ledger entry 4.
+    std::vector<std::size_t> partial(size, 0);
+
     while (numEliminated < size) {
         while (buckets.empty(minDegree)) ++minDegree;   // walk up to the first live bucket
         const std::int32_t pivot = buckets.head(minDegree);   // whatever was filed last
 
-        const std::vector<std::int32_t>& merged = qg.eliminate(pivot);
+        // Under setLateMassElimination this returns an empty list and C[pivot] is reach(pivot)
+        // exactly. The merge happens below, once the absorption has run.
+        qg.eliminate(pivot);
         pivots.push_back(pivot);
-        numEliminated += 1 + merged.size();
-        numLive -= qg.weight(pivot);                // every original the pivot stands for
 
         buckets.unfile(degrees[pivot], pivot);      // unfile before zeroing: the bucket index is
         degrees[pivot] = 0;                         //   read from the degree
-        for (std::int32_t u : merged) {
-            buckets.unfile(degrees[u], u);
-            degrees[u] = 0;
-        }
 
         // ---- the bound, in place of an exact refresh -----------------------------------
         // Everything the new clique reached needs a new degree, and nothing else can have
@@ -114,13 +172,19 @@ std::vector<std::int32_t> orderAmd2(const std::vector<std::size_t>&  colPtr,
         // pointer taken before the next elimination is the only one that is safe, and this is
         // that window.
         const std::int32_t* pivotClique     = qg.clique(pivot);
-        const std::size_t   pivotCliqueSize = qg.cliqueSize(pivot);
+        std::size_t         pivotCliqueSize = qg.cliqueSize(pivot);
 
         // No membership stamp for C[p] is needed any more: the subtraction below asks which
         // cliques the new clique's members belong to, never which vertices a clique's members
         // are, so the one query that used it is gone. The amd2 prototype still carries the stamp,
         // inherited from amd1 and dead there for the same reason.
-        std::size_t degme = 0;                      // |C[p]|, weighted
+        // |C[p]| weighted is NOT taken here. It is the value after mass elimination, which now runs
+        // below the absorption, so it is read there. The scan that follows is deliberately over
+        // the UNTRIMMED clique, which is what Amd.cpp's scan 1 walks: it runs over the whole of
+        // Lme before any of it has been mass eliminated. Nothing is lost by that, since a vertex
+        // the merge will take belongs to no clique but the new one and so cannot appear in any
+        // touched clique's member list either way.
+        std::size_t degme = 0;
         for (std::size_t k = 0; k < pivotCliqueSize; ++k) degme += qg.weight(pivotClique[k]);
         cliqueDegree[pivot] = degme;                // what the scan below subtracts from
 
@@ -140,38 +204,78 @@ std::vector<std::int32_t> orderAmd2(const std::vector<std::size_t>&  colPtr,
         // 272646, which is most of the reason this branch used to run three times slower than the
         // vendored routine. `Amd.cpp` does the same thing at `we = Degree[e] + wnvi`, then
         // `we -= nvi`, and it is the amd2 layer's pass 3.
+        clearFlag();                            // Amd.cpp calls this here too, before scan 1
+        lemax = std::max(lemax, static_cast<std::int32_t>(degme));
+
         touchedCliques.clear();
-        ++tag;
-        const std::int32_t seenClique = tag;
         for (std::size_t k = 0; k < pivotCliqueSize; ++k) {
-            const std::int32_t u       = pivotClique[k];
-            const std::size_t  weightU = qg.weight(u);
+            const std::int32_t u    = pivotClique[k];
+            const std::int32_t nvi  = static_cast<std::int32_t>(qg.weight(u));
+            const std::int32_t wnvi = wflg - nvi;
             const std::int32_t* incidence     = qg.incidence(u);
             const std::size_t   incidenceSize = qg.incidenceSize(u);
             for (std::size_t i = 0; i < incidenceSize; ++i) {
                 const std::int32_t c = incidence[i];
                 if (c == pivot) continue;
-                if (mark[c] != seenClique) {        // first sighting: start from |C[c]|
-                    mark[c] = seenClique;
-                    touchedCliques.push_back(c);
-                    outside[c] = cliqueDegree[c] - weightU;
-                } else {                            // every later member just subtracts
-                    outside[c] -= weightU;
+                std::int32_t we = w[c];
+                if (we >= wflg) {                   // already seen this step: just subtract
+                    we -= nvi;
+                } else if (we != 0) {               // first sighting: start from |C[c]|, tagged
+                    we = static_cast<std::int32_t>(cliqueDegree[c]) + wnvi;
+                    touchedCliques.push_back(c);    // only for the absorption pass below
                 }
+                w[c] = we;
             }
         }
 
-        // AGGRESSIVE ABSORPTION. outside[c] == 0 says C[c] lies wholly inside the new clique, so
+        // AGGRESSIVE ABSORPTION. w[c] - wflg == 0 says C[c] lies wholly inside the new clique, so
         // it can never contribute anything again and its entries in the incidence lists are pure
         // cost. Amd.cpp's `if (aggressive && we == 0)`. It is worth doing here and nowhere else
         // because the quantity was computed for the bound anyway, so the test is free; and it
         // pays twice over, shortening the lists the bound walks and the lists a later scan walks.
         deadCliques.clear();
         for (std::int32_t c : touchedCliques)
-            if (outside[c] == 0) deadCliques.push_back(c);
+            if (w[c] == wflg) { deadCliques.push_back(c); w[c] = 0; }   // |C[c] - C[p]| == 0
         qg.absorb(deadCliques, pivotClique, pivotCliqueSize);
 
+        // MASS ELIMINATION, and it runs HERE rather than inside the eliminator. Absorption is what
+        // makes the cheap structural test agree with the true one: a clique whose members all lie
+        // inside C[p] contributes nothing to what u can reach, yet its presence in I[u] makes the
+        // test fail. Amd.cpp says so itself, making the same test in its scan 2 over an element
+        // list absorption has already compacted: with aggressive absorption, `deg == 0` is
+        // identical to `Elen[i] == 1 && p3 == pn`. Asking first, as every other driver here does,
+        // declines merges the vendored routine makes. experiments/ordering/AMD3.md, ledger entry 3.
+        const std::vector<std::int32_t>& merged = qg.massEliminate(pivot);
+        numEliminated += 1 + merged.size();
+        numLive -= qg.weight(pivot);                // every original the pivot stands for
+        for (std::int32_t u : merged) {
+            buckets.unfile(degrees[u], u);
+            degrees[u] = 0;
+        }
+
+        // The clique and its weight are re-read, both having moved: massEliminate trims C[p] of
+        // the merged members and folds their weight into the pivot. Amd.cpp reaches the same
+        // value by decrementing degme inside scan 2, but it does not CONSUME it there: the term
+        // enters a survivor's degree only in the pass that restores the degree lists,
+        // `deg = Degree[i] + degme - nvi`, by which point degme is final. So every survivor sees
+        // the same number, which is what re-taking it here gives.
+        pivotClique     = qg.clique(pivot);
+        pivotCliqueSize = qg.cliqueSize(pivot);
+        degme = 0;
+        for (std::size_t k = 0; k < pivotCliqueSize; ++k) degme += qg.weight(pivotClique[k]);
+
         const std::size_t numLeft = numLive;
+
+        // The bound is formed in TWO halves here, where Amd2 forms it in one, and that split is
+        // ledger entry 4. This pass computes the part that does not involve u's own weight and
+        // stores it; the pass after the hash adds `degme` and subtracts the weight. Amd.cpp does
+        // the same: scan 2 forms `deg = sum dext(e) + sum nvj` and keeps
+        // `Degree[i] = MIN(Degree[i], deg)`, and only the later pass finishes it. The reason it
+        // is load-bearing rather than a rearrangement is that supervariable detection runs BETWEEN
+        // the two and a hash merge does `Nv[i] += Nv[j]`, so `nvi` there is the POST-merge weight.
+        // Subtracting it in this pass would use the weight u had before absorbing v, which files a
+        // supervariable one bucket too high per vertex taken. Amd2 and Amd2B carried exactly that
+        // and it was costing 3 to 9 percent of fill on grids.
         for (std::size_t k = 0; k < pivotCliqueSize; ++k) {
             const std::int32_t u = pivotClique[k];
             // bound(u) = |A[u] - C[p]| + |C[p] - {u}| + sum |C[c] - C[p]| over I[u] - {p},
@@ -190,18 +294,17 @@ std::vector<std::int32_t> orderAmd2(const std::vector<std::size_t>&  colPtr,
             for (std::size_t a = 0; a < adjacencySize; ++a)
                 explicitPart += qg.weight(adjacency[a]);
 
-            std::size_t bound = explicitPart + degme - qg.weight(u);
+            std::size_t deg = explicitPart;
             for (std::size_t i = 0; i < incidenceSize; ++i)
-                if (incidence[i] != pivot) bound += outside[incidence[i]];
+                if (incidence[i] != pivot)
+                    deg += static_cast<std::size_t>(w[incidence[i]] - wflg);
 
-            // The two caps, both exact and both cheap, and load-bearing rather than defensive:
-            // they are what stops the loose term accumulating over a run, which is also why this
-            // branch cannot batch (the bound stays tight only while every reached vertex is
-            // recomputed at each pivot).
-            bound = std::min(bound, numLeft - qg.weight(u));
-            bound = std::min(bound, degrees[u] + degme - qg.weight(u));
-
-            buckets.refile(degrees, u, bound);
+            // Amd.cpp's `Degree[i] = MIN (Degree[i], deg)`. The stored degree is a full one from
+            // an earlier step and this is a partial, so the two are comparable only once the pass
+            // below adds `degme - weight(u)` to whichever won. That is why the minimum is taken
+            // here and the common term added there rather than the other way round. The second
+            // cap, `numLeft - weight(u)`, is also that pass's, for the same weight reason.
+            partial[u] = std::min(deg, degrees[u]);
         }
 
         // HASH SUPERVARIABLE DETECTION. Vertices indistinguishable from EACH OTHER, which the
@@ -217,7 +320,7 @@ std::vector<std::int32_t> orderAmd2(const std::vector<std::size_t>&  colPtr,
         // four of the test graphs before this loop was turned around. Same hazard the degree
         // buckets carry, and the tie-break section of experiments/ordering/README.md describes it.
         usedKeys.clear();
-        for (std::size_t k = pivotCliqueSize; k-- > 0;) {
+        for (std::size_t k = 0; k < pivotCliqueSize; ++k) {
             const std::int32_t u = pivotClique[k];
             if (qg.eliminated(u)) continue;
 
@@ -252,42 +355,71 @@ std::vector<std::int32_t> orderAmd2(const std::vector<std::size_t>&  colPtr,
         for (std::size_t hash : usedKeys) {
             for (std::int32_t u = hashHead[hash]; u != NIL; u = hashNext[u]) {
                 if (qg.eliminated(u)) continue;
+
+                // THE STAMP IS HOISTED, which is the second thing taken from Amd.cpp here. Its supervariable detection stamps the OUTER vertex once, before the
+                // inner loop, and then tests every candidate against that one stamp:
+                //
+                //     for (p = Pe [i] + 1 ; ... ) W [Iw [p]] = wflg ;   /* i, once */
+                //     while (j != EMPTY) { ok = ... ; for (p = Pe [j] + 1 ; ok && ... ) ... }
+                //
+                // This file used to stamp the INNER vertex, once per PAIR, over its whole list and with no
+                // short-circuit, so every pair pays a full list of random writes even though
+                // entry 6 got the comparison itself down to 1.08 iterations. Measured on a 140x140
+                // grid: 639083 stamp writes before against 290473 after, with 263032 compare
+                // iterations either way. We were stamping 2.4 times more elements than we compared.
+                //
+                // WHY IT CAN BE HOISTED, and why it took a day to see. The stamping carried
+                // `w != u` and the walk carried `w == v`, exclusions that look pair-dependent and
+                // so look to pin the stamp inside the loop. They are vestigial: u and v are both
+                // members of C[pivot], and the prune drops every neighbour lying inside the new
+                // clique, `if (mMark[v] == inClique) continue`, so A[u] cannot contain v and A[v]
+                // cannot contain u. Nothing to exclude. That is exactly why Amd.cpp's stamp has no
+                // such guard either. This was landed as a separate driver first, so that
+                // `AMD3C == AMD3` could say the reasoning held rather than merely sounding right,
+                // and folded in once it did.
+                //
+                // Roles swapped with the hoist: u is stamped and v is walked, where before it was
+                // v stamped and u walked. The test is symmetric so the outcome does not move, and the SURVIVOR
+                // does not either, u being the outer vertex in both and merge(u, v) folding v into
+                // it. Amd.cpp merges j into i the same way round.
+                ++tag;
+                const std::int32_t other = tag;
+                std::size_t sizeU = 0;
+                const std::int32_t* adjacencyU = qg.adjacency(u);
+                for (std::size_t a = 0; a < qg.adjacencySize(u); ++a) {
+                    const std::int32_t w = adjacencyU[a];
+                    if (!qg.eliminated(w)) { mark[w] = other; ++sizeU; }
+                }
+                // Index 1: the new clique is at the front of every I[u] and is shared by every
+                // member of C[pivot], so it can never discriminate. Ledger entry 6.
+                const std::int32_t* incidenceU = qg.incidence(u);
+                for (std::size_t i = 1; i < qg.incidenceSize(u); ++i) {
+                    mark[incidenceU[i] + cliqueStamp] = other;
+                    ++sizeU;
+                }
+
                 for (std::int32_t v = hashNext[u]; v != NIL; v = hashNext[v]) {
                     if (qg.eliminated(v)) continue;
 
                     // The exact test the hash only filters for:
-                    //     A[u] - {v} == A[v] - {u}   and   I[u] == I[v]
-                    // Decided by stamping one side and counting matches on the other, one pass
-                    // and no sort, as every other membership test here is.
-                    ++tag;
-                    const std::int32_t other = tag;
+                    //     A[u] == A[v]   and   I[u] == I[v]
+                    // against the stamp of u laid down once above. Both walks short-circuit on the
+                    // first mismatch, which is what made the comparison cheap and the stamping the
+                    // thing that had to move: see experiments/ordering/AMD3.md, iteration 15.
                     std::size_t sizeV = 0;
-                    const std::int32_t* adjacencyV = qg.adjacency(v);
-                    for (std::size_t a = 0; a < qg.adjacencySize(v); ++a) {
-                        const std::int32_t w = adjacencyV[a];
-                        if (w != u && !qg.eliminated(w)) { mark[w] = other; ++sizeV; }
-                    }
-                    const std::int32_t* incidenceV = qg.incidence(v);
-                    for (std::size_t i = 0; i < qg.incidenceSize(v); ++i) {
-                        mark[incidenceV[i] + cliqueStamp] = other;
-                        ++sizeV;
-                    }
-
-                    std::size_t sizeU = 0;
                     bool        same  = true;
-                    const std::int32_t* adjacencyU = qg.adjacency(u);
-                    for (std::size_t a = 0; a < qg.adjacencySize(u) && same; ++a) {
-                        const std::int32_t w = adjacencyU[a];
-                        if (w == v || qg.eliminated(w)) continue;
-                        ++sizeU;
+                    const std::int32_t* adjacencyV = qg.adjacency(v);
+                    for (std::size_t a = 0; a < qg.adjacencySize(v) && same; ++a) {
+                        const std::int32_t w = adjacencyV[a];
+                        if (qg.eliminated(w)) continue;
+                        ++sizeV;
                         if (mark[w] != other) same = false;
                     }
                     if (same) {
-                        const std::int32_t* incidenceU = qg.incidence(u);
-                        for (std::size_t i = 0; i < qg.incidenceSize(u) && same; ++i) {
-                            ++sizeU;
-                            if (mark[incidenceU[i] + cliqueStamp] != other)
-                                same = false;
+                        const std::int32_t* incidenceV = qg.incidence(v);
+                        for (std::size_t i = 1; i < qg.incidenceSize(v) && same; ++i) {
+                            ++sizeV;
+                            if (mark[incidenceV[i] + cliqueStamp] != other) same = false;
                         }
                     }
                     if (!same || sizeU != sizeV) continue;
@@ -336,14 +468,29 @@ std::vector<std::int32_t> orderAmd2(const std::vector<std::size_t>&  colPtr,
         }
         for (std::size_t hash : usedKeys) hashHead[hash] = NIL;      // only what was used
 
+        // THE FOURTH PASS, which finishes the bounds and files them. Amd.cpp spells it
+        // `deg = Degree[i] + degme - nvi` then `deg = MIN (deg, nleft - nvi)`, under its RESTORE
+        // DEGREE LISTS heading, and it runs here for the reason in the note above: `nvi` is read
+        // after supervariable detection, so a vertex that absorbed another subtracts the combined
+        // weight. `degme` and `numLeft` were settled before the hash and are the same for
+        // everyone, so this is one addition and two comparisons per survivor.
+        for (std::size_t k = 0; k < pivotCliqueSize; ++k) {
+            const std::int32_t u = pivotClique[k];
+            if (qg.eliminated(u)) continue;         // absorbed by the hash a moment ago
+            const std::size_t  weightU = qg.weight(u);   // POST-merge, which is the whole point
+            std::size_t bound = partial[u] + degme - weightU;
+            bound = std::min(bound, numLeft - weightU);
+            buckets.refile(degrees, u, bound);
+        }
+
         for (std::size_t k = 0; k < pivotCliqueSize; ++k)
             if (!qg.eliminated(pivotClique[k]))
                 minDegree = std::min(minDegree, degrees[pivotClique[k]]);
 
-        // Nothing above reads an entry this step did not write, since the cliques read are the
-        // cliques listed. Clearing anyway keeps that a property of the loop rather than of the
-        // reader's memory, and it costs one pass over what was touched.
-        for (std::int32_t c : touchedCliques) outside[c] = 0;
+        // The whole array is invalidated in ONE ADDITION, where Amd3 walks the touched list and
+        // zeroes each entry. After scan 1 no entry exceeds wflg + lemax, so advancing the tag by
+        // lemax puts every one of them into the stale range. Amd.cpp's `wflg += lemax`.
+        wflg += lemax;
     }
 
     return qg.order(pivots);

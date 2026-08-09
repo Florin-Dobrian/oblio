@@ -67,6 +67,208 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-08-08: what the vendored AMD's speed is made of, and which parts of it we can have
+
+After the alignment, `AMD3` returned `AMD_2`'s permutation exactly and took 2.55x its time. A day
+of profiling took that to 2.32x, and the interesting part is not the number but what the remaining
+gap turned out to be made of.
+
+**It is not algorithmic.** With the permutations identical the counts are identical too: the same
+eliminations, the same reachable-set elements, the same prune elements, the same pairs tested in
+supervariable detection, the same fill. `AMD_2` does the same work. What it has is a constant
+factor, and the factor has one source.
+
+**`AMD_2` never adds an array to record a fact it can encode in the range of one it already loads.**
+
+```
+W    seen this step (>= wflg), absorbed (== 0), and the running value |Le \ Lme|
+Nv   live (> 0), taken into Lme this step (< 0), and the weight |nvi|
+Pe   the list pointer, and FLIPped, the assembly-tree parent
+```
+
+Where it reads `W` once, we read `mark` and `outside` and infer deadness from removal. Where it
+reads `Nv` once, we read `mMark` and `mEliminated` and `mWeight`. On a walk that touches 300000
+elements per ordering at 140 a side, that is one cache line against two or three.
+
+**Two of the three were portable and are taken.** `W` is now `Amd3`'s `w` array with the same tag
+scheme and `wflg += lemax` in place of a clearing pass. And `Buckets` lost `mFiled` — not a
+vendored encoding but an array `AMD_2` simply never needed, `Head`/`Next`/`Last` and no flag;
+folding the filed state into a `mPrev` sentinel removed 224054 byte writes per amd ordering that
+nothing on that path ever read.
+
+**The third is not portable, and the reason is worth recording because it will look portable
+again.** `Nv` is negated when a vertex enters `Lme` and restored in the very last pass of the step,
+so it is negative across the entire body of an elimination, and four separate readers — scan 1,
+scan 2, supervariable detection, the hash merge — are each written to expect that. It is not a
+local trick but a whole-step convention, and it holds because `AMD_2` is a single function. Our
+readers of a weight are in six drivers across a class boundary. An attempt at the neighbouring
+substitution, testing `mWeight[v] != 0` instead of `mEliminated[v] == 0`, looked exactly equivalent
+and produced a duplicated vertex on `mmd2`; `experiments/ordering/AMD3.md` iteration 17 has the counterexample.
+
+**The two encodings are not the same KIND of thing, and the difference is LIFETIME rather than
+density.** This is the criterion worth keeping, because "several facts in one array" describes both
+and only one of them is defensible.
+
+`W`'s three facts share ONE lifetime. Seen-this-step, absorbed, and the running value are all
+properties of a clique during a single elimination, and the array is read at two known points. When
+it was ported, the invariant fitted in a comment beside the code that depends on it and a reader of
+`Amd3.cpp` can check it locally. Dense, and still reasonable.
+
+`Nv` MIXES lifetimes. Weight is a durable property of a vertex; taken-into-Lme lasts for the body of
+one elimination; and the sign smears the second over the first. Between the flip and the restore the
+array means something else, and four readers hundreds of lines apart must each know that. Nothing
+can check it.
+
+So: **an encoding is defensible when its invariant can be stated where it is used and checked there,
+and it is not when the invariant spans phases and lives only in the author's head.** Density is not
+the problem. Unenforceable, non-local invariants are. And note which one ported: the speed was never
+contingent on the bad half.
+
+**The cost of the bad half is paid in DEFECTS, not in reading time**, which is the argument that
+should settle this rather than any appeal to taste. Two instances, both ours:
+
+- The claim that the amd branch could not carry `Mmd2`'s entry-5 defect, because AMD files at an
+  external degree. Reasoned from a true premise about `Nv`-style encoding, never checked, stood for
+  a month, and `Amd2` and `Amd2B` carried the defect the whole time at 3 to 9 percent of fill.
+- An attempt to fold `mEliminated` into the weight the way `Nv` does, on 2026-08-08. It looked
+  exactly equivalent, and produced a DUPLICATED VERTEX on `mmd2`: 201 entries for 200. Not a
+  performance failure or a style failure, a correctness one, from reasoning about an invariant that
+  could not be checked locally.
+
+Both are the same error, and it is the error the idiom invites. Whoever writes the encoding pays
+nothing; whoever comes next pays.
+
+**The three-arrays-against-one pattern does NOT explain the gap, measured 2026-08-08.** It was the
+leading hypothesis for most of a day and it is false, and the measurement that killed it is the one
+this entry had already named as decisive.
+
+Arrays touched per element, read from both sources, weighted by elements walked per ordering at 140
+a side:
+
+```
+site                              elements  ours  AMD    ours x el  AMD x el
+reachableSet, clique members        130852     3    2       392556    261704
+prune, adjacency                    157000     3    2       471000    314000
+prune, incidence                    158169     2    2       316338    316338
+scan 1                              241339     2    2       482678    482678
+bound loop                          300250     3    3       900750    900750
+hash key                            300250     3    3       900750    900750
+TOTAL                                                      3464072   3176220
+
+ratio ours/AMD  1.09x        time ratio at 140  2.32x
+```
+
+**We touch nine percent more arrays and take a hundred and thirty percent longer.** The pattern is
+real and it is confined to two sites, `reachableSet`'s member walk and the prune's adjacency
+compaction, and those are the two CHEAPEST of the six. Everywhere the volume is we are already
+level: scan 1 because `W` was ported, the bound loop and hash key because they were never worse.
+
+**Why the wrong conclusion was so comfortable, since that is the reusable part.** The supporting
+evidence was that every change reducing arrays-touched-per-element paid and every change reducing
+elements-walked did not. That is TRUE and it is consistent with the hypothesis without testing it:
+both are also consistent with the cost being per-touch rather than per-count. Reasoning that
+survives several confirmations can still never have been checked, which is the same failure as the
+entry-5 claim two paragraphs up, in a place where nobody would look for it.
+
+**What the gap is NOT, at this point.** Not algorithmic: the counts are equal. Not integer width:
+`make width` shows MMD pays that as much as AMD and runs at 1.26x. Not the number of arrays touched:
+1.09x. Not any single line: the profile is 48 percent `orderAmd3` self weight with nothing above 378
+ms of 8.4 s.
+
+**What is left is per-TOUCH cost, which is layout rather than anything countable.** `AMD_2` walks one
+`Iw` pool; we walk `mSource` and a separate clique arena. Its per-vertex arrays arrive as consecutive
+parameters into one function; ours are independent heap allocations reached through `this`. That is a
+locality hypothesis and it has not been tested, and on this entry's record it should be tested before
+it is believed.
+
+**The trade this names, with the correction above applied.** The shared `QuotientGraph`, the
+six-driver ladder and the prototype-against-production check cost a constant factor on the amd
+branch. What this entry can say is that the factor exists, that it is not algorithmic, and that two
+plausible accounts of it have now been measured and rejected. What it CANNOT say is what the factor
+is made of. Closing it would probably mean a driver owning its own storage, which is the trade
+`AMD_2` made and which this tree declined for reasons that have nothing to do with speed — but that
+is a guess about an unexplained gap, not a conclusion from a measured one.
+That remains available and should be a deliberate decision if it is ever taken, not a drift.
+
+**Two method notes that cost a day between them and are not about amd at all.**
+
+**Counting and profiling answer different questions, and counting misled twice.** It is the right
+instrument for "are we doing more work" and it cannot see a loop whose cost is decided by an early
+exit: a counter that added `adjacencySize + incidenceSize` measured what a short-circuiting test
+COULD cost, and the real iteration count was 1.7x higher on one side. Nor can it see allocation —
+the largest single item found all day was `operator new` under `beginElimination`, an unreserved
+arena doubling 18 times per ordering, and no counter would ever have shown it.
+
+**A call tree bounds the search; only the source view ends it.** Everything in a driver inlines
+into one symbol, so the tree could say only that 5.70 s sat in `orderAmd3`'s self weight. The
+source view named the line. And when the answer is a CALL rather than a line, it takes a second
+zoom: call tree, then line 250, then `allocate.h`. Stopping at either of the first two would have
+found nothing.
+
+---
+
+## 2026-08-08: amd3 aligns to the vendored AMD, and the alignment found a defect worth 3 to 9 percent of fill
+
+**`amd3` is the amd counterpart of `mmd3`: `amd2` with the vendored routine's list order, adding
+no mechanism.** It returns `AMD_2`'s permutation exactly up to the postorder, on the seven
+examples and on every square grid tested from 3 a side to 40, member order within each
+supervariable included. The old `amd3`, which carried dense rows, `amd_aat`, the postorder and
+the Control interface, is renamed `amd4` and is temporary; the digit now means the same thing on
+both branches, 3 is the layer aligned to the vendored code.
+
+Five ledger entries. Four are tie-break conventions, all of the same family: AMD pushes at the
+head where we append. The hash bucket is built by head-push while scan 2 walks `Lme` forward, so
+its chain is reversed against `C[p]`; the reachable set is laid out cliques-then-explicit, since
+`for (knt1 = 1; knt1 <= elenme + 1; knt1++)` takes the elements first and the supervariables on
+its last pass; mass elimination runs in scan 2 *after* aggressive absorption, which is what makes
+the cheap structural test agree with the true one, as `AMD_2`'s own comment says; and the new
+element goes to the front of a variable's list by a rotation, `Iw[p1] = me` with two boundary
+entries lifted to the two ends rather than everything shifted.
+
+**The fifth was a defect in `amd2`, `Amd2` and `Amd2B`, and it is the entry that matters.** A hash
+merge folds `v` into a live `u` and grows `u`'s weight, and the bound written moments earlier has
+that weight subtracted inside it. So a supervariable was filed one bucket too high per original
+vertex absorbed. `AMD_2` subtracts `nvi` in the pass that restores the degree lists, which runs
+after supervariable detection, so its weight is the post-merge one.
+
+```
+grid        AMD (vendored)    AMD1      AMD2 before    AMD2 after
+ 32x32            11900      12074         12364         11900
+100x100          206332     201856        212496        199386
+140x140          474995     455472        487111        444191
+```
+
+**Three things follow, and the second is the reason this entry exists.**
+
+The comment at all four sites argued for the behavior it got wrong, and argued nearly correctly:
+an external degree does exclude `u`'s own supervariable, and `u`'s reachable set really is
+unchanged. What it missed is that the buckets are keyed on a degree that has the weight
+subtracted *in* it, so the term moves even though the reach does not. A comment that reasons and
+concludes wrongly is more dangerous than none, because it answers the question a reader would
+otherwise ask.
+
+**It was found by making the code comparable, not by making it fast or by reading it.** This is
+the second time: `Mmd2` filed a supervariable one bucket too high for months, worth 13 percent of
+fill, and alignment found it in an afternoon. Both defects are the same shape, a weight
+subtracted before the merge that grows it, in two different arrays. This file previously recorded
+that the amd branch could not carry that shape, because AMD files at an external degree that does
+not move when a weight changes; the external degree does not, and the `- nvi` term does.
+
+**And alignment costs fill here where it bought fill on the mmd branch.** `amd3` is aligned, so
+its fill is the vendored routine's, 474995 at 140 a side, where the corrected `Amd2` reaches
+444191. On grids our tie-break now beats AMD's by 6.5 percent, the opposite direction from mmd.
+That is a real number on one problem family, and the family known to flatter us; it is the second
+data point for the LIFO-against-FIFO question parked in `experiments/ordering/REPORT.md`, and it
+should not be quoted without the 3D grids `REPORT.md` has been asking for.
+
+**What this obliges elsewhere.** Every AMD2 fill figure in `benchmarks/ordering/README.md`,
+`benchmarks/pipeline/README.md`, `experiments/ordering/README.md` and `REPORT.md` predates the
+fix; each carries a superseding note rather than being rewritten, since a dated measurement is a
+record of a run. REPORT finding 3, that AMD2's extras are a net loss with the hash almost all of
+it, reverses on fill and stands on time.
+
+---
+
 ## 2026-08-08: The integer model, one dimension against two, and what the convenience costs
 
 **Oblio splits integers by DIMENSION, not by role, and that is the whole design.** A quantity that

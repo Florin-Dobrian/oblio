@@ -22,6 +22,32 @@ compiling would be discovered on the day it was wanted.
 Each folder carries its own results with the machine, the date and the compiler beside them. A
 timing without those cannot be compared against anything later.
 
+## Two things learned the hard way, 2026-08-08
+
+**Counting and profiling answer different questions.** Counting is right for "are we doing more
+work" and blind to two things this folder cares about. It cannot see a loop whose cost is decided
+by an EARLY EXIT: a counter that added `adjacencySize + incidenceSize` per pair measured what a
+short-circuiting test could cost, and the real iteration count was 1.7x higher on one side, which
+is where a 42-percent line was hiding. And it cannot see ALLOCATION at all — the largest single
+item found in a day of this was `operator new`, an unreserved arena doubling 18 times per ordering.
+
+**A call tree bounds the search; only the source view ends it.** A driver inlines into one symbol,
+so the tree can say only how much sits in its self weight. Open the source annotation. And when the
+top line is a CALL rather than a line of work, zoom again: call tree, then the call site, then
+`allocate.h`. Stopping at either of the first two finds nothing.
+
+**Fix the harness before chasing anything under 10 percent, and this one was fixed on 2026-08-08.**
+`order_timing` took the best of three, which at 140 a side is nine milliseconds of measurement, and
+two runs of an IDENTICAL BINARY disagreed by 4 percent. Five changes had landed inside that band
+during the amd work before anyone noticed the instrument was the constraint. It now sizes its
+repeat count from a timed probe targeting 300 ms per method per row, and two runs agree to a tenth
+of a percent at 140 and half a percent at 32. `experiments/ordering/width.cpp` does the same and
+also prints the count so a row can be judged.
+
+**It costs wall time and that is the trade.** A full `make scale` is minutes rather than seconds
+now. The alternative is a benchmark that cannot answer the questions being asked of it, which is
+what it was.
+
 ## How to profile, and what each tool is actually good for
 
 Written down because a day was spent finding this out, and two of the three tools gave answers that

@@ -58,8 +58,20 @@ public:
     // degree is at most size - 1 while a branch is filing degrees, but MMD's convention files a
     // vertex under its degree plus one, so the heads need one more slot than there are vertices.
     // One int32 either way, and getting it wrong is an out-of-bounds write on a one-vertex matrix.
+    // NOT FILED, distinct from NIL, and it is what lets this class hold three arrays instead of
+    // four. `unfile` used to leave mPrev[u] = NIL, which is also what a FILED vertex at the head
+    // of its bucket has, so the state was ambiguous and a separate mFiled byte was needed to
+    // disambiguate it. A sentinel of its own removes the ambiguity and the array with it.
+    //
+    // What that array was costing, measured on a 140x140 grid: amd3 wrote it 224054 times, once
+    // per file and once per unfile, and read it ZERO times — `filed()` is MMD's accessor and no amd
+    // driver calls it. mmd3 read it 115931 times. So one branch paid for a byte array it never
+    // consulted, and the other kept information it could have derived from a link it already
+    // touches. Amd.cpp has Head, Next and Last and no flag, for the same reason.
+    static constexpr std::int32_t UNFILED = -2;
+
     explicit Buckets(std::size_t size)
-        : mHead(size + 1, NIL), mNext(size, NIL), mPrev(size, NIL), mFiled(size, 0) {}
+        : mHead(size + 1, NIL), mNext(size, NIL), mPrev(size, UNFILED) {}
 
     // buckets[degree].add(u), at the head. The head is the only O(1) end of a singly reachable
     // list, so the winner among equal degrees is whatever was filed last rather than the lowest
@@ -67,23 +79,21 @@ public:
     // scan's in its ties.
     void file(std::size_t degree, std::int32_t u) {
         mNext[u] = mHead[degree];
-        mPrev[u] = NIL;
+        mPrev[u] = NIL;                                // filed, and at the head
         if (mHead[degree] != NIL) mPrev[mHead[degree]] = u;
         mHead[degree] = u;
-        mFiled[u]     = 1;
     }
 
     // buckets[degree].discard(u). Idempotent, which matters during a batch: a vertex evicted
     // early can be merged away by a later pivot in the same round, and unfiling it twice must
     // not splice a list it is no longer in.
     void unfile(std::size_t degree, std::int32_t u) {
-        if (mFiled[u] == 0) return;
+        if (mPrev[u] == UNFILED) return;               // already gone; see the sentinel's note
         if (mPrev[u] != NIL) mNext[mPrev[u]] = mNext[u];
         else                 mHead[degree]   = mNext[u];
         if (mNext[u] != NIL) mPrev[mNext[u]] = mPrev[u];
-        mNext[u]  = NIL;
-        mPrev[u]  = NIL;
-        mFiled[u] = 0;
+        mNext[u] = NIL;
+        mPrev[u] = UNFILED;
     }
 
     // Move u to the bucket for newDegree, carrying the cached degree with it. The three steps go
@@ -100,7 +110,7 @@ public:
     // walks a whole bucket in the prepass, and its refresh asks whether a vertex it reached has
     // already been dealt with this round.
     std::int32_t next(std::int32_t u) const      { return mNext[u]; }
-    bool         filed(std::int32_t u) const     { return mFiled[u] != 0; }
+    bool         filed(std::int32_t u) const     { return mPrev[u] != UNFILED; }
 
     std::int32_t head(std::size_t degree) const  { return mHead[degree]; }
     bool         empty(std::size_t degree) const { return mHead[degree] == NIL; }
@@ -128,7 +138,6 @@ private:
     //
     // The prototypes in experiments/ordering keep the bit-packed form, which is right: they
     // construct one graph per run.
-    std::vector<std::uint8_t> mFiled;  // whether u is in a bucket at all, 0 or 1
 };
 
 // What an approximate-degree driver accumulates while the eliminator is already walking the lists,
@@ -204,6 +213,7 @@ public:
     // 2.77x against 2.76x, so the array is here for the chain and not for the cache.
     std::size_t weight(std::int32_t u) const { return mWeight[u]; }
 
+
     // reach(u), as above. Not const: the mark array and its tag are scratch, and threading them
     // through every call site is what the prototypes do only because their display functions
     // needed to borrow them.
@@ -228,9 +238,13 @@ public:
     // order to take them out of its own bookkeeping.
     //
     // **The returned reference is valid until the next eliminate**, being a scratch buffer whose
-    // capacity survives from pivot to pivot, as mReached's does. Returning by value cost one
-    // allocation per elimination that merged anything, about 1700 per ordering at 140x140. A
-    // caller that needs the list to outlive the next call copies it.
+    // capacity survives from pivot to pivot. Returning by value cost one allocation per
+    // elimination that merged anything, about 1700 per ordering at 140x140. A caller that needs
+    // the list to outlive the next call copies it.
+    //
+    // This is now the ONLY scratch here. The reachable set used to have one too and no longer
+    // does: the walk writes it straight into the clique arena, since C[pivot] is the reach and
+    // there was never a reason for it to exist anywhere else first. See beginElimination.
     //
     // In set operations, and the order is the order below:
     //
@@ -295,6 +309,46 @@ public:
     // computed. See the member's note.
     void setReverseIncidence(bool on) { mReverseIncidence = on; }
 
+    // Lay the lists out the way AMD_2 does, which is the opposite of genmmd's on both counts.
+    // Two conventions under one switch because they are one fact, that AMD's lists run the other
+    // way round, and are only ever wanted together. Like the flag above, this changes which
+    // permutation comes out and never which sets are computed. Used by Amd3 alone.
+    //
+    //   reachableSet   walks the CLIQUES before the explicit adjacency, since AMD_2's
+    //                  `for (knt1 = 1; knt1 <= elenme + 1; knt1++)` takes the elements of me and
+    //                  the supervariables only on its last pass. genmmd is the other way round,
+    //                  which is why the md ladder is laid out as it is.
+    //   the prune      puts the new clique at the FRONT of I[u] rather than appending, with the
+    //                  displaced entries ROTATED rather than shifted, which is AMD_2's
+    //                  `Iw[pn] = Iw[p3]; Iw[p3] = Iw[p1]; Iw[p1] = me`. Our two lists share one
+    //                  run exactly as its do, so the same three moves apply unchanged.
+    //
+    // See experiments/ordering/AMD3.md, ledger entries 2 and 5.
+    void setVendoredListOrder(bool on) { mVendoredListOrder = on; }
+
+    // Stop eliminate() at the prune, leaving mass elimination to the caller. AMD_2 makes the same
+    // test in its scan 2, AFTER aggressive absorption has dropped every clique lying inside the
+    // new one, and says why in its own comment: with aggressive absorption, `deg == 0` is
+    // identical to the structural test. Asking first, which is what eliminate() does by default,
+    // asks it of an I[u] that still holds cliques about to be removed, so the cheap test declines
+    // vertices AMD merges.
+    //
+    // With this on, eliminate() returns an EMPTY merged list and C[pivot] is reach(pivot) exactly,
+    // and the caller must call massEliminate() once it has absorbed. Used by Amd3 alone. See
+    // experiments/ordering/AMD3.md, ledger entry 3.
+    void setLateMassElimination(bool on) { mLateMassElimination = on; }
+
+    // The half eliminate() no longer does under the flag above: fold into the pivot's supervariable
+    // every member of C[pivot] that the new clique now accounts for entirely, and trim C[pivot] of
+    // them. Returns the merged vertices, from a member scratch as eliminate() does.
+    //
+    //     merged   = { u in C[pivot] : A[u] == {} and I[u] == {pivot} }
+    //     C[pivot] = C[pivot] - merged
+    //
+    // Calling it without the flag is a caller error and not guarded: eliminate() will already have
+    // merged, so this would find nothing and cost a pass.
+    const std::vector<std::int32_t>& massEliminate(std::int32_t pivot);
+
     // Kill these cliques and take them out of the incidence lists of these vertices. A clique
     // dies when it is found to lie wholly inside a newer one, which is aggressive absorption, and
     // the vertices to purge are the newer clique's members, since those are the only lists that
@@ -318,6 +372,7 @@ private:
     // vertices still name the pivot as a variable. Nothing outside may observe that state, which is
     // why the seam is two private calls rather than a public begin and end.
     void beginElimination(std::int32_t pivot, std::int32_t& inClique, std::int32_t& absorbed);
+
     const std::vector<std::int32_t>& finishElimination(std::int32_t pivot);
 
     // A[u] and I[u] share one run, and one array holds every run end to end. The two lists are
@@ -368,9 +423,8 @@ private:
     std::vector<std::int32_t> mSuperNext;
     std::vector<std::int32_t> mSuperLast;
     std::vector<std::size_t>  mWeight;
-    std::vector<std::uint8_t> mEliminated;   // a byte per vertex; see the note on Buckets::mFiled
+    std::vector<std::uint8_t> mEliminated;   // a byte per vertex; see reachableSet on why the flag stays
 
-    std::vector<std::int32_t> mReached;  // scratch for the reachable set an elimination forms
     std::vector<std::int32_t> mMerged;   // scratch for the vertices an elimination merges away
     // Whether any live merge has happened yet, which decides whether the reachable set has to
     // check for dead vertices at all. Mass elimination cannot leave one in a clique, so a branch
@@ -387,6 +441,16 @@ private:
     // Off by default, so every existing driver is unaffected; Mmd3 turns it on. See
     // experiments/ordering/mmd3.py, where the same four walks are reversed together.
     bool mReverseIncidence = false;
+
+    // AMD_2's list conventions, off by default so the other five drivers are untouched. Read in
+    // reachableSet() and in the prune, hoisted at both sites for the same reason mReverseIncidence
+    // is: a member load the compiler cannot prove is unaliased by the stores in the loop. See the
+    // setter for what each half does and why they are one flag.
+    bool mVendoredListOrder = false;
+
+    // Whether eliminate() stops at the prune and leaves mass elimination to the caller. Off by
+    // default. See the setter, and massEliminate() for the half it hands over.
+    bool mLateMassElimination = false;
 
     std::vector<std::int32_t> mMark;     // membership scratch, read against mTag
     std::int32_t              mTag = 0;

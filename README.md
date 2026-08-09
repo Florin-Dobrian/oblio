@@ -324,9 +324,9 @@ src/                , method bodies + explicit instantiations (flat layout)
                       One .cpp per header, plus the vendored orderings, which have none:
   Amd.cpp           , AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
   Mmd.cpp           , MMD ordering (Sparspak/Liu, via Oblio 0.9)
-tests/              , test suites (269 assertions; see docs/TESTING_SPECIFICATION.md)
+tests/              , test suites (283 assertions; see docs/TESTING_SPECIFICATION.md)
   smoke.cpp                    5,  quick end-to-end sanity
-  test_order.cpp              77,  the eight non-trivial orderings, and each B pair against its
+  test_order.cpp              91,  the ten non-trivial orderings, and each B pair against its
                                    original entry for entry
   test_permutation.cpp        11,  permutation maps
   test_forest.cpp             29,  elimination forest and supernodes
@@ -353,10 +353,14 @@ experiments/        , frozen design studies, each answering one question with a 
 ```
 
 The ordering enum also carries Natural, the identity, and our own minimum-degree implementations
-under the names MMD1, MMD2, MMD3, AMD1, AMD2, AMD1B and AMD2B. Those are work in progress; see
+under the names MMD1, MMD2, MMD3, AMD1, AMD2, AMD3, AMD1B and AMD2B. Those are work in progress; see
 `experiments/ordering/`. MMD3 is the default: it reproduces the vendored MMD's permutation
 exactly, so it behaves as a reference implementation with decades of use behind it rather than as
-a tie-break of our own.
+a tie-break of our own. AMD3 is its counterpart on the other branch and reproduces the vendored
+AMD's, up to the postorder that routine applies and Oblio does not want, since ElmForest orders
+the supernodal tree later with better information. It is NOT the default: with the filing defect
+its alignment uncovered now fixed, AMD2 fills less than the vendored routine on grids and AMD3
+therefore fills more, which is a reason to keep both and no reason yet to prefer either.
 
 ## History
 
@@ -410,7 +414,7 @@ Done:
 - [x] Namespaced headers (`include/oblio/`), explicit instantiation throughout
 - [x] Validated against Oblio 0.9 as oracle; end-to-end residual at machine precision
 - [x] `DirectSolver<Val>`, the top-level analyze / factor / solve driver
-- [x] 269 assertions across 8 suites
+- [x] 283 assertions across 8 suites
 - [x] Dynamic LDL, threshold 1x1 / 2x2 pivots: all three traversals, delayed columns and all, at
       machine precision. Non-root supernodes follow Ashcraft, Grimes and Lewis (1998) Figure 3.4
       with the Figure 3.3 acceptance test; roots, which cannot delay, use bounded Bunch-Kaufman

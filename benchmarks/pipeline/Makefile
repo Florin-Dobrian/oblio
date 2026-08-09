@@ -40,6 +40,10 @@ endif
 # so they live in ../../private and are optional. Absent, this benchmark still builds and any row
 # that asks for Ordering::MMD or Ordering::AMD reports a refusal.
 OBLIO_SRCS  = $(wildcard ../../src/*.cpp)
+
+# See benchmarks/ordering/Makefile: without this a header-only change is invisible to make and the
+# benchmark reports a stale binary as if it were current.
+OBLIO_HDRS  = $(wildcard ../../include/oblio/*.h)
 # OBLIO_PUBLIC=1 builds as everyone else does, ignoring private/ even when it is there. Same word
 # in every Makefile here that links the library, so one habit covers all of them.
 ifdef OBLIO_PUBLIC
@@ -71,7 +75,7 @@ help:
 
 all: pipeline_timing_cpp
 
-pipeline_timing_cpp: pipeline_timing.cpp $(OBLIO_SRCS) $(VENDOR_SRCS) .build-mode
+pipeline_timing_cpp: pipeline_timing.cpp $(OBLIO_SRCS) $(OBLIO_HDRS) $(VENDOR_SRCS) .build-mode
 	$(if $(VENDOR_SRCS),$(CXX) $(CXXFLAGS) -w -c $(VENDOR_SRCS))
 	$(CXX) $(CXXFLAGS) $(VENDOR_DEFS) $< $(OBLIO_SRCS) $(VENDOR_OBJS) $(BLAS_LIBS) -o $@
 

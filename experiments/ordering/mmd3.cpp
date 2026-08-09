@@ -27,9 +27,21 @@
 // had earned, and the code did not do what its own comment said. It was FIXED IN mmd2 AND IN
 // PRODUCTION Mmd2 as well, where it had been costing fill since those were written; mmd2's
 // gap against genmmd fell from about 20 percent to about 7. mmd1 cannot have it, having no
-// q2h path and no live merges, and the amd layers cannot either, since AMD files at an
-// EXTERNAL degree, which excludes a vertex's own supervariable and so does not move when its
-// weight changes.
+// q2h path and no live merges.
+//
+// THE AMD LAYERS COULD, and this paragraph used to say they could not. It argued that AMD
+// files at an external degree, which excludes a vertex's own supervariable and so does not
+// move when its weight changes. The external degree does not move; the `- weight(u)` term
+// inside the amd bound does, and it is the term that decides the bucket. amd2, Amd2 and
+// Amd2B carried exactly this defect and it was costing 3 to 9 percent of fill on grids,
+// found on 2026-08-08 by aligning amd3 against the vendored AMD, where it is that ledger's
+// entry 4, and fixed the same day. amd1 and Amd1B genuinely cannot have it, having no live
+// merges at all.
+//
+// Worth keeping as a lesson about ledgers rather than only as a correction. The claim was
+// reasoned from a true premise and never checked against the quantity actually filed. A
+// defect ruled out by an argument is ruled out only as far as the argument reaches, and the
+// same sentence stood in the README for a month.
 //
 // CONVENTION means neither side is wrong. A tie-break has no right answer, and 1 to 4 only
 // change which of several equal-degree vertices wins. What they cost is not quality but
@@ -60,9 +72,17 @@
 // closed anyway, because an exact permutation makes the comparison an equality test rather
 // than a judgement, and that is the instrument the next layer will be aligned with.
 //
-// WHERE IT STANDS. Seven of seven examples. On grids, 67 to 78 percent of the pivots, a
-// fraction FLAT in n rather than falling, which says one more mechanism rather than
-// accumulating drift. Fill against genmmd went from about 20 percent to about 10.
+// WHERE IT STANDS. **mmd3 returns genmmd's permutation EXACTLY**, on all seven
+// examples and on every square grid tested from 5 a side to 80, n = 6400, and its
+// fill is genmmd's to the digit at every size on the scale ladder where mmd2 ran
+// 12 to 25 percent above. Six alignments got it there, four conventions, one
+// cosmetic numbering and one real defect, with no mechanism added to mmd2 at all.
+//
+// (This block used to record the position after entries 1 to 4, seven of seven
+// examples but 67 to 78 percent of the pivots on grids, and concluded that one
+// more mechanism was unaccounted for. Entry 5 was that mechanism. The paragraph
+// was not revisited when it closed, which is worth one line of warning about
+// headers written mid-work.)
 //
 // WHY THAT MATTERS AND IS NOT A DETAIL. Minimum degree is a tie-break algorithm. At
 // almost every iteration several vertices share the least degree, and which one is taken
@@ -86,9 +106,17 @@
 // of C[pivot], the content order of every list built downstream. The other three alone
 // reach four of seven examples; all four reach seven of seven.
 //
-// WHAT IS NOT DONE HERE. Grids still part company in the last third of the run, at a
-// fraction flat in n rather than growing, so one mechanism is unaccounted for and this is
-// the anchor it will be found against.
+// WHY THIS IS A LAYER RATHER THAN AN EDIT TO mmd2. mmd2 is a different ordering and
+// a correct one: it has every mechanism genmmd has, and only its arbitrary choices
+// differ. Folding these six alignments into it would delete that ordering rather
+// than add one, and would leave nothing to measure the conventions against. So the
+// two sit side by side, mmd2 carrying our tie-break and mmd3 carrying genmmd's, and
+// `Ordering::MMD2` remains selectable.
+//
+// (This block used to say the opposite reason: that grids still parted company in
+// the last third of the run, so one mechanism was unaccounted for and this file was
+// the anchor it would be found against. That was true when it was written and entry
+// 5 closed it the same day. Stale until 2026-08-08.)
 //
 // NOT A SORT. genmmd never sorts and neither does this. Sorting the element members
 // reaches five of seven and reproduces the effect without the mechanism, at the cost of a

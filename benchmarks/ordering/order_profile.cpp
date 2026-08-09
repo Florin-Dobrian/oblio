@@ -11,8 +11,11 @@
 //   make profile
 //   ./order_profile_cpp amd1 140 200      method, grid side, repeats
 //
-// The method may be one of ours (mmd1, mmd2, mmd3, amd1, amd2, amd1b, amd2b) or a vendored one
-// (mmd, amd). Profiling both
+// The method may be one of ours (mmd1, mmd2, mmd3, amd1, amd2, amd3, amd1b, amd2b) or a vendored
+// one (mmd, amd). An unrecognized name is REFUSED rather than ignored: this driver used to fall
+// through such a name silently, order nothing, and produce a profile of process startup that looks
+// like a real trace with the ordering missing from it. That cost a profiling session.
+// Profiling both
 // sides through the same driver is the point: the difference between them is what is being
 // investigated, and a comparison across two programs measures their differences too.
 //
@@ -32,6 +35,7 @@
 #include "oblio/Amd1.h"
 #include "oblio/Amd1B.h"
 #include "oblio/Amd2.h"
+#include "oblio/Amd3.h"
 #include "oblio/Amd2B.h"
 #include "oblio/Mmd1.h"
 #include "oblio/Mmd2.h"
@@ -93,12 +97,25 @@ int main(int argc, char** argv) {
     const SparseMatrix<double> A(colPtr.size() - 1, colPtr, rowIdx, val);
     const OrderEngine engine(method == "mmd" ? Ordering::MMD : Ordering::AMD);
 
+    // Refuse an unknown method rather than falling through it. A profile of a method that never
+    // ran is not empty, it is a trace of dyld and process startup, and it reads as a real one.
+    if (!vendored && method != "mmd1" && method != "mmd2" && method != "mmd3" &&
+        method != "amd1" && method != "amd2" && method != "amd3" &&
+        method != "amd1b" && method != "amd2b") {
+        std::fprintf(stderr,
+                     "order_profile: unknown method \"%s\"\n"
+                     "  ours:     mmd1 mmd2 mmd3 amd1 amd2 amd3 amd1b amd2b\n"
+                     "  vendored: mmd amd\n", method.c_str());
+        return 2;
+    }
+
     // The sum is only there to stop the optimizer deleting the calls.
     std::size_t sum = 0;
     for (int k = 0; k < repeats; ++k) {
         if      (method == "mmd1") sum += orderMmd1(colPtr, rowIdx).size();
         else if (method == "amd1") sum += orderAmd1(colPtr, rowIdx).size();
         else if (method == "amd2") sum += orderAmd2(colPtr, rowIdx).size();
+        else if (method == "amd3") sum += orderAmd3(colPtr, rowIdx).size();
         else if (method == "amd1b") sum += orderAmd1B(colPtr, rowIdx).size();
         else if (method == "amd2b") sum += orderAmd2B(colPtr, rowIdx).size();
         else if (method == "mmd2") sum += orderMmd2(colPtr, rowIdx).size();

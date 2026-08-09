@@ -49,6 +49,7 @@ OBLIO_SRCS = \
   src/Amd1.cpp \
   src/Amd1B.cpp \
   src/Amd2.cpp \
+  src/Amd3.cpp \
   src/Amd2B.cpp \
   src/ElmForestEngine.cpp \
   src/SymFactorEngine.cpp \

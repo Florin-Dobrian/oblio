@@ -41,10 +41,25 @@ std::vector<std::int32_t> orderAmd2B(const std::vector<std::size_t>&  colPtr,
     // The driver's own membership scratch, separate from the quotient graph's: which vertices lie
     // in the new clique, and which cliques the step has already listed. Both are sets built by
     // stamping and queried by comparison, never allocated.
-    // Sized for twice the vertex space: the hash comparison below stamps a clique id at c + size,
-    // so vertices and cliques can be tested against one stamp without two arrays.
+    // Sized for twice the vertex space: the hash comparison below stamps a clique id at
+    // c + cliqueStamp, so vertices and cliques can be tested against one stamp without two arrays.
     std::vector<std::int32_t> mark(2 * size, NIL);
     std::int32_t              tag = 0;
+
+    // The stride separating the two halves of `mark`, and the one place a COUNT becomes an offset
+    // in the INDEX space. `size` is the matrix order, one dimensional and bounded by n, so it is a
+    // count and is held as std::size_t like every other count here; the sum below is an index into
+    // mark and so is std::int32_t. Naming the crossing once beats writing the cast at each of the
+    // sites that make it, which is what this file used to do: the cast is not a hazard here, since
+    // n is an int32_t by construction, but four unexplained casts of the same quantity read as
+    // four separate events rather than one convention.
+    //
+    // It exists because there is no type for a count. docs/DESIGN_DECISIONS.md (2026-08-08) and
+    // experiments/ordering/REPORT.md carry that: an index names an entity and may be NIL, a
+    // position offsets into an n x n object and may exceed 2^31, and a count is bounded by a SIDE
+    // rather than an AREA and has neither category. With one, `size` would already be the right
+    // width and this line would not be needed.
+    const std::int32_t cliqueStamp = static_cast<std::int32_t>(size);
 
     // The hash groups, an array indexed by the hash value rather than a map: the key is already
     // an index into 0 .. size, so a map would cost a log per insertion and a node per group for
@@ -65,7 +80,7 @@ std::vector<std::int32_t> orderAmd2B(const std::vector<std::size_t>&  colPtr,
     // allocates and zeroes it per pivot, which reads better and is O(n) per step, O(n^2) over the
     // run in bookkeeping alone, independent of the graph. Only the entries this step wrote are
     // touched, and they are exactly the ones it will read.
-    std::vector<std::size_t>  outside(size, 0);
+    std::vector<std::size_t> outside(size, 0);
     std::vector<std::int32_t> touchedCliques;
     std::vector<std::int32_t> deadCliques;
 
@@ -235,7 +250,7 @@ std::vector<std::int32_t> orderAmd2B(const std::vector<std::size_t>&  colPtr,
                     }
                     const std::int32_t* incidenceV = qg.incidence(v);
                     for (std::size_t i = 0; i < qg.incidenceSize(v); ++i) {
-                        mark[incidenceV[i] + static_cast<std::int32_t>(size)] = other;
+                        mark[incidenceV[i] + cliqueStamp] = other;
                         ++sizeV;
                     }
 
@@ -252,7 +267,7 @@ std::vector<std::int32_t> orderAmd2B(const std::vector<std::size_t>&  colPtr,
                         const std::int32_t* incidenceU = qg.incidence(u);
                         for (std::size_t i = 0; i < qg.incidenceSize(u) && same; ++i) {
                             ++sizeU;
-                            if (mark[incidenceU[i] + static_cast<std::int32_t>(size)] != other)
+                            if (mark[incidenceU[i] + cliqueStamp] != other)
                                 same = false;
                         }
                     }
@@ -264,16 +279,38 @@ std::vector<std::int32_t> orderAmd2B(const std::vector<std::size_t>&  colPtr,
                     // elimination folds into a vertex that is leaving; this folds into one that
                     // stays, carrying the combined weight and still a candidate.
                     //
-                    // No degree is recomputed after a merge, and nothing here is stale as a
-                    // result. u keeps the degree the bound wrote a few lines above, which is
-                    // still correct: an external degree excludes u's own supervariable, the two
-                    // were adjacent to each other, and v leaves the graph entirely, so u's
-                    // reachable set is exactly what it was. What changes is u's WEIGHT, and the
-                    // buckets are keyed on degree. Every other member of C[p] is unaffected too,
-                    // since v was in C[p] and its weight has moved to u, so |C[p]| weighted is
-                    // unchanged and so is the middle term of their bounds.
+                    // u's REACHABLE SET is unchanged by the merge, and that half is worth
+                    // keeping: the two were adjacent to each other, v leaves the graph, and an
+                    // external degree excludes u's own supervariable, so what u can reach is
+                    // exactly what it was. Every other member of C[p] is unaffected too, since v
+                    // was in C[p] and its weight has moved to u, so |C[p]| weighted is unchanged
+                    // and so is the middle term of their bounds.
+                    //
+                    // And the degree IS recomputed, by one subtraction. The bound a few lines
+                    // above was written with u's weight as it stood BEFORE this merge, and the
+                    // weight appears inside the bound, in `degme - weight(u)` and in the
+                    // `numLeft - weight(u)` cap. So absorbing v leaves the filed value one
+                    // bucket too high per original vertex taken, and u is never picked as early
+                    // as its size has earned.
+                    //
+                    // This comment used to say the opposite, that nothing was stale because an
+                    // external degree excludes u's own supervariable and only the WEIGHT
+                    // changes. The first half is true and the second is the whole difficulty:
+                    // the buckets are keyed on a degree that has the weight subtracted in it.
+                    // AMD_2 has no such problem because it subtracts `nvi` in the pass that
+                    // restores the degree lists, which runs AFTER supervariable detection and so
+                    // reads the post-merge weight. Found by aligning the amd3 prototype against
+                    // it, where the same timing is ledger entry 4.
+                    //
+                    // One subtraction rather than a recomputation, because all three terms of
+                    // the bound's minimum shift by the same amount when the weight grows, so the
+                    // minimum shifts with them. It remains an upper bound for the same reason:
+                    // the true external degree drops by exactly weight(v) as v stops being
+                    // outside u's supervariable and becomes part of it.
+                    const std::size_t weightV = qg.weight(v);
                     buckets.unfile(degrees[v], v);
                     qg.merge(u, v);                 // v folded into u, left where it lies
+                    buckets.refile(degrees, u, degrees[u] - weightV);
                     ++numEliminated;                // out of the count, not out of the graph
                 }
             }

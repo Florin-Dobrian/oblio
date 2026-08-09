@@ -21,6 +21,7 @@
 
 #include "oblio/Amd1.h"
 #include "oblio/Amd2.h"
+#include "oblio/Amd3.h"
 #include "oblio/ElmForest.h"
 #include "oblio/ElmForestEngine.h"
 #include "oblio/Mmd1.h"
@@ -99,6 +100,7 @@ static void run(const std::string& layer, const std::string& name, const Graph& 
     if (layer == "mmd2") printOrder(Oblio::orderMmd2(colPtr, rowIdx));
     if (layer == "mmd3") printOrder(Oblio::orderMmd3(colPtr, rowIdx));
     if (layer == "amd2") printOrder(Oblio::orderAmd2(colPtr, rowIdx));
+    if (layer == "amd3") printOrder(Oblio::orderAmd3(colPtr, rowIdx));
     std::cout << "\n";
 }
 

@@ -1162,18 +1162,25 @@ oracle computes the same structure a different way, from a dense factor pattern.
 At that point both classes gain a `.cpp` holding the validation and nothing else, the accessors
 staying in the header. That is the trigger to watch for: a body no longer obviously worth inlining.
 
-### amd3 is parked, 2026-08-07
+### amd4 is parked, 2026-08-07, and renamed from amd3 on 2026-08-08
 
-**The ordering experiment's layers under investigation are `mmd1`, `mmd2`, `amd1` and `amd2`.**
-`amd3` is not one of them. It was built to carry amd_1's input path, the dense-row removal and the
+**The ordering experiment's layers are `mmd1`, `mmd2`, `mmd3`, `amd1`, `amd2` and `amd3`.** `amd4`
+is not one of them. It was built to carry amd_1's input path, the dense-row removal and the
 postorder, it answered that, and nothing is open against it.
+
+It held the name `amd3` until the amd alignment began, and was renamed rather than deleted so that
+`amd3` could be the aligned layer, which is what `mmd3` is on the other branch. So `amd4` forks
+sideways from `amd2` and does NOT contain `amd3`, which is the one place on the ladder where a
+trailing digit does not continue the chain. Its header says so and says when it goes: once the
+alignment work is finished and nothing further is wanted from it, lifting its postorder block
+first if a permutation-level check is ever wanted.
 
 It stays in `make test`, in `GRID_LAYERS` and in the twin check, because its two twins are the
 only oracle it has, production having no counterpart, and a layer left to drift costs more later
 than one kept green. Its `matrix1` example stays with it.
 
-What parked means for the work: **amd3 is not evidence.** A result holding there and nowhere else
-settles nothing about the four, and an `amd2` against `amd3` difference is not by itself a defect
+What parked means for the work: **amd4 is not evidence.** A result holding there and nowhere else
+settles nothing about the four, and an `amd2` against `amd4` difference is not by itself a defect
 worth chasing. Items below that mention it do so as history, not as open work.
 
 ### Five ordering questions, three still open and deliberately so
@@ -1264,7 +1271,7 @@ what is left to do, which is the production half and the ceiling.
 neither their selective loop nor AMD's `wbig = Int_MAX_VAL - n` headroom is needed. The rule for
 where a check may go is **one before each region that advances the tag, at a point where nothing
 in `mark` is live**, which gives one site in md1 and mda2, two in nine layers, and three in amd2
-and amd3, whose hash pair loop advances a tag per pair tested and so must be guarded inside the
+and amd4, whose hash pair loop advances a tag per pair tested and so must be guarded inside the
 loop rather than before it. The eliminators are the standing hazard, holding two stamps live
 across the prune loop and a third across the `C[pivot]` compaction. `experiments/ordering`'s
 README carries the full account under "The tag guard".
@@ -1301,7 +1308,7 @@ to three orders of magnitude below where the current ceiling fails. This is corr
 not risk.
 
 One consequence, since it explains a difference that would otherwise look arbitrary: **our amd2
-and amd3 carry a third check site where AMD carries none.** AMD guards two regions, at
+and amd4 carry a third check site where AMD carries none.** AMD guards two regions, at
 `Amd.cpp:1694` and `1949`, and does not guard the `wflg++` per candidate in supervariable
 detection at `2067`. It does not have to, because its headroom is `n` and that pass spends at
 most one per live variable. We need the third site only because our ceiling is a constant that
@@ -1412,7 +1419,7 @@ rather than deleted, because the shape recurred three times in two sessions and 
 the next time a prototype is built by adding mechanisms to a sibling.
 
 **Two defects, one cause.** Both were lines that are CORRECT in amd1 and became wrong the moment
-amd2 added a merge into a LIVE vertex. amd3 had both fixed and so did production, so amd2 was the
+amd2 added a merge into a LIVE vertex. amd4 had both fixed and so did production, so amd2 was the
 only file carrying them.
 
 - **The bound's live-vertex cap.** amd2 derived `num_left` as `n - num_eliminated`, amd1's line.
@@ -1426,7 +1433,7 @@ only file carrying them.
   understated the reported fill by 12 percent at 10x10 and 30 percent at 32x32. Recorded as fixed
   in the previous session's handoff note and in fact not fixed, in either twin.
 
-**The vendored routine is the oracle for the first, and it settles it without appeal to amd3.**
+**The vendored routine is the oracle for the first, and it settles it without appeal to amd4.**
 `AMD_2` advances `nel` at exactly two sites in its main loop, `nel += nvpiv` at the pivot and
 `nel += nvi` at mass elimination inside scan 2, both originals genuinely leaving. Its supervariable
 absorption is `Nv[i] += Nv[j]; Nv[j] = 0;` and never touches `nel`, so `nleft = n - nel` counts
@@ -1477,6 +1484,88 @@ A grid is one problem family, it is the family every number in `benchmarks/order
 from, and it is the worst case for judging a tie-break. What it closes is narrower and worth
 having on its own: the ported prototypes and the engines they were extracted from are now checked
 against each other at a size where every mechanism fires.
+
+### Aligning amd against the vendored AMD: DONE for the layer, and it found one real defect
+
+The amd counterpart of the mmd3 work, 2026-08-08. The experiment's `amd3` is the aligned layer
+(the layer that used to hold this name, carrying the four non-ordering extras, is renamed
+`amd4` and is temporary); its header carries the ledger and the experiment README carries the method.
+
+**`amd3` returns `AMD_2`'s permutation exactly, up to the postorder.** Not merely its pivot
+sequence: the full expanded order agrees, member order within each supervariable included, on
+the seven examples and on every square grid tested from 3 a side to 40, with pivot sequences
+checked to 50. Hash merges and aggressive absorptions agree throughout and `bound below exact`
+stays zero. nnz(L) comes out 206332 at 100 a side and 474995 at 140, which is what
+`benchmarks/ordering/README.md` records for the vendored AMD.
+
+Five ledger entries, four of them pure tie-break conventions: the hash bucket walk, the
+reachable set laid out cliques-before-explicit, mass elimination moved after aggressive
+absorption, and the new clique prepended to `I[u]` with AMD's make-room rotation rather than
+appended. `amd3` needed no mechanism added and carried no defect of its own.
+
+**The fifth was a defect, and it was in `amd2`, `Amd2` and `Amd2B`: FIXED 2026-08-08.** A hash
+merge folds `v` into a live `u` and grows `u`'s weight, and the bound written moments earlier has
+that weight subtracted inside it, in `degme - weight(u)` and in the `numLeft - weight(u)` cap. So
+a supervariable was filed one bucket too high per original vertex absorbed and was never picked
+as early as its size had earned. `AMD_2` has no such problem because it subtracts `nvi` in the
+pass that restores the degree lists, which runs after supervariable detection.
+
+The comment at all four sites said the opposite, that nothing was stale because an external
+degree excludes `u`'s own supervariable and only the weight changes. The first half is true; the
+second is the whole difficulty, since the buckets are keyed on a degree that has the weight
+subtracted in it. That is `Mmd2`'s entry-5 defect in a different array, and this file previously
+recorded that the amd branch could not carry that shape. It could.
+
+The fix is one subtraction, not a recomputation: all three terms of the bound's minimum shift by
+the same amount when the weight grows. It remains an upper bound, the true external degree
+dropping by exactly `weight(v)`.
+
+**What it was costing, measured on grid Laplacians through Oblio's symbolic factorization:**
+
+```
+grid        AMD (vendored)    AMD1      AMD2 before    AMD2 after
+ 32x32            11900      12074         12364         11900
+100x100          206332     201856        212496        199386
+140x140          474995     455472        487111        444191
+```
+
+`Amd1` and `Amd1B` cannot have it, having no live merges. `Amd2B` moved with `Amd2`, and the
+identity assertion in `test_order` is the guard that they still agree.
+
+**This reverses the fill half of REPORT finding 3**, which recorded AMD2's extras as a net loss
+with the hash almost all of it. Corrected, AMD2 beats AMD1 at every size by 1 to 3 percent: the
+extras were not costing fill, the filing was, and the hash was being charged for it. The time
+half is untouched, the hash still being 72 to 92 percent of AMD2's time penalty.
+
+**And it leaves a result that should not be smoothed over.** `amd3` is aligned, so its fill is the
+vendored routine's, 474995 at 140 a side, where the corrected `Amd2` gets 444191. On grids our
+tie-break now beats AMD's by 6.5 percent. That is the second data point for the question
+`experiments/ordering/REPORT.md` parks, whether LIFO is genuinely better or genmmd merely
+good, and it points the opposite way from mmd, where aligning improved fill. Grids are one
+problem family and the flattering one, so this wants the 3D grids REPORT asks for before it
+means anything.
+
+**One correction still owed to the experiment README, about the vendored routine rather than
+ours.** It says the shrinking `degme` is vendored behavior, so a survivor handled early sees a
+larger value than one handled late, and calls it a loss in analysis quality our front-loaded mass
+elimination avoids. `degme` is decremented inside `AMD_2`'s scan 2 but never read there: the term
+enters a survivor's degree only in the later pass, `deg = Degree[i] + degme - nvi`, by which point
+it is final. Every survivor sees the same number in both codes, and there was nothing to avoid.
+
+**Production `Amd3` and `Ordering::AMD3` are extracted, 2026-08-08.** It reproduces the vendored
+routine's raw permutation directly, and its fill column in `benchmarks/ordering` is the vendored
+AMD's exactly. `amd3` is in `PORTED`, so `make test` now holds it to production on the examples and
+on grids as well as to its own twin. The shared quotient graph gained two flags and one method,
+`setVendoredListOrder`, `setLateMassElimination` and `massEliminate`, all inert for the other five
+drivers and verified so before `Amd3` existed.
+
+**`AMD3` is NOT the default, deliberately.** `MMD3` became one because reproducing a reference with
+decades of use is a better bet on unseen inputs than a tie-break of our own. The same argument
+would apply here and the evidence does not: with the filing defect fixed, `AMD2` fills less than
+the vendored routine on grids, so `AMD3` fills more. Revisit if the 3D grids say otherwise.
+
+**What is left of this work:** deleting `amd4` once nothing further is wanted from it, lifting its
+postorder block first if a permutation-level check is ever wanted.
 
 ### Two extractions in the dynamic factorization code
 

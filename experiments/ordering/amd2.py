@@ -410,6 +410,14 @@ def amd2_minimum_degree(G):
     # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     num_absorbed = 0                           # cliques killed aggressively
     num_hash_merges = 0                        # pairs found by the hash
+    # THE STANDING WITNESS FOR LEDGER ENTRY 8, and it is here for the reason `tag sweeps` and
+    # `bound below exact` are: to make a claim checkable rather than to measure anything. The
+    # key spread badly for months without a single output moving, because twins collide under
+    # any function of the pattern, so the merges found were right the whole time and only the
+    # pairs tested to find them were absurd. This is that number. It should read about half a
+    # pair per pivot; before the fix it read 19 on a 140x140 grid and 155 at 26 cubed, against
+    # the vendored routine's 0.33 and 0.48 for the same merges.
+    num_hash_pairs = 0                         # pairs the exact test was run on
     hash_bucket = [[] for _ in range(n + 1)]   # Amd.cpp's Head[hval]
     num_bound_checks = 0
     num_loose_bounds = 0
@@ -608,8 +616,17 @@ def amd2_minimum_degree(G):
             for v in A[u]:
                 if not eliminated[v]:
                     key += v + 1
+            # ONE SUM, WITH NO STRIDE, and that is ledger entry 8. This added the
+            # incidence half as (c + 1) * (n + 1) until 2026-08-09, so that a vertex
+            # and a clique of the same index could not cancel. True of the KEY and
+            # false of the BUCKET: the modulus below is the same number as the
+            # stride, so the incidence term is annihilated exactly and the hash came
+            # out a function of the ADJACENCY ALONE. Amd.cpp lets a vertex and a
+            # clique collide on purpose, the hash being a filter and never the
+            # decision. The invariant the two lines hold TOGETHER is that the
+            # modulus must not divide the stride.
             for c in I[u]:
-                key += (c + 1) * (n + 1)       # cliques and vertices must not mix
+                key += c + 1
             k = key % (n + 1)
             if not hash_bucket[k]:
                 used_keys.append(k)
@@ -627,6 +644,7 @@ def amd2_minimum_degree(G):
                     v = group[y]
                     if eliminated[v]:
                         continue
+                    num_hash_pairs += 1          # the witness; see its declaration
                     # The exact test, which the hash only filters for:
                     #     A[u] - {v} == A[v] - {u}  and  I[u] == I[v]
                     # Decided by stamping one side and counting matches on the
@@ -777,7 +795,8 @@ def amd2_minimum_degree(G):
     print(f"clique-member visits an exact degree would need: {num_member_visits}")
     print(f"clique reads the bound needed:                    {num_clique_reads}")
     # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
-    print(f"aggressively absorbed: {num_absorbed}, hash merges: {num_hash_merges}")
+    print(f"aggressively absorbed: {num_absorbed}, hash merges: {num_hash_merges}"
+          f", hash pairs tested: {num_hash_pairs}")
     # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     print(f"bound below exact {num_bounds_below_exact} times, "
           f"which must be zero")

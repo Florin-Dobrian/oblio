@@ -1001,6 +1001,9 @@ mirrored in `amd3.cpp`.
 7  the stored clique degree not     beginElimination,   Degree [me] = degme,        DEFECT
    rewritten after mass             PRODUCTION Amd3     written TWICE, at its
    elimination trimmed the clique   alone               lines 1676 and 1940
+8  the hash key's incidence half    the hash pass,      hval += e and hval += j,    COST
+   annihilated by taking the        every amd layer     one sum with no stride,
+   modulus to be the stride         and Amd2, Amd2B     then hval % n
 ```
 
 **Entry 7 is production's alone, and that is the interesting half.** These prototypes obtain
@@ -1043,7 +1046,45 @@ sat at the head of a short-circuiting walk and every FAILING pair paid one extra
 hottest line in the program. **Half a mechanism can be correct and still be wrong**, and nothing in
 any output could have shown it: permutations, fill and every count matched.
 
-**Four of the five are one idiom, and it is mmd's idiom.** AMD pushes at the head where we append,
+**Entry 8 is the largest of the eight and the only one that was never a divergence.** Entries 1 to
+5 are things we failed to reproduce; entry 8 is a defect of our own that `AMD_2` does not have. Our
+key adds the incidence half with a stride, `(c + 1) * (n + 1)`, so that a vertex and a clique of
+the same index cannot cancel, and then reduces modulo the same number, which annihilates that half
+exactly. The hash was therefore a function of the ADJACENCY ALONE, and `A[u]` empties as the
+elimination proceeds, so the key carried less and less and the buckets grew enormous.
+
+**What it cost, against the vendored routine on the same graphs and for the same merges:** 19.0
+pairs tested per pivot at 140 a side against its 0.333, and 155.3 at 26 cubed against its 0.484,
+with the largest bucket 20 and 110 against essentially two. On alpamayo the fix takes `AMD2` at 26
+a side from 14.88 ms to 5.45 and `AMD3` from 12.30 to 5.83, with the vendored routine and `AMD1`
+unmoved to within the drift.
+
+**The invariant the two lines hold TOGETHER**, which is how the replacement is stated: the modulus
+must not divide the stride. `AMD_2` holds it by having no stride, and accepts the collision on
+purpose, the hash being a filter and never the decision.
+
+**It changes no output, which is why nothing here could see it.** Twins collide under any function
+of the pattern, so the merges were the vendored routine's throughout. The prototypes carry the
+identical key in both twins, so the twin check compared two files wrong the same way and the
+prototype-against-production check inherited it. `docs/DESIGN_DECISIONS.md` (2026-08-09) carries
+the full account of why five separate oracles were blind, and it is the more general form of what
+entry 7 showed.
+
+**The witness is a counter.** All three amd layers now print `hash pairs tested` beside `hash
+merges`, for the reason `tag sweeps` and `bound below exact` exist: to make a claim checkable
+rather than to measure anything. It should read about one pair per merge, and it reads 94 against
+88 on a 20x20 grid.
+
+**Production only: `Amd3` keeps its permutation and `Amd2` does not.** `make amdorder` still
+matches on all 38 cases, and `Amd2` and `Amd2B` move, two-sided, `+1.4` percent of fill at 140x140
+and `-3.1` at 26^3. The difference is where each driver last writes a bucket position: `Amd2` files
+during the bound pass and the hash merge's refile is the last word, so the hash partition reaches
+the degree buckets, while `Amd3` refiles every survivor afterwards in `pivotClique` order and comes
+out canonical. That fourth pass is entry 4's, made for the post-merge weight, and it made `Amd3`
+immune to this by accident.
+
+**Four of the first five are one idiom, and it is mmd's idiom.** AMD pushes at the head where we
+append,
 so the entry seen last is processed first. Entry 1 is that in the hash buckets; entry 5 is it in
 a variable's element list; entry 2 is which of the two sources is walked first, since
 `for (knt1 = 1; knt1 <= elenme + 1; knt1++)` takes the elements and only its last pass the
@@ -4682,7 +4723,7 @@ bucket, and so may `v`.
 **The key, at the level of what it must satisfy.**
 
 ```
-key(u)  = sum over v in A[u] of (v + 1)  +  (n + 1) * sum over c in I[u] of (c + 1)
+key(u)  = sum over v in A[u] of (v + 1)  +  sum over c in I[u] of (c + 1)
 hash(u) = key(u) mod (n + 1)
 ```
 
@@ -4690,12 +4731,25 @@ hash(u) = key(u) mod (n + 1)
   list. A sum is; a concatenation is not. Any symmetric function would do and the sum is the
   cheapest.
 - **`+ 1`, because vertex 0 must contribute.** Otherwise `{0, 5}` and `{5}` are indistinguishable.
-- **The stride `n + 1`, so a vertex and a clique of the same index cannot cancel.** Write the key in
-  base `n + 1`: the adjacency sum is the low digit and the incidence sum the high one. The two
-  halves are not fully separable, since the low sum can exceed `n + 1`, but a SINGLE vertex `v` and
-  a SINGLE clique `c` of the same index contribute `v + 1` against `(v + 1)(n + 1)`, so moving an
-  element from `A[u]` to `I[u]` cannot leave the key unchanged. Those are exactly the pairs that
-  must be told apart.
+- **NO STRIDE, and a vertex and a clique of the same index are simply allowed to collide.** That
+  costs one exact comparison and nothing else, the hash being a filter and never the decision, and
+  it is what `AMD_2` does: `hval += e` and `hval += j` into one running value, then `hval % n`.
+
+**This paragraph used to argue the opposite, and the correction is ledger entry 8.** It read that
+the incidence half is multiplied by a stride of `n + 1` so that a vertex and a clique of the same
+index cannot cancel, and explained the key as a number in base `n + 1` with the adjacency sum as
+the low digit and the incidence sum as the high one. Every sentence of that is true of the KEY.
+Three lines above it, the hash is defined as the key modulo `n + 1`, which keeps the low digit and
+discards the high one, so the bucket was a function of the ADJACENCY ALONE. Written apart, both
+statements read as correct, and the first read as a justification for the thing that broke the
+second.
+
+**So the rule the two lines have to satisfy is a joint one, and it is what the text should say
+rather than describing each line on its own: the modulus must not divide the stride.** Having no
+stride is the cheapest way to hold it. What it was costing, on the same graphs and for the same
+merges, was 19.0 pairs tested per pivot at 140 a side against the vendored routine's 0.333 and
+155.3 at 26 cubed against its 0.484; the amd section's entry 8 has the account and
+`docs/DESIGN_DECISIONS.md` (2026-08-09) has why nothing here could see it.
 
 **And the property that licenses all of it is one-directional:**
 

@@ -732,6 +732,70 @@ the same binary. That has always been true of this benchmark's fill and is worth
 new family: fill is a deterministic function of the pattern, so it is a usable regression signal
 where timings never are.
 
+## The hash key, and what the section above was actually seeing, 2026-08-09
+
+The tables above put the amd branch's whole cubic degradation in the extras and named the hash
+pass's pair loop as the suspect, on the grounds that its cost is the sum of squared bucket sizes
+over `C[p]` and `C[p]` grows with the family. They also said the measurement wanted was a COUNT
+rather than a profile. That count was taken, and it found a defect: our hash key multiplied its
+incidence half by a stride of `size + 1` and then reduced modulo the same number, which annihilates
+that half exactly, so the bucket was a function of the adjacency alone. Against the vendored
+routine on the same graphs, for the SAME MERGES, we tested 19.0 pairs per pivot at 140 a side
+against its 0.333, and 155.3 at 26 cubed against its 0.484.
+
+**alpamayo (Apple Silicon), macOS, Apple Clang, Accelerate, 2026-08-09.** `make scale3d` and
+`make scale2d`, against the rows recorded earlier the same day:
+
+```
+grid3d          AMD      AMD1      AMD2      AMD3          AMD3 vs AMD
+26^3  before   4.07      5.76     14.88     12.30                3.02x
+26^3  after    4.06      5.69      5.45      5.83                1.44x
+32^3  after    8.81     13.03     12.33     12.71                1.44x
+
+grid            AMD      AMD1      AMD2      AMD3          AMD3 vs AMD
+140x140 before  1.27      1.51x     2.42x     2.55x
+140x140 after   1.21      1.80      2.04      2.24                1.81x
+400x400 after  10.49     17.47     19.86     21.80                2.08x
+```
+
+**The two controls do not move**, the vendored routine and `AMD1` sitting within a percent, which
+is the drift and is what says the rest is real. `AMD3` on cubes goes from about 3.0x to 1.44x and
+`AMD2` from 2.85x to 1.40x. In 2D the same change is worth about 1.4x, which is the ratio the count
+predicted from 155 pairs per pivot against 19: the defect was family dependent because `A[u]`
+empties as the elimination proceeds and cubes reach that state sooner.
+
+**Three readings, and the second and third are where the next work is.**
+
+- **`REPORT.md` finding 3 is dead on both halves.** It recorded AMD2's extras as a net loss with
+  the hash 72 to 92 percent of the penalty. On cubes `AMD2` is now FASTER than `AMD1`, 5.45 ms
+  against 5.69 at 26 a side and 12.33 against 13.03 at 32, so carrying aggressive absorption and
+  hash supervariable detection is cheaper than not carrying them. The fill half was reversed on
+  2026-08-08 by the entry-4 filing defect; both halves were measurements of defects rather than of
+  mechanisms.
+- **The families have swapped roles.** The extras were free in 2D and ruinous on cubes; they are
+  now free on cubes and cost about 25 percent in 2D, `AMD1` 17.47 against `AMD2` 19.86 and `AMD3`
+  21.80 at 400 a side. Whatever remains of the amd gap is a SQUARE-grid effect, which is the
+  opposite of where these tables pointed a few hours earlier.
+- **And the parked constant-factor proposals need re-pricing rather than reading off the section
+  above.** It deprioritized them because they change the shared quotient graph, which would help
+  `AMD1` equally, and `AMD1` was the half that was already fine. That argument has been consumed:
+  the extras are no longer the story, and what is left is per-element work in walks both branches
+  share. Taken per pivot, the excess over the vendored routine is 70 ns in 2D and 149 on cubes
+  against 6.28 and 12.72 clique members per pivot, so the residual tracks elements walked rather
+  than pivots.
+
+**AMD2's fill moves and AMD3's does not**, which is a tie-break consequence rather than a quality
+one: `Amd3` refiles every survivor after the hash in a fixed clique order and comes out canonical,
+where `Amd2`'s last write to a bucket is the merge's own refile, so the hash partition reaches the
+degree buckets. `Amd2` reads `+1.4` percent of fill at 140x140 and `-3.1` at 26^3, two-sided, and
+it now beats the vendored routine at five of seven square sizes and four of six cubic ones. Every
+AMD2 and AMD2B fill figure recorded above predates this and should be read with it. `AMD3`'s column
+is unchanged and still exact, `make amdorder` matching on all 38 cases.
+
+`docs/DESIGN_DECISIONS.md` (2026-08-09) carries the defect and the account of why five separate
+oracles were blind to it; `experiments/ordering/AMD3.md` iterations 21 to 24 are the narrative and
+the ledger's entry 8 the record.
+
 ## Results
 
 **alpamayo (Apple Silicon), macOS, Apple Clang, Accelerate, 2026-07-31.** Ordering time in

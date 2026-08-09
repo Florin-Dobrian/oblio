@@ -67,6 +67,135 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-08-09: the hash key threw half of itself away, and every oracle we had was blind to it
+
+**Our amd hash key was a function of the adjacency alone, for as long as `Amd2` has existed.** The
+key is a sum, with the incidence half multiplied by a stride so that a vertex and a clique of the
+same index cannot cancel:
+
+```
+key  = sum over live v in A[u] of (v + 1)
+     + sum over c in I[u] of (c + 1) * (n + 1)
+hash = key % (n + 1)
+```
+
+The stride and the modulus are the same number, so the second term is annihilated exactly. The
+argument for the stride is correct about the KEY and says nothing about the BUCKET, and the two
+lines have to hold an invariant together that neither holds alone: **the modulus must not divide
+the stride.** `AMD_2` accumulates `hval += e` and `hval += j` into one running value with no stride
+at all and takes it mod n, letting a vertex and a clique collide deliberately, because the hash is
+a filter and never the decision, so a collision costs one exact comparison and cannot produce a
+wrong merge.
+
+**What it cost, measured against the vendored routine on the same graphs, for the same merges:**
+
+```
+                     candidates/pivot   pairs tested/pivot   pairs per merge   max bucket
+2D 140x140, n=19600
+  vendored AMD_2                 6.28                0.333              1.00
+  ours, AMD3                     6.28               19.034             57.28           20
+3D 26^3, n=17576
+  vendored AMD_2                12.79                0.484              1.01
+  ours, AMD3                    12.72              155.335            323.97          110
+```
+
+Same candidates, same merges, 57 times the pairs on squares and 320 on cubes. As the elimination
+proceeds `A[u]` empties and everything a vertex reaches becomes cliques, so the surviving key
+carries less and less, and a cubic grid reaches that state sooner than a square one. That is why
+the defect is a family-dependent cost rather than a constant.
+
+**And it is why the amd branch degraded on cubes**, which `benchmarks/ordering/README.md` had
+observed on 2026-08-09 and could not explain. Fixed, on alpamayo at 26 a side: `AMD2` falls from
+14.88 ms to 5.45 and `AMD3` from 12.30 to 5.83, while the vendored routine and `AMD1` sit still to
+within a percent, which is the drift and is what says the rest is real. `AMD3` on cubes goes from
+about 3.0x the vendored routine to 1.44x.
+
+**It changes nothing any output could show.** Twins collide under any function of the pattern, so
+the merges found were the vendored routine's throughout and the fill, the permutation and every
+acceptance test were correct the whole time. Only the pairs tested to find those merges were
+absurd.
+
+### Why every oracle was blind, which is the part worth keeping
+
+**The prototypes carry the identical key, in both twins.** So the twin check compared two files
+wrong the same way, and production was extracted from the prototype, so the
+prototype-against-production check inherited it. This is the second instance of the shape ledger
+entry 7 named, and it is the more general one: there the prototypes lacked an optimization
+production had, here they share the defect, and both leave the comparison unable to see it.
+
+**The alignment's counters were equal by construction.** Pivots, hash merges, aggressive
+absorptions, `AMD_LNZ`, `AMD_NDIV`: every one is an output of the mechanism, and every one is
+forced equal once the layers agree. **An output that is equal by construction is not a check.**
+
+**The profile named the line twice and we fixed the wrong axis.** `AMD3.md` iteration 13 put
+6.22 s of a 14.90 s run on this pass's exact test and answered with entry 6, one iteration per
+pair; iteration 15 came back and hoisted the stamp, again per pair. Both were right and both made
+each pair cheaper on a loop that should have been running three hundred times less often. **A
+profile localizes cost inside a program and has no notion of how much of that code ought to run.**
+
+**The one count that was taken compared us against ourselves.** Iteration 13 records the hash pair
+count as measured and equal within 7 percent. It was AMD2 against AMD3, two instances of the same
+defect.
+
+**And every profile was taken on the flattering family.** All of it at 140x140, where the defect
+costs 19 pairs per pivot instead of 155, which is why that iteration ends with the profile being
+diffuse and no line above 378 ms. `REPORT.md` finding 1 says 2D flattered us and all our published
+numbers are 2D. That turned out to be true of the instrument as well as of the fill columns, and
+nobody carried it across.
+
+**The rule that would have caught it, and it was already in front of us.** The 2026-08-08 entry
+counts array touches at six sites and reaches 1.09x against a measured 2.32x, and reads the gap as
+a fact about the machine, per-touch cost and locality. The pair loop is not one of the six. The
+schema could not have held it: its first column is a single shared elements figure, which the
+alignment licensed, and that shape can express touching more arrays per element but not executing a
+different number of iterations. So: **when a work count and a measured time disagree by more than a
+factor, suspect the COVERAGE of the count before its interpretation.** That entry even warns that
+reasoning surviving several confirmations can still never have been checked. It was written about
+the wrong claim.
+
+**What was new here, since the technique was not.** `MMD3.md` entries 5 and 6 came from two
+`fprintf` calls in a scratch copy of `Mmd.cpp`, and `AMD3.md` iteration 1 built a six-site probe of
+`Amd.cpp`. Instrumenting the oracle is written into the method section. Every previous use asked
+which line we fail to reproduce. **None asked how much more of it we do.** An oracle built for what
+is computed does not answer what it costs, the same oracle usually can, and asking took ten
+minutes.
+
+### Two consequences that are not the fix
+
+**`REPORT.md` finding 3 is dead on both halves.** It recorded AMD2's extras as a net loss with the
+hash 72 to 92 percent of the penalty, and gated the hash out of production to measure 15.44 ms at
+26^3 against 34.15 with it. The fill half was reversed on 2026-08-08 by the entry-4 filing defect.
+The time half goes now: on cubes `AMD2` is FASTER than `AMD1`, 5.45 ms against 5.69 at 26 a side,
+so carrying aggressive absorption and hash detection is cheaper than not carrying them. Both halves
+of that finding were measurements of defects rather than of mechanisms.
+
+**And the families have swapped roles.** The extras were free in 2D and ruinous on cubes; they are
+now free on cubes and cost about 25 percent in 2D. Whatever remains of the amd gap is a square-grid
+effect, which is the opposite of where the 2026-08-09 tables pointed, and the parked constant-factor
+proposals need re-pricing against the new shape rather than against the old.
+
+### The fix is neutral for `Amd3` and a tie-break change for `Amd2`, and the reason is structural
+
+`Amd3`'s permutation is unchanged: identical on 31 shapes, and `make amdorder` still matches
+`AMD_2` on all 38 cases. `Amd2` and `Amd2B` move, with fill going `+1.4` percent at 140x140 and
+`-3.1` at 26^3, two-sided and small, which is what an arbitrary choice looks like once it is
+measured.
+
+The difference is where each driver last writes a vertex's bucket position. `Amd2` files during the
+bound pass and the hash merge's refile is the last word, so the order in which hash buckets are
+processed reaches the degree buckets and decides the next pivot among equals. `Amd3` refiles every
+survivor again afterwards, in `pivotClique` order, which owes nothing to the hash partition, so its
+degree-bucket chain comes out canonical whatever the buckets were. That fourth pass exists for
+ledger entry 4, the post-merge weight, and made `Amd3` immune to this as a side effect nobody
+designed.
+
+**The fix is kept in `Amd2` and `Amd2B` anyway**, on the rule this tree has applied twice already,
+that a defect found in one place is a defect wherever the code sits. The cost is that every
+published AMD2 fill figure moves again, and `Amd2B == Amd2` in `test_order` is the guard that says
+the pair moved together.
+
+---
+
 ## 2026-08-09: the ordering read freed memory for a week, and the acceptance test is what found it
 
 Two defects and one bug, all found by widening `make amdorder` from one shape to four. The bug is

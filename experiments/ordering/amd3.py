@@ -63,6 +63,30 @@
 #        not rewritten after mass    PRODUCTION Amd3    written TWICE, at its
 #        elimination trimmed the     alone              lines 1676 and 1940
 #        clique
+#     8  the hash key's incidence    the hash pass,     `hval += e` and        COST
+#        half annihilated by         EVERY amd layer    `hval += j`, one sum
+#        taking the modulus to be    and Amd2, Amd2B    with no stride, then
+#        the stride                                     `hval % n`
+#
+# **Entry 8 is the largest of the eight and the only one that was never a
+# divergence.** Entries 1 to 5 are lines of `AMD_2` we failed to reproduce; this is
+# a defect of our own that it does not have. The key added the incidence half as
+# `(c + 1) * (n + 1)`, so that a vertex and a clique of the same index could not
+# cancel, and then reduced modulo the same number, which annihilates that half
+# exactly: the bucket was a function of the ADJACENCY ALONE, and `A[u]` empties as
+# the elimination proceeds, so the key carried less and less and the buckets grew.
+# The invariant the two lines have to hold TOGETHER is that the modulus must not
+# divide the stride, and `AMD_2` holds it by having no stride, letting a vertex and
+# a clique collide on purpose because the hash is a filter and never the decision.
+#
+# It changed NO OUTPUT, which is why nothing here could see it: twins collide under
+# any function of the pattern, so the merges found were the vendored routine's
+# throughout. Against it on the same graphs, for the same merges, we tested 19.0
+# pairs per pivot at 140 a side where it tests 0.333, and 155.3 at 26 cubed where it
+# tests 0.484. Fixed on alpamayo, `AMD2` at 26 a side falls from 14.88 ms to 5.45
+# and `AMD3` from 12.30 to 5.83, with the vendored routine and `AMD1` unmoved.
+# `hash pairs tested` is the standing witness and should stay near one per merge.
+# `docs/DESIGN_DECISIONS.md` (2026-08-09) has why five separate oracles were blind.
 #
 #
 # **Entry 4's nature said `convention` here until 2026-08-09, and it is a DEFECT.**
@@ -677,6 +701,14 @@ def amd3_minimum_degree(G):
     # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     num_absorbed = 0                           # cliques killed aggressively
     num_hash_merges = 0                        # pairs found by the hash
+    # THE STANDING WITNESS FOR LEDGER ENTRY 8, and it is here for the reason `tag sweeps` and
+    # `bound below exact` are: to make a claim checkable rather than to measure anything. The
+    # key spread badly for months without a single output moving, because twins collide under
+    # any function of the pattern, so the merges found were right the whole time and only the
+    # pairs tested to find them were absurd. This is that number. It should read about half a
+    # pair per pivot; before the fix it read 19 on a 140x140 grid and 155 at 26 cubed, against
+    # the vendored routine's 0.33 and 0.48 for the same merges.
+    num_hash_pairs = 0                         # pairs the exact test was run on
     hash_bucket = [[] for _ in range(n + 1)]   # Amd.cpp's Head[hval]
     num_bound_checks = 0
     num_loose_bounds = 0
@@ -931,8 +963,17 @@ def amd3_minimum_degree(G):
             for v in A[u]:
                 if not eliminated[v]:
                     key += v + 1
+            # ONE SUM, WITH NO STRIDE, and that is ledger entry 8. This added the
+            # incidence half as (c + 1) * (n + 1) until 2026-08-09, so that a vertex
+            # and a clique of the same index could not cancel. True of the KEY and
+            # false of the BUCKET: the modulus below is the same number as the
+            # stride, so the incidence term is annihilated exactly and the hash came
+            # out a function of the ADJACENCY ALONE. Amd.cpp lets a vertex and a
+            # clique collide on purpose, the hash being a filter and never the
+            # decision. The invariant the two lines hold TOGETHER is that the
+            # modulus must not divide the stride.
             for c in I[u]:
-                key += (c + 1) * (n + 1)       # cliques and vertices must not mix
+                key += c + 1
             k = key % (n + 1)
             if not hash_bucket[k]:
                 used_keys.append(k)
@@ -967,6 +1008,7 @@ def amd3_minimum_degree(G):
                     v = group[y]
                     if eliminated[v]:
                         continue
+                    num_hash_pairs += 1          # the witness; see its declaration
                     # The exact test, which the hash only filters for:
                     #     A[u] - {v} == A[v] - {u}  and  I[u] == I[v]
                     # Decided by stamping one side and counting matches on the
@@ -1142,7 +1184,8 @@ def amd3_minimum_degree(G):
     print(f"clique-member visits an exact degree would need: {num_member_visits}")
     print(f"clique reads the bound needed:                    {num_clique_reads}")
     # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
-    print(f"aggressively absorbed: {num_absorbed}, hash merges: {num_hash_merges}")
+    print(f"aggressively absorbed: {num_absorbed}, hash merges: {num_hash_merges}"
+          f", hash pairs tested: {num_hash_pairs}")
     # NOT PRODUCTION: instrumentation, counting how often the bound was loose.
     print(f"bound below exact {num_bounds_below_exact} times, "
           f"which must be zero")

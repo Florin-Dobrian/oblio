@@ -738,6 +738,14 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
     std::vector<std::size_t> frontSize(n, 0);
     std::vector<bool> isElement(n, false);
     std::size_t numHashMerges = 0;                // pairs found by the hash
+    // THE STANDING WITNESS FOR LEDGER ENTRY 8, and it is here for the reason `tag sweeps` and
+    // `bound below exact` are: to make a claim checkable rather than to measure anything. The key
+    // spread badly for months without a single output moving, because twins collide under any
+    // function of the pattern, so the merges found were right the whole time and only the pairs
+    // tested to find them were absurd. This is that number. It should read about half a pair per
+    // pivot; before the fix it read 19 on a 140x140 grid and 155 at 26 cubed, against the vendored
+    // routine's 0.33 and 0.48 for the same merges.
+    std::size_t numHashPairs = 0;                 // pairs the exact test was run on
     std::size_t numDivides = 0;                   // AMD_NDIV, one per off-diagonal
     std::size_t numMultsubsLdl = 0;               // AMD_NMULTSUBS_LDL
     std::size_t numMultsubsLu = 0;                // AMD_NMULTSUBS_LU
@@ -1007,8 +1015,16 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
             std::size_t key = 0;
             for (std::int32_t v : A[u])
                 if (!eliminated[v]) key += static_cast<std::size_t>(v) + 1;
+            // ONE SUM, WITH NO STRIDE, and that is ledger entry 8. This added the
+            // incidence half as `(c + 1) * (n + 1)` until 2026-08-09, so that a vertex
+            // and a clique of the same index could not cancel. True of the KEY and false
+            // of the BUCKET: the modulus below is the same number as the stride, so the
+            // incidence term is annihilated exactly and the hash came out a function of
+            // the ADJACENCY ALONE. Amd.cpp lets a vertex and a clique collide on purpose,
+            // the hash being a filter and never the decision. The invariant the two lines
+            // hold TOGETHER is that the modulus must not divide the stride.
             for (std::int32_t c : I[u])
-                key += (static_cast<std::size_t>(c) + 1) * (n + 1);
+                key += static_cast<std::size_t>(c) + 1;
             const std::size_t k = key % (n + 1);
             if (hashBucket[k].empty()) usedKeys.push_back(k);
             hashBucket[k].push_back(u);
@@ -1023,6 +1039,7 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
                 for (std::size_t y = x + 1; y < group.size(); ++y) {
                     std::int32_t v = group[y];
                     if (eliminated[v]) continue;
+                    ++numHashPairs;              // the witness; see its declaration
                     // The exact test, which the hash only filters for:
                     //     A[u] - {v} == A[v] - {u}  and  I[u] == I[v]
                     // Decided by stamping one side and counting matches on the
@@ -1276,7 +1293,8 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
     std::cout << "bound was loose " << numLooseBounds << " times out of "
               << numBoundChecks << "\n";
     std::cout << "aggressively absorbed: " << numAbsorbed
-              << ", hash merges: " << numHashMerges << "\n";
+              << ", hash merges: " << numHashMerges
+              << ", hash pairs tested: " << numHashPairs << "\n";
     std::cout << "dense threshold: " << denseThreshold << ", dense rows removed: "
               << denseVertices.size() << "\n";
     // The rest of Amd.cpp's Info array, which is a factorization cost PREDICTION

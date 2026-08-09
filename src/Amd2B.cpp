@@ -220,9 +220,24 @@ std::vector<std::int32_t> orderAmd2B(const std::vector<std::size_t>&  colPtr,
             for (std::size_t a = 0; a < qg.adjacencySize(u); ++a)
                 if (!qg.eliminated(adjacency[a]))
                     key += static_cast<std::size_t>(adjacency[a]) + 1;
+            // ONE SUM, WITH NO STRIDE, and that is ledger entry 8. This added the incidence half
+            // as `(c + 1) * (size + 1)` until 2026-08-09, so that a vertex and a clique of the same
+            // index could not cancel. True of the KEY and false of the BUCKET: the modulus below
+            // is the same number as the stride, so the incidence term is annihilated exactly and
+            // the hash came out a function of the ADJACENCY ALONE. As the elimination proceeds
+            // A[u] empties and everything a vertex reaches becomes cliques, so the surviving key
+            // carried less and less, and cubic grids reach that state sooner than square ones.
+            //
+            // Measured, for the SAME MERGES: 19.0 pairs tested per pivot at 140 a side against the
+            // vendored routine's 0.33, and 155.3 at 26 cubed against its 0.48. Amd.cpp accumulates
+            // `hval += e` and `hval += j` into one running value and takes it mod n, letting a
+            // vertex and a clique collide on purpose, because the hash is a FILTER and never the
+            // decision: a collision costs one exact comparison and cannot produce a wrong merge.
+            // The invariant the two lines have to hold TOGETHER is that the modulus must not
+            // divide the stride, and having no stride is the cheapest way to hold it.
             const std::int32_t* incidence = qg.incidence(u);
             for (std::size_t i = 0; i < qg.incidenceSize(u); ++i)
-                key += (static_cast<std::size_t>(incidence[i]) + 1) * (size + 1);
+                key += static_cast<std::size_t>(incidence[i]) + 1;
 
             const std::size_t hash = key % (size + 1);
             if (hashHead[hash] == NIL) usedKeys.push_back(hash);

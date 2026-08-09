@@ -1207,6 +1207,23 @@ in two sessions and will recur again. The fourth is now half closed: the prototy
 guard, production does not, and the ceiling is a placeholder rather than a derivation.
 
 **1. The prototypes and production have diverged in encoding, and the alignment check does not see
+it. IT HAS NOW COST TWO DEFECTS, 2026-08-09.**
+
+**The second is the sharper of the two and is the opposite shape.** The amd hash key annihilated
+its own incidence half, by multiplying it with a stride and then reducing modulo the same number,
+so the bucket was a function of the adjacency alone and we tested up to 320 times the pairs the
+vendored routine does for the same merges. The prototypes carry the IDENTICAL key in both twins, so
+the twin check compared two files wrong the same way and the prototype-against-production check
+inherited it. Where entry 7 was invisible because a prototype does not carry an optimization, this
+was invisible because it does carry the defect, and the useful statement covering both is that a
+check between two things derived from each other cannot see what they share. The vendored routine
+is the only oracle either had. `docs/DESIGN_DECISIONS.md` (2026-08-09) carries the account, and it
+adds a rule this file should hold anyone to: **when a work count and a measured time disagree by
+more than a factor, suspect the coverage of the count before its interpretation.** The 2026-08-08
+entry had 1.09x against 2.32x and read the gap as a fact about the machine; the pair loop was not
+one of the six sites it counted.
+
+**1. The prototypes and production have diverged in encoding, and the alignment check does not see
 it. IT HAS NOW COST A DEFECT, 2026-08-09.** Production `Amd3` maintained a clique degree that went
 stale after mass elimination, and the twin check could not have caught it at any size, because the
 prototypes maintain no clique degree at all: they obtain `|C[c] - C[p]|` by walking `C[c]` and

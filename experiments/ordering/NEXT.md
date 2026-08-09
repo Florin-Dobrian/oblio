@@ -66,8 +66,28 @@ ordered that came from a real problem. That is the oldest open item on `docs/TOD
 the top of this list. `benchmarks/pipeline` is still square grids alone, so every break-even figure
 it carries is one family's.
 
-**2. Count the hash pass's pairs, 2D against 3D.** The cheapest measurement on this page and the
-one with the most behind it. `AMD1` is flat across both problem families at about 1.2 to 1.8x while
+**2. Count the hash pass's pairs, 2D against 3D. DONE 2026-08-09, and it was a defect.** The count
+was taken, and against the vendored routine on the same graphs and for the SAME MERGES we were
+testing 19.0 pairs per pivot at 140 a side where it tests 0.333, and 155.3 at 26 cubed where it
+tests 0.484. The cause is the key: its incidence half was multiplied by a stride of `n + 1` and
+then reduced modulo the same number, which annihilates it exactly, so the bucket was a function of
+the adjacency alone. Two lines in nine files. On alpamayo `AMD3` on cubes goes from about 3.0x the
+vendored routine to 1.44x and `AMD2` from 2.85x to 1.40x, with both controls unmoved. It is ledger
+entry 8, `AMD3.md` iterations 21 to 24 are the narrative, and `docs/DESIGN_DECISIONS.md`
+(2026-08-09) carries why five separate oracles were blind to it.
+
+**What that leaves of item 4 below, which is a re-pricing rather than a deletion.** The parked
+proposals were deprioritized because they change the SHARED quotient graph and would help `AMD1`
+equally, and `AMD1` was the half that was already fine. That argument has been consumed: the extras
+are no longer the story, and what is left is per-element work in walks both branches share. Taken
+per pivot the excess over the vendored routine is 70 ns in 2D and 149 on cubes, against 6.28 and
+12.72 clique members per pivot, so the residual tracks ELEMENTS WALKED rather than pivots, which is
+what those proposals are about. The families have also swapped roles: the extras now cost about 25
+percent in 2D and nothing on cubes, so what remains of the amd gap is a square-grid effect.
+
+**The original text of this item, kept because the reasoning is what produced the finding.** The
+cheapest measurement on this page and the one with the most behind it. `AMD1` is flat across
+both problem families at about 1.2 to 1.8x while
 `AMD3` goes 2.3x to 3.0x, so the amd branch's whole degradation on cubic grids is in the extras,
 and the hash pass is the only part of them whose cost is superlinear in clique size: its pair loop
 is the sum of squared bucket sizes over `C[p]`. Count pairs tested per iteration and the bucket

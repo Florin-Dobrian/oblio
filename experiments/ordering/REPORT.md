@@ -159,9 +159,22 @@ percent where this section records it as worse. The extras were not costing fill
 and the hash was being charged for it, which is exactly the attribution alignment was supposed to
 buy.
 
-**The time half stands.** Nothing here makes the hash cheaper, and its 72 to 92 percent share of
-AMD2's overhead is unaffected. The gating measurement in "The one gap we can explain" is still
-the right one.
+**AND THE TIME HALF IS NOW DEAD TOO, 2026-08-09, so this finding does not survive in any part.**
+It was measuring a defect rather than a mechanism, the second of two. Our hash key multiplied its
+incidence half by a stride of `n + 1` and then reduced modulo the same number, which annihilates
+that half exactly, so the bucket was a function of the ADJACENCY ALONE and the buckets grew
+enormous. Against the vendored routine on the same graphs and for the SAME MERGES we tested 19.0
+pairs per pivot at 140 a side against its 0.333, and 155.3 at 26 cubed against its 0.484. The
+figures below are what that cost, not what the hash costs.
+
+Corrected, on alpamayo at 26 a side, `AMD2` falls from 14.88 ms to 5.45 and `AMD3` from 12.30 to
+5.83 while the vendored routine and `AMD1` sit still. **On cubes `AMD2` is now FASTER than `AMD1`**,
+5.45 against 5.69, and 12.33 against 13.03 at 32 a side, so the extras are a net gain on time as
+well as on fill and the whole of finding 3 reverses. What survives of it is the gating measurement
+in "The one gap we can explain", which is now about a 25 percent cost in 2D rather than a factor of
+three on cubes.
+
+The numbers below are kept as the record of the run that produced them.
 
 The numbers below are kept as the record of the run that produced them.
 

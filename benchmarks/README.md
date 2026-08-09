@@ -28,7 +28,7 @@ timing without those cannot be compared against anything later.
 work" and blind to two things this folder cares about. It cannot see a loop whose cost is decided
 by an EARLY EXIT: a counter that added `adjacencySize + incidenceSize` per pair measured what a
 short-circuiting test could cost, and the real iteration count was 1.7x higher on one side, which
-is where a 42-percent line was hiding. And it cannot see ALLOCATION at all — the largest single
+is where a 42-percent line was hiding. And it cannot see ALLOCATION at all: the largest single
 item found in a day of this was `operator new`, an unreserved arena doubling 18 times per ordering.
 
 **A call tree bounds the search; only the source view ends it.** A driver inlines into one symbol,
@@ -43,6 +43,28 @@ during the amd work before anyone noticed the instrument was the constraint. It 
 repeat count from a timed probe targeting 300 ms per method per row, and two runs agree to a tenth
 of a percent at 140 and half a percent at 32. `experiments/ordering/width.cpp` does the same and
 also prints the count so a row can be judged.
+
+**What Instruments can and cannot give you from the command line, established 2026-08-09 and worth
+knowing before anyone spends an hour on it again.**
+
+`xctrace record --template 'CPU Counters' --launch -- ./binary args` works and produces a trace. It
+selects the template's DEFAULT mode, `CPU Bottlenecks`, which reports four derived percentages and
+cycles: Useful, Instruction Processing Bottleneck, Instruction Delivery Bottleneck, Discarded
+Bottleneck. That mix is genuinely informative: it says whether time is going to back-end stall, to
+fetch, or to misspeculation: but it gives no raw event counts.
+
+The GUI offers many other guided modes under Configuration: Guided, Mode: including `L1D Cache
+Metrics`, `L1D Miss Sampling` and several instruction-characteristic counts. **Those modes are not
+reachable from `xctrace`.** Only `templateCPUBottlenecks` exists as a template resource; the others
+are constructed by the GUI and there is no field to pass. Setting the mode in the GUI and recording
+from there does work, but the target's working directory and arguments have to be set in the
+target's Options sheet or the launch fails with `Path not found`.
+
+One lead that was not followed to the end: the default template ALREADY records eight raw per-core
+PMCs in the `kdebug-counters-with-time-sample` table of the trace. They are the bottleneck event
+set rather than cache events, but identifying which events those eight columns are would give raw
+counts out of traces already taken. The event identities live in the PMU database under the
+Instruments app bundle, keyed by a cpufamily hash.
 
 **It costs wall time and that is the trade.** A full `make scale` is minutes rather than seconds
 now. The alternative is a benchmark that cannot answer the questions being asked of it, which is

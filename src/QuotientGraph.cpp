@@ -81,7 +81,7 @@ void QuotientGraph::reachableSet(std::int32_t u, std::vector<std::int32_t>& reac
     // Under mmd2 on a random 200-vertex pattern, vertex 152 comes out eliminated with weight 1 and
     // sitting in a live ADJACENCY list, and the substitution lets it into a reachable set and out
     // of the ordering twice: 201 entries for 200 vertices. mmd1, mmd3 and all three amd layers
-    // were unaffected, which is what makes it worth a warning rather than a footnote — the
+    // were unaffected, which is what makes it worth a warning rather than a footnote: the
     // counterexample lives on one driver and the shared class carries it for all six.
     //
     // The unexamined premise was about the adjacency, not the cliques: the prune removes the pivot
@@ -304,7 +304,7 @@ const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pivot) {
         // LIST, bounded by deg(u) and so by n: one dimensional, a COUNT, where std::size_t is for
         // a position into an n x n object. The dimensional rule in experiments/ordering/REPORT.md
         // asks for this everywhere and it is taken here first because this is the hottest loop in
-        // the ordering — Instruments put 277 ms of an 8.53 s run on the incidence loop's header.
+        // the ordering, Instruments put 277 ms of an 8.53 s run on the incidence loop's header.
         // One cast at the crossing, on a value already loaded, rather than a wider induction
         // variable and a wider compare per element.
         const std::int32_t adjacencySize = static_cast<std::int32_t>(mAdjacencySize[u]);

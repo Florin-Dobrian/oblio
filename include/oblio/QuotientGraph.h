@@ -64,7 +64,7 @@ public:
     // disambiguate it. A sentinel of its own removes the ambiguity and the array with it.
     //
     // What that array was costing, measured on a 140x140 grid: amd3 wrote it 224054 times, once
-    // per file and once per unfile, and read it ZERO times — `filed()` is MMD's accessor and no amd
+    // per file and once per unfile, and read it ZERO times, `filed()` is MMD's accessor and no amd
     // driver calls it. mmd3 read it 115931 times. So one branch paid for a byte array it never
     // consulted, and the other kept information it could have derived from a link it already
     // touches. Amd.cpp has Head, Next and Last and no flag, for the same reason.

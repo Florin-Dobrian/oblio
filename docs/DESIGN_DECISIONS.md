@@ -91,15 +91,15 @@ reads `Nv` once, we read `mMark` and `mEliminated` and `mWeight`. On a walk that
 elements per ordering at 140 a side, that is one cache line against two or three.
 
 **Two of the three were portable and are taken.** `W` is now `Amd3`'s `w` array with the same tag
-scheme and `wflg += lemax` in place of a clearing pass. And `Buckets` lost `mFiled` — not a
+scheme and `wflg += lemax` in place of a clearing pass. And `Buckets` lost `mFiled`: not a
 vendored encoding but an array `AMD_2` simply never needed, `Head`/`Next`/`Last` and no flag;
 folding the filed state into a `mPrev` sentinel removed 224054 byte writes per amd ordering that
 nothing on that path ever read.
 
 **The third is not portable, and the reason is worth recording because it will look portable
 again.** `Nv` is negated when a vertex enters `Lme` and restored in the very last pass of the step,
-so it is negative across the entire body of an elimination, and four separate readers — scan 1,
-scan 2, supervariable detection, the hash merge — are each written to expect that. It is not a
+so it is negative across the entire body of an elimination, and four separate readers: scan 1,
+scan 2, supervariable detection, the hash merge: are each written to expect that. It is not a
 local trick but a whole-step convention, and it holds because `AMD_2` is a single function. Our
 readers of a weight are in six drivers across a class boundary. An attempt at the neighbouring
 substitution, testing `mWeight[v] != 0` instead of `mEliminated[v] == 0`, looked exactly equivalent
@@ -181,21 +181,110 @@ parameters into one function; ours are independent heap allocations reached thro
 locality hypothesis and it has not been tested, and on this entry's record it should be tested before
 it is believed.
 
+**What the gap IS, as far as it has been narrowed.** Cycles are 2.28x with the counts equal, so it
+is not that we execute more instructions: gcov arc counts put executed line-instances at 1.05x, and
+array touches at 1.09x. Instruments' bottleneck mix is nearly identical between the two runs except
+in ONE category, Instruction Processing, 15.47 percent for the vendored routine against 22.93 for
+ours. That is back-end stall, waiting on operands. **Same work, same instructions, roughly half the
+IPC.**
+
+The assembly names one contributor exactly. `orderAmd3` compiles to FORTY byte loads and the whole
+of `Amd.cpp` to ZERO, because `mEliminated` is a `uint8_t` array with no vendored counterpart:
+`AMD_2` reads liveness from the sign of `Nv[i]`, a value it has already loaded for its weight. Each
+of ours is a dependent chain, `ldrsw` for the index then `ldrb` at that index then a branch, which
+costs cycles without costing instructions and is exactly the shape the counters describe.
+
+**Deleting `mEliminated` is blocked, and all three candidate hosts are blocked for DIFFERENT
+reasons.** This is worth recording in full because each looks available until it is examined.
+
+```
+mWeight       number() must NOT zero it. A numbered vertex still counts toward its neighbours'
+              degrees, which is genmmd's prepass behaviour and part of what mmd3 is aligned to.
+              Zeroing it there would change the mmd ordering. This is the failure that produced
+              a duplicated vertex on mmd2 (201 entries for 200) when the substitution was tried.
+
+mMark         Vertices and cliques SHARE this space: mMark[v] for a vertex, mMark[c] for a clique,
+              and a clique's id IS the pivot's vertex id. A permanent sentinel on an eliminated
+              vertex would poison the mark of the clique it becomes, and absorption reads exactly
+              that mark. Collides by construction.
+
+Nv-style      Not portable at all. AMD_2 negates Nv when a vertex enters Lme and restores it in
+              the LAST pass of the step, so it is negative across the whole body with four readers
+              written to expect it. That works because AMD_2 is one function.
+```
+
+**The way through, and it is a real change rather than a tweak.** Give cliques their own mark
+space: `mMark` at `2n`, vertices at `[v]` and cliques at `[c + n]`, which is what the amd driver
+already does with its own mark array and `cliqueStamp`. Then the vertex half is free to carry a
+permanent sentinel and the membership test becomes ONE load answering both questions, `mMark[v] <
+mTag` for live-and-unseen against `== mTag` for seen and a `GONE` value above any tag for
+eliminated. That deletes `mEliminated` and the `mLiveMerges` branch beside it at all forty sites,
+for `n` extra `int32`. It needs an overflow guard on `mTag`, as `W` has, and it is the same idiom
+as the `W` port that worked.
+
+**Whether the remaining stall is dependency chains or cache misses has NOT been measured**, and
+those want different fixes: the change above is the right one for chains, and a pooled-storage
+redesign would be the one for layout. An attempt to get L1D counters out of Instruments established
+only that the guided modes are not reachable from `xctrace`; see benchmarks/README.md.
+
 **The trade this names, with the correction above applied.** The shared `QuotientGraph`, the
 six-driver ladder and the prototype-against-production check cost a constant factor on the amd
 branch. What this entry can say is that the factor exists, that it is not algorithmic, and that two
 plausible accounts of it have now been measured and rejected. What it CANNOT say is what the factor
 is made of. Closing it would probably mean a driver owning its own storage, which is the trade
-`AMD_2` made and which this tree declined for reasons that have nothing to do with speed — but that
+`AMD_2` made and which this tree declined for reasons that have nothing to do with speed: but that
 is a guess about an unexplained gap, not a conclusion from a measured one.
 That remains available and should be a deliberate decision if it is ever taken, not a drift.
+
+**A small instance of the same cost, and it is one we pay nothing for only because we can skip it.**
+`AMD_2` ends by postordering its assembly tree, and its own header states that the tree "is not
+guaranteed to be the precise supernodal elimination tree" and the postordering "is not guaranteed to
+be a precise postordering" of it, because mass elimination with approximate degrees can produce
+elements that are not fundamental supernodes. So it is a heuristic depth-first tidy, superseded
+outright by Liu's rule on the exact supernodal tree, which `ElmForestEngine` computes with real
+front and update sizes.
+
+It is defensible for its audience: a standalone library whose callers may have no symbolic phase,
+where a depth-first clustering beats the raw elimination order and nothing downstream would do
+better. But it is NOT OPTIONAL, so every caller who does have a symbolic phase pays for a result
+they discard. In a decomposed library that would be a flag or a separate entry point. It is a design
+cost rather than a bug, and it is the same cost as above wearing different clothes.
+
+**And the defence that a frozen reference implementation pays no maintenance cost is FALSE**, which
+matters because it is the argument that would justify copying `AMD_2`'s structure rather than only
+its devices.
+
+The premise is that `AMD_2` has been essentially unchanged since the mid-nineties, so the cost of
+being unreadable never came due. Two things falsify it.
+
+**Code is re-tuned for architectures, continually.** `W` and `Nv` trade loads for encoding density,
+and that trade was made for machines where a cache miss cost far less relative to an instruction
+than it does now. This entry's own measurements are a case in point: the binding constraint on
+Apple silicon turned out to be back-end stall, not instruction count, which is not the regime those
+encodings were tuned for. A codebase that cannot be re-tuned has not avoided the maintenance cost.
+It has converted it into a permanent tax that nobody is able to pay down.
+
+**And parallelism is the sharp case.** There are active discussions about multithreading minimum
+degree. What blocks that in a monolith is not the data structures, it is the CONVENTIONS: `Nv`
+negative for the duration of a step, `W` meaningful only relative to `wflg`, `Pe` flipped to mean a
+tree parent. To split work across threads you must know which of those hold over which regions, and
+that information exists nowhere but in the head of someone who has understood all 1664 lines at
+once. Modular boundaries are precisely what makes such a question answerable, because they are where
+you can say what is shared.
+
+So `AMD_2` is correct, fast, and it foreclosed its own future. That it survived thirty years
+unchanged is not evidence the trade worked; it is equally consistent with nobody being able to
+change it, and the parallelism discussions are what makes those two readings distinguishable. **This
+is the reason the shared class is worth its constant factor**, and it is a better-supported claim
+than the readability argument alone, which is a matter of taste where this is a matter of what can
+be built next.
 
 **Two method notes that cost a day between them and are not about amd at all.**
 
 **Counting and profiling answer different questions, and counting misled twice.** It is the right
 instrument for "are we doing more work" and it cannot see a loop whose cost is decided by an early
 exit: a counter that added `adjacencySize + incidenceSize` measured what a short-circuiting test
-COULD cost, and the real iteration count was 1.7x higher on one side. Nor can it see allocation —
+COULD cost, and the real iteration count was 1.7x higher on one side. Nor can it see allocation ,
 the largest single item found all day was `operator new` under `beginElimination`, an unreserved
 arena doubling 18 times per ordering, and no counter would ever have shown it.
 

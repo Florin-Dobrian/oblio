@@ -588,6 +588,13 @@ why it was not done.
 family and the flattering one. The 3D result in this report is the reason to distrust a 2D-only
 conclusion about fill.
 
+**This is now the top open item on the ordering work**, ahead of anything further on the constant
+factor, because fill drives the factorization and the factorization is where the time is. A 2x
+ordering costs well under 15 percent of a one-shot solve, which the pipeline benchmark established.
+A fill difference costs more than that on every factorization, permanently. So the question of
+whether our tie-break genuinely beats AMD's, or whether 2D grids are simply flattering it, is worth
+more than another few percent of ordering time.
+
 That minimum degree is tie-break sensitive is well established, and is why the vendored routines are
 used as oracles rather than reimplemented. Whether LIFO against FIFO specifically is characterized
 in the literature has NOT been checked and should not be asserted either way.

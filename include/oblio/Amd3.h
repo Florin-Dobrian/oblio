@@ -29,6 +29,23 @@
 // real front and update sizes, which DirectSolver turns on whenever the traversal is multifrontal.
 // So AMD's postorder would be work done twice and then overwritten. See experiments/ordering/AMD3.md.
 //
+// AND IT IS A HEURISTIC ONE, which Amd.cpp says itself and which is the stronger half of the
+// argument: mass elimination combined with the approximate degree can merge nodes of lower exact
+// degree than the pivot, so an element need not be a fundamental supernode and its diagonal block
+// can carry zeros. Its own header therefore states that the assembly tree "is not guaranteed to be
+// the precise supernodal elimination tree" and that its postordering "is not guaranteed to be a
+// precise postordering" of it. So it is not that we reach the same result by a better route. Theirs
+// is a depth-first tidy of an APPROXIMATE tree; Liu's rule on the exact supernodal tree, which is
+// what ElmForest computes, supersedes it outright.
+//
+// It is defensible where it sits. `AMD_2` is a standalone library returning a permutation to
+// callers who may have no symbolic phase at all, and for those a depth-first clustering beats the
+// raw elimination order with nothing downstream to do better. But it is not optional, so every
+// caller who DOES have a symbolic phase pays for a result they discard. Note also that it is a
+// separate function, AMD_postorder, called from AMD_1 after AMD_2 returns: the decomposition is
+// there in the source and the profile only shows it fused because everything inlines into
+// amd_order.
+//
 // The five differences from AMD2, three of which are conventions in the shared quotient graph and
 // so arrive as flags rather than as code here:
 //

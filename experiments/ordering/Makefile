@@ -7,6 +7,8 @@
 #:   make production   the production drivers on these graphs, linked from ../../src
 #:   make width        what the integer width costs, measured on the vendored AMD by retyping it
 #:                     to int64_t and timing the two against each other. Needs private/.
+#:   make raworder     production Amd3 against the vendored AMD's RAW elimination order, which is
+#:                     the acceptance test for the amd alignment. Needs private/.
 #:   make vendored     the vendored MMD and AMD on the same graphs, for reference. This is the
 #:                 only target here that needs private/, and it reports rather than fails without
 #:                 it; OBLIO_PUBLIC=1 makes it behave as though private/ were absent
@@ -155,7 +157,7 @@ else
   VENDOR_SRCS = $(wildcard ../../private/Amd.cpp ../../private/Mmd.cpp)
 endif
 
-.PHONY: all test production vendored width clean help
+.PHONY: all test production vendored width raworder clean help
 
 # Print the target list from this file's header. Those lines are marked with #: so there is one
 # source of truth: the header comment is the help text.
@@ -310,6 +312,35 @@ extern \"C\" void mmd_order64(std::int32_t n, const std::int32_t colPtr[], const
                                            invp[k] = static_cast<std::int32_t>(ip[k]); }\n\
 }\n''')"
 
+# ---- the raw-order oracle -------------------------------------------------------------------
+#
+# `make raworder` checks production Amd3 against the vendored AMD's RAW elimination order: the
+# pivot sequence together with the member order inside each supervariable, which is the whole
+# algorithm. It is the acceptance test for the amd alignment and the README's method section
+# explains why it, and not amd_order's output vector, is the object to compare.
+#
+# AMD_2 does not emit that order. amd_order returns Perm, which AMD_1 has already relabeled by
+# AMD_postorder, and that postorder is a heuristic tidy of an approximate assembly tree which
+# ElmForest replaces with Liu's rule on the exact supernodal tree. So the vendored OUTPUT differs
+# from ours by construction and always should.
+#
+# A hooked copy is GENERATED here rather than kept, exactly as the int64 copies above are, and for
+# the same reason: a checked-in copy of vendored code with our edits in it would drift from
+# private/ silently, and a test comparing against a stale oracle is worse than no test. Generated,
+# gitignored, removed by `make clean`, and rebuilt from whatever private/Amd.cpp currently says.
+#
+# The hook is additive: two containers and three lines, no behaviour change. PB_members[i]
+# accumulates what supervariable i stands for, growing at the hash merge; PB_raw takes a pivot's
+# members once per elimination, at FINALIZE THE NEW ELEMENT, before AMD_postorder ever runs.
+amd_raw.cpp: ../../private/Amd.cpp hook_amd.py
+	@python3 hook_amd.py $< $@
+
+raworder_cpp: raworder.cpp $(VENDOR_SRCS) amd_raw.cpp ../../src/Amd3.cpp ../../src/QuotientGraph.cpp ../../src/Types.cpp
+	$(CXX) -std=c++17 -O3 -DNDEBUG -w -I../../include $^ -o $@
+
+raworder: raworder_cpp
+	./raworder_cpp
+
 width_cpp: width.cpp $(VENDOR_SRCS) amd_int64.cpp mmd_int64.cpp
 	$(CXX) -std=c++17 -O3 -DNDEBUG -w width.cpp $(VENDOR_SRCS) amd_int64.cpp mmd_int64.cpp -o $@
 
@@ -318,4 +349,5 @@ width: width_cpp
 endif
 
 clean:
-	rm -f $(BINS) vendored_cpp production_cpp width_cpp amd_int64.cpp mmd_int64.cpp Amd.o Mmd.o
+	rm -f $(BINS) vendored_cpp production_cpp width_cpp raworder_cpp \
+	      amd_int64.cpp mmd_int64.cpp amd_raw.cpp Amd.o Mmd.o

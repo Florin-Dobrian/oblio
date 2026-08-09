@@ -73,11 +73,11 @@ plus `mWeight` where it has `Nv`. **Two of the three were portable and are taken
 not**, and iteration 17's read establishes why: `Nv` is negated in the construct loop and restored
 in the very last pass, so it is negative across the entire body of an elimination and four separate
 readers are written to expect that. It works because `AMD_2` is one function. Ours is a shared
-class with six drivers, three of them MMD with different invariants — and the `mmd2` counterexample
+class with six drivers, three of them MMD with different invariants: and the `mmd2` counterexample
 in iteration 17 is what that costs when a convention crosses the seam.
 
 **So the remaining gap does NOT have a name, and an earlier draft of this line said it did.** It is
-not algorithmic: the counts are equal — same eliminations, same reachable-set elements, same prune
+not algorithmic: the counts are equal: same eliminations, same reachable-set elements, same prune
 elements, same pairs tested, same fill. It is also not the one-fact-per-array-against-three pattern,
 which was the leading explanation for most of a day and was measured false: we touch 1.09x as many
 arrays per element as `AMD_2` and take 2.32x as long. `docs/DESIGN_DECISIONS.md` (2026-08-08) has
@@ -89,7 +89,7 @@ is a locality hypothesis and is untested.
 The profile is diffuse now. `orderAmd3` is 48 percent of the run with no line above 378 ms, and
 everything with a name has been taken. Getting from 2.3x to 1.5x is a third of the total and there
 is no item of that size left in it. It would have to come from a driver owning its own storage
-instead of sharing `QuotientGraph` — which is a real option, and is the trade `AMD_2` made, and
+instead of sharing `QuotientGraph`: which is a real option, and is the trade `AMD_2` made, and
 gives up the shared class, the six-driver ladder and the prototype-against-production check.
 
 **And fix the benchmark first.** `order_timing` uses a fixed repeat count and two runs of the same
@@ -868,8 +868,8 @@ after       541589
 The reverse walk stays separate, because its DIRECTION is a tie-break: it decides which of two
 indistinguishable vertices absorbs the other. Only the accumulation moved.
 
-**Permutation untouched at grids 20, 32 and 40**, as it must be — the key is the same value
-computed earlier — and both suites green. Applied to `Amd2` as well, where the 72 percent was
+**Permutation untouched at grids 20, 32 and 40**, as it must be: the key is the same value
+computed earlier: and both suites green. Applied to `Amd2` as well, where the 72 percent was
 measured and which `Amd3` inherits from.
 
 **The caution REPORT attached to it is now paid and not yet measured.** It needs an array of size
@@ -913,7 +913,7 @@ where ours was two of each into two.
 
 **The stamp is hoisted out of the pair loop.** `Amd.cpp` stamps the OUTER vertex once, before the
 inner loop, and tests every candidate against that one stamp. We stamped the inner vertex once per
-PAIR, over its whole list, with no short-circuit — so every pair paid a full list of random writes
+PAIR, over its whole list, with no short-circuit: so every pair paid a full list of random writes
 even after entry 6 got the comparison down to 1.08 iterations.
 
 ```
@@ -961,8 +961,8 @@ Entry 6 removed the one spike and what is left is spread thin: no line to fix.
 and zooming again landed in `allocate.h`, on `__builtin_operator_new`. **The whole of it was
 memory allocation**, not computation.
 
-**What allocates.** `mCliqueArena` was never reserved. It is append-only — a new clique goes at the
-end and a dead one's block is left where it lies — so it grows to the sum of |C[p]| over the whole
+**What allocates.** `mCliqueArena` was never reserved. It is append-only: a new clique goes at the
+end and a dead one's block is left where it lies: so it grows to the sum of |C[p]| over the whole
 elimination, 108705 entries at 140 a side against nnz(A) of 97440. Unreserved, a vector reaches
 that by doubling from nothing: 18 reallocations and 131071 entries copied per ordering, and the
 last few blocks are large enough that the allocator serves them from mmap and each faults its pages
@@ -1014,9 +1014,9 @@ anyway.
 
 **The substitution looked exact and was not.** `merge()` zeroes the weight of precisely the vertex
 it folds away, and this test exists for precisely those vertices, so `mEliminated[v] == 0` and
-`mWeight[v] != 0` appear to be one fact. I checked the two states where they could part — a
+`mWeight[v] != 0` appear to be one fact. I checked the two states where they could part: a
 mass-eliminated vertex, which is purged from the only clique that named it, and the pivot, whose
-cliques all die in `beginElimination` — and concluded both were unreachable.
+cliques all die in `beginElimination`: and concluded both were unreachable.
 
 Under `mmd2` on a random 200-vertex pattern, vertex 152 comes out **eliminated with weight 1,
 sitting in a live ADJACENCY list**, and the substitution emits it twice: 201 entries for 200

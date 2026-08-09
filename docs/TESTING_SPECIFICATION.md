@@ -55,6 +55,35 @@ The counts in this table had drifted from the suite before MMD1 was added, `test
 left, since a stale count is exactly the kind of quiet untruth the invariant above exists to
 prevent.
 
+## What the suite does NOT check, and how the amd and mmd alignments are verified instead
+
+`test_order` checks that each ordering returns a valid permutation, and that each B variant
+reproduces its original. It does NOT check either alignment against its vendored oracle, and it
+cannot: `genmmd` and `AMD_2` live in `private/`, which is unpublished, and the comparison needs a
+hooked scratch copy of the vendored source rather than a link against it.
+
+That verification lives in `experiments/ordering`, is run by hand, and is described in that folder's
+README under "The comparison object for amd is the RAW ORDER". In short:
+
+```
+experiments/ordering:  make test          63 checks, twins against each other and
+                                          prototype against production
+                       make raworder      production Amd3 against the vendored AMD's raw
+                                          elimination order, 11 grids from 4 a side to 140
+```
+
+`make raworder` generates a hooked copy of `private/Amd.cpp` on demand, since the vendored routine
+does not emit that order. The copy is gitignored and removed by `make clean`, so it cannot become a
+stale oracle.
+
+**The object compared for amd is the RAW elimination order**, not `amd_order`'s output vector. The
+vendored routine relabels its result with a postorder that Oblio deliberately does not reproduce, so
+the output vectors differ by construction. Fill is invariant under a postorder, so nnz(L) is a
+single number and matches: 206332 at 100 a side, 474995 at 140.
+
+Anyone extending the suite should know that the strongest evidence for the two orderings'
+correctness is not in it.
+
 ## A note on the word dynamic
 
 It carries two meanings in these names, and both are correct under the rule in WRITING_RULES: on a

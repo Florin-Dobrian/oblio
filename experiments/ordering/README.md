@@ -485,6 +485,86 @@ Two cautions learned the hard way:
 `AMD_LNZ` from the start and discovered the others at the end, having instrumented by hand what was
 already being reported.
 
+### The comparison object for amd is the RAW ORDER, and it has to be built
+
+`AMD_2` does not emit the elimination order. `amd_order` returns `Perm`, which `AMD_1` has already
+relabeled by `AMD_postorder`, and that postorder is a heuristic tidy of an approximate assembly tree
+that Oblio replaces with Liu's rule on the exact supernodal tree. So the vendored output vector is
+NOT what to compare against: our permutation will differ from it by construction and always should.
+
+**What to compare is the order `AMD_2` would emit if it stopped at the end of its main loop**, which
+is the pivot sequence together with the member order inside each supervariable. That is the whole
+algorithm, and it is what `amd3` and production `Amd3` reproduce exactly.
+
+### Running it
+
+```
+make raworder
+```
+
+That generates a hooked copy of the vendored source, builds the checker, and compares production
+`Amd3` against it on eleven grids from 4 a side to 140. `make clean` removes both the generated
+source and the binary; `./raworder_cpp 20 50` after building runs chosen sizes instead.
+
+The generated copy is `amd_raw.cpp`, written by `hook_amd.py` from whatever `private/Amd.cpp`
+currently says. It is gitignored and removed by `clean`, exactly as the int64 copies the width study
+uses are, and for the same reason: a checked-in copy of vendored code carrying our edits would be a
+third thing, drifting from the original with nothing to notice. **A test comparing against a stale
+oracle is worse than no test**, and this tree has three recorded instances of an instrument quietly
+declining to do its job.
+
+`hook_amd.py` asserts every anchor it depends on. If the vendored source moves, generation FAILS
+with a message naming which anchor went, rather than producing a copy with the hook in the wrong
+place. Fix the anchor there; do not loosen it.
+
+### What the hook does, and the three paths it has to cover
+
+Two file-scope containers:
+
+```c
+PB_members[i]   what supervariable i currently stands for, seeded as {i}
+PB_raw          the raw elimination order
+```
+
+**A vertex is numbered on THREE paths, not one**, and this is the part worth keeping. Building the
+generator found it empirically: covering only the obvious path left the order short by three
+entries on most grids and six on one, and an irregular deficit like that is the signature of an
+unhandled path rather than an off-by-one.
+
+```
+EMPTY VARIABLES     numbered in the INITIALIZATION, before the main loop runs. A vertex with no
+                    off-diagonal entry never forms an element, so it never reaches the finalize
+                    marker.  `Elen [i] = FLIP (1) ; nel++ ;`
+
+MASS ELIMINATION    scan 2 folds a variable whose degree has fallen to the pivot's straight into
+                    `me`, with `Nv [i] = 0`, and it never goes through the hash merge.
+
+THE HASH MERGE      supervariable detection, `Nv [i] += Nv [j]`. Note the DIRECTION: j is folded
+                    into i, so it is i's list that grows.
+```
+
+**And the source list must be CLEARED after each merge.** Without that, a member reached through a
+chain of merges is copied more than once, which produces sizes that match with contents that do not.
+
+A fourth insertion point, at `FINALIZE THE NEW ELEMENT`, takes the pivot's members into `PB_raw`
+once per elimination. Nothing in it comes from `AMD_postorder`, which runs later in `AMD_1` and only
+relabels.
+
+**This is the acceptance test to use from now on**, and it holds entry for entry, member order
+included.
+
+**Note what this does NOT claim.** Our AMD3 is not a drop-in match for `amd_order`'s output vector.
+Same fill, same elimination order underneath, different labels, because we never compute their
+postorder. Anyone comparing output vectors directly will see a difference and it is the intended
+one. Fill is invariant under a postorder, so there is one nnz(L) to match and we match it: 206332 at
+100 a side and 474995 at 140.
+
+**And the acceptance test was upgraded late.** It started as pivot sequences alone, because
+`AMD_2` postorders and we do not, so permutations could not be compared. The raw order turned out to
+be reconstructible upstream of the postorder, which made the test a full permutation including
+member order. Worth revisiting an acceptance test when it was chosen around an obstacle: the
+obstacle may not be one.
+
 ### Discipline that applied throughout
 
 - **Port, don't rewrite.** Every entry was found by asking which vendored line we failed to

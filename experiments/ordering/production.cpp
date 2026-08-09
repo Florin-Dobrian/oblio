@@ -86,7 +86,7 @@ static void run(const std::string& layer, const std::string& name, const Graph& 
 }
 
 int main(int argc, char** argv) {
-    // The seven examples come from graphs.h, shared with vendored.cpp and raworder.cpp.
+    // The seven examples come from graphs.h, shared with vendored.cpp and amdorder.cpp.
     const auto& examples = OrderingExperiment::exampleGraphs();
 
     const std::string layer = (argc > 1) ? argv[1] : "mmd1";

@@ -73,7 +73,7 @@ static void run(const std::string& name, const Graph& graph) {
 }
 
 int main(int argc, char** argv) {
-    // The seven examples come from graphs.h, which vendored.cpp, production.cpp and raworder.cpp
+    // The seven examples come from graphs.h, which vendored.cpp, production.cpp and amdorder.cpp
     // all read, so a graph cannot drift between the drivers whose outputs `make test` compares.
     const auto& examples = OrderingExperiment::exampleGraphs();
     int selected = (argc > 1) ? std::atoi(argv[1]) : 0;

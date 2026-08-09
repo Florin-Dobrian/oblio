@@ -63,27 +63,41 @@ cannot: `genmmd` and `AMD_2` live in `private/`, which is unpublished, and the c
 hooked scratch copy of the vendored source rather than a link against it.
 
 That verification lives in `experiments/ordering`, is run by hand, and is described in that folder's
-README under "The comparison object for amd is the RAW ORDER". In short:
+README under "The two alignment checks". In short:
 
 ```
 experiments/ordering:  make test          63 checks, twins against each other and
                                           prototype against production
-                       make raworder      production Amd3 against the vendored AMD's raw
-                                          elimination order, 38 cases over four shapes
+                       make aligned       both alignment checks, 38 cases each
+                       make amdorder      production Amd3 against the vendored AMD's raw
+                                          elimination order
+                       make mmdorder      production Mmd3 against genmmd's elimination order
 ```
 
-`make raworder` generates a hooked copy of `private/Amd.cpp` on demand, since the vendored routine
-does not emit that order. The copy is gitignored and removed by `make clean`, so it cannot become a
-stale oracle.
+**The two are named for the branch and not for the mechanism**, and the mechanisms differ: genmmd
+emits the order DIRECTLY, while AMD gets it through a HOOK. `make amdorder` generates a hooked copy
+of `private/Amd.cpp` on demand, because `amd_order` returns a vector `AMD_postorder` has already
+relabeled and the raw order has to be reconstructed upstream of it; the copy is gitignored and
+removed by `make clean`, so it cannot become a stale oracle. `make mmdorder` needs none of that:
+`mmd_order` returns the order genmmd eliminates in and there is no postorder anywhere in the
+routine, so the vendored output vector is the object to compare. The amd target was `raworder`
+until 2026-08-09, and was renamed because a name describing one target's mechanism made a matched
+pair read as two unlike things.
 
-**Four shapes, not one shape at many sizes**: the seven examples, 2D grids from 4 a side to 140, 3D
-grids from 2 to 24, and nine random patterns at n = 2000. The distinction is load bearing rather
-than thorough for its own sake. Widening a square grid exercises scale and never mechanism, and
-the 2D-only version of this check was green while production `Amd3` carried a stale clique degree
-that a 3D grid at 16 a side finds. It also found a use-after-free in the shared `QuotientGraph`
-that every ordering had, which no assertion in this suite could see because the program was reading
-its own freed memory and getting the right answer back. Both are in `docs/DESIGN_DECISIONS.md`
-(2026-08-09).
+**Four shapes each, not one shape at many sizes**: the seven examples, 2D grids from 4 a side to
+140, 3D grids from 2 to 24, and nine random patterns at n = 2000. The distinction is load bearing
+rather than thorough for its own sake. Widening a square grid exercises scale and never mechanism,
+and the 2D-only version of the amd check was green while production `Amd3` carried a stale clique
+degree that a 3D grid at 16 a side finds. It also found a use-after-free in the shared
+`QuotientGraph` that every ordering had, which no assertion in this suite could see because the
+program was reading its own freed memory and getting the right answer back. Both are in
+`docs/DESIGN_DECISIONS.md` (2026-08-09).
+
+**The mmd check is newer than the mmd alignment**, which is worth knowing when reading dates. The
+alignment was established on 2026-08-07 by a scratch probe that did not survive its session, and
+what ran between then and 2026-08-09 was the benchmark's fill column, which `MMD3.md` iteration 6
+shows is not sufficient: fill was exact at every size while the permutation still diverged at pivot
+700 of 1024.
 
 The same widening is available to `make test`, whose prototype-against-production comparison still
 runs on 2D grids alone; `graphs.h` now holds the 3D and random builders, so that is a change of one

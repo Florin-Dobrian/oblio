@@ -7,9 +7,14 @@
 #:   make production   the production drivers on these graphs, linked from ../../src
 #:   make width        what the integer width costs, measured on the vendored AMD by retyping it
 #:                     to int64_t and timing the two against each other. Needs private/.
-#:   make raworder     production Amd3 against the vendored AMD's RAW elimination order, which is
+#:   make aligned      both acceptance tests below, which is the one word for "is either
+#:                     ordering still what the vendored routine computes". Needs private/.
+#:   make amdorder     production Amd3 against the vendored AMD's RAW elimination order, which is
 #:                     the acceptance test for the amd alignment. Four shapes: the seven
 #:                     examples, 2D grids, 3D grids, random patterns. Needs private/.
+#:   make mmdorder     production Mmd3 against genmmd's elimination order, the same four shapes.
+#:                     The mmd counterpart, and it needs no hook: genmmd emits that order and
+#:                     does no postorder. Needs private/.
 #:   make vendored     the vendored MMD and AMD on the same graphs, for reference. This is the
 #:                 only target here that needs private/, and it reports rather than fails without
 #:                 it; OBLIO_PUBLIC=1 makes it behave as though private/ were absent
@@ -158,7 +163,7 @@ else
   VENDOR_SRCS = $(wildcard ../../private/Amd.cpp ../../private/Mmd.cpp)
 endif
 
-.PHONY: all test production vendored width raworder clean help
+.PHONY: all test production vendored width amdorder mmdorder aligned clean help
 
 # Print the target list from this file's header. Those lines are marked with #: so there is one
 # source of truth: the header comment is the help text.
@@ -263,6 +268,16 @@ vendored:
 	@echo "vendored: skipped, private/ is not present"
 width:
 	@echo "width: skipped, private/ is not present"
+# The two alignment checks say so too. They used to fall through with no rule at all, so make
+# answered "Nothing to be done for 'amdorder'" and exited zero, which is a check silently
+# declining to run: the same failure mode as grid mode's dead whitelist and order_profile's
+# missing else, both recorded in the README. A target that cannot run must say why.
+amdorder:
+	@echo "amdorder: skipped, private/ is not present"
+mmdorder:
+	@echo "mmdorder: skipped, private/ is not present"
+aligned:
+	@echo "aligned: skipped, private/ is not present"
 else
 vendored_cpp: vendored.cpp graphs.h $(VENDOR_SRCS)
 	$(CXX) -std=c++17 -O3 -w vendored.cpp $(VENDOR_SRCS) -o $@
@@ -313,9 +328,9 @@ extern \"C\" void mmd_order64(std::int32_t n, const std::int32_t colPtr[], const
                                            invp[k] = static_cast<std::int32_t>(ip[k]); }\n\
 }\n''')"
 
-# ---- the raw-order oracle -------------------------------------------------------------------
+# ---- the two alignment checks -----------------------------------------------------------------
 #
-# `make raworder` checks production Amd3 against the vendored AMD's RAW elimination order: the
+# `make amdorder` checks production Amd3 against the vendored AMD's RAW elimination order: the
 # pivot sequence together with the member order inside each supervariable, which is the whole
 # algorithm. It is the acceptance test for the amd alignment and the README's method section
 # explains why it, and not amd_order's output vector, is the object to compare.
@@ -349,11 +364,28 @@ extern \"C\" void mmd_order64(std::int32_t n, const std::int32_t colPtr[], const
 amd_raw.cpp: ../../private/Amd.cpp hook_amd.py
 	@python3 hook_amd.py $< $@
 
-raworder_cpp: raworder.cpp graphs.h $(VENDOR_SRCS) amd_raw.cpp ../../src/Amd3.cpp ../../src/QuotientGraph.cpp ../../src/Types.cpp
+amdorder_cpp: amdorder.cpp graphs.h $(VENDOR_SRCS) amd_raw.cpp ../../src/Amd3.cpp ../../src/QuotientGraph.cpp ../../src/Types.cpp
 	$(CXX) -std=c++17 -O3 -DNDEBUG -w -I../../include $(filter-out %.h,$^) -o $@
 
-raworder: raworder_cpp
-	./raworder_cpp
+amdorder: amdorder_cpp
+	./amdorder_cpp
+
+# The mmd half, and it needs none of the machinery above. genmmd emits the order it eliminates in
+# and does no postorder, so `mmd_order`'s own output vector is the object to compare: no hook, no
+# generated copy, no anchors, no Control array. MMD GETS THE ORDER DIRECTLY AND AMD GETS IT THROUGH
+# A HOOK, which is genmmd's asymmetry rather than ours. The two targets are named for the BRANCH
+# they check and not for that difference, which is written down in both drivers instead: naming one
+# for how it works and the other for what it checks made a matched pair read as two different kinds
+# of thing. This target was `raworder` until 2026-08-09 for exactly that reason.
+mmdorder_cpp: mmdorder.cpp graphs.h $(VENDOR_SRCS) ../../src/Mmd3.cpp ../../src/QuotientGraph.cpp ../../src/Types.cpp
+	$(CXX) -std=c++17 -O3 -DNDEBUG -w -I../../include $(filter-out %.h,$^) -o $@
+
+mmdorder: mmdorder_cpp
+	./mmdorder_cpp
+
+# One word for "is either ordering still aligned", which is the question a reader has. The same
+# shape as `make scale` over `scale-mmd` and `scale-amd`.
+aligned: amdorder mmdorder
 
 width_cpp: width.cpp $(VENDOR_SRCS) amd_int64.cpp mmd_int64.cpp
 	$(CXX) -std=c++17 -O3 -DNDEBUG -w width.cpp $(VENDOR_SRCS) amd_int64.cpp mmd_int64.cpp -o $@
@@ -363,5 +395,5 @@ width: width_cpp
 endif
 
 clean:
-	rm -f $(BINS) vendored_cpp production_cpp width_cpp raworder_cpp \
+	rm -f $(BINS) vendored_cpp production_cpp width_cpp amdorder_cpp mmdorder_cpp \
 	      amd_int64.cpp mmd_int64.cpp amd_raw.cpp Amd.o Mmd.o

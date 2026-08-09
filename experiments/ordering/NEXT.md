@@ -10,7 +10,7 @@ the task has already been written somewhere durable, and this file only points a
 - `docs/DESIGN_DECISIONS.md`, entry "the ordering read freed memory for a week", has what the
   widened acceptance test found and the three method notes that came with it.
 - `experiments/ordering/README.md`, section "Aligning a layer against a vendored routine", has the
-  method both alignments used, and its `make raworder` section has what the check now covers.
+  method both alignments used, and its `make amdorder` section has what the check now covers.
 - `benchmarks/README.md` has what Instruments can and cannot be made to do from the command line,
   and the two rules about counting against profiling that cost a day between them.
 
@@ -22,7 +22,7 @@ belonged elsewhere.
 
 ## Closed since the last note
 
-**The alignment check is widened, and the alignment holds.** `make raworder` ran eleven 2D grids
+**The alignment check is widened, and the alignment holds.** `make amdorder` ran eleven 2D grids
 and now runs 38 cases over four shapes: the seven examples, 2D grids to 140, 3D grids to 24, and
 nine random patterns at n = 2000. All match on alpamayo, so `Amd3` reproduces `AMD_2`'s raw
 elimination order, member order included, on something far wider than the shape it was built
@@ -38,6 +38,13 @@ Getting there found three things, none of them visible before:
   behavior and a 3D grid builder emitting unsorted columns.
 
 `experiments/ordering/AMD3.md`, iterations 18 to 20, is the narrative.
+
+**And the mmd branch has an acceptance test at last.** `make mmdorder` compares production `Mmd3`
+against genmmd's elimination order on the same four shapes, 38 cases, all matching. Until then the
+mmd alignment rested on a scratch probe from 2026-08-07 that died with its session and on the
+benchmark's fill column, which `MMD3.md` iteration 6 shows is not sufficient. It needs no hook,
+genmmd emitting that order directly, which is why it is forty lines against the amd machinery.
+`make aligned` runs both.
 
 ---
 
@@ -109,7 +116,7 @@ The oracle is exact and it is the whole safety net:
 make test                        283 with private/, 269 without
 experiments/ordering:
   make test                      63 twin and prototype-against-production checks
-  make raworder                  38 cases over four shapes
+  make aligned                   both alignment checks, 38 cases each
 ```
 
 Every ordering's permutation must be UNCHANGED. This is a re-schedule, not an algorithm change.

@@ -1044,7 +1044,7 @@ rule rather than a tendency, and it is written into the method notes above.
 
 ## Iteration 18: widening the acceptance test, and two of the three failures were the harness
 
-**The situation, 2026-08-09.** `make raworder` was committed running eleven 2D grids, which is ONE
+**The situation, 2026-08-09.** `make amdorder` was committed running eleven 2D grids, which is ONE
 SHAPE at many sizes. An attempt to widen it to the seven examples, 3D grids and random patterns
 had found divergences and had NOT been committed, because a checker that fails for unknown reasons
 is worse than one with narrow coverage. Three failures, and they turned out to have three
@@ -1147,7 +1147,7 @@ removed, `grid3d 16^3` and `24^3` fail and nothing else does; with the threshold
 
 ## Iteration 20: and the acceptance test found a bug that is not the ordering's
 
-**`make raworder` failed on alpamayo at `grid3d 6^3` and passed on the Linux sandbox.** Same
+**`make amdorder` failed on alpamayo at `grid3d 6^3` and passed on the Linux sandbox.** Same
 source, same deterministic input, no floating point anywhere in an ordering, so a difference
 between two machines cannot be a legitimate result. Something unspecified was being read.
 

@@ -69,7 +69,7 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ## 2026-08-09: the ordering read freed memory for a week, and the acceptance test is what found it
 
-Two defects and one bug, all found by widening `make raworder` from one shape to four. The bug is
+Two defects and one bug, all found by widening `make amdorder` from one shape to four. The bug is
 the entry: it is the shared `QuotientGraph` rather than any driver, and it had been live since
 2026-08-08.
 
@@ -126,7 +126,7 @@ the append site rather than in the caller's head.**
   `Amd2` cannot have it. No published figure moves: 2D fill is unchanged digit for digit at every
   size, because an inflated bound changes an ordering only when it changes the head of the minimum
   bucket, and no 2D grid does that at any size to 140 a side.
-- **The dense threshold was turned off by undefined behavior.** `raworder.cpp` passed
+- **The dense threshold was turned off by undefined behavior.** `amdorder.cpp` passed
   `Control[AMD_DENSE] = 1e30`, and `dense = alpha * sqrt((double) n)` assigns a double to an `Int`,
   so the conversion overflows: on x86-64 it lands on `INT_MIN` and `MAX (16, dense)` gives SIXTEEN,
   which is dense removal fully ON at the strictest setting the code can express, while on arm64 it

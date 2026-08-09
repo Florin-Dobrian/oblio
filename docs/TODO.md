@@ -1200,7 +1200,7 @@ recompute it from the truth at every step. So the blindness is structural rather
 the cases being small. **A prototype written to read as the algorithm does not carry the
 optimization, so it cannot model a hazard that lives in one**, which leaves the
 prototype-against-production comparison blind to exactly the class of defect that optimization
-introduces. What found it was the acceptance test, `make raworder`, widened to a shape the defect
+introduces. What found it was the acceptance test, `make amdorder`, widened to a shape the defect
 could move. The conclusion is not to give the prototypes production's encoding, which would spend
 what makes them readable; it is to know what this check does not cover and to cover it elsewhere.
 The rest of this item stands as written.
@@ -1579,7 +1579,7 @@ the vendored routine on grids, so `AMD3` fills more. Revisit if the 3D grids say
 **What is left of this work:** deleting `amd4` once nothing further is wanted from it, lifting its
 postorder block first if a permutation-level check is ever wanted.
 
-**Widened and closed properly, 2026-08-09.** `make raworder` ran eleven 2D grids, which is one
+**Widened and closed properly, 2026-08-09.** `make amdorder` ran eleven 2D grids, which is one
 shape at many sizes. It now runs four shapes, 38 cases: the seven examples, 2D grids to 140, 3D
 grids to 24, and nine random patterns at n = 2000, all matching on alpamayo. Getting there found
 three things, and only one of them was an ordering defect.
@@ -1598,6 +1598,14 @@ three things, and only one of them was an ordering defect.
   found.
 
 `docs/DESIGN_DECISIONS.md` (2026-08-09) carries all three and the method notes.
+
+**And the mmd branch gained the acceptance test it never had, 2026-08-09.** `make mmdorder`
+compares production `Mmd3` against genmmd's elimination order on the same four shapes, 38 cases,
+all matching, and `make aligned` runs both branches. The mmd alignment had rested since 2026-08-07
+on a scratch probe that died with its session, and day to day on `MMD3 nnzL == MMD nnzL`, which
+`MMD3.md` iteration 6 shows is not sufficient: fill was exact at every size while the permutation
+still diverged at pivot 700 of 1024. The check needs no hook, since genmmd emits that order and
+does no postorder, which is why it took forty lines where the amd side took a generator.
 
 ### Two extractions in the dynamic factorization code
 

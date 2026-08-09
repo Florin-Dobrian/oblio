@@ -3,7 +3,7 @@
 // graphs.h -- the test graphs, defined once for every driver in this folder.
 //
 // WHY THIS EXISTS. The seven examples were written out twice, in vendored.cpp and in
-// production.cpp, and a third copy was about to go into raworder.cpp. Three copies of a literal
+// production.cpp, and a third copy was about to go into amdorder.cpp. Three copies of a literal
 // is not a style complaint here: the drivers answer different questions ABOUT THE SAME GRAPHS,
 // and `make test` compares their outputs line for line, so a graph that drifts in one copy makes
 // two drivers disagree for a reason that is not the code. That failure would read exactly like a

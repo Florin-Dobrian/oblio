@@ -107,7 +107,7 @@ direction, and both are noticeably faster.
 ## The test graphs
 
 **One definition, in `graphs.h`.** The seven examples were written out twice, in `vendored.cpp`
-and in `production.cpp`, and a third copy was about to go into `raworder.cpp`. Three copies of a
+and in `production.cpp`, and a third copy was about to go into `amdorder.cpp`. Three copies of a
 literal is not a style complaint here: the drivers answer different questions about the SAME
 graphs and `make test` compares their outputs line for line, so a graph that drifted in one copy
 would make two drivers disagree for a reason that is not the code, and that would read exactly
@@ -495,6 +495,32 @@ Two cautions learned the hard way:
 `AMD_LNZ` from the start and discovered the others at the end, having instrumented by hand what was
 already being reported.
 
+### The two alignment checks, and why one needs a hook and the other does not
+
+The pair is `make amdorder` and `make mmdorder`, with `make aligned` running both. They ask the
+same question of the two branches, does our layer still compute what the vendored routine
+computes, so they are **named for the branch and not for the mechanism**. The mechanisms are not
+alike, and the difference is the vendored routines' rather than ours:
+
+```
+genmmd emits the order DIRECTLY   mmd_order returns perm, the order it eliminates in, and there
+                                  is no postorder anywhere in the routine. The vendored output
+                                  vector IS the object to compare. No hook, no generated copy, no
+                                  anchors to assert, no Control array.
+
+AMD gets it through a HOOK        amd_order returns a vector AMD_postorder has already relabeled,
+                                  so the order AMD_2 would emit at the end of its main loop has to
+                                  be reconstructed upstream of the relabeling, by a generated
+                                  copy of the vendored source with four insertion points in it.
+```
+
+The amd target was called `raworder` until 2026-08-09, for exactly the difference above. Naming one
+target for how it works and the other for what it checks made a matched pair read as two different
+kinds of thing, so the asymmetry moved into prose, which is where a fact about `AMD_2` belongs.
+
+The rest of this section is the amd half, which is the one with machinery in it. The mmd half is
+described under "mmd3, and the alignment ledger" and is a single file with no generator beside it.
+
 ### The comparison object for amd is the RAW ORDER, and it has to be built
 
 `AMD_2` does not emit the elimination order. `amd_order` returns `Perm`, which `AMD_1` has already
@@ -509,13 +535,13 @@ algorithm, and it is what `amd3` and production `Amd3` reproduce exactly.
 ### Running it
 
 ```
-make raworder
+make amdorder
 ```
 
 That generates a hooked copy of the vendored source, builds the checker, and compares production
 `Amd3` against it on **four shapes**: the seven examples, 2D grids from 4 a side to 140, 3D grids
 from 2 to 24, and nine random patterns at n = 2000. `make clean` removes both the generated source
-and the binary; `./raworder_cpp 20 50` after building runs chosen 2D sizes instead, for bisecting a
+and the binary; `./amdorder_cpp 20 50` after building runs chosen 2D sizes instead, for bisecting a
 failure.
 
 **Four shapes and not one shape at many sizes, which is the whole point of the list.** Widening a
@@ -718,6 +744,32 @@ are identical either way.
 
 Worth noting for the next layer: **the defect was the hardest of the six to find**, because it
 presented as a tie-break, which is what the other five were.
+
+### Running it
+
+```
+make mmdorder
+```
+
+Production `Mmd3` against genmmd's elimination order, on the same four shapes `make amdorder` uses:
+the seven examples, 2D grids from 4 a side to 140, 3D grids from 2 to 24, and nine random patterns
+at n = 2000. 38 cases. `make aligned` runs this and the amd one together, which is the one word for
+"is either ordering still what the vendored routine computes".
+
+**It needs no hook, and the asymmetry with amd is genmmd's rather than ours.** `mmd_order` returns
+`perm`, the order genmmd eliminates in, and there is no postorder anywhere in the routine, so the
+vendored output vector IS the object to compare. `AMD_2` hides its raw order behind
+`AMD_postorder`, which is the entire reason `hook_amd.py` exists. There is no Control array here
+either, so the dense threshold that cost a day on the amd side has no counterpart to set wrong;
+genmmd's one tunable is the `maxint` ceiling our wrapper supplies for the marker sweep, and
+`REPORT.md` records that sweep firing zero times at every size we run.
+
+**Until 2026-08-09 this check did not exist**, and that is the gap worth naming rather than the
+target. The alignment was established by a scratch probe that lived in `/tmp` and died with the
+session, exactly the arrangement `make amdorder` was built to replace on the other branch. What
+ran day to day was `MMD3 nnzL == MMD nnzL` in the benchmark, and iteration 6 of `MMD3.md` is the
+proof that this is not sufficient: fill was exact at every size while the permutation still
+diverged at pivot 700 of 1024. A weaker check passing is not the stronger one passing.
 
 ### How it was actually done, including the wrong turns
 

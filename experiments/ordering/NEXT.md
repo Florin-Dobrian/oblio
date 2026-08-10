@@ -1,19 +1,17 @@
-# NEXT: a matrix that is not a grid, and what is left of the amd constant factor
+# NEXT: the growth term, a matrix that is not a grid, and what the constant factor has left
 
-A handover note between sessions, rewritten 2026-08-10 when item 0's instrument was
-finished and its first candidate landed. **It is
-meant to be deleted** once the items below are done or abandoned. Everything in it that outlives
-the task has already been written somewhere durable, and this file only points at those places:
+A handover note between sessions, rewritten 2026-08-10 after three commits closed the constant
+factor on the amd branch. **It is meant to be deleted** once the items below are done or abandoned.
+Everything in it that outlives the task is already somewhere durable and this file only points at
+those places:
 
-- `docs/DESIGN_DECISIONS.md`, entry "what the vendored AMD's speed is made of", has the
-  measurements, the three blocked routes and why each is blocked, and the parked proposal restated
-  properly.
-- `docs/DESIGN_DECISIONS.md`, entry "the ordering read freed memory for a week", has what the
-  widened acceptance test found and the three method notes that came with it.
-- `experiments/ordering/README.md`, section "Aligning a layer against a vendored routine", has the
-  method both alignments used, and its `make amdorder` section has what the check now covers.
-- `benchmarks/README.md` has what Instruments can and cannot be made to do from the command line,
-  and the two rules about counting against profiling that cost a day between them.
+- `docs/DESIGN_DECISIONS.md`, three 2026-08-10 entries: "a null result measures an implementation",
+  "the algorithm was the smaller half", and the earlier "what the vendored AMD's speed is made of".
+- `experiments/ordering/AMD3.md`, iterations 25 and 26, the two fusions and how they were found.
+- `experiments/ordering/REPORT.md`, "The one gap we can explain", now closed, and the new vendored
+  against vendored section beside finding 1.
+- `benchmarks/ordering/README.md`, the per-pass inventory, the noise floor, and both scaling
+  ladders. `benchmarks/pipeline/README.md`, where the ordering phase gets priced.
 
 If you find yourself about to record something here that a later reader would want, put it in one
 of those instead. The previous `NEXT.md` went stale precisely because it accumulated content that
@@ -21,7 +19,65 @@ belonged elsewhere.
 
 ---
 
+## Read this first, and the rest only if you are picking up that item
+
+**Where the amd branch stands.** `Amd3` returns `AMD_2`'s raw elimination order exactly on all 38
+acceptance cases and now runs close to it: 0.83 to 0.89 ms at 16 cubed over eight runs where the
+vendored routine reads 0.74 to 0.86, so they overlap, rising to about 1.2x at 32 a side. In 2D it
+is 1.33x at 32 a side and about 1.95x at 400. Three days earlier it was 3.0x on cubes. `Mmd3` is
+0.87 to 1.05x genmmd on cubes and 1.26 to 1.55x in 2D, with no trend in n on either.
+
+**What was done, 2026-08-08 to 08-10**, three commits: the hash key defect (ledger entry 8, worth a
+factor of two to three on cubes), the key folded into the bound pass, and the first scan folded into
+the prune. **The walk axis is finished**: `Amd3` walks `I[u]` twice per pivot and `A[u]` once,
+which is `AMD_2`'s count exactly.
+
+**What is open, shortest first.**
+
+1. **A profile that compares `amd3` against itself at two sizes**, 140 and 400 a side. It decides
+   the next item and takes ten minutes. Item 2d.
+2. **The descriptor struct**, `docs/TODO.md` question 3, if that profile says stalls. Item 2d.
+3. **Narrow the one-dimensional sizes.** Self-contained, rules settled, ordering first. Item 2e.
+4. **A matrix that is not a grid.** Oldest open item in the tree, item 1 below, and the one that
+   would change what the other three are measured against.
+
+**Three things not to retry without reading why**, each of which cost a day or a wrong claim:
+
+- The key fusion and the scan fold both FAILED first as versions carrying an array of size n. Price
+  a re-schedule by what it walks AND by what it makes resident. The pass inventory counts only the
+  first.
+- `AMD3 / AMD` per row is a poor measurement: the vendored column moves 16 percent between runs
+  where ours moves 7. Quote absolute times with the vendored range beside them.
+- A benchmark column reached as a free function is timed differently from one reached through the
+  enum, by up to 2.4 percent. Two columns compared must go down the same path.
+
+---
+
 ## Closed since the last note
+
+**Two fusions landed and the constant factor on cubes is largely gone, 2026-08-10.** The hash key
+is accumulated in the bound's walks and the first scan is folded into the prune through
+`QuotientGraph`'s `TaggedScan` overload, so the driver makes `AMD_2`'s walk counts exactly. Neither
+carries an array of its own: the values crossing from the prune to the bound live in `partial` and
+`hashNext`, which are dead at that point, and a version with two fresh vectors of size n was 12
+percent slower in 2D. `AMD3.md` iterations 25 and 26.
+
+**And the instrument was the constraint four times in one week**, which is the part most likely to
+be forgotten. The noise floor is plus or minus 3 percent, measured by leaving an idle vehicle
+column in the benchmark. A `pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)` in both
+benchmark drivers turned a scattered null into a clean result, and without it the scheduler parks
+the thread on an efficiency core for whole runs. Our half of the pass inventory was doubled on six
+of fifteen columns. And the two timing paths differ by up to 2.4 percent.
+
+**The pipeline benchmark measures cubic grids too, 2026-08-10.** `make run2d` and `make run3d`, on
+the same ladders as `../ordering`. It prices the ordering phase at 10 to 18 percent of a one-shot
+solve, and it found that the branches change places for DIFFERENT reasons: in 2D genmmd fills 6 to
+14 percent less at level time, on cubes `AMD_2` orders twice as fast at equal fill. Two orderings
+can fill the same and factor 4 to 10 percent differently, which is supernode shape rather than
+fill.
+
+### Earlier, 2026-08-09
+
 
 **The alignment check is widened, and the alignment holds.** `make amdorder` ran eleven 2D grids
 and now runs 38 cases over four shapes: the seven examples, 2D grids to 140, 3D grids to 24, and
@@ -58,6 +114,11 @@ genmmd emitting that order directly, which is why it is forty lines against the 
 ---
 
 ## Priority
+
+**The numbering is historical and out of order, deliberately.** Items keep their numbers as they
+close so that a reference from a commit message or another document still resolves. Read the "Read
+this first" list above for what is actually open; below, an item is live only if its heading does
+not say DONE, CLOSED, DEFERRED or PARKED.
 
 **1. A matrix that is not a grid.** Cubic grids landed on 2026-08-09 and answered what they were
 brought in for: the claim that our tie-break beats AMD's was a square-grid artifact, `Amd2` reading
@@ -105,7 +166,8 @@ carry it, with the corrections below.
 
 **What is open, in the order we would take it.**
 
-- **THE GROWTH TERM, which is now the whole question.** Both families are a low constant plus
+- **THE GROWTH TERM, which is now the whole question**, and item 2d below has the pass that would
+  attack it. Both families are a low constant plus
   something that scales: cubes 0.97x at 16 a side rising about 25 percent to 1.2x at 32, 2D 1.33x
   at 32 a side rising about 45 percent to 1.9x at 400 with a knee past 280. The constant is nearly
   spent, and NOTHING measured so far touches the growth. The knee says memory. Two profiles of
@@ -197,6 +259,112 @@ in each benchmark driver calling `orderAmd3B` directly, and a local identity che
 `orderAmd3`. No enumerator, so no dispatch, no adapter, no `examples/` arm, no `test_order`
 assertions, no `test_pipeline` sweep entry, and no move in `docs/TESTING_SPECIFICATION.md`.
 
+**2d. THE NEXT PERFORMANCE PASS, and what of 2026-08-10 the other layers never got.** The walk
+axis is FINISHED on `Amd3`: after the fold it walks `I[u]` twice per pivot and `A[u]` once, which
+is `AMD_2`'s count exactly, so there is no pass left to remove that the vendored routine does not
+also make. What is left is seven sweeps over `C[p]` against its four, and the growth term. Three
+items, in the order the evidence supports.
+
+**(i) One profile first, and it decides whether (ii) is the right tool.** CPU Counters on `amd3` at
+140 and at 400 a side, compared AGAINST EACH OTHER rather than against the vendored routine. The
+constant factor is nearly spent; what remains grows with n and has a knee past 280 a side, which
+says memory. If the growth is stalls, (ii) is aimed at it. If it is instructions, this direction is
+finished and the descriptor struct is the wrong tool.
+
+**(ii) The descriptor struct, `docs/TODO.md` question 3.** `mSourcePtr[u]`, `mAdjacencySize[u]` and
+`mIncidenceSize[u]` are always read together for the same `u` and live in three arrays, so a
+vertex's descriptor touches three cache lines where one struct touches one. Each of the seven
+sweeps opens by reading exactly that, so this attacks all seven at once rather than deleting one,
+and deleting one is what B1 tried and measured nothing. It is also the only candidate left that
+targets STREAMS rather than passes, which is what paid three times on 2026-08-10. It lives in
+`QuotientGraph`, so all six drivers move together and no vehicle can isolate it: `make amdorder`
+and `make mmdorder` are the guard. The known ceiling is small, about 7 percent of a one-shot solve
+for closing `AMD1`'s whole remaining gap, and this is a fraction of that. Narrowing the arrays was
+tried once and measured nothing despite cutting simulated misses 17 percent.
+
+**(iii) What 2026-08-10 left on the table for the OTHER layers**, which is the part nobody has
+looked at:
+
+- **`Amd1B` and `Amd2B` carry `explicitPart(size)` as an extra array**, which is exactly the
+  footprint cost removed from `Amd3` that day. `Amd1B` is on record as "slower at large n after
+  being faster at small", and that is the signature of precisely this. **But the fix may not
+  transfer.** `Amd3` had somewhere to put the value, `partial[u]`, which exists only because
+  ledger entry 4 split its bound in two; `Amd1B` and `Amd2B` form the bound in one pass and have
+  no dead size-n array at that moment. `Amd2B` has `hashNext`, dead until filing, and `Amd1B`
+  appears to have nothing. **Entry 4's split is now the third thing it has bought by accident**,
+  after `Amd3`'s immunity to the hash-bucket order and its ability to take the key fusion at all.
+- **The tagged W consolidation never propagated.** `Amd1`, `Amd1B`, `Amd2` and `Amd2B` all carry
+  `outside(size)` plus a mark plus a clearing pass, `for (c : touchedCliques) outside[c] = 0`,
+  where `Amd3` carries one `w` and invalidates the lot with a single addition. That is one size-n
+  array and one pass per pivot, in four drivers, and it is iteration 15's change which landed in
+  `Amd3` alone as `AMD3C`. Care needed in `Amd2` and `Amd2B`: their `mark` is 2n and serves the
+  hash stamp as well, so only `outside` folds away.
+- **The key fusion is NOT available to `Amd2` and `Amd2B`**, checked on 2026-08-10 and recorded
+  under item 2b's neighbors: their key pass walks `C[p]` backward against a forward bound that
+  also refiles, so head insertion into both structures wants opposite directions. `Amd1` and
+  `Amd1B` have no hash and so no key.
+
+**None of (iii) is production work.** `Amd1` and `Amd2` are ladder rungs and the B layers are
+oracles; their speed has no consumer. It is listed because it is evidence about the SHARED class:
+if folding `explicitPart` away is worth something in `Amd2B`, that is a second data point for the
+stream hypothesis at no risk to the default.
+
+**2e. NARROW THE ONE-DIMENSIONAL SIZES, decided 2026-08-10, not yet done.** The integer model
+becomes: **`std::uint32_t` for one-dimensional sizes, `std::size_t` for two-dimensional ones, and
+`std::int32_t` for indices and for anything that carries NIL.** This reverses the 2026-08-08
+`DESIGN_DECISIONS` entry, which kept the wide one-dimensional types as a considered trade; that
+entry named the count sweep as the cheap half and this is it. **Ordering first**, since it is
+self-contained and has the shared class in it.
+
+**The operative test, and it is about the type's range rather than about n.** Cast when the result
+can exceed what the narrow type holds:
+
+- a PRODUCT of two 1D quantities always can, `f * u` reaching n^2;
+- an ACCUMULATION over an unbounded number of 1D terms always can;
+- a sum or difference of a FIXED FEW 1D quantities never can, and `frontSize + updateSize` is not
+  even that, a supernode's columns and its update rows being disjoint subsets of the same n
+  indices.
+
+**What changes in `QuotientGraph`.** `mAdjacencySize`, `mIncidenceSize`, `mCliqueSize` and
+`mWeight` narrow: all are counts bounded by n. `mSourcePtr` and `mCliquePtr` stay `std::size_t`,
+their values being offsets into arenas sized by nnz. They would FIT in 32 bits at any size we can
+factor, and they stay wide because of what they mean, which is the rule doing its job rather than
+the rule being slack. In the drivers `degrees`, `cliqueDegree`, `outside`, `explicitPart`, `degme`,
+`numLive` and `numLeft` narrow the same way, and `Buckets`'s signatures move with `degrees`.
+
+**The NIL-carrying set needs no work.** `mMark`, `mTag`, `mHead`, `mNext`, `mPrev`, `mSuperNext`,
+`mSuperLast`, `hashHead`, `hashNext` and `touchedCliques` are already `std::int32_t`.
+
+**One quantity is deliberately SIGNED and must stay so**, and it is the only one. `Amd3`'s tagged W
+array with `wflg`, `wnvi`, `lemax` and `wbig`: `wnvi = wflg - weight(u)` is negative whenever the
+tag is still small and the weight is not, which is the first few eliminations, and the arithmetic
+only comes right at `w[c] - wflg`. Unsigned wraps there and the bound comes out enormous. `Amd.cpp`
+is signed for the same reason. `src/Amd3.cpp` says this at its declaration; do not narrow it and do
+not make it unsigned.
+
+**Two accumulators cross and must stay wide**, both in the bound pass. `deg` accumulates
+`w[c] - wflg` over every clique in `I[u]`, each term up to n and O(n) of them, so the intermediate
+reaches O(n^2); it is at most n only because the two caps are applied afterwards, the bound's whole
+purpose being to overcount. And the hash `key` sums `c + 1` over `A[u]` and `I[u]`, same shape. The
+`TaggedScan` path already avoids the second by reducing modulo `n + 1` as it accumulates, which is
+why it fits an `int32_t` there; the driver's half does not.
+
+**Eight subtraction sites are non-negative by INVARIANT rather than by type**, and none is
+enforced: `outside[c] = cliqueDegree[c] - weightU` and its `-=`, `bound = explicitPart + degme -
+weight(u)`, `partial[u] + degme - weightU`, `numLeft - weight(u)`, `degrees[u] + degme -
+weight(u)`, and `degrees[u] - weightV` in `Amd2`'s hash merge. Each holds because the subtrahend is
+part of the minuend. They already wrap silently under `std::size_t`, so `uint32_t` inherits the
+hazard rather than creating it; what changes is the wrap distance, about 4.3e9 instead of 1.8e19,
+which reads as a large degree rather than an absurd one. Worth knowing when one of them ever fires.
+
+**Expect the model and the deleted casts, not milliseconds.** Narrowing six of these arrays was
+tried on 2026-08-01: 17 percent fewer simulated D1 misses and zero on alpamayo. What it does buy is
+that the hot loops stop casting: `const std::int32_t adjacencySize = static_cast<std::int32_t>(
+mAdjacencySize[u])` and its siblings exist only because the array is wider than the loop. And it
+composes with item 2d: `{ size_t sourcePtr; uint32 adjacencySize; uint32 incidenceSize; }` is 16
+bytes, four to a cache line, which makes the descriptor struct the natural next step rather than a
+separate argument.
+
 **3. The same widening is available to `make test`, cheaply.** Its prototype-against-production
 comparison still runs on 2D grids at sides 10 and 20 alone, and `graphs.h` holds the 3D and random
 builders. Worth knowing before relying on that check: the prototypes carry no maintained clique
@@ -206,7 +374,8 @@ the first of the five ordering questions.
 **4. And only then the performance work below, which is a PARK rather than a queue.** One bounded
 attempt, worth an hour whenever the amd branch is picked up again. Nothing here blocks anything.
 
-**Re-priced 2026-08-10, and it is now the WEAKER of the two parked ideas rather than the stronger.**
+**Re-priced 2026-08-10, and it is now the WEAKER of the three candidates rather than the stronger;
+item 2d has the ranking.**
 The proposal below deletes `mEliminated` by giving cliques their own mark space, which removes a
 dependent byte load from a hot walk. That is a good thing to want. But its sibling argument, that
 deleting work from a sweep is reliably worth something, is what the `degme` deletion tested and
@@ -220,8 +389,8 @@ pass. The point is only that it no longer inherits an argument it used to.
 deliberately does not do, on the seven examples, 2D grids to 140, 3D grids to 24 and nine random
 patterns. After the two fusions of 2026-08-10, the hash key into the bound and the first scan into
 the prune, `AMD3` runs at roughly 1.0 to 1.25x the vendored routine on cubic grids from 12 to 32 a
-side, overlapping it at 16, and 1.33 to about 1.95x on square grids from 32 to 400. `MMD3` is at 1.25 to 1.46x its
-own with no trend in n. `AMD3` is FASTER than both `AMD1` and `AMD2` at every cubic size while
+side, overlapping it at 16, and 1.33 to about 1.95x on square grids from 32 to 400. `MMD3` is at 0.87 to 1.05x its own on
+cubes and 1.26 to 1.55x in 2D, with no trend in n on either. `AMD3` is FASTER than both `AMD1` and `AMD2` at every cubic size while
 returning the vendored permutation, which `AMD2` does not. What is left is the 2D penalty, which
 grows with n and is stalls rather than work, and a cubic gap that has only now started to grow with
 size at all. The gap is NOT algorithmic, NOT integer width, NOT the number of arrays

@@ -187,7 +187,40 @@ differ**, and the fill column, which `../ordering` reports first, is nearly flat
 ### The break-even, which is the number a caller faces
 
 Against the vendored AMD at 140x140, the analysis time each ordering saves and the factorization
-time it costs:
+time it costs.
+
+**What the number is, since the column has twice been read as a property of the methods.** It is
+the count of factorizations per analysis at which our ordering overtakes the vendored one, and it
+is a quotient of the two columns beside it. Both of those are differences against AMD and both
+carry a sign that is easy to misread: `analyze -0.96` means our ordering takes 0.96 ms LONGER to
+analyze, and `factor -0.44` means each factorization is 0.44 ms FASTER. So one analysis and `k`
+factorizations cost
+
+```
+AMD     2.77 + 7.61 k
+AMD2    3.73 + 7.18 k        equal at k = 0.96 / 0.44 = 2.2
+```
+
+and a caller who analyzes a pattern once and factors it three times is better off with ours.
+
+**Both halves move independently, which is why a break-even can improve for two unrelated reasons.**
+AMD2 went from 26.6 to 2.2 between 2026-08-01 and 2026-08-09, and that is about a factor of two
+from the numerator, the ordering itself getting cheaper with ledger entry 8, and about a factor of
+five from the denominator, AMD2's fill falling from 487111 to 450190 through the entry-4 filing
+defect and the entry-8 tie-break. Neither of those is the other, and quoting the twelvefold
+improvement as a speed result would be wrong.
+
+**And the denominator is the least reliable number in this folder**, which bounds what the column
+can be used for. 0.44 ms against a 7.2 ms factorization is six percent, and the section above this
+one establishes that fill differences among orderings that are all roughly good do not propagate
+into factorization time in any orderly way, 19 percent of fill spread giving 5 percent of factor
+spread with no visible correlation. A small denominator makes the quotient swing hard: AMD3's 6.3
+rests on 0.18 ms, which is 2.4 percent of a factorization and inside what this harness can resolve,
+so it is the softest figure in the column and should not be quoted alone.
+
+**It is also traversal specific**, and the tables give only the left-looking one. Under
+multifrontal the same AMD2 row is 3.98 ms against 3.80, an advantage of 0.18 rather than 0.44, so
+its break-even is nearer 5 than 2. Read every figure here as "if you factor left-looking".
 
 ```
 against       analyze    factor LL     break-even

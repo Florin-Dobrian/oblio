@@ -9,6 +9,13 @@
 #:   make clean
 #:   make help   print this list
 #:
+#: ./order_profile_cpp amd3 140 200      one method in a loop, for a sampling profiler
+#: ./order_profile_cpp amd3 3d 26 200    the same on a CUBIC grid: profile the family the
+#:                                       question is about, since every profile taken here
+#:                                       before 2026-08-09 was square and the amd hash pass
+#:                                       looked diffuse there while doing eight times the work
+#:                                       per pivot on a cube
+#:
 #: Prefix any of these with OBLIO_PUBLIC=1 to build as everyone else does, without the vendored
 #: orderings; see docs/DESIGN_DECISIONS.md. The same word works in the repo root, both benchmarks
 #: and experiments/ordering.

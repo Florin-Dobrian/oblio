@@ -296,7 +296,16 @@ void QuotientGraph::beginElimination(std::int32_t pivot,
     // one space, so one mark array serves both, the tags keeping them apart.
     ++mTag;
     inClique = mTag;
-    for (std::size_t k = 0; k < reachedSize; ++k) mMark[reached[k]] = inClique;
+    // The weighted size of the new clique is accumulated HERE rather than in a pass of its own in
+    // each driver: this loop has the member loaded already, so the weight is one more read off a
+    // line the stamp is touching anyway. See cliqueWeight().
+    std::size_t cliqueWeight = 0;
+    for (std::size_t k = 0; k < reachedSize; ++k) {
+        const std::int32_t v = reached[k];
+        mMark[v] = inClique;
+        cliqueWeight += mWeight[v];
+    }
+    mCliqueWeight = cliqueWeight;
     ++mTag;
     absorbed = mTag;
     for (std::size_t i = 0; i < absorbedSize; ++i) mMark[absorbedCliques[i]] = absorbed;
@@ -503,6 +512,19 @@ const std::vector<std::int32_t>& QuotientGraph::massEliminate(std::int32_t pivot
         for (std::int32_t u : merged) {                // the pivot now stands for them too
             mSuperNext[mSuperLast[pivot]] = u;         // append u's chain, order preserved
             mSuperLast[pivot]             = mSuperLast[u];
+            // The weighted clique size follows the clique. `cliqueWeight()` promises the weighted
+            // size of C[pivot] AS IT NOW STANDS, and a merged vertex has just left it, so the
+            // decrement belongs here rather than in the caller. AMD_2 spells the same line
+            // `degme -= nvi` inside its own mass elimination.
+            //
+            // WITHOUT IT the drivers that mass-eliminate inside the eliminator, Amd1, Amd2 and
+            // Amd2B, read the UNTRIMMED size where they had been computing the trimmed one, which
+            // is a bound too large per vertex the merge took. That is the same shape as ledger
+            // entry 7 and it was caught by `prototype and production agree` in
+            // experiments/ordering, with `make amdorder` and all 283 assertions passing: Amd3
+            // mass-eliminates late, so its own first read is legitimately of the untrimmed clique
+            // and every check that watches Amd3 stayed green.
+            mCliqueWeight -= mWeight[u];
             mWeight[pivot] += mWeight[u];
             mWeight[u] = 0;
         }

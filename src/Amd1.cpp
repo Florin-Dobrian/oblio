@@ -79,8 +79,11 @@ std::vector<std::int32_t> orderAmd1(const std::vector<std::size_t>&  colPtr,
         // cliques the new clique's members belong to, never which vertices a clique's members
         // are, so the one query that used it is gone. The amd2 prototype still carries the stamp,
         // inherited from amd1 and dead there for the same reason.
-        std::size_t degme = 0;                      // |C[p]|, weighted
-        for (std::size_t k = 0; k < pivotCliqueSize; ++k) degme += qg.weight(pivotClique[k]);
+        // |C[p]| weighted, off the eliminator rather than from a pass of our own. AMD_2
+        // accumulates `degme += nvi` while building the element and this is that; the pass this
+        // replaces cost one scattered weight load per member per pivot, which is about 6 in 2D
+        // and 13 on cubes.
+        const std::size_t degme = qg.cliqueWeight();
         cliqueDegree[pivot] = degme;                // what the scan below subtracts from
 
         // |C[c] - C[p]| once per clique. This is the whole reason the bound is cheap: the

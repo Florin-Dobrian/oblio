@@ -797,6 +797,146 @@ cases.
 oracles were blind to it; `experiments/ordering/AMD3.md` iterations 21 to 24 are the narrative and
 the ledger's entry 8 the record.
 
+## What each family is actually made of, 2026-08-09
+
+With the hash key fixed, the amd branch was profiled on both families for the first time. Every
+earlier profile here was square, because until this day `order_profile.cpp` could not build
+anything else. **CPU Counters, alpamayo, 140x140 at 3000 repeats and 26^3 at 600, each
+configuration recorded twice**; cycles reproduced within 0.8 percent between passes and the two
+cubic vendored runs agreed to seven digits, so these are results rather than readings.
+
+`useful cycles = cycles x useful%` is the work; `cycles / useful cycles` is how efficiently it was
+done.
+
+```
+                      cycles    useful   useful cycles   stall cycles   work vs AMD   eff vs AMD
+2D 140x140
+  vendored AMD       15.036 G   57.06%      8.580 G        6.456 G         1.000        1.000
+  AMD1               22.408 G   45.36%     10.164 G       12.244 G         1.185        0.795
+  AMD2               25.434 G   48.68%     12.381 G       13.053 G         1.443        0.853
+3D 26^3
+  vendored AMD       10.677 G   25.11%      2.681 G        7.996 G         1.000        1.000
+  AMD1               14.999 G   25.07%      3.760 G       11.239 G         1.403        0.999
+  AMD2               14.078 G   28.45%      4.005 G       10.073 G         1.494        1.133
+```
+
+**The two families fail in completely different ways, and that is the finding.**
+
+**3D is pure work at identical efficiency.** `AMD1` is 25.07 percent useful against the vendored
+25.11, which is as close as two measurements get, and its cycle ratio and work ratio agree to three
+digits, 1.405 and 1.403. **We execute 40 percent more work and stall exactly as much per unit of
+it.** No layout change, no width change and no locality work can touch that number. The only lever
+on this family is doing less.
+
+**2D is mostly stalls.** `AMD1` spends 7.37 G extra cycles of which only 1.58 G is extra work, so
+**four fifths of the gap is not work at all**, and its Instruction Processing bottleneck is 28.1
+percent against the vendored routine's 15.3, which is the back end waiting on operands. Split
+multiplicatively, 1.19 of the 1.49 is work and 1.26 is lost efficiency.
+
+**And the two are not one phenomenon seen twice.** Work goes 1.19x in 2D and 1.40x on cubes;
+efficiency goes 0.79x in 2D and 1.00x on cubes. Something we do scales worse with clique size than
+what `AMD_2` does, and separately something in our 2D memory behavior costs a quarter of the time.
+
+### Why we close on cubes, which is not what it looks like
+
+The tempting reading is that we handle dense structure better. The counters say otherwise:
+**both codes collapse**, from 57 and 45 percent useful down to 25, with Discarded at about 40
+percent for both. Misspeculation on cubes is a property of the family rather than of either code,
+and the vendored routine has further to fall. We close because their efficiency advantage
+evaporates, not because ours appears.
+
+### What the extras do, which refuted the hypothesis they were measured to test
+
+`AMD1` lacks aggressive absorption, which `AMD_2` has, so the cubic work gap looked like a missing
+mechanism. The prediction was that `AMD2`'s useful cycles would fall toward 1.1x. **They rose, to
+1.49x.** The extras add work, as they must.
+
+`AMD2` is faster than `AMD1` on cubes anyway, 5.47 ms against 5.72, and the counters say why: it
+**stalls 1.17 G cycles less while doing 0.25 G more work.** Aggressive absorption pays by
+shortening the lists every later walk touches, which is a stall saving and not a work saving. In 2D
+the same trade loses, `AMD2` stalling slightly more than `AMD1` and doing 22 percent more work, and
+the timings agree, 2.05 ms against 1.77.
+
+**One number is worth keeping separately.** `AMD2` on cubes is MORE efficient than the vendored
+routine, 28.45 percent against 25.11. That is the first measure of any kind on which one of ours
+beats `AMD_2`.
+
+### What each family wants, which is the point of the section
+
+- **2D wants memory work**, and there are two candidates, both already written down and neither
+  yet tried. `mEliminated` deleted by giving cliques their own mark space removes one dependent
+  byte load per element from the hottest walk in the ordering; `docs/TODO.md` carries it and
+  `experiments/ordering/REPORT.md` parked it. And the width question is the other: `REPORT.md`
+  measured `std::size_t` counts at 17 to 26 percent against int32, deliberately kept, and 26
+  percent is what the efficiency gap here comes to. `AMD_2` runs on 32-bit `Int` throughout and
+  streams half the bytes through the same caches. Both are hypotheses; the second is the cheaper
+  to test and the harder to act on, since the integer model is a design decision rather than a
+  tuning knob.
+- **3D wants less work**, and nothing else will move it. The key walk is the visible candidate,
+  since `AMD_2` accumulates its hash key inside walks it already makes and we build it in a pass of
+  its own. That fusion was measured at zero on 2026-08-08 and reverted, but it was measured when
+  the pair loop was ninety percent of the pass and on squares only, which is the family where the
+  trade loses; `AMD1B` and `AMD2B` are the same bargain and are ahead by up to 11 percent on the
+  cubic ladder while behind by 3 percent in 2D.
+
+### The two fusions, and a null result worth as much as the finding above
+
+`AMD_2` accumulates the weighted clique size inside the loops that build the element, `degme +=
+nvi`, and takes its minimum degree inside the loop that restores the degree lists. All four amd
+drivers did the first in a pass of their own and three of them did the second, so both were ported
+on 2026-08-09: `QuotientGraph::cliqueWeight()` accumulates in the walk that already stamps each
+member, `massEliminate` decrements it as members leave, and the minimum folds into the refile loop.
+Two passes over `C[p]` per pivot removed, about 13 scattered loads per pivot on cubes and 6 in 2D.
+
+**Measured, it bought nothing.** Same repeat counts, same session, before against after:
+
+```
+                    cycles          useful cycles        work vs AMD
+3D 26^3
+  vendored AMD   10.677 -> 10.686    2.681 -> 2.679     1.000
+  AMD3           15.164 -> 15.144    4.338 -> 4.324     1.618 -> 1.614
+  AMD2           14.078 -> 14.136    4.005 -> 3.995     1.494 -> 1.491
+2D 140x140
+  vendored AMD   15.036 -> 15.023    8.580 -> 8.569     1.000
+  AMD3           28.107 -> 28.179   13.356 -> 13.390    1.557 -> 1.563
+  AMD2           25.434 -> 25.400   12.381 -> 12.361    1.443 -> 1.442
+```
+
+Everything is unchanged within half a percent. **The reason is that the loads were already cheap**:
+`pivotClique` is a contiguous arena run and `mWeight` is small and hot, so those gathers were
+served from L1 and cost near nothing. That is this folder's own lesson arriving from the other
+direction. Counting elements walked cannot price them, and here the count was right and the work it
+counted was already free.
+
+**The change is kept as measured-neutral rather than as an improvement.** It is a faithful port, it
+removes two passes and a stale-value hazard, and it costs nothing; it is not a speed fix and should
+not be cited as one. It also carried a correctness dependency: `Amd1`, `Amd2` and `Amd2B`
+mass-eliminate inside the eliminator and so needed `cliqueWeight` to follow the trim, which is
+`AMD_2`'s own `degme -= nvi`. Without it they read a bound too large per merged vertex. **`make
+amdorder` and all 283 assertions passed; only `prototype and production agree` caught it**, `Amd3`
+mass-eliminating late and so being legitimately untrimmed.
+
+**And a caution about this benchmark that cost a wrong claim.** The scale tables appeared to show
+`AMD3` improving from about 1.41 to 1.30 on the cubic ladder after the fusions, and that was
+**drift**. `AMD3` at 26 a side has measured 5.83, 5.95 and 5.65 ms across three runs of the same or
+nearly-same code, a 5 percent spread, where the cycle counts for those runs agree to 0.2 percent.
+**Ratios in these tables move by several percent between runs at fixed code**, so a change that
+does not exceed that band is not visible here at all, and the counters are the instrument for
+anything smaller. The harness already picks its repeat count from a timed probe for this reason and
+it is still not enough at these sizes.
+
+**So the 1.6x work gap is intact and unexplained.** On cubes it is 2.7 G cycles of real
+instructions per 600 orderings, and it is not in any pass that reading the code has found. What
+that wants is the per-pass inventory, ours against `AMD_2`, element visits per pass per pivot on
+both families, counted rather than reasoned. That is the instrument that found the hash key, and it
+is the only one that has answered anything on this question.
+
+**And the parked proposals are re-priced by this rather than merely revived.** `NEXT.md`
+deprioritized them because they change the shared quotient graph and would help `AMD1` equally,
+where `AMD1` was thought to be fine. `AMD1` is now the larger of the two remaining terms and its 2D
+gap is four fifths stalls, which is exactly what those proposals address. The same proposals are
+worthless on cubes, where the efficiency gap is zero.
+
 ## Results
 
 **alpamayo (Apple Silicon), macOS, Apple Clang, Accelerate, 2026-07-31.** Ordering time in

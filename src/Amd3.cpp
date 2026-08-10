@@ -184,8 +184,11 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
         // Lme before any of it has been mass eliminated. Nothing is lost by that, since a vertex
         // the merge will take belongs to no clique but the new one and so cannot appear in any
         // touched clique's member list either way.
-        std::size_t degme = 0;
-        for (std::size_t k = 0; k < pivotCliqueSize; ++k) degme += qg.weight(pivotClique[k]);
+        // |C[p]| weighted, off the eliminator rather than from a pass of our own. AMD_2
+        // accumulates `degme += nvi` while building the element and this is that. The second
+        // computation below is NOT removable: it runs after mass elimination has trimmed the
+        // clique, which is ledger entry 7, and this one is deliberately over the untrimmed one.
+        std::size_t degme = qg.cliqueWeight();
         cliqueDegree[pivot] = degme;                // what the scan below subtracts from
 
         // |C[c] - C[p]| once per clique. This is the whole reason the bound is cheap: the
@@ -527,11 +530,13 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
             std::size_t bound = partial[u] + degme - weightU;
             bound = std::min(bound, numLeft - weightU);
             buckets.refile(degrees, u, bound);
+            // The minimum, taken HERE rather than in a pass of its own. `bound` is in a register
+            // and `degrees[u]` has just been written from it, so the pass this replaces was one
+            // scattered read per survivor per pivot to recover a value it had already had.
+            // AMD_2 does the same inside its restore-degree-lists loop, `if (deg < mindeg)`.
+            // Amd1 has always done it this way; Amd2, Amd2B and Amd3 did not.
+            minDegree = std::min(minDegree, bound);
         }
-
-        for (std::size_t k = 0; k < pivotCliqueSize; ++k)
-            if (!qg.eliminated(pivotClique[k]))
-                minDegree = std::min(minDegree, degrees[pivotClique[k]]);
 
         // The whole array is invalidated in ONE ADDITION, where Amd3 walks the touched list and
         // zeroes each entry. After scan 1 no entry exceeds wflg + lemax, so advancing the tag by

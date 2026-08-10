@@ -66,6 +66,21 @@ ordered that came from a real problem. That is the oldest open item on `docs/TOD
 the top of this list. `benchmarks/pipeline` is still square grids alone, so every break-even figure
 it carries is one family's.
 
+**0. The 1.6x work gap, which is what the amd branch now is.** `AMD3` reproduces `AMD_2`'s
+permutation exactly, so its work is the vendored routine's work and any difference is
+implementation. CPU Counters put it at **1.61x the useful cycles on cubes and 1.56x in 2D**, nearly
+family independent, where efficiency is 1.14x on cubes and 0.83x in 2D. So there are two separate
+problems: a roughly constant 1.6x of extra instructions everywhere, and a 2D-only memory penalty.
+
+Two passes were found by reading and ported, the weighted clique size and the minimum degree, both
+of which `AMD_2` accumulates inside walks it already makes. **Both measured at zero**, the loads
+having been L1-resident already. So the remaining instructions are not where reading the code
+suggests, and the next instrument is the per-pass inventory: element visits per pass per pivot, in
+ours and in `AMD_2`, on both families. The 2026-08-08 attempt at that table was 2D only, used a
+single shared elements column, and omitted the pair loop entirely; done per code and per pass it is
+what would locate the 1.6x. `benchmarks/ordering/README.md` carries the counters and the null
+result.
+
 **2. Count the hash pass's pairs, 2D against 3D. DONE 2026-08-09, and it was a defect.** The count
 was taken, and against the vendored routine on the same graphs and for the SAME MERGES we were
 testing 19.0 pairs per pivot at 140 a side where it tests 0.333, and 155.3 at 26 cubed where it

@@ -138,8 +138,11 @@ std::vector<std::int32_t> orderAmd2B(const std::vector<std::size_t>&  colPtr,
         // cliques the new clique's members belong to, never which vertices a clique's members
         // are, so the one query that used it is gone. The amd2 prototype still carries the stamp,
         // inherited from amd1 and dead there for the same reason.
-        std::size_t degme = 0;                      // |C[p]|, weighted
-        for (std::size_t k = 0; k < pivotCliqueSize; ++k) degme += qg.weight(pivotClique[k]);
+        // |C[p]| weighted, off the eliminator rather than from a pass of our own. AMD_2
+        // accumulates `degme += nvi` while building the element and this is that; the pass this
+        // replaces cost one scattered weight load per member per pivot, which is about 6 in 2D
+        // and 13 on cubes.
+        const std::size_t degme = qg.cliqueWeight();
         cliqueDegree[pivot] = degme;                // what the scan below subtracts from
 
         // The clique-degree scan is not here any more: it ran inside the elimination above, in the
@@ -193,6 +196,16 @@ std::vector<std::int32_t> orderAmd2B(const std::vector<std::size_t>&  colPtr,
             bound = std::min(bound, degrees[u] + degme - qg.weight(u));
 
             buckets.refile(degrees, u, bound);
+            // The minimum, taken HERE rather than in a pass of its own after the hash. `bound` is
+            // in a register, where that pass paid a scattered read per survivor to recover it.
+            // AMD_2 takes its minimum inside the same loop, `if (deg < mindeg)`.
+            //
+            // TWO SITES, and that is not tidiness: a hash merge below LOWERS a survivor's degree
+            // after this loop has run, which is exactly why the pass being removed sat at the end.
+            // Folding it here alone would miss those, so the merge takes the minimum too, off the
+            // value it computes anyway. Amd3 needs one site only, its refile pass running after
+            // the hash rather than before it.
+            minDegree = std::min(minDegree, bound);
         }
 
         // HASH SUPERVARIABLE DETECTION. Vertices indistinguishable from EACH OTHER, which the
@@ -325,16 +338,15 @@ std::vector<std::int32_t> orderAmd2B(const std::vector<std::size_t>&  colPtr,
                     const std::size_t weightV = qg.weight(v);
                     buckets.unfile(degrees[v], v);
                     qg.merge(u, v);                 // v folded into u, left where it lies
-                    buckets.refile(degrees, u, degrees[u] - weightV);
+                    const std::size_t merged = degrees[u] - weightV;
+                    buckets.refile(degrees, u, merged);
+                    minDegree = std::min(minDegree, merged);   // see the bound loop above
                     ++numEliminated;                // out of the count, not out of the graph
                 }
             }
         }
         for (std::size_t hash : usedKeys) hashHead[hash] = NIL;      // only what was used
 
-        for (std::size_t k = 0; k < pivotCliqueSize; ++k)
-            if (!qg.eliminated(pivotClique[k]))
-                minDegree = std::min(minDegree, degrees[pivotClique[k]]);
 
         // Nothing above reads an entry this step did not write, since the cliques read are the
         // cliques listed. Clearing anyway keeps that a property of the loop rather than of the

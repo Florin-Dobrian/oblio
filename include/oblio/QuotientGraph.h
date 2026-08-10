@@ -185,6 +185,22 @@ public:
     }
     std::size_t cliqueSize(std::int32_t c) const { return mCliqueSize[c]; }
 
+    // |C[pivot]| WEIGHTED, which every amd driver needs and all four used to compute for
+    // themselves in a pass of their own, one scattered weight load per member per pivot. It is
+    // accumulated in `beginElimination`'s stamping walk instead, which has the member in hand
+    // already, so the pass is gone and nothing is added. AMD_2 does the same, `degme += nvi`
+    // inside the loops that build the element, at its lines 1492 and 1636.
+    //
+    // VALID UNTIL THE NEXT ELIMINATION, and a scalar rather than an array for that reason: it is
+    // read immediately after `eliminate` and never afterwards. Same contract as the pointer
+    // `clique()` returns, and stated here because a scalar carrying per-pivot state is the kind
+    // of thing that goes stale silently.
+    //
+    // Over the UNTRIMMED clique, which is what the drivers want: mass elimination runs after the
+    // absorption in Amd3, and the value that pass needs is the one before any trimming. Amd3
+    // recomputes it afterwards over the trimmed clique, which is ledger entry 7 and stays.
+    std::size_t cliqueWeight() const { return mCliqueWeight; }
+
     // The two halves of the neighbor relation, read by an approximate degree, which decomposes
     // reach(u) rather than forming it: A[u] contributes its own term and each clique in I[u]
     // contributes one number computed for the clique rather than for u. An exact degree has no
@@ -423,6 +439,7 @@ private:
     std::vector<std::int32_t> mSuperNext;
     std::vector<std::int32_t> mSuperLast;
     std::vector<std::size_t>  mWeight;
+    std::size_t               mCliqueWeight = 0;   // see cliqueWeight(); per-pivot, not per-vertex
     std::vector<std::uint8_t> mEliminated;   // a byte per vertex; see reachableSet on why the flag stays
 
     std::vector<std::int32_t> mMerged;   // scratch for the vertices an elimination merges away

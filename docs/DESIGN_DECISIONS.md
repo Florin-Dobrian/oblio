@@ -67,6 +67,114 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-08-10: a null result measures an implementation, not the idea it implements
+
+**The hash key now accumulates in the walks the bound is already making, and it is the first thing
+in five attempts to move `AMD3`'s gap to the vendored routine.** 4.4 to 7.0 percent faster at six
+consecutive square grids from 64 to 400 a side, 5 to 14 percent on cubic grids from 12 to 32, with
+`nnz(L)` identical everywhere and `make amdorder` matching `AMD_2` on all 38 cases. It removes a
+sweep over `C[p]` and a second walk of `A[u]` and `I[u]`, 18 to 19 percent of the driver's element
+visits.
+
+**The same change was built and reverted on 2026-08-08, having measured nothing at 140 a side and
+minus two percent at 400.** The difference between the two versions is one line of storage. That
+one carried each key in a vector of size n; this one files each vertex into its hash bucket at the
+point its key completes and stores nothing extra, `hashNext` being size n either way. `REPORT.md`
+had already named the footprint trade as its own caution, and it is the same stream that made
+`Amd1B` slower at large n after being faster at small.
+
+**So the finding is not about hash keys.** We had four fusion attempts measuring zero, the key into
+the bound, `Amd1B` and `Amd2B` folding a scan into the eliminator, and two loop fusions on
+2026-08-09 worth 0.25 percent. Four nulls in a row is enough to read as a rule about fusion, and we
+did read it that way: the per-pass inventory taken on 2026-08-10 was interpreted through it, and
+the sweeps axis was ranked ahead of the walks axis on the strength of it. **A null result is a
+measurement of one implementation, not of the idea it implements**, and four of them stacked up do
+not become a measurement of the idea either. What the earlier attempt measured was an array.
+
+**The reading that made this hard to see was itself well founded**, which is the part worth
+recording. The inventory put us at 2.12x `AMD_2`'s element visits on both grid families against
+1.56x and 1.61x its useful cycles, so we execute about 0.74x the work per visit: its loops are fat
+because each does four things and ours are thin because each does one. Fusion therefore does not
+remove work, it trades a visit for per-visit work, and pays only where that work is redundant
+rather than merely distributed. That argument is still correct. It just does not say which fusions
+those are, and it was being used as though it did.
+
+**The control was a second candidate from the same table, and it bought nothing.** `Amd3` re-sums
+`weight(u)` over `C[p]` after mass elimination trims it, recovering a number `massEliminate`
+already maintains, so deleting the loop is provably safe: the two cannot disagree. It measured zero
+in 2D and 1 to 3 percent slower on cubes, all of which is inside this benchmark's plus or minus 3
+percent floor. **It is a null, not a regression**, and the first draft of this entry called it one,
+which is the mistake this paragraph now exists to avoid repeating.
+
+The floor is itself worth recording, because it was measured rather than assumed and it was free.
+Between the fusion landing in `Amd3` and the vehicle being removed, `Amd3B` held a verbatim copy of
+it, so the two benchmark columns were the same code timed twice in one process, and they differed
+by up to 3.7 percent. **An idle vehicle is an error bar**, which is a reason to leave one in place
+for a run before deleting it and is worth doing again. So a single figure under about 4
+percent is not a result here, and what rescues a small effect is consistency of sign across sizes,
+drift not being systematically signed. On that test the fusion's six same-signed 2D sizes stand and
+the deletion's does not, though its sign was positive at all five cubic sizes in two runs, which is
+weak evidence of a small real cost and no more.
+
+**The ranking conclusion survives the softening, and it is the part that matters.** Deleting a
+provably redundant sweep bought nothing measurable where fusing two walks bought 4 to 7 percent.
+That is a statement about which candidate to try next and it needs no account of why the deletion
+failed. It does mean the two ranked behind it, the `C[p]` membership stamp and the mass-elimination
+sweep, no longer inherit an argument from their shape.
+
+**Both results came out of one file holding one change at a time, and that is the durable part.**
+`Amd3B` was built as a vehicle rather than a variant: a candidate goes in, is priced against `Amd3`
+by the benchmark, and then either lands or is recorded as a negative. **The vehicle is not in the
+tree between candidates.** It was removed with the fusion it carried, along with its enumerator,
+its dispatch, its fourteen `test_order` assertions, its `test_pipeline` sweep entry and its two
+benchmark columns, and it comes back when there is something to put in it. That keeps the public
+enum a statement about what Oblio offers rather than about what is being worked on, and it keeps
+`docs/TESTING_SPECIFICATION.md`'s counts from moving twice per experiment.
+
+**It should not have been an enumerator at all, which the revert is what made obvious.** Wiring a
+one-day experiment in as a full ordering touched ten files and missed an eleventh, three files
+under `examples/` switching over `Ordering`, caught by `-Wswitch` after the fact. The tree already
+had the pattern: `order_timing.cpp`'s `AMDraw` column is deliberately not an enumerator, on the
+stated grounds that it "would put a benchmark's oracle into the library's public enum and into
+every switch over it". **A measurement apparatus should be reachable without being offered.** It first carried
+both changes together and they measured 5 percent in 2D and 5 to 12 on cubes. Had that been
+written down, we would have recorded two improvements where one of them measured nothing, and we
+would have ranked the remaining sweeps above the remaining walks on the strength of a number the
+deletion had contributed nothing to. The cost of splitting was one extra pair of benchmark runs.
+
+**The other B layers are not a precedent for this.** `Amd1B` and `Amd2B` are fixed transformations
+kept for the identity oracle and for the pair being complete. This one is a workbench, and the
+distinction is worth keeping in the naming: what makes it a B is that it must return `Amd3`'s
+permutation exactly, not what it holds.
+
+**Where the change does and does not propagate.**
+
+- **`Amd2` and `Amd2B` cannot take it the cheap way**, which was checked rather than assumed.
+  They form the bound in one pass and call `buckets.refile` inside it, so the direction of their
+  bound loop is already a tie-break input. Their key pass walks `C[p]` backward against that
+  forward bound, and head insertion into both structures wants opposite directions. Measured on a
+  scratch copy: fusing there as `Amd3` does moves the permutation on all ten grids tried, fill
+  going `-1.33` percent at 140x140 and `+3.24` at 26^3, so it is an ordering change rather than a
+  schedule change. Tail insertion would preserve the order and is untried; it costs a `hashTail`
+  array of size n, the footprint that made the first version of this fusion measure nothing, so it
+  is expected not to pay. Left undone rather than ruled out: `Amd3` is the default and `Amd2`'s
+  speed has no consumer.
+- **`Amd1` and `Amd1B` cannot take it at all**, having no hash detection and so no key.
+- **The prototypes in `experiments/ordering` deliberately do not take it.** They are the oracle,
+  and an oracle that shares an optimization cannot see a defect in it. If the twins also fused,
+  then dropping the eliminated-neighbor guard on the adjacency half, or letting the pivot fall out
+  of the incidence half, would be present in both and `prototype and production agree` would stay
+  green. That is the 2026-08-09 entry's failure exactly.
+
+**This sharpens the encoding-gap question rather than worsening it.** `TODO.md` asks how far the
+prototypes may diverge from production, on the evidence that entry 7 was invisible because they
+lacked an optimization production had. The distinction that resolves it: entry 7 was a divergence
+in WHAT is computed, and those are dangerous in exactly the way that item records. This is a
+divergence in WHEN, and there the divergence is the check. Keeping the prototype's key in a pass of
+its own is not lag.
+
+---
+
 ## 2026-08-09: the hash key threw half of itself away, and every oracle we had was blind to it
 
 **Our amd hash key was a function of the adjacency alone, for as long as `Amd2` has existed.** The

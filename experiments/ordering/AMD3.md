@@ -1341,5 +1341,175 @@ standing witness, reading 94 against 88 merges at side 20.
 
 ---
 
+## Iteration 25: the per-pass inventory, and the fifth fusion is the one that worked
+
+**The situation, 2026-08-10.** Entry 8 had left `AMD3` at about 1.6x the vendored routine's useful
+cycles on both families, and `NEXT.md` named a per-pass inventory of element visits as the next
+instrument. Half of it existed. What was missing was the vendored half, so the table was our
+numbers rather than an attribution, and the claim that `AMD_2` walks a vertex's element list twice
+where we walk it three times was a reading of the source.
+
+**The vendored half, by the same technique as `tools/hook_amd.py`**, one counter per loop, every
+anchor asserted, the counted copy's permutation checked against the unhooked `amd_order` and
+`AMD_LNZ` matched against six published fill figures before any number was read off it. Two of our
+own errors were caught by guards rather than by reading: `AMD_NDENSE` transcribed as index 3, which
+is `AMD_SYMMETRY`, and a zeroed `Control` array, which is not the default `Control` and silently
+turns aggressive absorption off.
+
+**And our half was wrong, which the vendored half is what found.** `QuotientGraphI.cpp` carries the
+same symbols as `QuotientGraph.cpp`, so it is linked instead of it and both drivers share it, and
+the probe read its counters after a control run of the uninstrumented driver. Six of fifteen
+columns were doubled and nine were not. The check was free and existed only because the vendored
+numbers were beside it: the alignment forces our `reachAdj` to equal `AMD_2`'s construct-adjacency
+count, and after the correction it does, 2.61 against 2.61 in 2D and 4.18 against 4.18 on cubes,
+with four further passes agreeing to the digit at all six sizes.
+
+```
+                              per pivot, corrected     as recorded
+AMD3 element visits, 140x140        112.26                155.15
+AMD3 element visits, 26^3           276.25                374.83
+```
+
+**What the completed inventory says.** Two axes, and both are family independent to two digits,
+which nothing on this question had been before:
+
+```
+                          ours                 AMD_2             ratio
+               walks sweeps    all   walks sweeps    all  walks  sweep    all  cycles
+2D 140x140     93.41  56.55 149.96   45.25  25.32  70.57  2.06x  2.23x  2.12x   1.56x
+3D 26^3       238.08 114.49 352.57  115.41  51.27 166.68  2.06x  2.23x  2.12x   1.61x
+```
+
+We make nine sweeps over `C[p]` per pivot and `AMD_2` makes four; we walk `I[u]` four times, in the
+prune, scan 1, the bound and the key, where it walks twice. Five of ours collapse into its scan 2,
+which per member computes the degree, accumulates the key, compacts the list and tests for mass
+elimination in one visit. And 2.12x of visits against 1.56x of cycles means **we already execute
+about 0.74x the work per visit that `AMD_2` does**: its loops are fat because each does four
+things, ours are thin because each does one.
+
+**The reading that follows from that, and it was wrong.** Fusion does not remove work, it trades a
+visit for per-visit work, so a reschedule pays only where the per-visit work is redundant rather
+than merely distributed. Four fusion attempts had measured zero, which looked like the evidence.
+Deleting a sweep, by contrast, removes `|C[p]|` scattered loads and a loop and makes nothing else
+more expensive. So the sweeps axis was ranked first.
+
+**Two candidates, put through a scratch `Amd3B` one at a time.** That driver is a VEHICLE and not
+a layer: it carries exactly one change, is priced against `Amd3` by the benchmark, and goes away
+once the change has landed or been recorded. **It was never committed**, so nothing below it left
+an enumerator, an assertion count or a benchmark column behind. `NEXT.md` item 2c says how to
+build the next one.
+
+- **B1, a sweep deleted.** `Amd3` re-sums `weight(u)` over `C[p]` after mass elimination trims it.
+  `massEliminate` already maintains that number, decrementing `mCliqueWeight` per vertex it takes,
+  so `cliqueWeight()` returns what the loop recomputes. Provable rather than empirical.
+- **B2, the key folded into the bound.** The bound walks `A[u]` and `I[u]`; the key walked both
+  again. `Amd.cpp` accumulates `hval += e` and `hval += j` inside its scan 2.
+
+**Carried together they measured 5 percent in 2D across six sizes and 5 to 12 on cubes.** Split,
+on alpamayo, `make run2d`, `make run3d`, `make scale2d`, `make scale3d`:
+
+```
+AMD3 -> AMD3B         B1 alone        B2 alone
+64x64                   0.0%            -7.0%
+100x100                 0.0%            -4.6%
+140x140                -0.9%            -6.5%
+200x200                +3.6%            -5.1%
+280x280                -1.2%            -4.4%
+400x400                +0.5%            -5.4%
+12^3                   +5.0%           -14.3%
+16^3                   +2.8%           -12.8%
+20^3                   +1.5%            -8.1%
+26^3                   +2.3%            -5.0%
+32^3                   +1.4%            -8.0%
+```
+
+**The fusion carried all of it and the deletion carried none.** `nnz(L)` identical at every
+size in every run. `AMD3B` at 32^3 came out at 11.20 ms against `AMD2`'s 11.70 while returning the
+vendored permutation, which is a cleaner statement than any ratio here since both are ours and both
+ran in one process.
+
+**Why B2 worked this time, having failed on 2026-08-08.** That version carried the key in a vector
+of size n and measured nothing at 140 a side and minus two percent at 400, which `REPORT.md` had
+already named as the footprint trade, the same stream that made `Amd1B` slower at large n after
+being faster at small. This one files each vertex into its bucket at the point its key completes
+and stores nothing extra, `hashNext` being size n either way. **The failure was the array, not the
+fusion**, and the reason that distinction went unexamined for two days is that four other nulls
+made the fusion itself the obvious suspect. It was also measured while entry 8 was live, when the
+exact comparison ran 19.0 pairs per pivot against the vendored routine's 0.33, so the pass it
+shortens was not the one the profile was standing on.
+
+**B1 is a null, and calling it a regression was the first draft's error.** It reads 0 percent in 2D
+and 1 to 3 percent slower on cubes, and the whole of that range is inside this benchmark's floor,
+which was measured the same day at plus or minus 3 percent: between the fusion landing and the
+vehicle being removed, `Amd3B` held a verbatim copy of `Amd3`, so the two benchmark columns were
+the same code timed twice in one run and the difference between them is the instrument measuring
+itself. Its sign was positive at all five
+cubic sizes in two independent runs, which is weak evidence of a small real cost and not more. One
+mechanism would explain it, the deleted sweep having walked `pivotClique` immediately before the
+bound sweep walks the same array and so warming `C[p]`, but that is a hypothesis attached to a null
+and CPU Counters would settle it if it ever mattered.
+
+What it does establish needs no mechanism: **deleting a provably redundant sweep bought nothing
+measurable where fusing two walks bought 4 to 7 percent.** That is enough to reorder the queue, and
+it means the stamp and the mass-elimination sweep no longer inherit an argument from their shape.
+
+**What that pair of results does to the ranking.** The argument for the sweeps axis rested on four
+fusion nulls looking like a rule. The fifth fusion is the only thing that has ever moved this gap
+and the one deletion was negative, so the rule was not one. What generalizes instead is narrower
+and more useful: **a null is a measurement of one implementation, not of the idea it implements**,
+and the four earlier nulls were read as the latter.
+
+**Two things the split bought that a combined measurement could not.** Carried together the pair
+would have been recorded as two improvements when one of them measured nothing, and the remaining
+sweeps would have been ranked above the remaining walks on the strength of a number the deletion
+contributed nothing to. That is what
+`Amd3B` is for, and it is why it holds one candidate at a time.
+
+**And leaving it briefly empty was worth more than the split.** With the fusion landed and the
+next candidate not yet chosen, `Amd3B` was a verbatim copy of `Amd3`, so the benchmark ran the same
+code in two columns and reported the difference: plus or minus 3 percent, on that machine, in that
+run, at every size. That is an error bar under identical conditions, which no amount of repeating
+one column supplies, and it cost one column. Worth arranging deliberately whenever a vehicle
+exists and is idle. It also retired a claim made earlier the same day, that B1 was a regression.
+
+**Landed in `Amd3` on 2026-08-10, and the vehicle went with it.** It had been wired in as a full
+ordering, an enumerator with everything that follows from one, which touched ten files and missed
+an eleventh, `make examples` warning that three `Ordering` switches did not handle it. The next
+vehicle is a free function called from the two benchmark drivers instead; `NEXT.md` item 2c has
+the list.
+**`Amd2` and `Amd2B` cannot take it the cheap way, and the reason is ledger entry 4.** They form
+the bound in ONE pass and call `buckets.refile` inside it, so their bound loop's direction is
+already a tie-break input, deciding which vertex sits at a degree bucket's head. Their key pass
+walks `C[p]` backward against that forward bound, and HEAD insertion into both structures wants
+opposite directions, so one walk cannot serve both. Measured on a scratch copy: fusing there the
+way `Amd3` does changes the permutation on all ten grids tried, with fill moving `-1.33` percent at
+140x140 and `+3.24` at 26^3, two-sided and small. So it is an ordering change there, not a schedule
+change.
+
+**One route is left and was not tried.** TAIL insertion from a forward walk reproduces the chain
+order their backward walk produces now, so the permutation would be preserved and it would be a
+genuine schedule change. It costs a `hashTail` array beside `hashHead`, which is the same size-n
+footprint that made the 2026-08-08 version of this fusion measure nothing, touched at a similar
+rate, so the expectation is that it does not pay. That is an expectation and not a measurement.
+Left undone deliberately: `Amd3` is the production default, `Amd2`'s speed has no consumer, and the
+profile that would size this whole direction has not been taken yet. Entry 4 split `Amd3`'s bound in two and moved the refile below the hash, for the
+post-merge weight, and that is what leaves its bound loop free of tie-break duty. **The second
+thing that split has bought by accident**, the first being `Amd3`'s immunity to the hash-bucket
+order reaching the degree buckets, recorded in iteration 24.
+
+`Amd1` and `Amd1B` have no hash detection and so no key to fuse. The prototypes deliberately do not
+take it either, since an oracle that shares an optimization cannot see a defect in it, which is
+entry 8's lesson exactly.
+
+**Verified:** `make amdorder`, `make mmdorder` and `make aligned` 38 of 38 each, the whole test
+suite green, and `AMD3B == AMD3` on 32 graphs including twelve random ones.
+
+**What the inventory still cannot say**, and what a profile would. B2 removes 18 to 19 percent of
+the visits and bought 5 percent in 2D. Whether the saving is instructions, in proportion to the
+visits, or locality from touching each list once instead of twice, decides whether the three
+remaining walks of `I[u]` are the next large prize or a much smaller one.
+
+---
+
 **What is left.** Deleting `amd4`, once nothing further is wanted from it, lifting its postorder
 block first if a permutation-level check is ever wanted.

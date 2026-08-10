@@ -360,7 +360,10 @@ a tie-break of our own. AMD3 is its counterpart on the other branch and reproduc
 AMD's, up to the postorder that routine applies and Oblio does not want, since ElmForest orders
 the supernodal tree later with better information. It is NOT the default: with the filing defect
 its alignment uncovered now fixed, AMD2 fills less than the vendored routine on grids and AMD3
-therefore fills more, which is a reason to keep both and no reason yet to prefer either.
+therefore fills more, which is a reason to keep both. On speed the two have separated since: after
+the hash key was folded into the bound pass on 2026-08-10, AMD3 is faster than AMD2 at every cubic
+size measured and level with it on square grids. So the trade is AMD2 fills a little less and AMD3
+reproduces a permutation with decades of use behind it, rather than one being better outright.
 
 ## History
 

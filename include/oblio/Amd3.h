@@ -79,12 +79,25 @@
 //
 // Which of the four is which, and what each cost, is experiments/ordering/AMD3.md.
 //
-// TWO THINGS IT ALSO TAKES FROM Amd.cpp THAT ARE NOT ORDERING AT ALL, and so are not ledger
+// THREE THINGS IT ALSO TAKES FROM Amd.cpp THAT ARE NOT ORDERING AT ALL, and so are not ledger
 // entries: the tagged W array, which carries seen, absorbed and value in one place where three
 // were used, and the hoisted stamp in supervariable detection, which stamps the outer vertex once
 // instead of the inner one per pair. Both are pure re-schedules and were landed as a separate
 // driver, AMD3C, until `AMD3C == AMD3` had confirmed them; that driver is gone and this is it.
 // experiments/ordering/AMD3.md, iteration 15.
+//
+// And the third, added 2026-08-10: THE HASH KEY IS ACCUMULATED IN THE BOUND'S WALKS rather than in
+// a pass of its own, which is `hval += e` and `hval += j` inside Amd.cpp's scan 2. It removes a
+// sweep over C[p] and a second walk of A[u] and I[u], 26.70 of this driver's 149.96 element visits
+// per pivot at 140 a side and 66.77 of 352.57 at 26 cubed. Measured on alpamayo: 4.4 to 7.0
+// percent at six consecutive square grids from 64 to 400 a side and 5 to 14 percent on cubic grids
+// from 12 to 32, with nnz(L) unchanged everywhere.
+//
+// It is the FIRST of five attempts at this gap to move anything, and it had been tried and
+// reverted once already. The difference is that the earlier version carried the key in an array of
+// size n; this one files each vertex into its bucket where the key completes and stores nothing.
+// The failure was the array rather than the fusion, which is a distinction the four other null
+// results had made it easy to stop looking for. See AMD3.md and DESIGN_DECISIONS.md.
 
 #include "oblio/QuotientGraph.h"
 

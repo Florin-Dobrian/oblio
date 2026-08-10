@@ -1,6 +1,7 @@
-# NEXT: 3D grids in the benchmark, and one last bounded attempt at the amd constant factor
+# NEXT: a matrix that is not a grid, and what is left of the amd constant factor
 
-A handover note between sessions, rewritten 2026-08-09 when its first priority closed. **It is
+A handover note between sessions, rewritten 2026-08-10 when item 0's instrument was
+finished and its first candidate landed. **It is
 meant to be deleted** once the items below are done or abandoned. Everything in it that outlives
 the task has already been written somewhere durable, and this file only points at those places:
 
@@ -66,42 +67,68 @@ ordered that came from a real problem. That is the oldest open item on `docs/TOD
 the top of this list. `benchmarks/pipeline` is still square grids alone, so every break-even figure
 it carries is one family's.
 
-**0. The 1.6x work gap, which is what the amd branch now is.** `AMD3` reproduces `AMD_2`'s
-permutation exactly, so its work is the vendored routine's work and any difference is
-implementation. CPU Counters put it at **1.61x the useful cycles on cubes and 1.56x in 2D**, nearly
-family independent, where efficiency is 1.14x on cubes and 0.83x in 2D. So there are two separate
-problems: a roughly constant 1.6x of extra instructions everywhere, and a 2D-only memory penalty.
+**0. The work gap, DONE as an instrument and OPEN as a question, 2026-08-10.** The per-pass
+inventory named here is built, both halves, and it produced the first change in five attempts to
+move this gap. Everything durable from it is in `benchmarks/ordering/README.md` under "The per-pass
+inventory" and "What the inventory was worth", in `AMD3.md` iteration 25, and in
+`docs/DESIGN_DECISIONS.md` (2026-08-10). The short version:
 
-Two passes were found by reading and ported, the weighted clique size and the minimum degree, both
-of which `AMD_2` accumulates inside walks it already makes. **Both measured at zero**, the loads
-having been L1-resident already. So the remaining instructions are not where reading the code
-suggests, and the next instrument is the per-pass inventory: element visits per pass per pivot, in
-ours and in `AMD_2`, on both families. The 2026-08-08 attempt at that table was 2D only, used a
-single shared elements column, and omitted the pair loop entirely; done per code and per pass it is
-what would locate the 1.6x. `benchmarks/ordering/README.md` carries the counters and the null
-result.
+- We make **2.12x** `AMD_2`'s element visits on both families against 1.56x and 1.61x its useful
+  cycles, so we execute about 0.74x its work per visit. Nine sweeps over `C[p]` per pivot against
+  its four, four walks of `I[u]` against its two.
+- Our half as previously recorded here was wrong by up to a factor of two on six of fifteen
+  columns, the instrumented shared class having been counted twice. The corrected figures are
+  112.26 visits per pivot at 140 a side and 276.25 at 26 cubed, not 155.2 and 374.8. The prune's
+  incidence compaction is NOT oversized, contrary to what this file said: it equals `AMD_2`'s scan
+  2 exactly.
+- **The key fusion landed** and is worth 4.4 to 7.0 percent in 2D across six sizes and 5 to 14 on
+  cubes. The 2026-08-08 version of it failed because it stored keys in an array of size n, not
+  because of the fusion.
+- **Deleting the `degme` re-take is a recorded NULL**, 0 percent in 2D and 1 to 3 percent slower
+  on cubes, all of it inside this benchmark's plus or minus 3 percent floor. Not a regression. The
+  sign was positive at all five cubic sizes in two runs, which is weak evidence of a small cost
+  and no more.
+- **THE FLOOR IS PLUS OR MINUS 3 PERCENT**, measured between the fusion landing and the vehicle
+  being removed, when `Amd3B` held a verbatim copy of `Amd3` and the two benchmark columns were
+  the same code timed twice. A single figure under about 4 percent is not a result; what rescues a
+  small effect is consistency of sign across sizes. **Worth arranging again**: whenever the next
+  vehicle exists, run the benchmark once with it still a verbatim copy before putting anything in
+  it, which costs one column and gives every other column an error bar under identical
+  conditions.
 
-**OUR HALF OF THAT INVENTORY IS ALREADY COUNTED**, and the numbers are in that same section:
-`AMD3` at 374.8 element visits per pivot on a 26 cubed grid and 155.2 at 140 a side, broken out by
-pass. Two entries stand out and both are candidates rather than findings. We walk `I[u]` THREE
-times per pivot, in scan 1, in the bound and in the key, at 43.65 visits each on cubes, where
-`AMD_2` appears to walk it twice, accumulating its key inside scan 2; if that reading is right, one
-whole pass of 11.6 percent of our total is structurally extra and the key fusion finally has a
-price rather than an argument. And the prune's incidence compaction is the largest single pass by a
-factor of two, 83 visits per pivot, because it walks `I[u]` BEFORE absorption has shortened it
-where the other three walk it after.
+**What is open, in the order we would take it.**
 
-**What is missing is the vendored half, and only that.** Counters on `AMD_2`'s scan 1, its scan 2
-and its element-construction loops, generated the way `tools/hook_amd.py` and the 2026-08-09 count
-probe generate theirs, with every anchor asserted. Until it exists the table is our numbers rather
-than an attribution, and the reading about scan 2 above is a reading of the source and not a
-measurement.
+- **A profile of the fusion**, which decides the size of everything after it. CPU Counters on
+  `amd3` at 140 a side and 26 cubed, before and after, comparing the instruction drop against the
+  cycle drop. The fusion removed 18 to 19 percent of the visits and returned 5 percent. If cycles
+  fell further than instructions the win is locality, and the three remaining walks of `I[u]` in
+  the prune, scan 1 and the bound are the large prize since `AMD_2` makes two where we make four.
+  If instructions fell in proportion, the ceiling is low and this direction is nearly spent.
+- **`Amd2` and `Amd2B`, 2026-08-10: not by the cheap route, and PARKED rather than closed.**
+  Checked on a scratch copy: fusing there as `Amd3` does moves the permutation on all ten grids
+  tried. They refile inside their single-pass bound, so that loop's direction is already a
+  tie-break input and cannot also serve the hash chain, which wants the opposite direction under
+  head insertion. Tail insertion would preserve the order and is untried; it needs a `hashTail`
+  array of size n, which is the footprint that made the first version of this fusion measure
+  nothing, so expect nothing. Not worth a measurement before the profile below. `Amd1` and `Amd1B`
+  have no hash and so no key. Only `Amd3` fuses free, because entry 4 moved its refile below the
+  hash.
+- **The stamp and the mass-elimination sweep are DEMOTED, not queued.** Both were next on the
+  reasoning that produced the `degme` deletion, and that reasoning now has a counterexample.
+- **`tmp/Amd3I.cpp` is the pre-fusion driver.** The pass inventory reproduces the OLD `Amd3` until
+  it is re-derived, which is fine for the before-and-after already recorded and wrong for anything
+  further.
 
-**And the standing caution, which this session earned twice.** A count locates work; it does not
-price it. The two passes fused on 2026-08-09 were 6.7 percent of the visits on cubes and moved
-useful cycles by 0.25 percent, because they were contiguous walks over hot arrays. The three `I[u]`
-walks are back to back over the same lists, so the same argument applies to them and the counters,
-not the timing tables, are what would settle it.
+**And the 2D scaling divergence, which is larger than any of the above and is not made of passes.**
+`AMD3` runs at 1.54x the vendored routine at 64 a side and 2.07x at 400, growing monotonically,
+where `MMD3` over the same quotient graph shows no trend at all across those seven sizes. A
+constant-factor fix takes five percent off a growing curve and leaves it growing. Two profiles of
+`amd3` at 64 and at 400, compared against each other rather than against the vendored routine,
+would say what grows.
+
+**The standing caution, unchanged and now with a third instance.** A count locates work; it does
+not price it. The 2026-08-09 fusions were 6.7 percent of the visits and moved cycles by 0.25
+percent; the `degme` deletion was 4 percent of the visits and moved cycles the wrong way.
 
 **2. Count the hash pass's pairs, 2D against 3D. DONE 2026-08-09, and it was a defect.** The count
 was taken, and against the vendored routine on the same graphs and for the SAME MERGES we were
@@ -133,27 +160,24 @@ growing one says the fix is a better filter rather than a faster loop. One count
 prototypes already keep. `benchmarks/ordering/README.md`, "What the two families say about where
 the amd gap is", carries the tables.
 
-**2b. Take `AMD1B` and `AMD2B` out of the public enum, 2026-08-09, decided and not yet done.**
-Nine orderings a caller can name, Natural, MMD, AMD and 1/2/3 per branch, which is the story worth
-telling: basic, extras, alignment. The B variants are an ORACLE rather than an ordering, and the
-tree already has the pattern for that in `order_timing.cpp`, whose `AMDraw` column is deliberately
-not an enumerator because that "would put a benchmark's oracle into the library's public enum and
-into every switch over it".
+**2b. Taking `AMD1B` and `AMD2B` out of the public enum: DEFERRED 2026-08-10, deliberately.** The
+reasoning below still holds and the work is still worth doing eventually. It is not being done now
+because a third B name is in circulation that is not an oracle at all: `Amd3B` is a VEHICLE,
+holding one candidate change to `Amd3` at a time. It is SCRATCH and was never committed: it existed
+on 2026-08-10 while the two candidates below were being priced and was removed with them. Item 2c
+says how the next one should be added so that it touches far less. Deciding the fate of the
+other two while that name comes and goes would be churn in the middle of an open investigation.
+Revisit when the amd branch is quiet.
 
-So: the enumerators and their dispatch go; `src/Amd1B.cpp` and `src/Amd2B.cpp` stay, compiled and
-committed; `test_order` keeps all sixteen assertions by calling `orderAmd1B(colPtr, rowIdx)`
-against `orderAmd1(...)` directly; the benchmarks keep their columns through a local identity
-beside `AMDraw`'s. **The identity checks must not be dropped**: `Amd2B == Amd2` is how we knew the
-pair moved together under the key fix.
-
-A build flag was considered and rejected. Detection cannot apply, these files always being present,
-so it would be a deliberate switch, and either default is wrong: on, and an outside build is noisy;
-off, and it costs a word every time. It would also give the suite FOUR assertion counts rather than
-two, 283 and 267 with `private/` and 269 and 253 without, since the B variants are worth sixteen
-assertions. What the enum change does cost is `test_pipeline`'s sweep, which asserts all eleven
-orderings are reached and becomes nine: two assertions change content, none changes count, and
-`docs/TESTING_SPECIFICATION.md` moves in the same step by the invariant, in wording rather than in
-totals.
+**2c. HOW TO ADD THE NEXT VEHICLE.** `Amd3B` was wired in as a full ordering on 2026-08-10, an
+enumerator with everything that follows from one, and all of it was reverted a day later. One site
+was missed on the way in: three files under `examples/` switch over `Ordering`, so `make examples`
+warned. Do it as a FREE FUNCTION instead, which is the pattern `order_timing.cpp`'s `AMDraw` column
+already uses on the stated grounds that an enumerator "would put a benchmark's oracle into the
+library's public enum and into every switch over it". Two new files, two build entries, one column
+in each benchmark driver calling `orderAmd3B` directly, and a local identity check against
+`orderAmd3`. No enumerator, so no dispatch, no adapter, no `examples/` arm, no `test_order`
+assertions, no `test_pipeline` sweep entry, and no move in `docs/TESTING_SPECIFICATION.md`.
 
 **3. The same widening is available to `make test`, cheaply.** Its prototype-against-production
 comparison still runs on 2D grids at sides 10 and 20 alone, and `graphs.h` holds the 3D and random
@@ -162,18 +186,28 @@ degree, so a defect in production's encoding is invisible to it at any size. See
 the first of the five ordering questions.
 
 **4. And only then the performance work below, which is a PARK rather than a queue.** One bounded
-attempt, worth an hour whenever the amd branch is picked up again. The branch is in a good state to
-leave without it: `Amd3` reproduces `AMD_2` at 2.32x, `Amd2` runs at 2.28x with better fill, `Mmd3`
-at 1.26x with fill matching genmmd. Nothing here blocks anything.
+attempt, worth an hour whenever the amd branch is picked up again. Nothing here blocks anything.
+
+**Re-priced 2026-08-10, and it is now the WEAKER of the two parked ideas rather than the stronger.**
+The proposal below deletes `mEliminated` by giving cliques their own mark space, which removes a
+dependent byte load from a hot walk. That is a good thing to want. But its sibling argument, that
+deleting work from a sweep is reliably worth something, is what the `degme` deletion tested and
+falsified: a provably redundant sweep cost one to three percent on cubes when removed. This
+proposal is not that deletion and may well pay, since it shortens a walk rather than removing a
+pass. The point is only that it no longer inherits an argument it used to.
 
 ## The state, in one paragraph
 
 `amd3` is aligned: production `Amd3` returns `AMD_2`'s permutation exactly, up to the postorder it
 deliberately does not do, on the seven examples, 2D grids to 140, 3D grids to 24 and nine random
-patterns. AMD3 runs at about 2.32x the vendored routine at 140 a side and MMD3 at about 1.26x its
-own. The gap is NOT algorithmic, NOT integer width, NOT the number of arrays touched, NOT
-instruction count, and NOT any single line: all five measured and rejected. What is left is IPC,
-and the profile is stall-shaped.
+patterns. After the key fusion of 2026-08-10, `AMD3` runs at 1.25 to 1.38x the vendored routine on
+cubic grids from 6 to 32 a side and 1.40 to 1.91x on square grids from 32 to 400, against 1.67x and
+2.06x at 140 and 400 before it, and `MMD3` at 1.28 to 1.46x its own with no trend in n. `AMD3` is
+now FASTER than `AMD2` at all five cubic sizes and level with it in 2D, while returning the
+vendored permutation, which `AMD2` does not. The gap is NOT algorithmic, NOT integer width, NOT the number of arrays
+touched, and NOT any single line. It IS partly the number of passes, which is new: 2.12x the
+element visits on both families, of which the fusion removed a fifth. What remains is that plus a
+2D-only memory penalty that GROWS with n, and the second of those is now the larger question.
 
 ## The parked attempt
 

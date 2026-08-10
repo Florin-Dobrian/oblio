@@ -290,6 +290,8 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
 
         const std::size_t numLeft = numLive;
 
+        usedKeys.clear();       // the bound pass below fills the buckets
+
         // The bound is formed in TWO halves here, where Amd2 forms it in one, and that split is
         // ledger entry 4. This pass computes the part that does not involve u's own weight and
         // stores it; the pass after the hash adds `degme` and subtracts the weight. Amd.cpp does
@@ -315,64 +317,28 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
             const std::size_t   incidenceSize = qg.incidenceSize(u);
 
             std::size_t explicitPart = 0;
-            for (std::size_t a = 0; a < adjacencySize; ++a)
-                explicitPart += qg.weight(adjacency[a]);
-
-            std::size_t deg = explicitPart;
-            for (std::size_t i = 0; i < incidenceSize; ++i)
-                if (incidence[i] != pivot)
-                    deg += static_cast<std::size_t>(w[incidence[i]] - wflg);
-
-            // Amd.cpp's `Degree[i] = MIN (Degree[i], deg)`. The stored degree is a full one from
-            // an earlier step and this is a partial, so the two are comparable only once the pass
-            // below adds `degme - weight(u)` to whichever won. That is why the minimum is taken
-            // here and the common term added there rather than the other way round. The second
-            // cap, `numLeft - weight(u)`, is also that pass's, for the same weight reason.
-            partial[u] = std::min(deg, degrees[u]);
-        }
-
-        // HASH SUPERVARIABLE DETECTION. Vertices indistinguishable from EACH OTHER, which the
-        // pivot test cannot see: mass elimination only ever finds a vertex indistinguishable from
-        // the pivot, and two vertices can become interchangeable with one another without either
-        // being interchangeable with it. Hash first so the exact comparison runs only within a
-        // group; the hash is a filter and never the decision, so a collision costs a comparison
-        // rather than a wrong merge.
-        // Filled in REVERSE, and that is load bearing rather than a preference. A chain pushed at
-        // the head comes out reversed, and the order within a bucket decides which of two
-        // indistinguishable vertices absorbs the other, so filling forward would have been a
-        // tie-break change wearing a data-structure change's clothes. It moved the permutation on
-        // four of the test graphs before this loop was turned around. Same hazard the degree
-        // buckets carry, and the tie-break section of experiments/ordering/README.md describes it.
-        usedKeys.clear();
-        for (std::size_t k = 0; k < pivotCliqueSize; ++k) {
-            const std::int32_t u = pivotClique[k];
-            if (qg.eliminated(u)) continue;
-
-            // A SUM, because addition has no order and neither do the sets: sorting to build a
-            // key would be a log factor for nothing. The two halves are separated by a stride so
-            // that a vertex and a clique of the same index cannot cancel.
+            // THE HASH KEY IS ACCUMULATED HERE, in the walks the bound is already making, which
+            // is what Amd.cpp does with `hval += e` and `hval += j` inside its scan 2. It had a
+            // pass of its own until 2026-08-10, walking A[u] and I[u] a second time; see the
+            // filing site below for what that cost and why an earlier attempt at this failed.
             //
-            // Built in a pass of its own, and it was FUSED INTO THE BOUND LOOP ABOVE AND REVERTED
-            // on 2026-08-08. Amd.cpp accumulates its key in the walks it is already making,
-            // `hval += e` and `hval += j`, and REPORT.md had measured this separate traversal at
-            // 72 percent of AMD2's overhead in 2D and 92 in 3D, so the fusion looked like the
-            // whole answer. Measured on alpamayo it bought NOTHING at 140 a side and cost 2
-            // percent at 400, which is the footprint trade REPORT attached as its own caution:
-            // the key has to be carried in an array of size n, the same stream that made Amd1B
-            // slower at large n after being faster at small. A tenth of the driver's element
-            // visits went and the array ate it.
+            // A SUM, because addition has no order and neither do the sets: sorting to build a key
+            // would be a log factor for nothing.
             std::size_t key = 0;
-            const std::int32_t* adjacency = qg.adjacency(u);
-            for (std::size_t a = 0; a < qg.adjacencySize(u); ++a)
-                if (!qg.eliminated(adjacency[a]))
-                    key += static_cast<std::size_t>(adjacency[a]) + 1;
-            // ONE SUM, WITH NO STRIDE, and that is ledger entry 8. This added the incidence half
-            // as `(c + 1) * (size + 1)` until 2026-08-09, so that a vertex and a clique of the same
-            // index could not cancel. True of the KEY and false of the BUCKET: the modulus below
-            // is the same number as the stride, so the incidence term is annihilated exactly and
-            // the hash came out a function of the ADJACENCY ALONE. As the elimination proceeds
-            // A[u] empties and everything a vertex reaches becomes cliques, so the surviving key
-            // carried less and less, and cubic grids reach that state sooner than square ones.
+            for (std::size_t a = 0; a < adjacencySize; ++a) {
+                const std::int32_t v = adjacency[a];
+                explicitPart += qg.weight(v);
+                if (!qg.eliminated(v)) key += static_cast<std::size_t>(v) + 1;
+            }
+
+            // ONE SUM, WITH NO STRIDE, and that is ledger entry 8. The incidence half was added as
+            // `(c + 1) * (size + 1)` until 2026-08-09, so that a vertex and a clique of the same
+            // index could not cancel. True of the KEY and false of the BUCKET: the modulus at the
+            // filing site is the same number as the stride, so the incidence term was annihilated
+            // exactly and the hash came out a function of the ADJACENCY ALONE. As the elimination
+            // proceeds A[u] empties and everything a vertex reaches becomes cliques, so the
+            // surviving key carried less and less, and cubic grids reach that state sooner than
+            // square ones.
             //
             // Measured, for the SAME MERGES: 19.0 pairs tested per pivot at 140 a side against the
             // vendored routine's 0.33, and 155.3 at 26 cubed against its 0.48. Amd.cpp accumulates
@@ -381,15 +347,86 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
             // decision: a collision costs one exact comparison and cannot produce a wrong merge.
             // The invariant the two lines have to hold TOGETHER is that the modulus must not
             // divide the stride, and having no stride is the cheapest way to hold it.
-            const std::int32_t* incidence = qg.incidence(u);
-            for (std::size_t i = 0; i < qg.incidenceSize(u); ++i)
-                key += static_cast<std::size_t>(incidence[i]) + 1;
+            //
+            // EVERY ENTRY OF I[u] IS TAKEN, the pivot included, where the bound skips it. The two
+            // rules differ and both are Amd.cpp's: its scan 2 accumulates `hval += e` over the
+            // element list it is compacting, which by then holds the new element, while the degree
+            // term for the new element is added in a later pass. Fusing the walks does not fuse
+            // the rules.
+            std::size_t deg = explicitPart;
+            for (std::size_t i = 0; i < incidenceSize; ++i) {
+                const std::int32_t c = incidence[i];
+                key += static_cast<std::size_t>(c) + 1;
+                if (c != pivot) deg += static_cast<std::size_t>(w[c] - wflg);
+            }
 
-            const std::size_t hash = key % (size + 1);
-            if (hashHead[hash] == NIL) usedKeys.push_back(hash);
-            hashNext[u]    = hashHead[hash];
-            hashHead[hash] = u;
+            // Amd.cpp's `Degree[i] = MIN (Degree[i], deg)`. The stored degree is a full one from
+            // an earlier step and this is a partial, so the two are comparable only once the pass
+            // below adds `degme - weight(u)` to whichever won. That is why the minimum is taken
+            // here and the common term added there rather than the other way round. The second
+            // cap, `numLeft - weight(u)`, is also that pass's, for the same weight reason.
+            partial[u] = std::min(deg, degrees[u]);
+
+            // AND THE VERTEX IS FILED HERE, WHICH IS WHY THIS FUSION NEEDS NO ARRAY. It was tried
+            // on 2026-08-08 and reverted: that version carried the key in a vector of size n and
+            // measured nothing at 140 a side and minus two percent at 400, which REPORT.md had
+            // already named as the footprint trade, the same stream that made Amd1B slower at
+            // large n after being faster at small. Filing at the point the key completes stores
+            // nothing extra, since hashNext is size n either way and hashHead is already
+            // allocated. THE FAILURE WAS THE ARRAY, NOT THE FUSION.
+            //
+            // It was also measured while ledger entry 8 was live, when the exact comparison ran
+            // 19.0 pairs per pivot against the vendored routine's 0.33, so the pass it shortens
+            // was not the one the profile was standing on.
+            //
+            // Measured on alpamayo in a scratch Amd3B, 2026-08-10: 4.4 to 7.0 percent faster at six
+            // consecutive square grids from 64 to 400 a side, and 5 to 14 percent on cubic grids
+            // from 12 to 32, with nnz(L) identical at every size. It removes a sweep over C[p] and
+            // two walks, 26.70 of 149.96 element visits per pivot at 140 a side and 66.77 of
+            // 352.57 at 26 cubed. See benchmarks/ordering/README.md and AMD3.md.
+            //
+            // THE GUARD AND THE DIRECTION ARE THE TWO THINGS THAT HAD TO COME ACROSS. The key pass
+            // skipped an eliminated member and this bound pass does not, so the skip moves onto
+            // the FILING alone: a bound computed for an eliminated vertex is written to partial[u]
+            // and never read, exactly as before. And this loop walks C[p] FORWARD and pushes at
+            // the head, which is the direction the key pass walked, so the chain comes out in the
+            // same order. That order decides which of two indistinguishable vertices absorbs the
+            // other, so a reversal would be a tie-break change wearing a schedule change's
+            // clothes; it moved the permutation on four test graphs when this bucket was first
+            // turned around.
+            //
+            // AND THIS DRIVER IS THE ONLY ONE THAT CAN DO IT, which is ledger entry 4's doing.
+            // Amd2 and Amd2B form the bound in ONE pass and call `buckets.refile` inside it, so
+            // the direction of their bound loop is ALREADY a tie-break input, deciding which
+            // vertex sits at a degree bucket's head. Their key pass walks C[p] backward against
+            // that forward bound, and head insertion into both structures wants opposite
+            // directions, so one walk cannot serve both. Measured: fusing there changes the
+            // permutation on all ten grids tried, so it is an ORDERING change there rather than a
+            // schedule one. Tail insertion would preserve the order and is untried, needing a
+            // hashTail array of size n, which is the footprint that made the 2026-08-08 version of
+            // this fusion measure nothing. Entry 4 split this driver's bound in two and
+            // moved the refile below the hash, for the post-merge weight, and that is what leaves
+            // this loop free of tie-break duty. Second thing that split has bought by accident.
+            if (!qg.eliminated(u)) {
+                const std::size_t hash = key % (size + 1);
+                if (hashHead[hash] == NIL) usedKeys.push_back(hash);
+                hashNext[u]    = hashHead[hash];
+                hashHead[hash] = u;
+            }
         }
+
+        // HASH SUPERVARIABLE DETECTION. Vertices indistinguishable from EACH OTHER, which the
+        // pivot test cannot see: mass elimination only ever finds a vertex indistinguishable from
+        // the pivot, and two vertices can become interchangeable with one another without either
+        // being interchangeable with it. Hash first so the exact comparison runs only within a
+        // group; the hash is a filter and never the decision, so a collision costs a comparison
+        // rather than a wrong merge.
+        //
+        // THE BUCKETS ARE ALREADY FILLED, by the bound pass above, which accumulates each key in
+        // the walks it is making anyway. Filling them was a sweep over C[p] and a second walk of
+        // A[u] and I[u] until 2026-08-10. The chain is still built at the head from a forward
+        // sweep, so it still comes out reversed against C[p], which is what the pair loop below
+        // depends on.
 
         for (std::size_t hash : usedKeys) {
             for (std::int32_t u = hashHead[hash]; u != NIL; u = hashNext[u]) {

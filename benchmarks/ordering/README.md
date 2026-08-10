@@ -1134,7 +1134,7 @@ a side to 2.07x at 400, and a constant five percent off a growing curve leaves i
 over the same quotient graph shows no such trend across the same seven sizes, so whatever grows
 lives on the amd branch alone and is not made of passes.
 
-## The first scan folded into the prune, 2026-08-10, and parity on cubes
+## The first scan folded into the prune, 2026-08-10
 
 **`AMD3` reaches the vendored routine on cubic grids.** The driver walked `I[u]` three times per
 pivot and `A[u]` twice; `AMD_2` walks them twice and once. `QuotientGraph::eliminate` now
@@ -1151,9 +1151,36 @@ so scan 1 goes entirely and the bound's adjacency loop with it.
                                          400x400  20.12   19.47   -3.2%
 ```
 
-Against the vendored routine that is 1.01x at 12 a side, 1.02x at 16, 1.07x at 20, 1.09x at 26 and
-1.16x at 32. `nnz(L)` identical at all thirteen sizes. It is faster than `AMD2` at every cubic size
-and faster than `AMD1` too, which no layer carrying the extras has managed before.
+`nnz(L)` identical at all thirteen sizes. It is faster than `AMD2` at every cubic size and faster
+than `AMD1` too, which no layer carrying the extras has managed before.
+
+**TWO CORRECTIONS TO THAT TABLE, both found the same evening, and both about the instrument.**
+
+**The two columns were not timed the same way.** A scratch variant reached as a free function goes
+through `orderTimeFn`, which times the bare ordering call; a standing method goes through
+`orderTime`, which times `OrderEngine::compute` and so also builds a Permutation, two assigns of
+size n and a loop of size n. Timing identical code down both paths puts that at **0 to 2.4 percent
+in the free function's favor**, so every figure above is that much too generous. Re-measured with
+both down the same path, the fold is worth **10 to 16 percent on cubes**, 16.1 at 12 a side, 16.2
+at 16, 9.8 at 20, 10.3 at 26 and 12.8 at 32. Larger than first recorded, and arrived at properly.
+
+**And the ratio's denominator is the noisiest column in the table.** Over eight runs at 16 cubed,
+`AMD` reads 0.74 to 0.86 ms, a 16 percent spread, where `AMD3` reads 0.83 to 0.89, a 7 percent one.
+**The vendored routine varies more than we do**, so `AMD3 / AMD` per row is mostly a measurement of
+it. This section first said `AMD3` reaches 1.01x, 1.02x and 1.07x at 12, 16 and 20 a side, "which
+is parity"; that was one run. What reproduces:
+
+```
+                 AMD3 ms        AMD ms        ratio over eight runs
+12^3           0.26 - 0.28   0.20 - 0.27         0.98 - 1.33
+16^3           0.83 - 0.89   0.74 - 0.86         0.97 - 1.18
+26^3           4.65 - 4.89   3.98 - 4.13         1.13 - 1.19
+32^3          10.29 - 10.75  8.43 - 8.83         1.18 - 1.27
+```
+
+So: **at or near the vendored routine to 16 a side, rising to about 1.2x by 32.** 16 cubed and 26
+cubed reproduce to a percent; 12, 20 and 32 wobble by five. **Quote absolute milliseconds with the
+vendored range beside them, not a ratio per row.**
 
 **The fusion alone did not do this, and that is the part worth keeping.** The first version carried
 the two values crossing from the prune to the bound in two fresh vectors of size n, and measured 3
@@ -1168,6 +1195,92 @@ the third time the footprint has been the answer: the 2026-08-08 key fusion fail
 recorded as a failure of the fusion, and `Amd1B` is on record as slower at large n after being
 faster at small for the same reason. **Price a re-schedule by what it walks AND by what it makes
 resident.**
+
+## The two VENDORED routines against each other, 2026-08-10
+
+Every other table in this file measures one of ours against the routine it was ported from. This
+one measures genmmd against `AMD_2`, which is a different question and the one that says what we
+should be aiming at on each family. Fill is exact and reproduces to the digit; **the times are one
+run each and this benchmark moves 7 to 11 percent between runs**, so read the ratios and not the
+milliseconds.
+
+```
+SQUARE, make scale2d
+ side       n   MMD ms   AMD ms  MMD/AMD      MMD nnz    AMD nnz  MMD/AMD   ns/n MMD  ns/n AMD
+   32    1024     0.05     0.06    0.83x        11822      11900   0.993x       48.8      58.6
+   64    4096     0.21     0.27    0.78x        63219      67200   0.941x       51.3      65.9
+  100   10000     0.54     0.62    0.87x       186835     206332   0.906x       54.0      62.0
+  140   19600     1.09     1.22    0.89x       412921     474995   0.869x       55.6      62.2
+  200   40000     2.27     2.52    0.90x       981766    1081911   0.907x       56.8      63.0
+  280   78400     4.46     4.93    0.90x      2137410    2440757   0.876x       56.9      62.9
+  400  160000     8.88    10.26    0.87x      4862612    5663298   0.859x       55.5      64.1
+
+CUBIC, make scale3d
+ side       n   MMD ms   AMD ms  MMD/AMD      MMD nnz    AMD nnz  MMD/AMD   ns/n MMD  ns/n AMD
+    6     216     0.02     0.02    1.00x         3279       3265   1.004x       92.6      92.6
+   12    1728     0.47     0.20    2.35x        75674      76038   0.995x      272.0     115.7
+   16    4096     1.65     0.76    2.17x       295113     281014   1.050x      402.8     185.5
+   20    8000     3.60     1.76    2.05x       840560     842282   0.998x      450.0     220.0
+   26   17576     8.76     4.02    2.18x      2869267    2836813   1.011x      498.4     228.7
+   32   32768    17.63     8.83    2.00x      7898321    7746501   1.020x      538.0     269.5
+```
+
+**The two advantages are made of different things.** In 2D genmmd fills 6 to 14 percent less from
+64 a side up and the two are level on time. On cubes `AMD_2` orders twice as fast and the fill is
+equal, within two percent at every size and with no direction: MMD is ahead at 12 and 20 a side and
+behind at 6, 16, 26 and 32.
+
+**Neither ratio moves with n on either family.** 0.87x time and 0.86x fill in 2D at 400 a side are
+what they were at 64; 2.0x time and 1.02x fill on cubes at 32 are what they were at 12. So both are
+CONSTANT FACTORS, and whichever routine wins at the smallest size wins at the largest. The choice
+between them is a property of the problem's dimensionality rather than its scale, at least out to
+these sizes.
+
+**Ordering is near linear in n and fill is not**, which is why the ordering phase shrinks as a
+share of a solve:
+
+```
+                   time        fill
+square grids     n^1.01      n^1.18
+cubic grids      n^1.15      n^1.58
+```
+
+Fitted over the reliable part of each ladder, n = 10^4 to 1.6*10^5 on squares and 4096 to 32768 on
+cubes. Both routines give the same exponents to two digits on both families, which is worth knowing
+on its own: **they scale identically and differ by a constant.**
+
+**And the largest number here is not a branch difference at all.** Cubes cost 4 to 8 times more
+ordering time per vertex than squares at comparable n, 229 ns against 62 for `AMD_2`. That is
+clique size: 12.7 members per pivot on cubes against 6.28 in 2D, which the pass inventory above
+measures directly. The family gap dwarfs either branch-against-branch gap.
+
+## What both families look like now, 2026-08-10
+
+With the cubic constant factor largely gone, the two families have the same SHAPE for the first
+time, and it is not the shape either had before.
+
+```
+cubes, AMD3 / AMD        2D, AMD3 / AMD
+12^3   0.98 - 1.33       32x32     1.33
+16^3   0.97 - 1.18       64x64     1.39
+20^3   1.05 - 1.17       100x100   1.56 - 1.73
+26^3   1.13 - 1.19       140x140   1.63
+32^3   1.18 - 1.27       200x200   1.63 - 1.64
+                         280x280   1.68 - 1.75
+                         400x400   1.87 - 1.97
+```
+
+**A low constant plus a term that grows with n, on both.** The constants differ, near 1.0 on cubes
+and about 1.33 in 2D, and the 2D one is the stall penalty already recorded. What is new is the
+growth: cubes rise about 25 percent from 12 a side to 32, where the cubic gap was FLAT at 1.3x that
+morning and flat at 3.0x three days before. 2D rises about 45 percent from 32 to 400 with a visible
+knee past 280, where the working set roughly doubles.
+
+**That is a different question from the one the pass inventory answered.** The inventory addressed
+a constant factor and the constant factor is nearly spent. Nothing measured so far touches a term
+that scales, and the knee says memory rather than instructions. `MMD3` over the same quotient graph
+shows no growth on either family, which is the control that makes this an amd-branch property
+rather than a shared-infrastructure one.
 
 ## Results
 
@@ -1439,6 +1552,13 @@ and the pairwise merging of `mmdupd`'s q2h path, which cost real fill once a gra
 for them to fire often, where AMD1 lacks mechanisms that trade fill for speed in the other
 direction. The two-percent agreement seen on small grids does not survive size, which is worth
 knowing before quoting it.
+
+**A scratch driver left in `src/` is linked into every benchmark whether or not anything calls
+it**, because `benchmarks/ordering/Makefile` builds its source list with
+`$(wildcard ../../src/*.cpp)`. The top-level `Makefile` and `CMakeLists.txt` have explicit lists,
+and removing a name from those changes nothing here: a variant is gone when its FILE is gone. One
+more reason to keep a vehicle short-lived, found on 2026-08-10 after `Amd3B` kept appearing in the
+compile line long after it had been taken out of both build files.
 
 **The fill columns are identical to a Linux run of the same benchmark, digit for digit**, under a
 different compiler and standard library. That is what an ordering should be, there being no

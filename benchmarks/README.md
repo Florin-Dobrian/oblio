@@ -8,10 +8,24 @@ Timing and profiling work, one self-contained folder per subject.
   and after how many factorizations a slower-analyzing ordering pays for itself.
 
 The second exists because the first cannot answer whether its own subject matters, and the answer
-was not the expected one twice over. Ordering turns out to be a quarter of a one-shot solve rather
-than a fraction of a percent, so it is worth optimizing; and the fill differences among orderings
-that are all roughly good turn out not to propagate into factorization time at all, so the fill
-column is nearly flat in its effect. Both are in `pipeline/README.md`.
+was not the expected one. Ordering is a substantial share of a one-shot solve rather than a
+fraction of a percent, so it is worth optimizing: between a tenth and a fifth of a one-shot solve,
+17.8 percent at 140 a side in 2D and 10.3 percent at 26 cubed, falling as the factorization
+grows.
+
+**Both of those shares are family dependent**, and so is the comparison between the two branches.
+On square grids MMD wins on all three terms, ordering no slower, filling up to 13 percent less and
+factoring 5 to 7 percent faster. On cubic grids exactly one of the three reverses and it is the
+smallest: AMD orders about twice as fast, fill is within a percent either way, and MMD still
+factors 4 to 10 percent faster at the same nnz(L). So AMD wins a one-shot solve on cubes and MMD
+wins anything factored more than about four times, where in 2D MMD wins at every count.
+
+The old text here said fill differences among good orderings do not propagate into factorization
+time at all. That was a square-grid observation stated generally, and the cubic tables show
+something more interesting than either version: **two orderings can fill the same and factor
+differently**, by 4 to 10 percent, which is about supernode shape rather than fill.
+`pipeline/README.md` has both, and the lesson is the one `experiments/ordering` learned first: a
+claim measured on one grid family is a claim about that family.
 
 **A benchmark is not an experiment.** The studies under `experiments/` are frozen: each answers one
 question with a measurement and is not maintained afterwards. These run against the current tree

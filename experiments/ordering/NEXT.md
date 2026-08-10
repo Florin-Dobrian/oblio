@@ -81,9 +81,9 @@ inventory" and "What the inventory was worth", in `AMD3.md` iteration 25, and in
   112.26 visits per pivot at 140 a side and 276.25 at 26 cubed, not 155.2 and 374.8. The prune's
   incidence compaction is NOT oversized, contrary to what this file said: it equals `AMD_2`'s scan
   2 exactly.
-- **The key fusion landed** and is worth 4.4 to 7.0 percent in 2D across six sizes and 5 to 14 on
-  cubes. The 2026-08-08 version of it failed because it stored keys in an array of size n, not
-  because of the fusion.
+- **The key fusion landed** and is worth about 4 to 7 percent in 2D across six sizes and 5 to 14 on
+  cubes, both approximate for the harness reason below. The 2026-08-08 version of it failed because
+  it stored keys in an array of size n, not because of the fusion.
 - **Deleting the `degme` re-take is a recorded NULL**, 0 percent in 2D and 1 to 3 percent slower
   on cubes, all of it inside this benchmark's plus or minus 3 percent floor. Not a regression. The
   sign was positive at all five cubic sizes in two runs, which is weak evidence of a small cost
@@ -98,17 +98,26 @@ inventory" and "What the inventory was worth", in `AMD3.md` iteration 25, and in
 
 **AND THE WALKS ARE DONE, 2026-08-10, later the same day.** The first scan is folded into the
 prune, so `I[u]` is walked twice per pivot and `A[u]` once, which is `AMD_2`'s count exactly.
-`AMD3` is at 1.01x, 1.02x and 1.07x the vendored routine at 12, 16 and 20 a side and 1.09x at 26,
-which is parity on cubic grids, with 2D improving 0 to 8 percent as well. `AMD3.md` iteration 26
-and `docs/DESIGN_DECISIONS.md` (2026-08-10, "the algorithm was the smaller half") carry it.
+Over eight runs `AMD3` reads 0.83 to 0.89 ms at 16 cubed where `AMD` reads 0.74 to 0.86, so the two
+overlap there, and it is about 1.2x at 32 a side; 2D improved 0 to 8 percent as well. `AMD3.md`
+iteration 26 and `docs/DESIGN_DECISIONS.md` (2026-08-10, "the algorithm was the smaller half")
+carry it, with the corrections below.
 
 **What is open, in the order we would take it.**
 
-- **A profile, now that cubes are at parity and the shape of the gap has changed.** CPU Counters on
-  `amd3` against `AMD` at 26 and 32 cubed. The cubic gap used to be pure work at identical
-  efficiency; if that still holds at 1.09x there is little left, and if efficiency has moved the
-  ranking needs redoing. At 32 a side the gap is 1.16x against 1.09x at 26, so it now GROWS with
-  size on this family too, which it did not before and which is a different question.
+- **THE GROWTH TERM, which is now the whole question.** Both families are a low constant plus
+  something that scales: cubes 0.97x at 16 a side rising about 25 percent to 1.2x at 32, 2D 1.33x
+  at 32 a side rising about 45 percent to 1.9x at 400 with a knee past 280. The constant is nearly
+  spent, and NOTHING measured so far touches the growth. The knee says memory. Two profiles of
+  `amd3` compared AGAINST EACH OTHER rather than against the vendored routine, 140 and 400 a side
+  in 2D, or 16 and 32 cubed, would say whether it is instructions or stalls. `MMD3` over the same
+  quotient graph shows no growth on either family, which is the control that makes this an
+  amd-branch property.
+- **QUOTE ABSOLUTE TIMES, NOT RATIOS PER ROW.** The vendored column is the noisiest in the table:
+  at 16 cubed it spans 16 percent across runs where `AMD3` spans 7, so `AMD3 / AMD` mostly measures
+  `AMD`. And a free-function column is timed by `orderTimeFn`, a standing method by `orderTime`
+  which also builds a Permutation, a difference of up to 2.4 percent, so those two are not
+  comparable. Both cost a wrong claim on 2026-08-10.
 - **Price a change by its STREAMS as well as its visits.** The pass inventory counts visits and is
   silent about size-n arrays, and on 2026-08-10 the arrays were the larger term in 2D: the same
   fold measured 12 percent slower there with two extra vectors and 0 to 8 percent faster without
@@ -210,8 +219,8 @@ pass. The point is only that it no longer inherits an argument it used to.
 `amd3` is aligned: production `Amd3` returns `AMD_2`'s permutation exactly, up to the postorder it
 deliberately does not do, on the seven examples, 2D grids to 140, 3D grids to 24 and nine random
 patterns. After the two fusions of 2026-08-10, the hash key into the bound and the first scan into
-the prune, `AMD3` runs at 1.01 to 1.16x the vendored routine on cubic grids from 12 to 32 a side,
-which is parity, and 1.44 to 2.00x on square grids from 32 to 400. `MMD3` is at 1.25 to 1.46x its
+the prune, `AMD3` runs at roughly 1.0 to 1.25x the vendored routine on cubic grids from 12 to 32 a
+side, overlapping it at 16, and 1.33 to about 1.95x on square grids from 32 to 400. `MMD3` is at 1.25 to 1.46x its
 own with no trend in n. `AMD3` is FASTER than both `AMD1` and `AMD2` at every cubic size while
 returning the vendored permutation, which `AMD2` does not. What is left is the 2D penalty, which
 grows with n and is stalls rather than work, and a cubic gap that has only now started to grow with

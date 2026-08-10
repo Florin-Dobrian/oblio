@@ -166,10 +166,12 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
         // on the walk it is already making, so scan 1 goes entirely and the bound's adjacency loop
         // with it, leaving the vendored routine's counts exactly.
         //
-        // Worth 7 to 13 percent on cubic grids and 0 to 8 in 2D, with `AMD3` reaching 1.01x the
-        // vendored routine at 12 a side, 1.02x at 16 and 1.07x at 20. The same fusion exists in
-        // Amd1B and Amd2B and measured zero there, five percent slower in Amd1B's case, which is
-        // why it took a re-run to find: that reading was 2D, at one size, before ledger entry 8.
+        // Worth 10 to 16 percent on cubic grids, measured with both codes down the same harness
+        // path, and 0 to 8 percent in 2D. Over eight runs this driver reads 0.83 to 0.89 ms at 16
+        // cubed where the vendored routine reads 0.74 to 0.86, so the two overlap there, and about
+        // 1.2x at 32 a side. The same fusion exists in Amd1B and Amd2B and measured zero there,
+        // five percent slower in Amd1B's case, which is why it took a re-run to find: that reading
+        // was 2D, at one size, before ledger entry 8.
         //
         // clearFlag RUNS FIRST, where Amd3 calls it after the elimination: the scan is inside the
         // eliminator now, so the tag has to be valid before it, and `Amd.cpp` calls clear_flag
@@ -389,10 +391,12 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
             // 19.0 pairs per pivot against the vendored routine's 0.33, so the pass it shortens
             // was not the one the profile was standing on.
             //
-            // Measured on alpamayo in a scratch Amd3B, 2026-08-10: 4.4 to 7.0 percent faster at six
-            // consecutive square grids from 64 to 400 a side, and 5 to 14 percent on cubic grids
-            // from 12 to 32, with nnz(L) identical at every size. It removes a sweep over C[p] and
-            // two walks, 26.70 of 149.96 element visits per pivot at 140 a side and 66.77 of
+            // Measured on alpamayo in a scratch Amd3B, 2026-08-10: about 4 to 7 percent faster at
+            // six consecutive square grids from 64 to 400 a side, and 5 to 14 percent on cubic
+            // grids from 12 to 32, with nnz(L) identical at every size. APPROXIMATE, both ranges:
+            // the variant was timed as a free function and this driver through OrderEngine, which
+            // also builds a Permutation, a bias of up to 2.4 percent. It removes a sweep over C[p]
+            // and two walks, 26.70 of 149.96 element visits per pivot at 140 a side and 66.77 of
             // 352.57 at 26 cubed. See benchmarks/ordering/README.md and AMD3.md.
             //
             // THE GUARD AND THE DIRECTION ARE THE TWO THINGS THAT HAD TO COME ACROSS. The key pass

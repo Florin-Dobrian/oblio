@@ -1,9 +1,18 @@
 # pipeline benchmark - where a solve's time goes, across all its phases.
 #
 #:   make        build the benchmark
-#:   make run    build and run it, default grid sizes
+#:   make run2d  build and run it, the default square-grid sizes, every ordering
+#:   make run3d  the same on cubic grids, which are a DIFFERENT PROBLEM FAMILY
 #:   make clean
 #:   make help   print this list
+#:
+#: ./pipeline_timing_cpp 200        any square sides
+#: ./pipeline_timing_cpp 3d 26      any cubic sides
+#:
+#: The target names and the default grid ladders match ordering/ exactly, 32, 64, 100, 140 on
+#: squares and 6, 12, 16, 20, 26 on cubes, so a row here can be read beside a row there without
+#: converting sizes. There is no bare `make run` in either folder: the family is always named,
+#: because a claim measured on one of them is a claim about that one.
 #:
 #: Prefix any of these with OBLIO_PUBLIC=1 to build as everyone else does, without the vendored
 #: orderings; see docs/DESIGN_DECISIONS.md. The same word works in the repo root, both benchmarks
@@ -15,7 +24,7 @@
 # Not part of the main Oblio build, and unlike experiments/ this is not a frozen study: a
 # benchmark runs against the current tree forever, so it links ../../src directly and must keep
 # compiling as the code moves. Building it is cheap and running it is not, which is why `make`
-# builds and only `make run` measures.
+# builds and only `make run2d` and `make run3d` measure.
 #
 # NDEBUG is on deliberately, as in the experiments that measure: the claim is about what a solve
 # costs, and at -O0 with asserts in it would measure something else.
@@ -79,8 +88,11 @@ pipeline_timing_cpp: pipeline_timing.cpp $(OBLIO_SRCS) $(OBLIO_HDRS) $(VENDOR_SR
 	$(if $(VENDOR_SRCS),$(CXX) $(CXXFLAGS) -w -c $(VENDOR_SRCS))
 	$(CXX) $(CXXFLAGS) $(VENDOR_DEFS) $< $(OBLIO_SRCS) $(VENDOR_OBJS) $(BLAS_LIBS) -o $@
 
-run: all
-	./pipeline_timing_cpp
+run2d: all
+	./pipeline_timing_cpp 2d
+
+run3d: all
+	./pipeline_timing_cpp 3d
 
 clean:
 	rm -f .build-mode pipeline_timing_cpp Amd.o Mmd.o

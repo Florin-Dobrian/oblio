@@ -69,10 +69,18 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ## 2026-08-10: the algorithm was the smaller half
 
-**`Amd3` reaches parity with the vendored routine on cubic grids.** 1.01x at 12 a side, 1.02x at
-16, 1.07x at 20, 1.09x at 26 and 1.16x at 32, against 1.25x to 1.38x that morning and 3.0x three
-days earlier. It is now faster than `Amd2` at every cubic size and faster than `Amd1` too, which no
-layer carrying the extras has been before, and `nnz(L)` is unchanged everywhere.
+**`Amd3` comes within a few percent of the vendored routine on cubic grids at moderate sizes.**
+Over eight runs it reads 0.83 to 0.89 ms at 16 cubed where `AMD` reads 0.74 to 0.86, so the two
+overlap; the ratio runs 0.97x to 1.18x on that row and rises to 1.18x to 1.27x at 32 a side. That
+is against about 1.3x flat that morning and 3.0x three days earlier. It is now faster than `Amd2`
+at every cubic size and faster than `Amd1` too, which no layer carrying the extras has been before,
+and `nnz(L)` is unchanged everywhere.
+
+**The first draft of this entry said "parity", with three figures to a hundredth.** They came from
+one run of a quotient whose denominator moves more than its numerator: at 16 cubed the vendored
+routine spans 16 percent across runs and `Amd3` spans 7. **We had been reading `AMD3 / AMD` as
+though `AMD` were a constant.** Quote absolute times with the vendored range beside them, and say
+which rows reproduce, rather than a ratio per row.
 
 **The change with the name on it is one fusion**, the driver's first scan folded into the prune, so
 that `I[u]` is walked twice per pivot rather than three times and `A[u]` once rather than twice,
@@ -106,9 +114,20 @@ completely and a whole run on the wrong core is not filtered at all. That is the
 4 percent disagreement between identical binaries the ordering benchmark has been recording since
 2026-08-08 and treating as irreducible.
 
-**So the instrument has now been the constraint three times in one week**, and each time it was
+**A fourth, found after this entry was first written: the two benchmark columns were not measured
+the same way.** A scratch variant reached as a free function is timed by `orderTimeFn`, which times
+the bare ordering call, while a standing method is timed by `orderTime`, which times
+`OrderEngine::compute` and so also builds a Permutation, two assigns of size n and a loop of size
+n. Timing identical code through both paths puts that at 0 to 2.4 percent in the free function's
+favor, so every variant-against-standing figure this day was that much too generous. Re-measured
+with both through the same path, the fold is worth 10 to 16 percent on cubes rather than 7 to 13:
+larger, not smaller, but arrived at properly. **A comparison between two columns has to go down the
+same path**, and the protocol was copied carefully without anyone asking whether the thing being
+repeated was the same thing.
+
+**So the instrument has now been the constraint four times in one week**, and each time it was
 cheap to fix once seen: the idle-vehicle column that measured the noise floor, the doubled counter
-in the pass inventory, and this. The general form is that **a measurement apparatus needs its own
+in the pass inventory, the scheduler, and the two timing paths. The general form is that **a measurement apparatus needs its own
 error bar and its own oracle**, exactly as the code does, and this tree had been holding the code
 to a standard it never held the benchmark to.
 
@@ -131,9 +150,11 @@ second overload keeps `Amd1B` and `Amd2B` untouched and keeps the measurement ab
 ## 2026-08-10: a null result measures an implementation, not the idea it implements
 
 **The hash key now accumulates in the walks the bound is already making, and it is the first thing
-in five attempts to move `AMD3`'s gap to the vendored routine.** 4.4 to 7.0 percent faster at six
+in five attempts to move `AMD3`'s gap to the vendored routine.** About 4 to 7 percent faster at six
 consecutive square grids from 64 to 400 a side, 5 to 14 percent on cubic grids from 12 to 32, with
-`nnz(L)` identical everywhere and `make amdorder` matching `AMD_2` on all 38 cases. It removes a
+`nnz(L)` identical everywhere and `make amdorder` matching `AMD_2` on all 38 cases. Both ranges
+carry the harness bias described in the 2026-08-10 entry above, up to 2.4 percent in the variant's
+favor, so read them as approximate. It removes a
 sweep over `C[p]` and a second walk of `A[u]` and `I[u]`, 18 to 19 percent of the driver's element
 visits.
 

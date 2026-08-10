@@ -5,14 +5,17 @@ three traversals, and the solve. Nine orderings, Cholesky, real, on grid Laplaci
 
 **A benchmark, not an experiment**, on the same terms as `../ordering`: it links `../../src`
 directly and is expected to keep compiling as the tree moves, which is why `make` builds it and
-only `make run` measures.
+only `make run2d` and `make run3d` measure.
 
 ```
 make          build
-make run      build and run, grid sides 32, 64, 100, 140
+make run2d    build and run, square grid sides 32, 64, 100, 140
+make run3d    the same on CUBIC grids, sides 6, 12, 16, 20, 26
 make clean
+make help     print this list
 
-./pipeline_timing_cpp 200      any sides
+./pipeline_timing_cpp 200        any square sides
+./pipeline_timing_cpp 3d 26      any cubic sides
 ```
 
 ## Why this folder exists
@@ -278,6 +281,83 @@ two agree within noise on all eight other orderings. Reproduced across sizes at 
 4.22 against 3.83. No explanation, and it is small enough that it may be an artifact of one
 permutation. Recorded rather than chased.
 
+## Cubic grids, 2026-08-10, and what actually changes between the families
+
+`make run3d`, beside `make run2d`, on the same ladders `../ordering` uses so a row here can be read
+beside a row there without converting sizes. **Neither folder has a bare `make run` any more**: the
+family is always named, because this section is what happens when it is not.
+
+Every table above this section is square, and on square grids **MMD wins on all three terms**:
+
+```
+2D, MMD against the vendored AMD        order      nnz(L)     factor LL
+32x32                                   0.86x      0.993x       0.938x
+64x64                                   0.83x      0.941x       0.957x
+100x100                                 1.03x      0.906x       0.935x
+140x140                                 0.98x      0.869x       0.933x
+```
+
+It orders no slower, fills up to 13 percent less, and factors 5 to 7 percent faster, which is why
+`MMD` reads "wins on both, at every count" against AMD at three of the four sizes.
+
+**On cubic grids only ONE of those three reverses, and it is the smallest term.**
+
+```
+3D, MMD against the vendored AMD        order      nnz(L)     factor LL
+6^3                                     1.33x      1.004x       1.000x
+12^3                                    1.93x      0.995x       0.902x
+16^3                                    1.97x      1.050x       0.925x
+20^3                                    1.89x      0.998x       0.917x
+26^3                                    2.24x      1.011x       0.961x
+```
+
+**AMD orders about twice as fast**, and that is the whole of its advantage. **Fill is a wash**,
+within one percent at every size but 16 cubed. And **MMD still factors 4 to 10 percent faster**,
+at the same nnz(L), which is the genuinely surprising row: an ordering that fills the same produces
+a factor that runs measurably quicker, presumably through supernode shape rather than count.
+
+So the break-even runs the other way from 2D rather than the ordering flipping: on cubes `MMD` pays
+above about 3 to 6 factorizations, `MMD3` similarly. **For a one-shot solve AMD wins on cubes; for
+anything factored repeatedly MMD still does.** In 2D MMD wins at every count.
+
+**A correction, and it is the third time the same mistake has been made this week.** This section
+first said the mmd branch fills five percent more on cubes and factors eleven percent slower, and
+that every mmd method loses on both terms at every count. That was written from ONE sandbox run at
+16 cubed. Sixteen is the only cubic size where MMD fills more, and the factor figure was backwards.
+**A claim measured at one size of one family is a claim about that size**, which is what
+`../ordering` learned on 2026-08-09 and this folder has now learned twice.
+
+**Where `AMD3` sits.** It returns `AMD_2`'s permutation, so its fill is the vendored routine's
+exactly, and against it `AMD3` reads "wins on both, at every count" at 12 and 16 cubed and pays
+above 1.6 to 3.6 factorizations at 20 and 26. Against `AMD2`, which uses its own tie-break, the
+fill comparison is two-sided on cubes as it is on squares: `AMD2` fills less at 12, 20 and 26 a
+side and more at 6 and 16, and in 2D it fills 5 percent less at 140. So `AMD2` is generally the
+better filler of the two and `AMD3` the faster orderer with a permutation that has decades of use
+behind it. Neither dominates.
+
+## What the ordering phase is worth, in proportion, 2026-08-10
+
+Worth stating plainly beside a week of ordering work. With `AMD3`, ordering as a share of
+analyze plus one left-looking factorization plus one solve:
+
+```
+140x140   order 2.04 of 11.49 ms    17.8%
+16^3      order 0.94 of  5.61 ms    16.8%
+26^3      order 4.96 of 47.99 ms    10.3%
+```
+
+**Between a tenth and a fifth for one solve**, falling as the factorization grows, and a smaller
+share again of anything factored more than once, which is the case the break-even column exists
+for. Note that `analyze` already contains the ordering, so those are shares of the whole one-shot
+cost rather than of something the ordering sits beside.
+
+So a 10 to 16 percent gain on the ordering phase is one or two percent of a single solve, and less
+thereafter. That is not an argument against the work: the amd branch went from 3.0x the vendored
+routine to overlapping it in three days, the alignment that made it possible is the strongest
+correctness oracle in the tree, and at 16 cubed the branch now wins this table outright. It is an
+argument about **where to look next**, and this table says the factorization, which is 2 to 7 times
+the ordering at every size and 30 times it under a Natural ordering.
+
 ## What this folder still needs
 
 - **Matrices that are not grids**, which the caveat above makes the first item, and which the
@@ -287,3 +367,9 @@ permutation. Recorded rather than chased.
 - **Complex.** Real only.
 - **A profile target.** The ordering folder has one and this does not, because nothing here has yet
   needed a call tree.
+- **A repeat count sized from a probe.** `bestOfThree` is a fixed three trials where the ordering
+  folder sizes its count so every row is measured for about the same wall time and takes the best
+  of fifteen to thirty. Three samples is thin against thermal state and page placement, which the
+  performance-core request added on 2026-08-10 does not fix: the ordering benchmark still moves 7
+  to 11 percent run to run on unchanged code with that call in. The callable interface
+  `bestOfThree` already has makes the protocol a drop-in.

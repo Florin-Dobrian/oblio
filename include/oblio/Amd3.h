@@ -89,9 +89,11 @@
 // And the third, added 2026-08-10: THE HASH KEY IS ACCUMULATED IN THE BOUND'S WALKS rather than in
 // a pass of its own, which is `hval += e` and `hval += j` inside Amd.cpp's scan 2. It removes a
 // sweep over C[p] and a second walk of A[u] and I[u], 26.70 of this driver's 149.96 element visits
-// per pivot at 140 a side and 66.77 of 352.57 at 26 cubed. Measured on alpamayo: 4.4 to 7.0
+// per pivot at 140 a side and 66.77 of 352.57 at 26 cubed. Measured on alpamayo at about 4 to 7
 // percent at six consecutive square grids from 64 to 400 a side and 5 to 14 percent on cubic grids
-// from 12 to 32, with nnz(L) unchanged everywhere.
+// from 12 to 32, with nnz(L) unchanged everywhere. Approximate: the variant was timed as a free
+// function and this driver through OrderEngine, which also builds a Permutation, a bias of up to
+// 2.4 percent in the variant's favor. AMD3.md iteration 26.
 //
 // It is the FIRST of five attempts at this gap to move anything, and it had been tried and
 // reverted once already. The difference is that the earlier version carried the key in an array of
@@ -102,8 +104,11 @@
 // And the fourth, added later the same day: THE FIRST SCAN IS FOLDED INTO THE PRUNE, through
 // QuotientGraph's TaggedScan overload of `eliminate`. I[u] is walked twice per pivot and A[u]
 // once, which is `AMD_2`'s count exactly, where this driver walked them three times and twice.
-// Worth 7 to 13 percent on cubic grids and 0 to 8 in 2D, and it brings this layer to 1.01x the
-// vendored routine at 12 a side, 1.02x at 16, 1.07x at 20 and 1.09x at 26. It carries no arrays of
+// Worth 10 to 16 percent on cubic grids, measured with both codes down the same harness path, and
+// 0 to 8 percent in 2D. Over eight runs this layer reads 0.83 to 0.89 ms at 16 cubed where the
+// vendored routine reads 0.74 to 0.86, so the two overlap there, and about 1.2x at 32 a side. A
+// ratio per row is a poor summary here: the vendored column moves more between runs than ours
+// does. It carries no arrays of
 // its own: the two values crossing from the prune to the bound live in `partial` and `hashNext`,
 // which are dead at that point, and a version with two fresh vectors of size n was 12 percent
 // SLOWER in 2D. AMD3.md iteration 26.

@@ -1544,11 +1544,30 @@ a `TaggedScan` overload and the vehicle differed from `Amd3` in the fold alone.
                                          400x400  20.12   19.47   -3.2%
 ```
 
-Nine of eleven negative and none positive, `nnz(L)` identical at every size. **`AMD3` reaches
-1.01x, 1.02x and 1.07x the vendored routine at 12, 16 and 20 a side**, which is parity, and 1.09x
-at 26 and 1.16x at 32. It is faster than `AMD2` at every cubic size and faster than `AMD1` too,
-which no layer carrying the extras has been before. Three days earlier this branch was at 3.0x on
-cubes.
+Nine of eleven negative and none positive, `nnz(L)` identical at every size. It is faster than
+`AMD2` at every cubic size and faster than `AMD1` too, which no layer carrying the extras has been
+before. Three days earlier this branch was at 3.0x on cubes.
+
+**CORRECTED THE SAME EVENING, and the correction is the more useful entry.** This section first
+read that `AMD3` reaches 1.01x, 1.02x and 1.07x the vendored routine at 12, 16 and 20 a side,
+"which is parity". That was ONE RUN of a quotient whose denominator is the noisiest column in the
+table. Over eight runs at 16 cubed, `AMD` reads 0.74 to 0.86 ms, a 16 percent spread, where `AMD3`
+reads 0.83 to 0.89, a 7 percent one. **The vendored routine varies more than we do, so a
+ratio-per-row is mostly a measurement of it.**
+
+What reproduces, and it is still the best result this branch has had:
+
+```
+                 AMD3 ms        AMD ms        AMD3 / AMD over eight runs
+12^3           0.26 - 0.28   0.20 - 0.27          0.98 - 1.33
+16^3           0.83 - 0.89   0.74 - 0.86          0.97 - 1.18
+26^3           4.65 - 4.89   3.98 - 4.13          1.13 - 1.19
+32^3          10.29 - 10.75  8.43 - 8.83          1.18 - 1.27
+```
+
+So the honest statement is that `AMD3` is **at or near the vendored routine to 16 a side and rises
+to about 1.2x by 32**. 16 cubed and 26 cubed reproduce to a percent; 12, 20 and 32 wobble by five.
+Quote absolute milliseconds with the vendored range beside them rather than a ratio per row.
 
 ---
 
@@ -1579,6 +1598,20 @@ absorption runs between the prune and the bound and compacts `I[u]` in place, so
 must sum over does not exist yet at prune time. **Every square grid passed and every cubic and
 random graph failed**, absorption firing far more there. Only the adjacency half can move, and
 `I[u]` is still walked twice.
+
+**AND THE MEASUREMENTS ABOVE CARRY A HARNESS BIAS, found after the fact.** `AMD3B` was timed
+through `orderTimeFn`, which times the bare ordering call, and `AMD3` through `orderTime`, which
+times `OrderEngine::compute` and so also builds a Permutation: two assigns of size n and a loop of
+size n. Measured by timing identical code through both paths, that is **0 to 2.4 percent** in the
+free function's favor. So every "AMD3B is X percent faster" figure this day, the 7 to 13 percent
+above and the key fusion's 4.4 to 7.0 percent in iteration 25, is that much too generous.
+
+Re-measured with both through the free-function path, same run, the fold is worth **10 to 16
+percent on cubes**: 16.1 at 12 a side, 16.2 at 16, 9.8 at 20, 10.3 at 26 and 12.8 at 32. Larger
+than what was first recorded, not smaller, but arrived at properly. **A comparison between two
+columns of a benchmark has to go down the same path**, which is obvious once stated and was not
+checked when `orderTimeFn` was written: its probe-and-repeat protocol was copied carefully and
+nobody asked whether the thing being repeated was the same thing.
 
 **Verified:** `make amdorder`, `make mmdorder` and `make aligned` 38 of 38 each, `Amd3B == Amd3` on
 32 graphs including twelve random ones before the port, and 283/283 with 8 examples after it.

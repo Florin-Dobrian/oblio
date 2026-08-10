@@ -362,8 +362,8 @@ the supernodal tree later with better information. It is NOT the default: with t
 its alignment uncovered now fixed, AMD2 fills less than the vendored routine on grids and AMD3
 therefore fills more, which is a reason to keep both. On speed the two have separated since: after
 two fusions on 2026-08-10, the hash key into the bound pass and the first scan into the prune, AMD3
-is faster than both AMD1 and AMD2 at every cubic size measured, and on cubic grids it now runs
-within 1 to 16 percent of the vendored routine. So the trade is AMD2 fills a little less and AMD3
+is faster than both AMD1 and AMD2 at every cubic size measured, and on cubic grids it now overlaps
+the vendored routine's own timing range at moderate sizes, rising to about 1.2x at 32 a side. So the trade is AMD2 fills a little less and AMD3
 is faster and reproduces a permutation with decades of use behind it.
 
 ## History

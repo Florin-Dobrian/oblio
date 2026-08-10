@@ -117,6 +117,40 @@ late-stage extras, because AMD1 has none. Whatever produces it is in the base: t
 the tie-break, the filing convention, the degree floor, or the order in which mass elimination and
 the refresh interleave. That was not where we expected to be looking.
 
+## What the two VENDORED routines do against each other, added 2026-08-10
+
+**A gap in this report, noticed seven days after it was written.** Every table above measures one of
+ours against the routine it was ported from, so each of ours has an oracle. Nothing here compares
+genmmd against `AMD_2`, and that is the question that says which oracle is the better target on a
+given family. `benchmarks/ordering/README.md` carries the full ladders; the conclusion is short.
+
+**They scale identically and differ by a constant.** Ordering time goes as `n^1.01` on square grids
+and `n^1.15` on cubic ones, and fill as `n^1.18` and `n^1.58`, with the two routines agreeing to two
+digits on both exponents on both families. So neither ratio below moves with n, and whichever
+routine wins at the smallest size wins at the largest.
+
+```
+                       time            fill
+square, 64 to 400    MMD by 10-22%   MMD by 6-14%
+cubic, 12 to 32      AMD by 50-58%   equal, within 2% and unsigned
+```
+
+**The two advantages are made of different things**, which is the part worth carrying. In 2D
+genmmd's win is QUALITY: it fills 6 to 14 percent less and the two are level on time. On cubes
+`AMD_2`'s win is SPEED: it orders twice as fast and the fill is a wash, MMD ahead at 12 and 20 a
+side and behind at 6, 16, 26 and 32. Neither is the other's mirror, and a sentence of the form "MMD
+wins in 2D and AMD wins in 3D" hides that.
+
+**And the largest number in the comparison is not a branch difference.** Cubes cost 4 to 8 times
+more ordering time per vertex than squares at comparable n, 229 ns against 62 for `AMD_2`. That is
+clique size, 12.7 members per pivot against 6.28, and it dwarfs either branch-against-branch gap.
+
+**What this changes about finding 1**, which is still the one open item here. `AMD1` fills 12 to 14
+percent more than `AMD_2` on cubic grids, and this section says `AMD_2` and genmmd fill the SAME
+there. So the deficit is not the amd family's shape being wrong for cubes: it is `AMD1` alone, and
+both vendored routines reach a fill our base layer does not. That narrows the question without
+answering it.
+
 ## Finding 2: our two branches fail in mirror-image places
 
 **RESTATED IN A NEW FORM BY THE CUBIC BENCHMARK, 2026-08-09, and this time it points somewhere.**
@@ -224,6 +258,29 @@ good mechanism that pays for itself twice over, and the conclusion is not that i
 having. It is that our implementation of it is not yet worth having.
 
 ## The one gap we can explain
+
+**CLOSED 2026-08-10, and the caution below was the whole of why it took two attempts.** The key is
+now accumulated in the bound loop, and the first scan is folded into the prune besides, so `Amd3`
+walks `I[u]` twice per pivot and `A[u]` once, which is `AMD_2`'s count exactly. Worth about 4 to 7
+percent in 2D and 5 to 14 on cubes for the key, and 10 to 16 percent on cubes for the scan.
+
+**The section predicted the failure of the first attempt precisely.** It says the repair "needs an
+array of size n, which is exactly the footprint trade that made AMD1B slower at large n after being
+faster at small". A version built on 2026-08-08 did exactly that, carrying the key in a vector of
+size n, and measured nothing at 140 a side and minus two percent at 400. It was recorded as the
+fusion failing.
+
+**The way past it was to not need the array.** Each vertex is filed into its hash bucket at the
+point its key completes, so nothing is stored; and when the scan fold later needed two values to
+cross from the prune to the bound, both went into arrays the driver already had and that are dead
+at that moment, `partial[u]` and `hashNext[u]`, with the key reduced modulo the bucket count as it
+accumulates so it fits an `int32`. A first version of THAT used two fresh vectors of size n and was
+12 percent slower in 2D from 200 a side up, which is the same trade a third time.
+
+So the standing lesson is the one this section already half-stated: **price a re-schedule by what
+it walks AND by what it makes resident.** The per-pass inventory built on 2026-08-10 counts the
+first and is silent about the second. `AMD3.md` iterations 25 and 26 and
+`docs/DESIGN_DECISIONS.md` (2026-08-10) carry the accounts.
 
 For the time half of AMD2's hash, the cause is visible in one line of each implementation.
 
@@ -589,14 +646,28 @@ part of the MMD time gap, which is array width.
 5. **Open question 1, the AMD1 3D fill gap.** Hardest, because it is in the base, and most valuable
    for the same reason: everything above AMD1 inherits it. Note that AMD2's fill is no longer
    evidence about it in either direction, the defect above having moved every AMD2 figure.
-6. **Then the hash key fusion.** It is the best understood of the remaining items and the only one
-   with a known repair. Its fill behavior is now understood, which was the reason given for not
-   taking it first; what is left is the constant factor, and the time half of finding 3 is
-   untouched by anything done since.
+6. **Then the hash key fusion. DONE 2026-08-10**, together with the first scan folded into the
+   prune, which the same section did not anticipate. Both are above, under "The one gap we can
+   explain". The constant factor on cubic grids is largely gone with them: `AMD3` now reads 0.83 to
+   0.89 ms at 16 cubed where the vendored routine reads 0.74 to 0.86, so the two overlap, against
+   3.0x three days earlier.
 7. **And a new one, from the alignment.** AMD3 fills more than the corrected AMD2 on grids, 474995
    against 444191 at 140 a side, so our tie-break now beats AMD's by 6.5 percent where aligning
    MMD improved ours. Whether that survives outside 2D grids is item 2 above, and it is the second
    data point for the LIFO-against-FIFO question below.
+
+   **PARTLY ANSWERED 2026-08-10, and it is two-sided rather than a win.** On cubic grids `AMD2`
+   fills less than `AMD3` at 12, 20 and 26 a side and more at 6 and 16, so our tie-break is better
+   on most cubic sizes as well but not all, where in 2D it is better at every size. Neither
+   dominates. `benchmarks/pipeline/README.md` prices it: on squares the fill difference reaches the
+   factorization and `AMD2` is the better of the two, on cubes they trade places by size.
+
+8. **And the item this list did not contain, now the largest open one.** Both families are a low
+   constant factor plus a term that GROWS with n: cubes rise about 25 percent from 12 a side to 32,
+   2D about 45 percent from 32 to 400 with a knee past 280. The constant is what everything above
+   addressed and it is nearly spent; nothing measured so far touches the growth, and the knee says
+   memory rather than instructions. `MMD3` over the same quotient graph shows no growth on either
+   family, which makes it an amd-branch property rather than a shared-infrastructure one.
 
 ## Open question: is LIFO actually better, or is genmmd merely good?
 

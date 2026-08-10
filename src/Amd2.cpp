@@ -214,6 +214,10 @@ std::vector<std::int32_t> orderAmd2(const std::vector<std::size_t>&  colPtr,
             // Folding it here alone would miss those, so the merge takes the minimum too, off the
             // value it computes anyway. Amd3 needs one site only, its refile pass running after
             // the hash rather than before it.
+            //
+            // MEASURED AT ZERO, with the clique-weight fusion beside it: useful cycles unchanged
+            // within half a percent in both families. A port and a simplification, not a speed
+            // fix. See benchmarks/ordering/README.md (2026-08-09).
             minDegree = std::min(minDegree, bound);
         }
 

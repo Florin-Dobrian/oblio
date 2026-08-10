@@ -535,6 +535,10 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
             // scattered read per survivor per pivot to recover a value it had already had.
             // AMD_2 does the same inside its restore-degree-lists loop, `if (deg < mindeg)`.
             // Amd1 has always done it this way; Amd2, Amd2B and Amd3 did not.
+            //
+            // MEASURED AT ZERO, with the clique-weight fusion beside it: useful cycles unchanged
+            // within half a percent in both families. A port and a simplification, not a speed
+            // fix. See benchmarks/ordering/README.md (2026-08-09).
             minDegree = std::min(minDegree, bound);
         }
 

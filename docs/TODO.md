@@ -1209,6 +1209,15 @@ guard, production does not, and the ceiling is a placeholder rather than a deriv
 **1. The prototypes and production have diverged in encoding, and the alignment check does not see
 it. IT HAS NOW COST TWO DEFECTS, 2026-08-09.**
 
+**And the gap widened again the same day, deliberately.** Production's four amd drivers now take
+the weighted clique size off `QuotientGraph::cliqueWeight()` and fold the minimum degree into the
+refile loop; the `amd2`, `amd3` and `amd4` prototypes still compute both in passes of their own.
+Behaviour is identical and `make test` says so, so this is drift rather than a defect, and it is
+recorded because it is the third widening and because both defects above began exactly here. The
+fusions were not carried across on purpose: they are encoding rather than concept, and the
+prototypes exist to state the concept. Whether that line holds is the open question this item is
+about.
+
 **The second is the sharper of the two and is the opposite shape.** The amd hash key annihilated
 its own incidence half, by multiplying it with a stride and then reducing modulo the same number,
 so the bucket was a function of the adjacency alone and we tested up to 320 times the pairs the

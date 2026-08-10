@@ -191,6 +191,13 @@ public:
     // already, so the pass is gone and nothing is added. AMD_2 does the same, `degme += nvi`
     // inside the loops that build the element, at its lines 1492 and 1636.
     //
+    // MEASURED AT ZERO, and that is the point of saying so here. CPU Counters before and after,
+    // same session: useful cycles unchanged within half a percent in both families, AMD3 still
+    // 1.61x the vendored routine on cubes and 1.56x in 2D. The 25 visits per pivot this removes on
+    // cubes were contiguous walks over hot arrays and cost near nothing. It is kept as a faithful
+    // port that removes two passes and a stale-value hazard, NOT as a speed fix, and it should not
+    // be cited as one. `benchmarks/ordering/README.md` (2026-08-09) has the numbers.
+    //
     // VALID UNTIL THE NEXT ELIMINATION, and a scalar rather than an array for that reason: it is
     // read immediately after `eliminate` and never afterwards. Same contract as the pointer
     // `clique()` returns, and stated here because a scalar carrying per-pivot state is the kind

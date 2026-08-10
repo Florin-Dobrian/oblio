@@ -67,6 +67,67 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-08-10: the algorithm was the smaller half
+
+**`Amd3` reaches parity with the vendored routine on cubic grids.** 1.01x at 12 a side, 1.02x at
+16, 1.07x at 20, 1.09x at 26 and 1.16x at 32, against 1.25x to 1.38x that morning and 3.0x three
+days earlier. It is now faster than `Amd2` at every cubic size and faster than `Amd1` too, which no
+layer carrying the extras has been before, and `nnz(L)` is unchanged everywhere.
+
+**The change with the name on it is one fusion**, the driver's first scan folded into the prune, so
+that `I[u]` is walked twice per pivot rather than three times and `A[u]` once rather than twice,
+which is `AMD_2`'s count exactly. But the fusion alone was 3 to 9 percent on cubes and **12 percent
+slower in 2D**, and what made it land was two changes that are not about the algorithm at all.
+
+**The arrays.** Two values have to cross from the prune to the bound, and the first version carried
+them in two fresh vectors of size n. Both fit in arrays the driver already had and that are dead at
+that moment: `partial[u]` is not written until the end of the bound pass, and `hashNext[u]` holds
+nothing until the vertex is filed, which happens in that pass after the key has been read. The key
+is reduced modulo the bucket count as it accumulates, which is what lets it fit an `int32`. With
+the two arrays gone the 2D penalty went with them, and 2D turned from 12 percent worse to 0 to 8
+percent better.
+
+**This is the third time the footprint has been the answer and the second time it was missed.** The
+2026-08-08 key fusion failed for the same reason and was recorded as a failure of the fusion;
+`Amd1B` is on record as "slower at large n after being faster at small" for the same reason. The
+per-pass inventory that drove all of this counts VISITS, and a visit count is silent about how many
+size-n streams a change adds. **Both are real costs and only one of them was being measured**,
+which is worth more than the fusion it explains: a re-schedule should be priced by what it walks
+AND by what it makes resident, and this tree has an instrument for the first and none for the
+second.
+
+**The scheduler.** The same code on the same machine read as a scattered null and then as a clean 3
+to 9 percent, with nothing between the two runs but one line in the benchmark:
+`pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)`. A command-line process on Apple
+Silicon runs at `QOS_CLASS_DEFAULT`, which permits the scheduler to park the thread on an
+efficiency core, and that placement is sticky over a whole run rather than jittering per iteration.
+Every benchmark row is a minimum over fifteen to thirty repeats, so per-sample noise is filtered
+completely and a whole run on the wrong core is not filtered at all. That is the exact shape of the
+4 percent disagreement between identical binaries the ordering benchmark has been recording since
+2026-08-08 and treating as irreducible.
+
+**So the instrument has now been the constraint three times in one week**, and each time it was
+cheap to fix once seen: the idle-vehicle column that measured the noise floor, the doubled counter
+in the pass inventory, and this. The general form is that **a measurement apparatus needs its own
+error bar and its own oracle**, exactly as the code does, and this tree had been holding the code
+to a standard it never held the benchmark to.
+
+**One near-miss, recorded because a plausible check would have missed it.** A version accumulating
+the whole hash key in the prune failed 14 of 32 identity cases: aggressive absorption runs between
+the prune and the bound and compacts `I[u]` in place, so the list the key must sum over does not
+exist yet at prune time. Every square grid passed and every cubic and random graph failed, since
+absorption fires far more there. The 2D-only checks this project ran until 2026-08-09 would have
+shipped it.
+
+**And the shared class gained one thing, deliberately narrow.** `QuotientGraph` has a `TaggedScan`
+overload of `eliminate` beside the existing `ApproximateScan` one. The obvious move was to reuse
+the existing overload, but it carries the pre-iteration-15 encoding, a value array plus a separate
+mark, where `Amd3` carries `Amd.cpp`'s tagged W. Reusing it would have bundled a revert of that
+consolidation into the measurement, and the record prices W only jointly with the stamp hoist. A
+second overload keeps `Amd1B` and `Amd2B` untouched and keeps the measurement about one thing.
+
+---
+
 ## 2026-08-10: a null result measures an implementation, not the idea it implements
 
 **The hash key now accumulates in the walks the bound is already making, and it is the first thing

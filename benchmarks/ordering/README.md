@@ -937,6 +937,23 @@ where `AMD1` was thought to be fine. `AMD1` is now the larger of the two remaini
 gap is four fifths stalls, which is exactly what those proposals address. The same proposals are
 worthless on cubes, where the efficiency gap is zero.
 
+## Two things this benchmark now does to itself, 2026-08-10
+
+**It asks for a performance core.** `pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)`
+at the top of `main`, guarded by `__APPLE__`, in both drivers. A command-line process on Apple
+Silicon runs at `QOS_CLASS_DEFAULT`, which prefers a performance core but permits the scheduler to
+park the thread on an efficiency one, and that placement is STICKY over long stretches rather than
+jittering per iteration. Every row here is a MINIMUM over fifteen to thirty repeats, which filters
+per-sample noise completely and filters a whole run placed on the wrong core not at all.
+
+That is the shape of the 4 percent disagreement between identical binaries this file has recorded
+since 2026-08-08 and treated as irreducible. **It was not irreducible.** With the call in, a change
+that had read as a scattered null across five cubic sizes read as a clean 3 to 9 percent, and the
+verdict on it reversed. `taskpolicy -c` at the shell does the same thing and has to be remembered
+every run, which is why it is in the source instead.
+
+**And it measures its own floor when it can.** See the section below.
+
 ## The noise floor of this benchmark, measured 2026-08-10
 
 **Plus or minus 3 percent, at every size above the smallest.** Between the key fusion landing in
@@ -1116,6 +1133,41 @@ prune, scan 1 and the bound become the large prize, since `AMD_2` makes two wher
 a side to 2.07x at 400, and a constant five percent off a growing curve leaves it growing. `MMD3`
 over the same quotient graph shows no such trend across the same seven sizes, so whatever grows
 lives on the amd branch alone and is not made of passes.
+
+## The first scan folded into the prune, 2026-08-10, and parity on cubes
+
+**`AMD3` reaches the vendored routine on cubic grids.** The driver walked `I[u]` three times per
+pivot and `A[u]` twice; `AMD_2` walks them twice and once. `QuotientGraph::eliminate` now
+accumulates |C[c] - C[p]| and the bound's adjacency term on the walk the prune is already making,
+so scan 1 goes entirely and the bound's adjacency loop with it.
+
+```
+                  AMD3   AMD3B                    AMD3   AMD3B
+12^3              0.29    0.26  -10.3%   64x64     0.41    0.41    0.0%
+16^3              0.93    0.85   -8.6%   100x100   1.03    0.95   -7.8%
+20^3              2.22    1.94  -12.6%   140x140   2.07    1.98   -4.3%
+26^3              5.28    4.67  -11.6%   200x200   4.27    4.14   -3.0%
+32^3             10.85   10.07   -7.2%   280x280   8.87    8.76   -1.2%
+                                         400x400  20.12   19.47   -3.2%
+```
+
+Against the vendored routine that is 1.01x at 12 a side, 1.02x at 16, 1.07x at 20, 1.09x at 26 and
+1.16x at 32. `nnz(L)` identical at all thirteen sizes. It is faster than `AMD2` at every cubic size
+and faster than `AMD1` too, which no layer carrying the extras has managed before.
+
+**The fusion alone did not do this, and that is the part worth keeping.** The first version carried
+the two values crossing from the prune to the bound in two fresh vectors of size n, and measured 3
+to 9 percent faster on cubes and **12 percent slower in 2D from 200 a side up**. Both fit in arrays
+the driver already had and that are dead at that point, `partial[u]` and `hashNext[u]`, with the
+key reduced modulo the bucket count as it accumulates so that it fits an `int32`. With the arrays
+gone the 2D penalty went with them.
+
+**So the per-pass inventory above is half an instrument.** It counts VISITS and is silent about how
+many size-n streams a change adds, and here the streams were the larger term on one family. This is
+the third time the footprint has been the answer: the 2026-08-08 key fusion failed for it and was
+recorded as a failure of the fusion, and `Amd1B` is on record as slower at large n after being
+faster at small for the same reason. **Price a re-schedule by what it walks AND by what it makes
+resident.**
 
 ## Results
 

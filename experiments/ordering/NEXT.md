@@ -96,14 +96,23 @@ inventory" and "What the inventory was worth", in `AMD3.md` iteration 25, and in
   it, which costs one column and gives every other column an error bar under identical
   conditions.
 
+**AND THE WALKS ARE DONE, 2026-08-10, later the same day.** The first scan is folded into the
+prune, so `I[u]` is walked twice per pivot and `A[u]` once, which is `AMD_2`'s count exactly.
+`AMD3` is at 1.01x, 1.02x and 1.07x the vendored routine at 12, 16 and 20 a side and 1.09x at 26,
+which is parity on cubic grids, with 2D improving 0 to 8 percent as well. `AMD3.md` iteration 26
+and `docs/DESIGN_DECISIONS.md` (2026-08-10, "the algorithm was the smaller half") carry it.
+
 **What is open, in the order we would take it.**
 
-- **A profile of the fusion**, which decides the size of everything after it. CPU Counters on
-  `amd3` at 140 a side and 26 cubed, before and after, comparing the instruction drop against the
-  cycle drop. The fusion removed 18 to 19 percent of the visits and returned 5 percent. If cycles
-  fell further than instructions the win is locality, and the three remaining walks of `I[u]` in
-  the prune, scan 1 and the bound are the large prize since `AMD_2` makes two where we make four.
-  If instructions fell in proportion, the ceiling is low and this direction is nearly spent.
+- **A profile, now that cubes are at parity and the shape of the gap has changed.** CPU Counters on
+  `amd3` against `AMD` at 26 and 32 cubed. The cubic gap used to be pure work at identical
+  efficiency; if that still holds at 1.09x there is little left, and if efficiency has moved the
+  ranking needs redoing. At 32 a side the gap is 1.16x against 1.09x at 26, so it now GROWS with
+  size on this family too, which it did not before and which is a different question.
+- **Price a change by its STREAMS as well as its visits.** The pass inventory counts visits and is
+  silent about size-n arrays, and on 2026-08-10 the arrays were the larger term in 2D: the same
+  fold measured 12 percent slower there with two extra vectors and 0 to 8 percent faster without
+  them. There is no instrument for this and one would be cheap.
 - **`Amd2` and `Amd2B`, 2026-08-10: not by the cheap route, and PARKED rather than closed.**
   Checked on a scratch copy: fusing there as `Amd3` does moves the permutation on all ten grids
   tried. They refile inside their single-pass bound, so that loop's direction is already a
@@ -200,11 +209,13 @@ pass. The point is only that it no longer inherits an argument it used to.
 
 `amd3` is aligned: production `Amd3` returns `AMD_2`'s permutation exactly, up to the postorder it
 deliberately does not do, on the seven examples, 2D grids to 140, 3D grids to 24 and nine random
-patterns. After the key fusion of 2026-08-10, `AMD3` runs at 1.25 to 1.38x the vendored routine on
-cubic grids from 6 to 32 a side and 1.40 to 1.91x on square grids from 32 to 400, against 1.67x and
-2.06x at 140 and 400 before it, and `MMD3` at 1.28 to 1.46x its own with no trend in n. `AMD3` is
-now FASTER than `AMD2` at all five cubic sizes and level with it in 2D, while returning the
-vendored permutation, which `AMD2` does not. The gap is NOT algorithmic, NOT integer width, NOT the number of arrays
+patterns. After the two fusions of 2026-08-10, the hash key into the bound and the first scan into
+the prune, `AMD3` runs at 1.01 to 1.16x the vendored routine on cubic grids from 12 to 32 a side,
+which is parity, and 1.44 to 2.00x on square grids from 32 to 400. `MMD3` is at 1.25 to 1.46x its
+own with no trend in n. `AMD3` is FASTER than both `AMD1` and `AMD2` at every cubic size while
+returning the vendored permutation, which `AMD2` does not. What is left is the 2D penalty, which
+grows with n and is stalls rather than work, and a cubic gap that has only now started to grow with
+size at all. The gap is NOT algorithmic, NOT integer width, NOT the number of arrays
 touched, and NOT any single line. It IS partly the number of passes, which is new: 2.12x the
 element visits on both families, of which the fusion removed a fifth. What remains is that plus a
 2D-only memory penalty that GROWS with n, and the second of those is now the larger question.

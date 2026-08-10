@@ -38,6 +38,12 @@
 // The method argument matters: mmd1 and amd1 spend their time in completely different places, so
 // profile the one whose gap is being investigated rather than an average of both.
 
+// The same performance-core request the timing benchmark makes; see the note there. A profile
+// taken on an efficiency core attributes time correctly and reports the wrong amount of it.
+#ifdef __APPLE__
+#include <pthread.h>
+#endif
+
 #include "oblio/Amd1.h"
 #include "oblio/Amd1B.h"
 #include "oblio/Amd2.h"
@@ -124,6 +130,10 @@ static void grid3dPattern(int side,
 }
 
 int main(int argc, char** argv) {
+#ifdef __APPLE__
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#endif
+
     // An optional shape word between the method and the side, as order_timing.cpp takes:
     //     ./order_profile_cpp amd3 140 200        square, the default
     //     ./order_profile_cpp amd3 3d 26 200      cubic

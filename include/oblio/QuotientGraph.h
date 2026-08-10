@@ -155,6 +155,41 @@ struct ApproximateScan {
     std::int32_t                    tag;             // its stamp for this elimination
 };
 
+// The same thing for a driver that carries `Amd.cpp`'s TAGGED W ARRAY instead of a value array and
+// a separate seen-this-step mark. One array holds three facts: `w[c] == 0` is absorbed, `0 < w[c] <
+// wflg` is alive but stale, and `w[c] >= wflg` is seen this step with `w[c] - wflg` the value. So
+// there is no mark to carry and no clearing pass, and first sighting is `w[c] != 0 && w[c] < wflg`
+// rather than a tag comparison. `Amd3` uses that encoding; `Amd1` and `Amd2` use the other, which
+// is why this is a second struct rather than a flag on the first.
+//
+// `key` is the odd one and is here because of where the walks are. `Amd3` builds its hash key from
+// the PRUNED A[u] and the FINAL I[u], and a driver that folds its first scan in here keeps a walk
+// of I[u] but loses its second walk of A[u], so the ADJACENCY HALF has nowhere else to go. This
+// fills that half and the driver adds the other.
+//
+// **ONLY THAT HALF, and the reason is a phase boundary rather than a preference.** Aggressive
+// absorption runs between this prune and the driver's bound pass and COMPACTS I[u] in place,
+// dropping the cliques it killed. So the list the key must sum over does not exist yet here.
+// Accumulating it anyway is correct on square grids, where absorption rarely fires, and wrong on
+// cubic and random ones, which is how it was found.
+//
+// **REDUCED AS IT ACCUMULATES**, modulo the driver's bucket count, which is why it is an int32 and
+// not a size_t. The key is a SUM and the driver only ever uses it modulo that number, so reducing
+// early cannot change which bucket a vertex lands in. What it buys is the width: the running value
+// stays below the modulus, so this fits in an array the driver already has rather than needing one
+// of its own. Two extra arrays of size n across the phase boundary cost 12 percent in 2D at 400 a
+// side when this fusion was first built, which is the footprint trade REPORT.md names and the
+// same one that sank the 2026-08-08 key fusion.
+struct TaggedScan {
+    std::vector<std::size_t>&       explicitPart;    // per vertex, sum of weight over the pruned A[u]
+    std::vector<std::int32_t>&      key;             // per vertex, the whole hash key, reduced
+    std::vector<std::int32_t>&      w;               // per clique, Amd.cpp's tagged W
+    const std::vector<std::size_t>& cliqueDegree;    // per clique, |C[c]| weighted
+    std::vector<std::int32_t>&      touchedCliques;  // the cliques this step reached, once each
+    std::int32_t                    wflg;            // the tag for this elimination
+    std::int32_t                    modulus;         // the driver's bucket count, n + 1
+};
+
 // The quotient graph itself: the three lists above, the liveness flags, and the supervariable
 // members that mass elimination grows. A driver owns one of these, picks a pivot, calls
 // eliminate, and refreshes whatever the elimination reached.
@@ -308,6 +343,12 @@ public:
     // already removed every member of C[p] from A[u] and mass elimination merges only members of
     // C[p]. Neither would survive reordering the phases.
     const std::vector<std::int32_t>& eliminate(std::int32_t pivot, ApproximateScan& scan);
+
+    // The same fusion for the tagged-W encoding, which is the one `Amd3` carries. Everything the
+    // overload above says about why the fold is sound applies here unchanged; only the three-facts
+    // array differs. It also fills the hash key's adjacency half, which that overload has no need
+    // of because its callers keep a separate walk of A[u].
+    const std::vector<std::int32_t>& eliminate(std::int32_t pivot, TaggedScan& scan);
 
 
     // Fold v into u, the two having been found indistinguishable from EACH OTHER rather than

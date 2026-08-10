@@ -36,6 +36,21 @@
 #include "oblio/SparseMatrix.h"
 #include "oblio/Permutation.h"
 #include "oblio/OrderEngine.h"
+
+// ASK FOR A PERFORMANCE CORE, on the one platform where cores differ. Apple Silicon runs a
+// command-line process at QOS_CLASS_DEFAULT, which prefers a performance core but permits the
+// scheduler to park the thread on an efficiency core, and that placement is STICKY over long
+// stretches rather than jittering per iteration. That matters here because every row below is a
+// MINIMUM over fifteen to thirty repeats, which filters per-sample noise completely and filters a
+// whole run placed on the wrong core not at all. It is the shape of the 4 percent disagreement
+// between identical binaries that the note above records.
+//
+// QOS_CLASS_USER_INTERACTIVE is the class the scheduler will not put on an efficiency core. The
+// alternative is `taskpolicy -c` at the shell, which has to be remembered every run and silently
+// does nothing when it is not.
+#ifdef __APPLE__
+#include <pthread.h>
+#endif
 #include "oblio/ElmForest.h"
 #include "oblio/ElmForestEngine.h"
 #include "oblio/SymFactor.h"
@@ -242,6 +257,11 @@ static std::size_t fill(const SparseMatrix<double>& A, const Method& method) {
 }
 
 int main(int argc, char** argv) {
+#ifdef __APPLE__
+    // Before anything is timed. See the note beside the include.
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#endif
+
     // First argument may be a mode word rather than a side, and anything else is read as a side, so
     // the plain spelling keeps working unchanged. A branch mode narrows the columns to one lineage
     // and adds the gap columns against that lineage's vendored routine, which is what makes a long

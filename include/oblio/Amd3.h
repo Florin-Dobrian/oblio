@@ -98,6 +98,15 @@
 // size n; this one files each vertex into its bucket where the key completes and stores nothing.
 // The failure was the array rather than the fusion, which is a distinction the four other null
 // results had made it easy to stop looking for. See AMD3.md and DESIGN_DECISIONS.md.
+//
+// And the fourth, added later the same day: THE FIRST SCAN IS FOLDED INTO THE PRUNE, through
+// QuotientGraph's TaggedScan overload of `eliminate`. I[u] is walked twice per pivot and A[u]
+// once, which is `AMD_2`'s count exactly, where this driver walked them three times and twice.
+// Worth 7 to 13 percent on cubic grids and 0 to 8 in 2D, and it brings this layer to 1.01x the
+// vendored routine at 12 a side, 1.02x at 16, 1.07x at 20 and 1.09x at 26. It carries no arrays of
+// its own: the two values crossing from the prune to the bound live in `partial` and `hashNext`,
+// which are dead at that point, and a version with two fresh vectors of size n was 12 percent
+// SLOWER in 2D. AMD3.md iteration 26.
 
 #include "oblio/QuotientGraph.h"
 

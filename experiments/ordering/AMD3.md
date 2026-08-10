@@ -1511,5 +1511,82 @@ remaining walks of `I[u]` are the next large prize or a much smaller one.
 
 ---
 
+## Iteration 26: the last two walks, and three things that were not the algorithm
+
+**The situation, 2026-08-10, after the key fusion.** The corrected inventory had `AMD3` at 1.64x
+`AMD_2`'s element visits on cubes and about 1.30x its work, with efficiency at parity on that
+family, so the cubic gap was pure work and the walk count was the whole lever. The remaining excess
+was concentrated: we walked `I[u]` three times per pivot where `AMD_2` walks it twice, and `A[u]`
+twice where it walks it once, and those two rows were 96 percent of what was left.
+
+**The transformation for exactly that already existed and had already failed.**
+`QuotientGraph::eliminate(pivot, ApproximateScan&)` folds the driver's first scan into the prune,
+which is what `Amd1B` and `Amd2B` are. It measured zero on both, five percent slower on `Amd1B`.
+Three things made it worth re-running: it had never been tried on `Amd3`; the reading was 2D, and
+the direction is now 3D; and it predates entry 8, when a different pass dominated the profile. That
+is the same pair of conditions that had made the key fusion look worthless the day before.
+
+**It could not be reused as it stood, and the detour was the right one.** That overload carries the
+pre-iteration-15 encoding, a value array plus a separate seen-this-step mark, where `Amd3` carries
+`Amd.cpp`'s tagged W. Adopting it would have bundled a revert of that consolidation into the
+measurement, and the record prices W only together with the stamp hoist. So `QuotientGraph` gained
+a `TaggedScan` overload and the vehicle differed from `Amd3` in the fold alone.
+
+**Result, alpamayo, and the vendored routine is unmoved throughout:**
+
+```
+                  AMD3   AMD3B                    AMD3   AMD3B
+12^3              0.29    0.26  -10.3%   64x64     0.41    0.41    0.0%
+16^3              0.93    0.85   -8.6%   100x100   1.03    0.95   -7.8%
+20^3              2.22    1.94  -12.6%   140x140   2.07    1.98   -4.3%
+26^3              5.28    4.67  -11.6%   200x200   4.27    4.14   -3.0%
+32^3             10.85   10.07   -7.2%   280x280   8.87    8.76   -1.2%
+                                         400x400  20.12   19.47   -3.2%
+```
+
+Nine of eleven negative and none positive, `nnz(L)` identical at every size. **`AMD3` reaches
+1.01x, 1.02x and 1.07x the vendored routine at 12, 16 and 20 a side**, which is parity, and 1.09x
+at 26 and 1.16x at 32. It is faster than `AMD2` at every cubic size and faster than `AMD1` too,
+which no layer carrying the extras has been before. Three days earlier this branch was at 3.0x on
+cubes.
+
+---
+
+**Three things were not the algorithm, and together they were most of the day.**
+
+**One: the arrays, which were worth more in 2D than the fold was.** The first version carried the
+two values crossing from the prune to the bound in two fresh vectors of size n. It measured 3 to 9
+percent faster on cubes and **12 percent slower in 2D from 200 a side up**. Both fit in arrays the
+driver already had and that are dead at that point: `partial[u]` is not written until the end of
+the bound pass, and `hashNext[u]` holds nothing until the vertex is filed, which happens in that
+same pass after the key has been read. The key is reduced modulo the bucket count as it
+accumulates, which is what makes it fit an `int32` rather than needing a `size_t` array. With the
+arrays gone the 2D penalty went with them. **The visit count predicted the fold and said nothing
+about the streams**, and the streams were the larger term on one family.
+
+**Two: the scheduler.** The same code, on the same machine, read as a scattered null before a
+`pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)` went into the benchmark and as a
+clean 3 to 9 percent after it. A command-line process on Apple Silicon runs at `QOS_CLASS_DEFAULT`,
+which permits the scheduler to park the thread on an efficiency core, and that placement is STICKY
+over a whole run rather than jittering per iteration. Every row here is a minimum over fifteen to
+thirty repeats, which filters per-sample noise completely and a whole run on the wrong core not at
+all. That is the shape of the 4 percent disagreement between identical binaries this folder has
+been recording since 2026-08-08.
+
+**Three: the near-miss, which a 2D-only check would have shipped.** A version accumulating the
+WHOLE key in the prune, including the incidence half, failed 14 of 32 identity cases. Aggressive
+absorption runs between the prune and the bound and compacts `I[u]` in place, so the list the key
+must sum over does not exist yet at prune time. **Every square grid passed and every cubic and
+random graph failed**, absorption firing far more there. Only the adjacency half can move, and
+`I[u]` is still walked twice.
+
+**Verified:** `make amdorder`, `make mmdorder` and `make aligned` 38 of 38 each, `Amd3B == Amd3` on
+32 graphs including twelve random ones before the port, and 283/283 with 8 examples after it.
+
+**The vehicle is gone again**, with its build entries and its two benchmark columns. What stays in
+the shared class is the `TaggedScan` overload, which `Amd3` now uses.
+
+---
+
 **What is left.** Deleting `amd4`, once nothing further is wanted from it, lifting its postorder
 block first if a permutation-level check is ever wanted.

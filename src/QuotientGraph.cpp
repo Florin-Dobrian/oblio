@@ -454,6 +454,75 @@ const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pivot,
     return finishElimination(pivot);
 }
 
+// The same prune again, with the driver's first scan folded in under `Amd.cpp`'s tagged-W
+// encoding. This is the overload above with `outside`, `mark` and `tag` replaced by one array and
+// one tag, plus the hash key's adjacency half, which a driver that folds its scan in here has no
+// other walk of A[u] to accumulate. Everything the header says about why the fold is sound holds
+// unchanged: the scan runs over the untrimmed C[p], and the weights over A[u] are read before mass
+// elimination could move any of them.
+const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pivot, TaggedScan& scan) {
+    std::int32_t inClique = NIL;
+    std::int32_t absorbed = NIL;
+    beginElimination(pivot, inClique, absorbed);
+    const std::int32_t* reached     = mCliqueArena.data() + mCliquePtr[pivot];
+    const std::size_t   reachedSize = mCliqueSize[pivot];
+    const bool          amdOrder    = mVendoredListOrder;
+    const std::int32_t  wflg        = scan.wflg;          // hoisted, as the flags are
+    const std::int32_t  modulus     = scan.modulus;
+
+    for (std::size_t ri = 0; ri < reachedSize; ++ri) {
+        const std::int32_t u       = reached[ri];
+        const std::int32_t nvi     = static_cast<std::int32_t>(mWeight[u]);
+        const std::int32_t wnvi    = wflg - nvi;          // Amd.cpp's wnvi, and signed for it
+        std::int32_t*      source  = mSource.data() + mSourcePtr[u];
+        const std::int32_t adjacencySize = static_cast<std::int32_t>(mAdjacencySize[u]);
+        std::int32_t       kept          = 0;
+        std::size_t        explicitPart  = 0;             // a weight sum, not a count of positions
+        std::int32_t       key           = 0;             // reduced as it goes; see the header
+        std::int32_t       heldVertex    = NIL;           // see the plain prune above
+        for (std::int32_t k = 0; k < adjacencySize; ++k) {
+            const std::int32_t v = source[k];
+            if (v == pivot) continue;
+            if (mMark[v] == inClique) continue;
+            if (mLiveMerges && mEliminated[v] != 0) continue;
+            explicitPart += mWeight[v];
+            key = (key + v + 1) % modulus;
+            if (amdOrder && heldVertex == NIL) { heldVertex = v; continue; }
+            source[kept++] = v;
+        }
+        if (heldVertex != NIL) source[kept++] = heldVertex;
+        mAdjacencySize[u]       = kept;
+        scan.explicitPart[u]    = explicitPart;
+        scan.key[u]             = key;                    // the ADJACENCY half alone; see the header
+
+        const std::int32_t* incidence     = source + adjacencySize;
+        const std::int32_t  incidenceSize = static_cast<std::int32_t>(mIncidenceSize[u]);
+        std::int32_t        write         = kept;
+        for (std::int32_t i = 0; i < incidenceSize; ++i) {
+            const std::int32_t c = incidence[i];
+            if (mMark[c] == absorbed) continue;
+            source[write++] = c;
+            if (c == pivot) continue;                     // the new clique subtracts from nothing
+            // Amd.cpp's four lines, transcribed. A clique seen earlier in this step already holds
+            // the running value above the tag; one seen for the first time starts from |C[c]| and
+            // is listed once; one already absorbed reads zero and is left alone.
+            std::int32_t we = scan.w[c];
+            if (we >= wflg) {
+                we -= nvi;
+            } else if (we != 0) {
+                we = static_cast<std::int32_t>(scan.cliqueDegree[c]) + wnvi;
+                scan.touchedCliques.push_back(c);
+            }
+            scan.w[c] = we;
+        }
+        source[write++]   = pivot;
+        mIncidenceSize[u] = write - kept;
+        if (amdOrder && write - kept > 1) std::swap(source[kept], source[write - 1]);
+    }
+
+    return finishElimination(pivot);
+}
+
 const std::vector<std::int32_t>& QuotientGraph::finishElimination(std::int32_t pivot) {
     // Under mLateMassElimination the merge is the caller's, run after it has absorbed, so this
     // hands back an empty list and C[pivot] stays reach(pivot) exactly. See the setter.

@@ -158,7 +158,37 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
 
         // Under setLateMassElimination this returns an empty list and C[pivot] is reach(pivot)
         // exactly. The merge happens below, once the absorption has run.
-        qg.eliminate(pivot);
+        // THE FIRST SCAN IS FOLDED INTO THE PRUNE, landed 2026-08-10. This driver walked I[u]
+        // three times per pivot, in the prune, in scan 1 and in the bound, and A[u] twice, in the
+        // prune and in the bound; `AMD_2` walks I[u] twice and A[u] once, and the per-pass
+        // inventory in benchmarks/ordering/README.md put that difference at 96 percent of what was
+        // left of the cubic gap. The eliminator accumulates |C[c] - C[p]| into the tagged w array
+        // on the walk it is already making, so scan 1 goes entirely and the bound's adjacency loop
+        // with it, leaving the vendored routine's counts exactly.
+        //
+        // Worth 7 to 13 percent on cubic grids and 0 to 8 in 2D, with `AMD3` reaching 1.01x the
+        // vendored routine at 12 a side, 1.02x at 16 and 1.07x at 20. The same fusion exists in
+        // Amd1B and Amd2B and measured zero there, five percent slower in Amd1B's case, which is
+        // why it took a re-run to find: that reading was 2D, at one size, before ledger entry 8.
+        //
+        // clearFlag RUNS FIRST, where Amd3 calls it after the elimination: the scan is inside the
+        // eliminator now, so the tag has to be valid before it, and `Amd.cpp` calls clear_flag
+        // before its own scan 1 for the same reason. `lemax` still advances after, needing degme,
+        // and it is consumed only at the end of the step.
+        clearFlag();
+        touchedCliques.clear();
+        // NO ARRAYS OF ITS OWN, which is the other half of the change and was worth more in 2D
+        // than the fold itself. Two values have to cross from the prune to the bound, and the
+        // first version carried them in two fresh vectors of size n: that measured 3 to 9 percent
+        // faster on cubes and 12 percent SLOWER in 2D from 200 a side up, which is the footprint
+        // trade REPORT.md names and the same one that sank the 2026-08-08 key fusion. Both fit in
+        // arrays this driver already has and that are dead at this point: `partial[u]` is not
+        // written until the end of the bound pass, and `hashNext[u]` holds nothing until the
+        // vertex is filed, which happens in that same pass after the key has been read. With the
+        // arrays gone the 2D penalty went with them.
+        TaggedScan scan{partial, hashNext, w, cliqueDegree, touchedCliques, wflg,
+                        static_cast<std::int32_t>(size + 1)};
+        qg.eliminate(pivot, scan);
         pivots.push_back(pivot);
 
         buckets.unfile(degrees[pivot], pivot);      // unfile before zeroing: the bucket index is
@@ -207,29 +237,7 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
         // 272646, which is most of the reason this branch used to run three times slower than the
         // vendored routine. `Amd.cpp` does the same thing at `we = Degree[e] + wnvi`, then
         // `we -= nvi`, and it is the amd2 layer's pass 3.
-        clearFlag();                            // Amd.cpp calls this here too, before scan 1
         lemax = std::max(lemax, static_cast<std::int32_t>(degme));
-
-        touchedCliques.clear();
-        for (std::size_t k = 0; k < pivotCliqueSize; ++k) {
-            const std::int32_t u    = pivotClique[k];
-            const std::int32_t nvi  = static_cast<std::int32_t>(qg.weight(u));
-            const std::int32_t wnvi = wflg - nvi;
-            const std::int32_t* incidence     = qg.incidence(u);
-            const std::size_t   incidenceSize = qg.incidenceSize(u);
-            for (std::size_t i = 0; i < incidenceSize; ++i) {
-                const std::int32_t c = incidence[i];
-                if (c == pivot) continue;
-                std::int32_t we = w[c];
-                if (we >= wflg) {                   // already seen this step: just subtract
-                    we -= nvi;
-                } else if (we != 0) {               // first sighting: start from |C[c]|, tagged
-                    we = static_cast<std::int32_t>(cliqueDegree[c]) + wnvi;
-                    touchedCliques.push_back(c);    // only for the absorption pass below
-                }
-                w[c] = we;
-            }
-        }
 
         // AGGRESSIVE ABSORPTION. w[c] - wflg == 0 says C[c] lies wholly inside the new clique, so
         // it can never contribute anything again and its entries in the incidence lists are pure
@@ -311,12 +319,22 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
             // disjoint. All the overcounting is therefore clique against clique, outside C[p],
             // which is the smallest place it could have been put.
             // Every length hoisted out of its condition; see the note in Amd1.
-            const std::int32_t* adjacency     = qg.adjacency(u);
-            const std::size_t   adjacencySize = qg.adjacencySize(u);
             const std::int32_t* incidence     = qg.incidence(u);
             const std::size_t   incidenceSize = qg.incidenceSize(u);
 
-            std::size_t explicitPart = 0;
+            // THE ADJACENCY TERM AND THE WHOLE KEY ARE ALREADY IN HAND, accumulated by the
+            // prune over exactly the sets it produced. Amd3 walks A[u] here for the bound's
+            // explicit part and for the key's explicit half, and walks I[u] for the key's other
+            // half; this reads both instead, which is one whole walk of A[u] removed and the key
+            // out of the loop below entirely. The key's rule that an eliminated neighbor is
+            // skipped is preserved by the prune's own filter: massEliminate and number both set
+            // mLiveMerges, so from the first merge onward the prune drops eliminated vertices,
+            // and before it there are none to drop.
+            std::size_t deg = partial[u];
+            // The ADJACENCY HALF of the key, already reduced. The other half is accumulated below,
+            // in the walk this pass makes anyway, and cannot move into the prune: absorption runs
+            // between the two and compacts I[u], so the list to sum over does not exist there yet.
+            std::size_t key = static_cast<std::size_t>(hashNext[u]);
             // THE HASH KEY IS ACCUMULATED HERE, in the walks the bound is already making, which
             // is what Amd.cpp does with `hval += e` and `hval += j` inside its scan 2. It had a
             // pass of its own until 2026-08-10, walking A[u] and I[u] a second time; see the
@@ -324,13 +342,6 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
             //
             // A SUM, because addition has no order and neither do the sets: sorting to build a key
             // would be a log factor for nothing.
-            std::size_t key = 0;
-            for (std::size_t a = 0; a < adjacencySize; ++a) {
-                const std::int32_t v = adjacency[a];
-                explicitPart += qg.weight(v);
-                if (!qg.eliminated(v)) key += static_cast<std::size_t>(v) + 1;
-            }
-
             // ONE SUM, WITH NO STRIDE, and that is ledger entry 8. The incidence half was added as
             // `(c + 1) * (size + 1)` until 2026-08-09, so that a vertex and a clique of the same
             // index could not cancel. True of the KEY and false of the BUCKET: the modulus at the
@@ -353,7 +364,6 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
             // element list it is compacting, which by then holds the new element, while the degree
             // term for the new element is added in a later pass. Fusing the walks does not fuse
             // the rules.
-            std::size_t deg = explicitPart;
             for (std::size_t i = 0; i < incidenceSize; ++i) {
                 const std::int32_t c = incidence[i];
                 key += static_cast<std::size_t>(c) + 1;

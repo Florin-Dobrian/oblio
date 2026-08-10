@@ -61,13 +61,77 @@ size and the vendored AMD at the two larger ones. The figures below are kept as 
 run that produced them. `docs/DESIGN_DECISIONS.md` (2026-08-08) and `docs/TODO.md` carry the
 finding; nothing about MMD, AMD or AMD1 moved.
 
-**AND SUPERSEDED AGAIN, 2026-08-09.** Ledger entry 8 fixed the amd hash key, which is worth a
-factor of two to three on the ordering time of AMD2, AMD2B and AMD3 and moves AMD2's and
-AMD2B's fill a second time. Every `order` and `analyze` figure for those three below is
-therefore stale, and so is every break-even computed from them: AMD2 and AMD2B broke even at
-twenty-seven and seventy factorizations here and will now break even far sooner. This folder
-has not been re-run. `benchmarks/ordering/README.md` carries the new ordering times and
-`docs/DESIGN_DECISIONS.md` (2026-08-09) the finding.
+**AND SUPERSEDED AGAIN, 2026-08-09, and this time the folder WAS re-run.** Ledger entry 8 fixed the
+amd hash key, worth a factor of two to three on the ordering time of AMD2, AMD2B and AMD3, and the
+mmd entry-5 filing defect had moved MMD2's fill on 2026-08-07 without this folder noticing. The
+2026-08-01 table below is therefore stale in both branches and is kept as the record of the run
+that produced it. The current numbers are in the section that follows it.
+
+**The break-evens are the figures that moved most, and they moved by an order of magnitude.** AMD2
+went from 26.6 factorizations to 2.2 and AMD2B from 70.4 to 3.2, so the sentence this folder was
+best known for, that a caller who factors once should use a vendored routine and one who factors a
+dozen times can use ours, now holds at two or three rather than at twenty-seven and seventy. Every
+one of ours except AMD3 breaks even inside four factorizations.
+
+### The re-run, 2026-08-09
+
+**alpamayo (Apple Silicon), macOS, Apple Clang, Accelerate.** Milliseconds, best of three, grid
+140x140, n = 19600, after ledger entry 8 and after the mmd entry-5 fix. Eleven rows where the run
+above has nine, MMD3, AMD3 and AMD2B having landed since.
+
+```
+ordering    order   analyze  analyzeMF     nnz(L)    factLL    factRL    factMF    solve
+Natural      0.00      9.45       9.61    2744139    529.22    747.63    261.93     3.05
+MMD          1.19      2.60       2.77     412921      6.88      6.83      3.42     0.43
+MMD1         2.80      4.46       4.62     492921      7.37      7.48      3.94     0.51
+MMD2         1.65      3.24       3.48     447712      7.25      7.41      3.71     0.47
+MMD3         1.58      3.01       3.17     412921      6.86      6.87      3.44     0.47
+AMD          1.32      2.77       2.91     474995      7.61      8.76      3.98     0.57
+AMD1         1.89      3.40       3.57     455472      7.28      7.35      3.70     0.52
+AMD1B        1.96      3.45       3.55     455472      7.11      7.21      3.77     0.47
+AMD2         2.12      3.73       3.92     450190      7.18      7.10      3.80     0.48
+AMD3         2.35      3.88       4.07     474995      7.44      7.55      3.89     0.51
+AMD2B        2.19      3.79       3.93     450190      7.29      7.44      3.67     0.55
+
+against       analyze    factor LL     break-even
+AMD          saved ms      cost ms factorizations
+MMD              0.17        -0.73         always, wins on both
+MMD1            -1.69        -0.24            7.0
+MMD2            -0.47        -0.36            1.3
+MMD3            -0.24        -0.76            0.3
+AMD1            -0.63        -0.33            1.9
+AMD1B           -0.69        -0.50            1.4
+AMD2            -0.96        -0.44            2.2
+AMD3            -1.11        -0.18            6.3
+AMD2B           -1.03        -0.32            3.2
+```
+
+**Four things to read off it, and the last is the one that changes what this folder says.**
+
+**Every ordering of ours now breaks even inside seven factorizations and most inside two.** MMD3 at
+0.3 is effectively free, and it is the default. Where the 2026-08-01 run had two rows out past
+twenty-seven, the worst now is AMD3 at 6.3, and AMD3 is the one row whose cost is deliberate: it
+reproduces `AMD_2`'s permutation exactly, so its fill is the vendored routine's rather than ours.
+
+**MMD3 costs 0.24 ms of analysis against the vendored MMD and gives 0.76 ms per factorization
+back.** It has the vendored routine's fill by construction and factors as fast, so against AMD it
+wins on both axes at every count. That is the strongest position any of ours has ever held here.
+
+**The analysis share is unchanged and the earlier reading stands.** Analyze is 2.6 to 3.9 ms
+against a 6.9 to 7.6 ms left-looking factorization, so 27 to 36 percent of one analyze-plus-factor,
+with ordering about half of analyze. Optimizing the ordering was worth the days; the fill spread
+still does not propagate, 19 percent of fill against 5 of factorization time.
+
+**And the amd branch's cost is now almost entirely AMD3's alignment rather than the extras.** AMD1
+at 1.89 ms of ordering, AMD2 at 2.12 and AMD3 at 2.35: the extras cost 12 percent where before the
+key fix they cost a factor. What separates AMD3 from AMD2 is the fourth pass and the seven percent
+more pairs the vendored list order tests, which is the price of matching `AMD_2` exactly and is
+paid for a reason.
+
+**One caution, since this folder has exactly one problem family.** Everything above is square grids.
+`benchmarks/ordering` measures cubic ones and the two disagree about our orderings, so no
+break-even here should be quoted as a property of the methods rather than of this family. That is
+still the first item under "What this folder still needs".
 
 **alpamayo (Apple Silicon), macOS, Apple Clang, Accelerate, 2026-08-01.** Milliseconds, best of
 three, grid 140x140, n = 19600.
@@ -142,6 +206,12 @@ number of factorizations. **AMD1 and AMD1B break even at about three, MMD2 at fi
 at twenty-seven and seventy.** A caller who factors once per pattern should use a vendored routine;
 one who factors a dozen times per analysis can use ours and not notice.
 
+**SUPERSEDED 2026-08-09, and by an order of magnitude.** The table above predates ledger entry 8
+and the mmd entry-5 fix. Re-run: AMD2 breaks even at 2.2 factorizations rather than 26.6, AMD2B at
+3.2 rather than 70.4, MMD2 at 1.3 rather than 5.5, and MMD3, which did not exist when this was
+written, at 0.3. The worst of ours is now AMD3 at 6.3, and the sentence above should be read as two
+or three factorizations rather than a dozen. The numbers are in the re-run under Results.
+
 **And MMD is the ordering to beat, not AMD. ON SQUARE GRIDS, corrected 2026-08-09.** The fill half
 of that does not hold on cubic ones: `benchmarks/ordering` now measures both families, and MMD
 fills 13 percent BELOW AMD on squares and slightly ABOVE it on cubes, 2869267 against 2836813 at 26
@@ -152,6 +222,13 @@ the first item under "What this folder still needs" is what would settle it. As 
 **MMD is the ordering to beat, not AMD.** It analyzes fastest of the two vendored routines,
 fills the least of all nine, and factors fastest. The closest of ours is MMD2, 0.68 ms behind on
 analysis and 0.12 ms ahead per factorization.
+
+**And the closest of ours is MMD3 now, 2026-08-09, which is a different statement.** MMD2 was close
+on time and behind on fill; MMD3 has the vendored routine's fill BY CONSTRUCTION, being its
+permutation, so on this family it gives up 0.24 ms of analysis and nothing else. Against AMD it
+wins on both axes at every count. The gap to beat is therefore 0.24 ms of ordering rather than
+anything about the ordering's quality, which is a narrower and more tractable target than this
+section was written against.
 
 ### Two things this turned up that belong to other parts of the tree
 

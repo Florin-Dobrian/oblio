@@ -205,6 +205,15 @@ saying because it is not obvious: AMD2 still beats AMD1 at every square size, an
 vendored routine at six of the seven, tying at the smallest, where before the count was five.
 Nothing about MMD, AMD, AMD1 or AMD3 moves.
 
+**`benchmarks/pipeline` was re-run the same day rather than annotated, because its whole subject
+moved.** Its break-evens are the number a caller actually faces, and they fell by an order of
+magnitude: AMD2 from 26.6 factorizations to 2.2 and AMD2B from 70.4 to 3.2. Every one of ours now
+breaks even inside seven and most inside two. Two things beyond the amd fix show up in that run and
+neither is new work: MMD2's fill had moved on 2026-08-07 with the mmd entry-5 defect and that
+folder had never noticed, and MMD3, AMD3 and AMD2B did not exist when its table was written. So the
+figure it was best known for, that a caller factoring once should take a vendored routine, now
+turns at two or three rather than at a dozen.
+
 ---
 
 ## 2026-08-09: the ordering read freed memory for a week, and the acceptance test is what found it

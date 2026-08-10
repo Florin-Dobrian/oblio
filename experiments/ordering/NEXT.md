@@ -81,6 +81,28 @@ single shared elements column, and omitted the pair loop entirely; done per code
 what would locate the 1.6x. `benchmarks/ordering/README.md` carries the counters and the null
 result.
 
+**OUR HALF OF THAT INVENTORY IS ALREADY COUNTED**, and the numbers are in that same section:
+`AMD3` at 374.8 element visits per pivot on a 26 cubed grid and 155.2 at 140 a side, broken out by
+pass. Two entries stand out and both are candidates rather than findings. We walk `I[u]` THREE
+times per pivot, in scan 1, in the bound and in the key, at 43.65 visits each on cubes, where
+`AMD_2` appears to walk it twice, accumulating its key inside scan 2; if that reading is right, one
+whole pass of 11.6 percent of our total is structurally extra and the key fusion finally has a
+price rather than an argument. And the prune's incidence compaction is the largest single pass by a
+factor of two, 83 visits per pivot, because it walks `I[u]` BEFORE absorption has shortened it
+where the other three walk it after.
+
+**What is missing is the vendored half, and only that.** Counters on `AMD_2`'s scan 1, its scan 2
+and its element-construction loops, generated the way `tools/hook_amd.py` and the 2026-08-09 count
+probe generate theirs, with every anchor asserted. Until it exists the table is our numbers rather
+than an attribution, and the reading about scan 2 above is a reading of the source and not a
+measurement.
+
+**And the standing caution, which this session earned twice.** A count locates work; it does not
+price it. The two passes fused on 2026-08-09 were 6.7 percent of the visits on cubes and moved
+useful cycles by 0.25 percent, because they were contiguous walks over hot arrays. The three `I[u]`
+walks are back to back over the same lists, so the same argument applies to them and the counters,
+not the timing tables, are what would settle it.
+
 **2. Count the hash pass's pairs, 2D against 3D. DONE 2026-08-09, and it was a defect.** The count
 was taken, and against the vendored routine on the same graphs and for the SAME MERGES we were
 testing 19.0 pairs per pivot at 140 a side where it tests 0.333, and 155.3 at 26 cubed where it
@@ -110,6 +132,28 @@ size distribution at comparable n on both families. A flat count per pivot kills
 growing one says the fix is a better filter rather than a faster loop. One counter beside one the
 prototypes already keep. `benchmarks/ordering/README.md`, "What the two families say about where
 the amd gap is", carries the tables.
+
+**2b. Take `AMD1B` and `AMD2B` out of the public enum, 2026-08-09, decided and not yet done.**
+Nine orderings a caller can name, Natural, MMD, AMD and 1/2/3 per branch, which is the story worth
+telling: basic, extras, alignment. The B variants are an ORACLE rather than an ordering, and the
+tree already has the pattern for that in `order_timing.cpp`, whose `AMDraw` column is deliberately
+not an enumerator because that "would put a benchmark's oracle into the library's public enum and
+into every switch over it".
+
+So: the enumerators and their dispatch go; `src/Amd1B.cpp` and `src/Amd2B.cpp` stay, compiled and
+committed; `test_order` keeps all sixteen assertions by calling `orderAmd1B(colPtr, rowIdx)`
+against `orderAmd1(...)` directly; the benchmarks keep their columns through a local identity
+beside `AMDraw`'s. **The identity checks must not be dropped**: `Amd2B == Amd2` is how we knew the
+pair moved together under the key fix.
+
+A build flag was considered and rejected. Detection cannot apply, these files always being present,
+so it would be a deliberate switch, and either default is wrong: on, and an outside build is noisy;
+off, and it costs a word every time. It would also give the suite FOUR assertion counts rather than
+two, 283 and 267 with `private/` and 269 and 253 without, since the B variants are worth sixteen
+assertions. What the enum change does cost is `test_pipeline`'s sweep, which asserts all eleven
+orderings are reached and becomes nine: two assertions change content, none changes count, and
+`docs/TESTING_SPECIFICATION.md` moves in the same step by the invariant, in wording rather than in
+totals.
 
 **3. The same widening is available to `make test`, cheaply.** Its prototype-against-production
 comparison still runs on 2D grids at sides 10 and 20 alone, and `graphs.h` holds the 3D and random

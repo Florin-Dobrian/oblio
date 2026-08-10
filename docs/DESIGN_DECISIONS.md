@@ -153,6 +153,24 @@ factor, suspect the COVERAGE of the count before its interpretation.** That entr
 reasoning surviving several confirmations can still never have been checked. It was written about
 the wrong claim.
 
+**And the blindness and the reinvention picked the same line, which is the sharpest thing here.**
+The obvious question is how a key survived two years of comparison against a routine that has one.
+The answer is that we never compared the key: we compared the OUTPUTS of the mechanism it feeds,
+and the key cannot reach them. Twins collide under any function of the pattern, so the merges are
+identical however badly the key spreads, and bad spreading costs pairs tested and nothing else. The
+alignment method has the same shape, working from the first DIFFERING PIVOT; the key never produced
+one, so the method never pointed at those lines. Entries 5 and 6 are in this very pass, so we read
+that code against `AMD_2` twice, for what it computes rather than for how it spreads.
+
+Meanwhile the one line we did not port is that line. `AMD_2` writes `hval += e` and `hval += j`; we
+derived a key instead, with a stride and a written justification for it. **Those two facts are not
+independent.** Reinvention concentrates exactly where outputs cannot see the difference, because
+that is where it feels safe, so the lines nobody ported and the defects no oracle can catch are the
+same set. The tree's invariant that every defect has come from reimplementation rather than
+translation is usually about correctness; here it produced a defect that no correctness oracle
+could ever have found, and a rationale in the README that made it look considered rather than
+invented.
+
 **What was new here, since the technique was not.** `MMD3.md` entries 5 and 6 came from two
 `fprintf` calls in a scratch copy of `Mmd.cpp`, and `AMD3.md` iteration 1 built a six-site probe of
 `Amd.cpp`. Instrumenting the oracle is written into the method section. Every previous use asked

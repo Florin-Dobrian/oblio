@@ -1,18 +1,24 @@
 # pipeline benchmark - where a solve's time goes, across all its phases.
 #
-#:   make        build the benchmark
-#:   make run2d  build and run it, the default square-grid sizes, every ordering
-#:   make run3d  the same on cubic grids, which are a DIFFERENT PROBLEM FAMILY
+#:   make          build both benchmarks
+#:   make run2d    where a solve's time goes, the default square-grid sizes, every ordering
+#:   make run3d    the same on cubic grids, which are a DIFFERENT PROBLEM FAMILY
+#:   make scale2d  how the cost GROWS, a longer square ladder, every factorization
+#:   make scale3d  the same, cubic
 #:   make clean
-#:   make help   print this list
+#:   make help     print this list
 #:
-#: ./pipeline_timing_cpp 200        any square sides
-#: ./pipeline_timing_cpp 3d 26      any cubic sides
+#: ./pipeline_timing_cpp 200            any square sides
+#: ./pipeline_timing_cpp 3d 26          any cubic sides
+#: ./pipeline_scaling_cpp 2d 100 200    any square sides
+#: ./pipeline_scaling_cpp 3d 16 20      any cubic sides
 #:
-#: The target names and the default grid ladders match ordering/ exactly, 32, 64, 100, 140 on
-#: squares and 6, 12, 16, 20, 26 on cubes, so a row here can be read beside a row there without
-#: converting sizes. There is no bare `make run` in either folder: the family is always named,
-#: because a claim measured on one of them is a claim about that one.
+#: run2d and run3d use ordering/'s ladders exactly, 32, 64, 100, 140 on squares and 6, 12, 16,
+#: 20, 26 on cubes, so a row here can be read beside a row there without converting sizes. The
+#: SCALE ladders are longer and are their own, 100 to 600 and 16 to 48, and their matrices carry a
+#: dominance margin the short ladders' do not, so rows are NOT comparable across the two. There is
+#: no bare `make run` in either folder: the family is always named, because a claim measured on
+#: one of them is a claim about that one.
 #:
 #: Prefix any of these with OBLIO_PUBLIC=1 to build as everyone else does, without the vendored
 #: orderings; see docs/DESIGN_DECISIONS.md. The same word works in the repo root, both benchmarks
@@ -75,24 +81,41 @@ ifneq ($(VENDOR_SRCS),)
   VENDOR_OBJS = Amd.o Mmd.o
 endif
 
-.PHONY: all run clean help
+# `make` builds, as the header says it does. Without this the default goal is the first rule in
+# the file, which is `help`, and a bare `make` would print the usage block and build nothing.
+# CLAUDE.md's pre-release clone checklist runs `make` here and expects a build.
+.DEFAULT_GOAL := all
+
+.PHONY: all run2d run3d scale2d scale3d clean help
 
 # Print the target list from this file's header. Those lines are marked with #: so there is one
 # source of truth: the header comment is the help text.
 help:
 	@grep '^#:' $(firstword $(MAKEFILE_LIST)) | cut -c3-
 
-all: pipeline_timing_cpp
+all: pipeline_timing_cpp pipeline_scaling_cpp
 
 pipeline_timing_cpp: pipeline_timing.cpp $(OBLIO_SRCS) $(OBLIO_HDRS) $(VENDOR_SRCS) .build-mode
 	$(if $(VENDOR_SRCS),$(CXX) $(CXXFLAGS) -w -c $(VENDOR_SRCS))
 	$(CXX) $(CXXFLAGS) $(VENDOR_DEFS) $< $(OBLIO_SRCS) $(VENDOR_OBJS) $(BLAS_LIBS) -o $@
 
-run2d: all
+# The scaling driver, which measures growth rather than a share: every factorization Oblio has,
+# real and complex Hermitian and complex symmetric, over a longer ladder. See its header.
+pipeline_scaling_cpp: pipeline_scaling.cpp $(OBLIO_SRCS) $(OBLIO_HDRS) $(VENDOR_SRCS) .build-mode
+	$(if $(VENDOR_SRCS),$(CXX) $(CXXFLAGS) -w -c $(VENDOR_SRCS))
+	$(CXX) $(CXXFLAGS) $(VENDOR_DEFS) $< $(OBLIO_SRCS) $(VENDOR_OBJS) $(BLAS_LIBS) -o $@
+
+run2d: pipeline_timing_cpp
 	./pipeline_timing_cpp 2d
 
-run3d: all
+run3d: pipeline_timing_cpp
 	./pipeline_timing_cpp 3d
 
+scale2d: pipeline_scaling_cpp
+	./pipeline_scaling_cpp 2d
+
+scale3d: pipeline_scaling_cpp
+	./pipeline_scaling_cpp 3d
+
 clean:
-	rm -f .build-mode pipeline_timing_cpp Amd.o Mmd.o
+	rm -f .build-mode pipeline_timing_cpp pipeline_scaling_cpp Amd.o Mmd.o

@@ -2,8 +2,8 @@
 
 This report asks a single question, on matrices Oblio's authors did not choose and did not
 generate: **when Oblio returns a solution, how good is it?** `PERFORMANCE.md` beside it asks what
-those answers cost, on the same kind of input; a third report will cover scaling on synthetic
-grids.
+those answers cost, on the same kind of input, and `benchmarks/pipeline/SCALING.md` how the cost
+grows, on generated grids where every factorization Oblio has can be exercised.
 
 The short answer, over the 106 matrices solved out of a set drawn from 28 problem kinds of the
 SuiteSparse Matrix Collection and spanning four orders of magnitude in fill: **every solution
@@ -18,8 +18,8 @@ awkward cases were, because a report that only shows the good rows is not worth 
 
 | | |
 |---|---|
-| Machine | Apple Silicon (M-series), macOS |
-| Compiler | Apple Clang, C++17, `-O3 -DNDEBUG` |
+| Machine | Apple M4, 32 GB, macOS 26.6.1 |
+| Compiler | Apple Clang (Xcode 26.6), C++17, `-O3 -DNDEBUG` |
 | BLAS and LAPACK | Apple Accelerate |
 | Oblio dependencies | a C++17 compiler, `make`, and a BLAS. Nothing else |
 
@@ -352,7 +352,7 @@ rationalization.
 
 Stated plainly, because the boundaries matter more than the headline.
 
-- **No timing.** Nothing here is a performance claim. That is a companion report.
+- **No timing.** Nothing here is a performance claim. Those are the two companion reports.
 - **One ordering and one traversal**, both defaults. AMD, right-looking and multifrontal are
   implemented and exercised in the performance report rather than here.
 - **Real double precision only.** Oblio supports complex Hermitian and complex symmetric

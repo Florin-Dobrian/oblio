@@ -1,18 +1,19 @@
 # Oblio: Performance
 
 This report asks what a solve costs, on matrices Oblio's authors did not choose and did not
-generate: **where does the time go, and which choices move it?** Its companion `ACCURACY.md` asks
-how good the answers are, on the same kind of input.
+generate: **where does the time go, and which choices move it?** Its companions ask the other two
+questions: `ACCURACY.md` how good the answers are, on the same kind of input, and
+`benchmarks/pipeline/SCALING.md` how the cost grows, on generated grids.
 
 Three results, over 107 positive definite matrices from the SuiteSparse Matrix Collection:
 
 - **The multifrontal traversal is the fastest numeric factorization, by roughly a third.** Against
   the best of the three on each matrix it averages 1.03 where left-looking averages 1.36 and
   right-looking 1.39.
-- **The choice between minimum degree and approximate minimum degree barely matters for fill**,
-  one to three percent, on matrices with real structure. On generated grids the same comparison
-  reaches thirteen percent, which turns out to be a property of grids rather than of the
-  orderings.
+- **The choice between multiple minimum degree and approximate minimum degree barely matters for
+  fill**, one to three percent, on matrices with real structure. On generated grids the same
+  comparison reaches thirteen percent, which turns out to be a property of grids rather than of
+  the orderings.
 - **The analysis is 45 percent of a one-shot solve at the median**, against 47 percent for the
   numeric factorization, and that split holds across three orders of magnitude of factor size.
 
@@ -22,8 +23,8 @@ Everything below says how those were measured and what they do not establish.
 
 | | |
 |---|---|
-| Machine | Apple Silicon (M-series), macOS |
-| Compiler | Apple Clang, C++17, `-O3 -DNDEBUG` |
+| Machine | Apple M4, 32 GB, macOS 26.6.1 |
+| Compiler | Apple Clang (Xcode 26.6), C++17, `-O3 -DNDEBUG` |
 | BLAS and LAPACK | Apple Accelerate |
 | Timing | best of three after a warm-up, per phase |
 
@@ -38,7 +39,7 @@ filter it. In a sibling benchmark this one call turned a scattered null result i
 | | |
 |---|---|
 | Factorization | Cholesky, real, double precision |
-| Orderings | minimum degree (MMD) and approximate minimum degree (AMD) |
+| Orderings | multiple minimum degree (MMD) and approximate minimum degree (AMD) |
 | Traversals | left-looking, right-looking, multifrontal |
 | Phases timed | ordering, analysis, numeric factorization, solve |
 
@@ -74,6 +75,13 @@ The set spans 20 problem kinds, among them structural mechanics, computational f
 thermal, model reduction, optimization and materials. Factor sizes run from a thousand entries to
 **46 million**, and multifrontal factorization times from under a tenth of a millisecond to 1.1
 seconds.
+
+**Accuracy is not the subject here and was checked anyway.** Across all 428 factorizations, four
+orderings on each of 107 matrices, the worst normwise backward error was **4.1e-15**, which is
+machine precision. Nothing perturbed a pivot and nothing delayed a column, as Cholesky on a
+positive definite matrix never does either. Relative residuals range far more widely, up to 1.5e+03
+on the worst-conditioned matrix in the set, which is conditioning rather than error and is the
+subject of `ACCURACY.md`, where the distinction between the two measures is drawn properly.
 
 ## Results
 
@@ -162,7 +170,8 @@ that.
 
 ## Where a solve's time actually goes
 
-Median share of a one-shot solve, at minimum degree and the multifrontal traversal, over the 107
+Median share of a one-shot solve, at multiple minimum degree and the multifrontal traversal,
+over the 107
 matrices, and again over the 26 with the largest factors:
 
 | phase | all | largest quarter |
@@ -191,7 +200,8 @@ factorizations.
 
 ### Eight matrices in full
 
-Milliseconds at minimum degree and the multifrontal traversal, spanning the set from a thousand
+Milliseconds at multiple minimum degree and the multifrontal traversal, spanning the set from a
+thousand
 factor entries to 46 million:
 
 | matrix | n | nnz(L) | order | analysis | factor | solve |
@@ -228,7 +238,8 @@ set, with a 46 million entry factor and a 1.5 second solve, the analysis is stil
 time.
 
 **`bcsstk14` is the row worth pausing on.** Its ordering alone is 35 percent of the solve,
-because minimum degree is expensive on it relative to a factorization of only 112507 entries. The
+because multiple minimum degree is expensive on it relative to a factorization of only 112507
+entries. The
 two sections above explain when that happens.
 
 ## What this report does not establish
@@ -246,7 +257,7 @@ two sections above explain when that happens.
   untouched, and five matrices were declined for predicted fill above the cap, the largest at 1.2
   billion entries.
 - **No claim about asymptotic scaling.** Measuring how cost grows with problem size needs a
-  controlled family rather than a heterogeneous set, and that is a separate report on synthetic
+  controlled family rather than a heterogeneous set, which is what `SCALING.md` does on generated
   grids.
 
 ## Reproducing this

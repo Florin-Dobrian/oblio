@@ -1,7 +1,9 @@
-# NEXT: the growth term, a matrix that is not a grid, and what the constant factor has left
+# NEXT: real matrices arrived, and what they said about the orderings
 
-A handover note between sessions, rewritten 2026-08-10 after three commits closed the constant
-factor on the amd branch. **It is meant to be deleted** once the items below are done or abandoned.
+A handover note between sessions, rewritten 2026-08-11 after two commits added a real-matrix
+benchmark and its two reports, and updated 2026-08-10 before that when three commits closed the
+constant factor on the amd branch. **It is meant to be deleted** once the items below are done or
+abandoned.
 Everything in it that outlives the task is already somewhere durable and this file only points at
 those places:
 
@@ -12,6 +14,9 @@ those places:
   against vendored section beside finding 1.
 - `benchmarks/ordering/README.md`, the per-pass inventory, the noise floor, and both scaling
   ladders. `benchmarks/pipeline/README.md`, where the ordering phase gets priced.
+- `benchmarks/matrices/README.md`, everything the real matrices said, including the two ordering
+  investigations of 2026-08-11 in full. Its `ACCURACY.md` and `PERFORMANCE.md` are the reports
+  drawn from it, written for readers outside this tree.
 
 If you find yourself about to record something here that a later reader would want, put it in one
 of those instead. The previous `NEXT.md` went stale precisely because it accumulated content that
@@ -32,14 +37,42 @@ factor of two to three on cubes), the key folded into the bound pass, and the fi
 the prune. **The walk axis is finished**: `Amd3` walks `I[u]` twice per pivot and `A[u]` once,
 which is `AMD_2`'s count exactly.
 
+**Item 4 of the previous list is done.** Real matrices are in, `benchmarks/matrices/` holds the
+benchmark and two reports, and they changed what the other items are measured against. What they
+said about the orderings, in order of how much it should affect the plan:
+
+- **The fill gap between MMD and AMD collapses on real structure**, to one to three percent from up
+  to thirteen on grids. Grids are where the gap lives, because nearly every live vertex has the
+  same degree and the tie-break decides almost every pick. **So a fill improvement measured on a
+  grid is a claim about grids**, and the ladders in `benchmarks/ordering` should be read that way
+  from now on.
+- **Ordering is a fifth of a one-shot solve at the median**, and the whole analysis is 45 percent
+  against the numeric factorization's 47. That is a stronger case for optimizing the ordering than
+  the pipeline benchmark's grid figure of a tenth to a fifth, and it is measured on the input a
+  caller actually has.
+- **Two ordering pathologies turned up, and one has a documented remedy.** Both are written out in
+  `benchmarks/matrices/README.md` under "Why some matrices order slowly".
+
 **What is open, shortest first.**
 
 1. **A profile that compares `amd3` against itself at two sizes**, 140 and 400 a side. It decides
    the next item and takes ten minutes. Item 2d.
-2. **The descriptor struct**, `docs/TODO.md` question 3, if that profile says stalls. Item 2d.
-3. **Narrow the one-dimensional sizes.** Self-contained, rules settled, ordering first. Item 2e.
-4. **A matrix that is not a grid.** Oldest open item in the tree, item 1 below, and the one that
-   would change what the other three are measured against.
+2. **A dense-row threshold in `QuotientGraph`.** NEW on 2026-08-11 and the largest ordering-time
+   item the real matrices found. A single vertex adjacent to everything makes minimum degree
+   quadratic; the vendored AMD sets such rows aside before ordering, above `max(16, 10*sqrt(n))`
+   entries, and places them last, and its own source says the cost of not doing so is O(n^2). Oblio
+   has no such rule anywhere. On `GHS_indef/bloweybq`, one column of degree 10000 among 9992 of
+   degree 5, removing it by hand takes MMD from 70.7 ms to 0.83 and AMD3 from 470 to 1.5, while the
+   vendored AMD does not move. **Fill is unaffected**, so this is time only. It belongs in the
+   shared quotient graph so all six drivers gain it at once.
+3. **The descriptor struct**, `docs/TODO.md` question 3, if that profile says stalls. Item 2d.
+4. **Narrow the one-dimensional sizes.** Self-contained, rules settled, ordering first. Item 2e.
+5. **Why `Amd3` and the vendored `AMD` disagree on fill on real matrices.** NEW on 2026-08-11.
+   `make amdorder` shows exact agreement on all 38 acceptance cases, which are grids and random
+   patterns; on the 107-matrix performance set they differ on a minority, once by 4 percent on
+   `HB/bcsstk08`, 29922 against 31153. **Ours fills less where they differ**, so it is not urgent,
+   but it is a divergence the acceptance tests cannot see and the widening that would see it is the
+   41 pattern files already sitting in `data/`.
 
 **Three things not to retry without reading why**, each of which cost a day or a wrong claim:
 
@@ -54,6 +87,20 @@ which is `AMD_2`'s count exactly.
 ---
 
 ## Closed since the last note
+
+**Real matrices arrived, 2026-08-11, and item 4 of the previous list is done.**
+`benchmarks/matrices/` fetches from the SuiteSparse Matrix Collection by an automated filter over
+its published index, reads Matrix Market, screens for structural singularity with a maximum
+matching, and runs two drivers: accuracy over 106 matrices in 28 problem kinds, and performance
+over 107 positive definite ones across four orderings and three traversals. Two reports came out of
+it, `ACCURACY.md` and `PERFORMANCE.md`, both written for readers outside this tree.
+
+**What it settled, beyond the two ordering items above.** Every solution was backward stable at
+machine precision, and no row had a poor answer whose reason was ours. Multifrontal is the fastest
+traversal by roughly a third, 1.028 against 1.364 and 1.388, which is the clearest result either
+benchmark folder has produced. And Cholesky agreed with the inertia on every matrix of four
+independent samples, at 35, 58, 88 and 106, which is the only place two parts of the library check
+each other.
 
 **Two fusions landed and the constant factor on cubes is largely gone, 2026-08-10.** The hash key
 is accumulated in the bound's walks and the first scan is folded into the prune through
@@ -389,8 +436,9 @@ pass. The point is only that it no longer inherits an argument it used to.
 deliberately does not do, on the seven examples, 2D grids to 140, 3D grids to 24 and nine random
 patterns. After the two fusions of 2026-08-10, the hash key into the bound and the first scan into
 the prune, `AMD3` runs at roughly 1.0 to 1.25x the vendored routine on cubic grids from 12 to 32 a
-side, overlapping it at 16, and 1.33 to about 1.95x on square grids from 32 to 400. `MMD3` is at 0.87 to 1.05x its own on
-cubes and 1.26 to 1.55x in 2D, with no trend in n on either. `AMD3` is FASTER than both `AMD1` and `AMD2` at every cubic size while
+side, overlapping it at 16, and 1.33 to about 1.95x on square grids from 32 to 400. `MMD3` is at
+0.87 to 1.05x its own on cubes and 1.26 to 1.55x in 2D, with no trend in n on either. `AMD3` is
+FASTER than both `AMD1` and `AMD2` at every cubic size while
 returning the vendored permutation, which `AMD2` does not. What is left is the 2D penalty, which
 grows with n and is stalls rather than work, and a cubic gap that has only now started to grow with
 size at all. The gap is NOT algorithmic, NOT integer width, NOT the number of arrays
@@ -493,3 +541,20 @@ routine's. `benchmarks/README.md` records how far an attempt to get them got and
   once; the size ARRAYS stay `std::size_t` because they are arithmetic operands and narrowing them
   buys a cast at every one. Measured at zero for speed at the hottest loop, so this is a clarity
   change and not a performance one.
+- **`DirectSolver` does not forward `NumFactorDynamic::rank()`.** NEW on 2026-08-11. It forwards
+  the perturbation and delay counts, the pivot counts and `inertia`, but not the numerical rank,
+  which is the one number that names a numerically singular matrix directly. The accuracy benchmark
+  stands in with the inertia's zero count, whose own header warns it is least reliable on singular
+  input, which is exactly where it is being used. A small library change.
+- **Why dynamic pivoting cascades on a chain.** NEW on 2026-08-11 and the largest question the real
+  matrices raised about the library rather than about a benchmark. `Oberwolfach/LFAT5000` delays
+  3.1 million columns for a 232-fold increase in fill on a matrix that is POSITIVE DEFINITE, where
+  no pivot needed delaying at all; `GHS_indef/bloweya` does the same past 32 GB and cannot be
+  factored. `GHS_indef/bloweybq` is the control: the same chain shape, definite, zero delays.
+  Ashcraft, Grimes and Lewis name the mechanism and give four routes out, all four recorded in
+  `benchmarks/matrices/ACCURACY.md`. The first is free: relax `setPivotThreshold` from its default
+  of 0.1, which they study directly and recommend loosening.
+- **`benchmarks/ordering` and `benchmarks/pipeline` build nothing on a bare `make`**, their first
+  rule being `help`, so `CLAUDE.md`'s pre-release clone checklist has been passing vacuously for
+  both. `benchmarks/matrices` sets `.DEFAULT_GOAL := all` and the three are now inconsistent. One
+  line each.

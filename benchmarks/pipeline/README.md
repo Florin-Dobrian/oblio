@@ -1,22 +1,37 @@
 # Pipeline Benchmark
 
-Where a solve's time actually goes: ordering, the rest of analyze, factorization in each of the
-three traversals, and the solve. Nine orderings, Cholesky, real, on grid Laplacians.
+Two drivers on grid Laplacians, asking two questions.
+
+**`pipeline_timing_cpp`: where a solve's time goes** at a few fixed sizes. Ordering, the rest of
+analyze, factorization in each of the three traversals, and the solve. Nine orderings, Cholesky,
+real.
+
+**`pipeline_scaling_cpp`: how that cost grows.** A longer ladder, four orderings, three traversals,
+and **every factorization Oblio has across all three value types**. `SCALING.md` beside this file
+is the report drawn from it, written for readers outside this tree.
 
 **A benchmark, not an experiment**, on the same terms as `../ordering`: it links `../../src`
-directly and is expected to keep compiling as the tree moves, which is why `make` builds it and
-only `make run2d` and `make run3d` measure.
+directly and is expected to keep compiling as the tree moves, which is why `make` builds both and
+only the run and scale targets measure.
 
 ```
-make          build
-make run2d    build and run, square grid sides 32, 64, 100, 140
+make          build both
+make run2d    square grid sides 32, 64, 100, 140
 make run3d    the same on CUBIC grids, sides 6, 12, 16, 20, 26
+make scale2d  the longer square ladder, 100, 140, 200, 300, 400, 600
+make scale3d  the same, cubic, 16, 20, 26, 32, 40, 48
 make clean
 make help     print this list
 
-./pipeline_timing_cpp 200        any square sides
-./pipeline_timing_cpp 3d 26      any cubic sides
+./pipeline_timing_cpp 200            any square sides
+./pipeline_timing_cpp 3d 26          any cubic sides
+./pipeline_scaling_cpp 2d 100 200    any square sides
+./pipeline_scaling_cpp 3d 16 20      any cubic sides
 ```
+
+**The two ladders' matrices are NOT the same matrices**, and rows are not comparable across them.
+The scaling ladder's carry a dominance margin the short ladder's do not; the section below says
+why.
 
 ## Why this folder exists
 
@@ -358,18 +373,121 @@ correctness oracle in the tree, and at 16 cubed the branch now wins this table o
 argument about **where to look next**, and this table says the factorization, which is 2 to 7 times
 the ordering at every size and 30 times it under a Natural ordering.
 
+## The scaling driver, 2026-08-11
+
+`pipeline_scaling.cpp` answers a growth question, which is why it exists beside a driver that
+already times the same phases. `../matrices` cannot answer it: two real matrices of the same order
+differ in fill by orders of magnitude, so a curve through them measures the sample. A grid ladder
+holds the structure fixed and moves one parameter.
+
+### The ladders, and the two rungs beyond them
+
+Priced with MMD3 on alpamayo, actual fill rather than an estimate. The committed ladders are the
+first six of each; the last two are documented because the cost of reaching them is the thing worth
+knowing before anyone tries.
+
+**Square:**
+
+| side | n | nnz(A) | nnz(L) | real | complex |
+|---|---|---|---|---|---|
+| 100 | 10000 | 49600 | 186835 | 1 MB | 3 MB |
+| 140 | 19600 | 97440 | 412921 | 3 MB | 7 MB |
+| 200 | 40000 | 199200 | 981766 | 8 MB | 16 MB |
+| 300 | 90000 | 448800 | 2482085 | 0.02 GB | 0.04 GB |
+| 400 | 160000 | 798400 | 4862612 | 0.04 GB | 0.07 GB |
+| 600 | 360000 | 1797600 | 12234021 | 0.09 GB | 0.18 GB |
+| 800 | 640000 | 3196800 | 23663216 | 0.18 GB | 0.35 GB |
+| 1000 | 1000000 | 4996000 | 38847780 | 0.29 GB | 0.58 GB |
+
+**Cubic:**
+
+| side | n | nnz(A) | nnz(L) | real | complex |
+|---|---|---|---|---|---|
+| 16 | 4096 | 27136 | 295113 | 2 MB | 5 MB |
+| 20 | 8000 | 53600 | 840560 | 7 MB | 13 MB |
+| 26 | 17576 | 118976 | 2869267 | 0.02 GB | 0.04 GB |
+| 32 | 32768 | 223232 | 7898321 | 0.06 GB | 0.12 GB |
+| 40 | 64000 | 438400 | 22455569 | 0.17 GB | 0.33 GB |
+| 48 | 110592 | 760320 | 51113859 | 0.38 GB | 0.76 GB |
+| 56 | 175616 | 1210496 | 101747449 | 0.76 GB | 1.52 GB |
+| 64 | 262144 | 1810432 | 194505331 | 1.45 GB | 2.90 GB |
+
+**The GB columns are the factor's values alone**, before update matrices and indices, so treat them
+as a floor. On a 32 GB machine the 64 cube is reachable and the rung after it is not.
+
+**And the two families are nothing alike, which is the point of running both.** In 2D ten times the
+columns costs 200 times the fill; in 3D sixty-four times the columns costs 660 times the fill. A 64
+cube at n = 262144 fills five times more than a 1000 square at n = 1000000.
+
+### Why the matrices carry a dominance margin
+
+`pipeline_timing.cpp` uses a diagonal of 4 against four neighbors in 2D, so its interior rows have a
+dominance margin of **zero**. That matrix is positive definite by structure rather than by
+dominance, which is fine for Cholesky and is not enough here: the complex symmetric arm has no
+definiteness to appeal to, `x^T A x` being complex, so **diagonal dominance is the only guarantee
+available** that no pivot is too small to divide by.
+
+So every scaling matrix has a diagonal 1.25 times the sum of its off-diagonal magnitudes, in all
+three arms. The consequence is that **the scaling ladder's matrices are not the short ladder's**,
+even at a size the two share, and rows must not be read across.
+
+**The run checks the margin rather than trusting it.** Static LDL never perturbs and dynamic LDL
+never delays on any matrix of either ladder, and the driver prints a closing line saying so; if
+either count is ever nonzero the construction is wrong, and it says that instead.
+
+### The eight arms
+
+| values | factorizations |
+|---|---|
+| real | Cholesky, static LDL^T, dynamic LDL^T |
+| complex Hermitian | Cholesky, static LDL^H, dynamic LDL^H |
+| complex symmetric | static LDL^T, dynamic LDL^T |
+
+The two absences are not gaps. Over the reals `LDL^H` **is** `LDL^T`, so running both repeats a
+column. And Cholesky needs Hermitian positive definiteness, so it does not apply to a complex
+symmetric matrix; worse, `zpotrf` reads one triangle and assumes the other is its conjugate, so it
+would run, succeed and return a plausible wrong answer. `examples/example_pipeline_complex.cpp`
+makes the same point at greater length.
+
+**This is the only place in the tree where complex Cholesky can be measured at all.** The
+SuiteSparse collection has 23 complex square pattern-symmetric matrices, of which one is marked
+positive definite, and that one is complex symmetric rather than Hermitian.
+
+### What the first run said, 2026-08-11
+
+**alpamayo, Apple M4, 32 GB, macOS 26.6.1, Apple Clang (Xcode 26.6), Accelerate.** `SCALING.md`
+carries the full account; the four results are:
+
+- **Factorization time tracks the fill almost exactly** for Cholesky and static LDL, at an exponent
+  of 0.94 to 1.04 against nnz(L) in both families, across a factor of 173 in fill.
+- **Multifrontal wins by 2.11x in 2D and 1.13x in 3D**, which is why `../matrices` measuring 1.33x
+  on real matrices sits between them and neither grid figure would have predicted it.
+- **Complex costs 2.74x real in 2D and 4.50x in 3D**, straddling the 4x the flop count predicts:
+  complex is relatively less memory-bound, so the ratio approaches the arithmetic as fronts grow.
+- **Dynamic pivoting costs 1.48x in 2D and 6.98x in 3D with nothing delayed**, growing as
+  nnz(L)^1.31 against static's nnz(L)^1.01. That is the pivot search alone, and it is the only
+  place in either report where cost outruns fill.
+
+**The ordering results are worth setting beside the other two folders.** On square grids MMD fills
+10 to 18 percent less than AMD; on cubic grids the two are within a few percent either way, and AMD
+orders cubes in **half** the time consistently. On 107 real matrices in `../matrices` the fill
+difference is one to three percent. Square grids are where the fill gap between minimum degree
+variants lives, and a fill claim measured on one should not be carried anywhere else.
+
 ## What this folder still needs
 
-- **Matrices that are not grids**, which the caveat above makes the first item, and which the
-  ordering folder's own open questions also ask for.
-- **The other factorizations.** Cholesky only, so nothing here says what LDL or dynamic pivoting
-  costs, and dynamic pivoting is where the interesting work happens.
-- **Complex.** Real only.
+- **Matrices that are not grids**, which the caveat above makes the first item. `../matrices` now
+  answers it for the accuracy and per-size performance questions, on 107 real matrices; what is
+  still owed here is a break-even computed on something other than a grid, since the one below is
+  a ratio of two phases and both move with the family.
+- **The other factorizations, and complex, in `pipeline_timing.cpp`.** The scaling driver covers
+  all eight arms; the timing driver is still Cholesky and real only, so its phase shares are a
+  Cholesky claim.
 - **A profile target.** The ordering folder has one and this does not, because nothing here has yet
   needed a call tree.
-- **A repeat count sized from a probe.** `bestOfThree` is a fixed three trials where the ordering
-  folder sizes its count so every row is measured for about the same wall time and takes the best
-  of fifteen to thirty. Three samples is thin against thermal state and page placement, which the
-  performance-core request added on 2026-08-10 does not fix: the ordering benchmark still moves 7
-  to 11 percent run to run on unchanged code with that call in. The callable interface
-  `bestOfThree` already has makes the protocol a drop-in.
+- **A repeat count sized from a probe**, in both drivers. `bestOfThree` is a fixed three trials
+  where the ordering folder sizes its count so every row is measured for about the same wall time
+  and takes the best of fifteen to thirty. Three samples is thin against thermal state and page
+  placement, which the performance-core request added on 2026-08-10 does not fix: the ordering
+  benchmark still moves 7 to 11 percent run to run on unchanged code with that call in. The
+  callable interface `bestOfThree` already has makes the protocol a drop-in.

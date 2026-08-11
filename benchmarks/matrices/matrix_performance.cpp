@@ -48,6 +48,7 @@
 #include "oblio/DirectSolver.h"
 #include "oblio/ElmForest.h"
 #include "oblio/ElmForestEngine.h"
+#include "oblio/MultiplyEngine.h"
 #include "oblio/OrderEngine.h"
 #include "oblio/Permutation.h"
 #include "oblio/SymFactor.h"
@@ -77,6 +78,26 @@ std::string shortName(const std::string& path) {
     if (name.size() > 4 && name.compare(name.size() - 4, 4, ".mtx") == 0)
         name.erase(name.size() - 4);
     return name;
+}
+
+// The induced infinity norm, for the backward error's denominator. Computed from the columns,
+// which is the same thing here: A is symmetric and stored fully.
+double infNorm(const SparseMatrix<double>& A) {
+    std::vector<double> rowSum(A.size(), 0.0);
+    for (std::size_t j = 0; j < A.size(); ++j)
+        for (std::size_t cp = A.colPtr()[j]; cp < A.colPtr()[j + 1]; ++cp)
+            rowSum[static_cast<std::size_t>(A.rowIdx()[cp])] += std::abs(A.val()[cp]);
+    double norm = 0.0;
+    for (double sum : rowSum)
+        norm = std::max(norm, sum);
+    return norm;
+}
+
+double infNorm(const Vector<double>& v) {
+    double norm = 0.0;
+    for (std::size_t i = 0; i < v.size(); ++i)
+        norm = std::max(norm, std::abs(v[i]));
+    return norm;
 }
 
 // nnz(L) from the symbolic factor, a supernode's own triangle plus its update rows. The same
@@ -118,6 +139,16 @@ struct Timing {
     double      factRl = 0;
     double      factMf = 0;
     double      solve = 0;
+
+    // THE ANSWER, beside the cost. A timing report that does not say whether the answers were any
+    // good is half a report, and it costs nothing here: the solve runs for the timing anyway, so
+    // the residual is one extra multiply. Both measures are computed as in ../matrices and mean
+    // the same there: `bwd` is the verdict, since it does not inherit the conditioning, and `res`
+    // is reported beside it. Every matrix in this set is positive definite and factored by
+    // Cholesky, so nothing perturbs and nothing is delayed; these columns should be at machine
+    // precision on every row and the run says so at the end if they are not.
+    double backward = 0;
+    double residual = 0;
 
     // PER TRAVERSAL, because they do not always agree. Cholesky's refusal is a numerical event,
     // not a structural one: the three traversals accumulate the same arithmetic in different
@@ -171,7 +202,7 @@ double factorTime(const SparseMatrix<double>& A, Ordering method, Traversal trav
     return bestOf([&] { solver.factor(A); }, repeats);
 }
 
-Timing measure(const SparseMatrix<double>& A, Ordering method, int repeats) {
+Timing measure(const SparseMatrix<double>& A, Ordering method, int repeats, double aNorm) {
     Timing t;
 
     bool ok = false;
@@ -200,10 +231,20 @@ Timing measure(const SparseMatrix<double>& A, Ordering method, int repeats) {
 
     DirectSolver<double> solver(method, Factorization::Cholesky, Traversal::LeftLooking);
     if (solver.analyze(A) && solver.factor(A)) {
-        Vector<double> b(A.size()), x(A.size());
+        Vector<double> b(A.size()), x(A.size()), r(A.size());
         for (std::size_t i = 0; i < A.size(); ++i)
             b[i] = 1.0;
         t.solve = bestOf([&] { solver.solve(b, x); }, repeats);
+
+        const MultiplyEngine multiply;
+        multiply.residual(A, x, b, r);
+
+        const double rNorm = infNorm(r);
+        const double xNorm = infNorm(x);
+        const double bNorm = infNorm(b);
+
+        t.backward = rNorm / (aNorm * xNorm + bNorm);
+        t.residual = (bNorm > 0.0) ? rNorm / bNorm : 0.0;
     }
 
     t.ok = true;
@@ -319,7 +360,9 @@ int main(int argc, char** argv) {
     std::vector<Record> records;
     int refused = 0;
     int capped = 0;
-    int notDefinite = 0;   // read and analyzed, but Cholesky refused under every ordering
+    int notDefinite = 0;
+    double worstBackward = 0;   // over every ordering of every matrix
+    double worstResidual = 0;   // read and analyzed, but Cholesky refused under every ordering
 
     for (const char* argument : files) {
         const std::string path = argument;
@@ -354,17 +397,19 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        const double aNorm = infNorm(A);
+
         std::printf("%-36s %8zu %10zu\n", name.c_str(), A.size(), A.nnz());
-        std::printf("  %-6s %11s %8s %8s %8s %8s %8s %8s %8s\n",
+        std::printf("  %-6s %11s %8s %8s %8s %8s %8s %8s %8s %9s %9s\n",
                     "order", "nnz(L)", "order", "anlzLL", "anlzMF", "factLL", "factRL", "factMF",
-                    "solve");
+                    "solve", "bwd", "res");
         std::fflush(stdout);
 
         Record record;
         record.name = name;
 
         for (int m = 0; m < kNumMethods; ++m) {
-            const Timing t = measure(A, kMethods[m].method, repeats);
+            const Timing t = measure(A, kMethods[m].method, repeats, aNorm);
             record.timing[m] = t;
 
             if (!t.ok) {
@@ -376,7 +421,10 @@ int main(int argc, char** argv) {
                         t.order, t.analyze, t.analyzeMf, t.factLl);
             if (t.okRl) std::printf(" %8.2f", t.factRl); else std::printf(" %8s", "refused");
             if (t.okMf) std::printf(" %8.2f", t.factMf); else std::printf(" %8s", "refused");
-            std::printf(" %8.2f\n", t.solve);
+            std::printf(" %8.2f %9.1e %9.1e\n", t.solve, t.backward, t.residual);
+
+            worstBackward = std::max(worstBackward, t.backward);
+            worstResidual = std::max(worstResidual, t.residual);
         }
         std::fflush(stdout);
 
@@ -540,6 +588,16 @@ int main(int argc, char** argv) {
                             traversalRefusals == 1 ? "matrix" : "matrices");
         }
     }
+
+    // The answers, in one line. Cholesky on a positive definite matrix perturbs nothing and delays
+    // nothing, so these should be at machine precision on every row; a report of timings that does
+    // not say whether the answers were good is half a report.
+    if (!records.empty())
+        std::printf("\nworst backward error over every ordering of every matrix %.1e. Cholesky on\n"
+                    "a positive definite matrix neither perturbs nor delays, so that is the\n"
+                    "arithmetic alone. The worst relative residual is %.1e, which is conditioning\n"
+                    "rather than error: see ACCURACY.md on why the two are reported together.\n",
+                    worstBackward, worstResidual);
 
     std::printf("\n%zu measured, %d not positive definite, %d over the fill cap, %d skipped\n",
                 records.size(), notDefinite, capped, refused);

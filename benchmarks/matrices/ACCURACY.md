@@ -1,14 +1,15 @@
 # Oblio: Accuracy
 
 This report asks a single question, on matrices Oblio's authors did not choose and did not
-generate: **when Oblio returns a solution, how good is it?** Companion reports cover performance
-on the same real matrices, and scaling on synthetic grids.
+generate: **when Oblio returns a solution, how good is it?** `PERFORMANCE.md` beside it asks what
+those answers cost, on the same kind of input; a third report will cover scaling on synthetic
+grids.
 
-The short answer, over 106 matrices from the SuiteSparse Matrix Collection spanning 28 problem
-kinds and four orders of magnitude in fill: **every solution Oblio produced was backward stable at
-machine precision, and every case where it produced no useful solution was a property of the
-matrix rather than of the solver.** There is no row in the results where the answer is poor and
-the reason is Oblio's.
+The short answer, over the 106 matrices solved out of a set drawn from 28 problem kinds of the
+SuiteSparse Matrix Collection and spanning four orders of magnitude in fill: **every solution
+Oblio produced was backward stable at machine precision, and every case where it produced no
+useful solution was a property of the matrix rather than of the solver.** There is no row in the
+results where the answer is poor and the reason is Oblio's.
 
 Everything below says how that was measured, what it does and does not establish, and what the
 awkward cases were, because a report that only shows the good rows is not worth reading.
@@ -22,9 +23,11 @@ awkward cases were, because a report that only shows the good rows is not worth 
 | BLAS and LAPACK | Apple Accelerate |
 | Oblio dependencies | a C++17 compiler, `make`, and a BLAS. Nothing else |
 
-Oblio calls LAPACK for dense supernodal kernels (`?potrf`, `?trsm`, `?gemm`, `?syrk`) and supplies
-its own unpivoted LDL kernel, LAPACK having none: `?sytrf` pivots, and pivoting is what a static
-factorization refuses to do.
+Oblio calls LAPACK and the BLAS for the dense work inside each supernode: `dpotrf` for the
+Cholesky factorization of a front, `dtrsm` for the triangular solves against it, and `dgemm` and
+`dsyrk` for the updates. It supplies its own unpivoted LDL kernel, LAPACK having none: the
+symmetric indefinite routine `dsytrf` pivots, and pivoting is what a static factorization refuses
+to do.
 
 ## What Oblio was asked to do
 
@@ -83,7 +86,8 @@ automated filter rather than by hand:
 - **structural variety before size**, sampling the cheapest few matrices of *each* problem kind the
   collection records rather than taking the largest or the most famous. Variety is what generated
   grids lack, so it is what a real set has to supply;
-- **an upper bound on nnz(A)**, to keep a full pass to a few minutes.
+- **an upper bound on nnz(A)**, the number of nonzeros in the matrix, to keep a full pass to a
+  few minutes. `nnz(L)`, used below, is the same count for the factor.
 
 The resulting set is 160 files, of which 41 carry no values at all (the collection stores binary
 matrices as patterns) and 119 are usable. It spans **28 problem kinds**, including structural
@@ -136,24 +140,26 @@ Twelve of the 119 valued matrices were declined this way:
 
 | matrix | n | structural rank | deficit | empty columns |
 |---|---|---|---|---|
-| `GHS_indef/aug3d` | 24300 | 11664 | 12636 | 0 |
-| `GHS_indef/aug2dc` | 30200 | 20000 | 10200 | 0 |
-| `GHS_indef/aug2d` | 29008 | 19208 | 9800 | 0 |
-| `Cunningham/m3plates` | 11107 | 6639 | 4468 | 4468 |
-| `Boeing/bcsstm38` | 8032 | 5199 | 2833 | 2833 |
-| `Pajek/Reuters911` | 13332 | 10685 | 2647 | 18 |
-| `HB/zenios` | 2873 | 266 | 2607 | 2605 |
-| `Arenas/PGPgiantcompo` | 10680 | 8159 | 2521 | 0 |
-| `HB/bcsstm13` | 2003 | 1241 | 762 | 762 |
-| `Newman/netscience` | 1589 | 1424 | 165 | 128 |
-| `GHS_indef/laser` | 3002 | 3000 | 2 | 0 |
-| `GHS_indef/bloweybl` | 30003 | 30002 | 1 | 1 |
+| aug3d | 24300 | 11664 | 12636 | 0 |
+| aug2dc | 30200 | 20000 | 10200 | 0 |
+| aug2d | 29008 | 19208 | 9800 | 0 |
+| m3plates | 11107 | 6639 | 4468 | 4468 |
+| bcsstm38 | 8032 | 5199 | 2833 | 2833 |
+| Reuters911 | 13332 | 10685 | 2647 | 18 |
+| zenios | 2873 | 266 | 2607 | 2605 |
+| PGPgiantcompo | 10680 | 8159 | 2521 | 0 |
+| bcsstm13 | 2003 | 1241 | 762 | 762 |
+| netscience | 1589 | 1424 | 165 | 128 |
+| laser | 3002 | 3000 | 2 | 0 |
+| bloweybl | 30003 | 30002 | 1 | 1 |
 
-Two things are worth noticing. **The matching is doing real work**: the `GHS_indef/aug*` family and
+Matrix names are the collection's, with the group prefix dropped for width.
+
+Two things are worth noticing. **The matching is doing real work**: the `aug*` family and
 `PGPgiantcompo` have deficits in the thousands and **no empty columns at all**, so a simpler test
 that only looked for empty rows would have passed every one of them and their meaningless residuals
-would have sat in the results looking like defects. And **`GHS_indef/laser` is deficient by 2 out
-of 3002**, which no inspection by eye would find.
+would have sat in the results looking like defects. And **`laser` is deficient by 2 out of 3002**,
+which no inspection by eye would find.
 
 Where the deficit does come from empty columns, the cause is usually mundane and worth knowing:
 `m3plates`, `bcsstm13` and `bcsstm38` are structural mass matrices, which are commonly rank
@@ -177,7 +183,7 @@ in `D` counts them in `A` without computing an eigenvalue.
 | class | count | meaning |
 |---|---|---|
 | positive definite | 30 | every eigenvalue strictly positive |
-| negative definite | 18 | every eigenvalue strictly negative, so Cholesky must refuse and `-A` would factor |
+| negative definite | 18 | every eigenvalue strictly negative; Cholesky refuses, `-A` would factor |
 | indefinite | 56 | both signs present, none zero |
 | numerically singular | 2 | at least one exactly zero eigenvalue |
 
@@ -193,14 +199,14 @@ factorizations on each measure:
 
 | matrix | best res | best bwd | perturbed | zero eig |
 |---|---|---|---|---|
-| `Marini/eurqsa` | 2.0e+16 | 5.8e-18 | 2084 | 8 |
-| `Guettel/TEM27623` | 1.1e+04 | 3.5e-18 | 79 | 0 |
-| `GHS_indef/sit100` | 2.6e+03 | 9.6e-15 | 1063 | 0 |
-| `Oberwolfach/t2dal_bci` | 1.4e+03 | 1.1e-16 | 0 | 0 |
-| `HB/plat1919` | 1.5e+02 | 7.3e-17 | 1 | 0 |
-| `Cote/vibrobox` | 1.4e+02 | 6.3e-18 | 0 | 0 |
-| `Oberwolfach/t2dah_a` | 1.7e+01 | 1.3e-16 | 0 | 0 |
-| `Boeing/crystk01` | 2.8e+00 | 8.1e-17 | 6 | 0 |
+| eurqsa | 2.0e+16 | 5.8e-18 | 2084 | 8 |
+| TEM27623 | 1.1e+04 | 3.5e-18 | 79 | 0 |
+| sit100 | 2.6e+03 | 9.6e-15 | 1063 | 0 |
+| t2dal_bci | 1.4e+03 | 1.1e-16 | 0 | 0 |
+| plat1919 | 1.5e+02 | 7.3e-17 | 1 | 0 |
+| vibrobox | 1.4e+02 | 6.3e-18 | 0 | 0 |
+| t2dah_a | 1.7e+01 | 1.3e-16 | 0 | 0 |
+| crystk01 | 2.8e+00 | 8.1e-17 | 6 | 0 |
 
 **Read the second column.** Every one of these is backward stable. The large residuals are
 conditioning and rank, which is what the pair of measures exists to distinguish. **A large residual
@@ -214,14 +220,14 @@ the pivoting is for. A few representative rows:
 
 | matrix | static bwd | dynamic bwd | delayed |
 |---|---|---|---|
-| `Gset/G32` | 1.0e-02 | 4.3e-15 | 4017 |
-| `Schenk_IBMNA/c-18` | 4.1e-16 | 2.6e-22 | 2603 |
-| `ML_Graph/mice_10NN` | 1.1e-03 | 7.2e-17 | 242 |
-| `IPSO/OPF_6000` | 1.0e+00 | 3.5e-19 | 10684 |
-| `Boeing/nasa1824` | 4.6e-11 | 7.9e-18 | 55 |
-| `FIDAP/ex32` | 1.5e-07 | 8.0e-19 | 1329 |
+| G32 | 1.0e-02 | 4.3e-15 | 4017 |
+| c-18 | 4.1e-16 | 2.6e-22 | 2603 |
+| mice_10NN | 1.1e-03 | 7.2e-17 | 242 |
+| OPF_6000 | 1.0e+00 | 3.5e-19 | 10684 |
+| nasa1824 | 4.6e-11 | 7.9e-18 | 55 |
+| ex32 | 1.5e-07 | 8.0e-19 | 1329 |
 
-On `IPSO/OPF_6000`, a 29902-column power-flow system, static LDL perturbs 3020 pivots and returns a
+On `OPF_6000`, a 29902-column power-flow system, static LDL perturbs 3020 pivots and returns a
 backward error of 1. Dynamic LDL delays 10684 columns and returns 3.5e-19. **That is seventeen
 orders of magnitude, on a matrix a static factorization simply cannot handle.**
 
@@ -285,10 +291,10 @@ factorization actually held, so the cost is visible per matrix:
 
 | matrix | n | predicted | actual | ratio | delayed |
 |---|---|---|---|---|---|
-| `LFAT5000` | 19994 | 67463 | 15678721 | **232.4x** | 3128750 |
-| `eurqsa` | 7245 | 156243 | 3101991 | 19.9x | 40294 |
-| `c-66b` | 49989 | 1121278 | 3927468 | 3.5x | 319743 |
-| `vibrobox` | 12328 | 2332570 | 7113191 | 3.0x | 29296 |
+| LFAT5000 | 19994 | 67463 | 15678721 | **232.4x** | 3128750 |
+| eurqsa | 7245 | 156243 | 3101991 | 19.9x | 40294 |
+| c-66b | 49989 | 1121278 | 3927468 | 3.5x | 319743 |
+| vibrobox | 12328 | 2332570 | 7113191 | 3.0x | 29296 |
 
 **On the great majority of the set the ratio is exactly 1.0 and nothing was delayed**, meaning
 dynamic pivoting cost nothing at all in fill. Where it costs, it can cost a great deal.
@@ -369,9 +375,9 @@ measurement mistakes that had to be corrected before the results above could be 
 directory:
 
 ```
-./ssget.py list --per-kind 8 --values --max-nnz 500000 > candidates.txt
-./ssget.py fetch candidates.txt
-make run
+./ssget.py list --per-kind 8 --values --max-nnz 500000 > accuracy_candidates.txt
+./ssget.py fetch accuracy_candidates.txt
+make accuracy
 ```
 
 The matrices are downloaded from the collection rather than committed, so the set is reproducible

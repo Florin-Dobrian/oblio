@@ -1,11 +1,13 @@
-// matrix_residual.cpp -- solve every matrix named on the command line and report the residual.
+// matrix_accuracy.cpp -- solve every matrix named on the command line and report how good the
+// answer is: the backward error, the residual, and what each factorization had to do to get
+// there. The report drawn from it is ACCURACY.md beside this file.
 //
 // The first pass over real input. Ordering is MMD3, the tree's default, and the traversal is
 // left-looking; both are held fixed on purpose, because the question here is whether the
 // pipeline computes correctly on matrices nobody generated, not which ordering is best. The
 // other axes come after this one has been read.
 //
-//   ./matrix_residual_cpp ../../data/*/*.mtx
+//   ./matrix_accuracy_cpp ../../data/*/*.mtx
 //
 // SKIP AND REPORT, everywhere. A file we cannot read, an analysis that refuses, a factorization
 // that refuses: each prints its reason in its own cell and the run continues. Over a set nobody

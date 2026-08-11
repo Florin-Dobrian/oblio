@@ -1,8 +1,10 @@
 # Matrices Benchmark
 
-**`ACCURACY.md` beside this file is the report.** It is written for someone evaluating Oblio; this
-README is the working notes behind it, including what went wrong on the way and the two
-measurement mistakes that had to be corrected before the results could be trusted.
+**`ACCURACY.md` and `PERFORMANCE.md` beside this file are the reports.** They are written for
+someone evaluating Oblio: how good the answers are, and what they cost. This README is the working
+notes behind both, including what went wrong on the way, the two measurement mistakes that had to
+be corrected before the accuracy results could be trusted, and the two ordering investigations the
+performance run set off.
 
 The pipeline on matrices nobody generated. Every figure in this tree until now was measured on a
 grid Laplacian or on one of seven hand-built examples, so every claim drawn from them is a claim
@@ -17,12 +19,17 @@ are named for what they compare: one phase against itself, and the phases agains
 distinguishes this folder is the matrices.
 
 ```
-make          build both programs
-make read     the reader alone over data/, an inventory of what is usable
-make run      the residual pass over data/
+make             build the three programs
+make accuracy    the accuracy pass over accuracy_candidates.txt
+make performance the timing pass over performance_candidates.txt
+make read        the reader alone over data/, an inventory of what is usable
 make clean
-make help     print this list, including the fetch commands
+make help        print this list, including the fetch commands
 ```
+
+**One driver per report, both reading the same files.** `matrix_accuracy_cpp` answers how good the
+answers are; `matrix_performance_cpp` answers what they cost, across four orderings and three
+traversals with Cholesky held still. `mmread_cpp` inventories the pool and factors nothing.
 
 ## Getting the matrices
 
@@ -30,8 +37,9 @@ They are not in the repository. They are large, they are somebody else's, and th
 reproducible from one script, which is what is committed instead.
 
 ```
-./ssget.py list --per-kind 8 --values --max-nnz 500000 > candidates.txt
-./ssget.py fetch candidates.txt
+./ssget.py list --per-kind 8 --values --max-nnz 500000 > accuracy_candidates.txt
+./ssget.py fetch accuracy_candidates.txt
+make accuracy
 ```
 
 `list` downloads only the collection's index, one line per matrix, and prints what matches the
@@ -41,15 +49,28 @@ rows we do not want, fetch. Matrices land in `../../data/<Group>/<name>.mtx`, th
 layout, so a path says where a file came from and two groups may share a name without colliding.
 `data/` is gitignored in full.
 
-**`candidates.txt` is committed and is the record of the set this folder's report describes.** It
-is generated, so a difference in it is meaningful only if the command that produced it changed.
-The one that produced the committed copy is
+### The candidates files
+
+**A candidates file is the INPUT to a run, not its output.** It records which matrices a report was
+built from, which is what makes that report reproducible on another machine, and it is regenerated
+rather than edited. Two are committed, one per report, and the commands that produced them are:
 
 ```
-./ssget.py list --per-kind 8 --values --max-nnz 500000 > candidates.txt
+./ssget.py list --per-kind 8 --values --max-nnz 500000 > accuracy_candidates.txt
+./ssget.py list --posdef --max-nnz 500000              > performance_candidates.txt
 ```
 
-and re-running `list` with any other flags will rewrite it.
+A difference in one of these files is meaningful only if the command that produced it changed, so
+the commands belong here beside them.
+
+**They select differently because the reports ask different questions.** The accuracy set samples
+by problem kind, since structural variety is what generated grids lack. The performance set takes
+**every** positive definite matrix in range without sampling, `--posdef` narrowing the pool to 89
+by itself, and sampling a pool that small would be worse than taking all of it.
+
+**And `data/` holds the union**, around 218 files, which is the point of keeping the pool separate
+from the run: neither list has to be curated when the other changes, and a matrix fetched for one
+report costs the other nothing.
 
 **The filter is narrow and matches what the reader accepts**: real, square, and numerically
 symmetric. A matrix stored `general` whose values happen to be symmetric is excluded, and so is
@@ -84,6 +105,32 @@ from, and the pattern files hold variety the valued ones cannot.
 **`fetch` reports `have` against `got`.** Widening a filter re-runs the whole selection, so the
 summary says how much was already on disk: `99 of 99 in .../data: 66 already there, 33
 downloaded`. Growing the set never looks like starting over, and the fetch is idempotent.
+
+### What the collection's index does and does not mark
+
+Two properties were checked against the index directly, and one of the answers is a trap worth
+recording.
+
+**`posdef` is marked and usable on the real side.** With our filter plus `posdef == 1`, the pool in
+the 1000 to 100000 range under 500000 nonzeros is 89 matrices, which is the whole performance set.
+
+**Numerical symmetry is computed WITHOUT the conjugate**, so it measures `A == A.'` rather than
+`A == A'`. For a complex Hermitian matrix with nonzero imaginary parts every off-diagonal
+disagrees, and the score collapses: `Bai/qc324` and `Bai/qc2534` are Hermitian and the index scores
+them at **exactly 0** while their pattern symmetry is 1. So a filter on `nsym == 1` selects complex
+**symmetric** matrices and silently excludes every complex Hermitian one, which would look like the
+collection having none rather than the filter hiding them.
+
+**Nothing in the index distinguishes Hermitian from merely pattern-symmetric.** Both give
+`psym == 1` with `nsym` below 1. Only the Matrix Market banner says `hermitian`, which is why
+`fetch` printing every file's banner is worth its line of code: the index narrows and the file
+decides.
+
+**And complex positive definiteness is effectively unmarked.** Of the 23 complex square matrices
+with `psym == 1`, one is flagged `posdef`, and that one, `Bai/mhd1280b`, has `nsym == 1` and so is
+complex symmetric rather than Hermitian. **There is no complex Cholesky set to be had from real
+matrices**, which is why complex Cholesky belongs in a scaling report on synthetic Hermitian grids,
+where definiteness comes free from the construction.
 
 ### The pool and the run are separate selections
 
@@ -131,7 +178,7 @@ when the number is known and nothing has been allocated on it yet, which is afte
 before any factorization, and that is where the check goes:
 
 ```
-./matrix_residual_cpp --max-fill=200000000 ../../data/*/*.mtx
+./matrix_accuracy_cpp --max-fill=2e8 ../../data/*/*.mtx
 ```
 
 The default is 50 million, generous enough for everything fetched so far. A row over it prints its
@@ -542,23 +589,36 @@ correctly rather than a case we handle badly.
 invisible singularity, which the `zero` column catches. This is invisible conditioning, which
 nothing marks and nothing should: the answer is correct and the question was ill-posed.
 
-## The two programs
+## The three programs
 
 **`mmread_cpp`** reads and reports, and does not factor anything. It is the inventory: what each
 file is, what it converted to, and what was refused. Run it first on a new set.
 
-**`matrix_residual_cpp`** runs the pipeline. One ordering, MMD3, and the left-looking traversal,
-both held fixed on purpose: the question is whether we compute correctly on matrices nobody
-generated, not which ordering is best. The other axes come after this one has been read. It drops
-`nnz(A)` from its table, which `mmread_cpp` already reports, to make room for the two measures.
+**`matrix_accuracy_cpp`** answers how good the answers are. One ordering, MMD3, and the
+left-looking traversal, both held fixed on purpose: the question is whether we compute correctly on
+matrices nobody generated, not which ordering is best. It drops `nnz(A)` from its table, which
+`mmread_cpp` already reports, to make room for the two measures. `ACCURACY.md` is its report.
 
-Both take file names, so a subset needs no option and no manifest format. `matrix_residual_cpp`
-also takes `--max-fill=N`, which is the section above:
+**`matrix_performance_cpp`** answers what they cost. Four orderings, the vendored MMD and AMD
+beside our MMD3 and AMD3, and three traversals, with **Cholesky held still**. That choice buys
+three things at once: the factor's structure is exactly what the analysis predicted, so nnz(L) is a
+property of the ordering alone; no column is delayed, so the fill cap is exact rather than a lower
+bound and no fork guard is needed; and the numeric phase does the same arithmetic under every
+traversal, so a difference between them is a difference in scheduling rather than in work. Its
+phase split and timing protocol are `../pipeline`'s, so rows can be read across the two folders,
+and the vendored pair is a live oracle in every row: MMD and MMD3 must agree on nnz(L), as must AMD
+and AMD3.
+
+All three take file names, so a subset needs no option:
 
 ```
-./matrix_residual_cpp ../../data/HB/*.mtx
-./matrix_residual_cpp --max-fill=200000000 ../../data/*/*.mtx
+./matrix_accuracy_cpp ../../data/HB/*.mtx
+./matrix_accuracy_cpp --max-fill=2e8 ../../data/*/*.mtx
+./matrix_performance_cpp --repeats=1 ../../data/HB/*.mtx
 ```
+
+`matrix_performance_cpp` needs `../../private` for its MMD and AMD rows; without it those two
+refuse and the other two still run. It is the only thing in this folder that does.
 
 ## What the reader accepts, and what that turned out to matter for
 
@@ -742,8 +802,58 @@ defects. That is why this change and the label are a pair rather than alternativ
 explains a row, and the consistent right-hand side is what makes the rest of the table trustworthy
 without a complete detector behind it.
 
-The line to change is in `matrix_residual.cpp`, where `b` is filled, and its header comment points
+The line to change is in `matrix_accuracy.cpp`, where `b` is filled, and its header comment points
 back here.
+
+## Why some matrices order slowly, 2026-08-11
+
+The first performance run turned up ordering times that looked wrong: `GHS_indef/bloweybq` at 148
+ms under AMD3 where the vendored AMD took 0.38, `Lourakis/bundle1` at 121 against 1.93,
+`Mulvey/finan512` at 347 against 6.42. **Two different causes, and neither is a defect.**
+
+### One is a missing feature, and its remedy is documented in the vendored source
+
+**A single dense row or column makes minimum degree quadratic.** `private/Amd.cpp` says so in as
+many words at the top of the file: "the presence of a dense row/column can increase the ordering
+time by up to O(n^2), unless they are removed prior to ordering". Its remedy is a threshold,
+`max(16, 10 * sqrt(n))` by default, above which a row is called dense, pulled out before ordering
+and placed last in the output.
+
+**Oblio implements no such rule**, in `Amd3.cpp` or in `QuotientGraph`, and neither does MMD3 or
+the vendored genmmd. So all three carry a vertex adjacent to everything through every degree
+update, and the vendored AMD does not.
+
+Removing every column above AMD's own threshold, alpamayo, milliseconds:
+
+```
+                     n  threshold  dense    MMD             MMD3            AMD           AMD3
+bloweybq         10001       1000      1    70.70 -> 0.83  145.37 -> 1.31  1.36 -> 1.35  470.32 -> 1.54
+bundle1          10581       1028    252   259.34 -> 10.98 322.25 -> 15.93 7.47 -> 2.46  107.30 -> 11.12
+```
+
+The vendored AMD barely moves, having already done this internally; everything else falls by one
+to two orders of magnitude. **`bloweybq` has exactly one column of degree 10000 and 9992 columns of
+degree 5**, so a single vertex accounts for a factor of 300.
+
+**Fill is unaffected**, 39996 against 39997 across all four on `bloweybq`, so this is time and not
+quality. A dense-row threshold in `QuotientGraph` would fix all six ordering drivers at once and is
+its own piece of work.
+
+### The other is minimum degree's own weakness, and it is not ours
+
+`Mulvey/finan512` has **no dense column at all**: maximum degree 54 against a threshold of 2734,
+and removing nothing changes nothing, 815 ms against AMD's 28. It also fills 6.5 million against
+AMD's 2.8 million, **losing on both axes at once**.
+
+Its degree histogram says why: 512 columns at 54, 512 at 51, 512 at 22, 1024 at 20, 24064 at 6.
+That is a nested block structure with massive degree ties, which is exactly where exact minimum
+degree spends its time and where AMD's approximate degree does not. **Our MMD3 is nearly twice as
+fast as the vendored genmmd here**, 452 against 815, so this one is not ours to answer for.
+
+**Two lessons for reading any ordering timing.** A minimum degree ordering's cost depends on the
+degree distribution far more than on n or nnz, so a mean over a set says little about any row in
+it. And the two families fail differently: AMD is protected against the dense case by a feature and
+exposed to nothing else here, where MMD is exposed to both.
 
 ## What the runs showed, 2026-08-10
 
@@ -819,6 +929,51 @@ all declined, with deficits of 9800, 10200 and 12636 and **no empty columns at a
 matching earning its place: the empty-column test would have passed every one of them and their
 residuals would have been noise in the table.
 
+## What the performance run showed, 2026-08-11
+
+**alpamayo (Apple Silicon), macOS, Apple Clang, Accelerate.** Cholesky, real, best of three after a
+warm-up, four orderings and three traversals over the positive definite set.
+
+```
+of the 114 files read: 107 measured, 1 not positive definite, 5 over the fill cap, 1 skipped
+
+geometric mean relative to the best ordering on each matrix:
+  order      nnz(L)      order    analyze     factLL
+  MMD         1.032      1.566      1.335      1.081
+  MMD3        1.032      1.821      1.416      1.074
+  AMD         1.020      1.126      1.045      1.073
+  AMD3        1.020      1.529      1.282      1.040
+
+traversals at MMD3, relative to the best traversal on each matrix:
+  left-looking   1.364
+  right-looking  1.388
+  multifrontal   1.028
+```
+
+**Multifrontal wins, and by a wide margin**: 1.028 against 1.364 and 1.388. That is the clearest
+result in the table and it held at both set sizes, 87 matrices and then 107.
+
+**The fill difference between orderings is one to three percent.** On grids `../ordering` measures
+up to 13 percent. That gap is a property of grids, where nearly every live vertex has the same
+degree and the tie-break decides almost every pick; on real structure the ordering choice barely
+moves the fill.
+
+**AMD fills slightly less than MMD here, 1.020 against 1.032**, which is the opposite of what square
+grids say. Both differences are small enough that the honest statement is that neither wins.
+
+**Analysis is where the spread lives**, 1.045 to 1.416, and the section above explains most of it:
+the dense-row rule the vendored AMD has and nothing else does.
+
+**The fill cap fired five times**, including `FlowIPM22/uni_chimera_i1` at a predicted 1.2 **billion**
+entries, about 10 GB of values. Without it that would have been another `bloweya`.
+
+**And the vendored pair is an oracle in every row.** MMD and MMD3 agreed on nnz(L) on all 107
+matrices. **AMD and AMD3 did not**, differing on a minority of rows, once substantially:
+`HB/bcsstk08` at 31153 against 29922, where ours fills 4 percent less. The acceptance tests in
+`experiments/ordering` have AMD3 reproducing the vendored raw order exactly on all 38 cases, but
+those are grids and random patterns. This is the first evidence from real structure and it is
+unexplained; it is recorded here rather than chased.
+
 ## What this folder still needs
 
 - **A consistent right-hand side**, `b = A x_exact` with a guard on `||b||`, which is what lets
@@ -831,17 +986,23 @@ residuals would have been noise in the table.
   rather than through a count whose own header warns it is least reliable on singular input. That
   is a library change rather than a benchmark one, and it is the first thing that would improve
   this table.
-- **Timing.** Nothing here is timed. The intended shape is a flag on this driver rather than a
-  second program, since one pass over a matrix produces both kinds of column and only the repeat
-  protocol differs: a correctness pass wants each matrix once, a timing pass wants a warm-up and
-  enough repeats to fill a fixed wall time.
-- **Complex matrices.** None are fetched, the filter excluding them. They are worth having:
-  complex Hermitian dynamic LDL is the one part of the numeric code that is an extension rather
-  than a port, so its only oracles today are the residual and reconstruction on generated input.
-  Matrix Market distinguishes `symmetric` from `hermitian` in the header, which maps onto Oblio's
-  `LDL^T` and `LDL^H` split exactly, and that is coverage the real set cannot give, `T` and `H`
-  being the same computation over the reals.
-- **The other orderings and traversals.** One ordering and one traversal today.
+- **A dense-row threshold**, which is the single largest ordering-time item and the one with a
+  documented remedy. It belongs in `QuotientGraph` so that all six ordering drivers gain it at
+  once. See "Why some matrices order slowly" above.
+- **Why AMD3 and the vendored AMD disagree on fill** on a minority of real matrices, where the 38
+  acceptance cases in `experiments/ordering` show exact agreement. Ours fills less where they
+  differ, so it is not urgent, but it is a divergence the acceptance tests cannot see.
+- **The scaling report**, the third of the three: synthetic 2D and 3D grids, Cholesky throughout,
+  covering real and complex Hermitian, which real matrices cannot supply, since the collection
+  marks one complex matrix in 23 as positive definite and that one is complex symmetric.
+- **Complex matrices.** None are fetched. They are worth having, complex Hermitian dynamic LDL
+  being the one part of the numeric code that is an extension rather than a port, so its only
+  oracles today are the residual and reconstruction on generated input. Fetching them needs a
+  separate branch in the filter rather than a relaxed threshold, for the reason in "What the
+  collection's index does and does not mark" above. The reader refuses `complex` today, so any
+  that land in `data/` skip harmlessly.
+- **The other orderings and traversals.** One ordering and one traversal here, deliberately: they
+  are the subject of the performance report rather than a gap in this one.
 - **The 41 pattern files.** They have no values and are exactly what widening
   `experiments/ordering`'s `make amdorder` to real patterns would want. They also carry the graph
   kinds the accuracy set no longer has.

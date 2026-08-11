@@ -1,0 +1,116 @@
+# matrix                                 n         nnz  posdef  binary  kind
+  HB/bcsstm08                         1074        1074       1       0  structural problem
+  HB/bcsstm09                         1083        1083       1       0  structural problem
+  HB/bcsstm11                         1473        1473       1       0  structural problem
+  HB/bcsstm26                         1922        1922       1       0  structural problem
+  HB/bcsstm23                         3134        3134       1       0  structural problem
+  JGD_BIBD/bibd_81_2                  3240        3240       1       1  combinatorial problem
+  HB/bcsstm24                         3562        3562       1       0  structural problem
+  HB/bcsstm21                         3600        3600       1       0  structural problem
+  HB/1138_bus                         1138        4054       1       0  power network problem
+  Oberwolfach/t2dal_e                 4257        4257       1       0  duplicate model reduction problem
+  Bates/Chem97ZtZ                     2541        7361       1       0  statistical/mathematical problem
+  HB/bcsstk08                         1074       12960       1       0  structural problem
+  HB/bcsstm25                        15439       15439       1       0  structural problem
+  Bai/mhd3200b                        3200       18316       1       0  electromagnetics problem
+  HB/bcsstk09                         1083       18437       1       0  structural problem
+  HB/bcsstm12                         1473       19659       1       0  structural problem
+  Oberwolfach/t3dl_e                 20360       20360       1       0  duplicate model reduction problem
+  HB/bcsstk10                         1086       22070       1       0  structural problem
+  FIDAP/ex33                          1733       22189       1       0  computational fluid dynamics problem
+  Boeing/msc01050                     1050       26198       1       0  structural problem
+  HB/bcsstk21                         3600       26600       1       0  structural problem
+  Bai/mhd4800b                        4800       27520       1       0  electromagnetics problem
+  HB/bcsstk26                         1922       30336       1       0  structural problem
+  TKK/plbuckle                        1282       30644       1       0  structural problem
+  HB/plat1919                         1919       32399       1       0  2D/3D problem
+  HB/bcsstk11                         1473       34241       1       0  structural problem
+  HB/bcsstk12                         1473       34241       1       0  duplicate structural problem
+  Nasa/nasa1824                       1824       39208       1       0  structural problem
+  JGD_Trefethen/Trefethen_2000        2000       41906       1       0  combinatorial problem
+  Boeing/msc01440                     1440       44998       1       0  structural problem
+  HB/bcsstk23                         3134       45178       1       0  structural problem
+  Boeing/bcsstm39                    46772       46772       1       0  structural problem
+  GHS_indef/bloweybq                 10001       49999       1       0  materials problem
+  FIDAP/ex3                           1821       52685       1       0  computational fluid dynamics problem
+  FIDAP/ex10                          2410       54840       1       0  computational fluid dynamics problem
+  HB/bcsstk27                         1224       56126       1       0  structural problem
+  FIDAP/ex10hs                        2548       57308       1       0  computational fluid dynamics problem
+  HB/bcsstk14                         1806       63454       1       0  structural problem
+  Nasa/nasa2146                       2146       72250       1       0  structural problem
+  Cannizzo/sts4098                    4098       72356       1       0  structural problem
+  FIDAP/ex13                          2568       75628       1       0  computational fluid dynamics problem
+  Oberwolfach/LFAT5000               19994       79966       1       0  model reduction problem
+  HB/bcsstk13                         2003       83883       1       0  computational fluid dynamics problem
+  Norris/fv1                          9604       85264       1       0  2D/3D problem
+  Norris/fv2                          9801       87025       1       0  2D/3D problem
+  Norris/fv3                          9801       87025       1       0  2D/3D problem
+  Boeing/msc04515                     4515       97707       1       0  structural problem
+  FIDAP/ex15                          6867       98671       1       0  computational fluid dynamics problem
+  FIDAP/ex9                           3363       99471       1       0  computational fluid dynamics problem
+  Oberwolfach/LF10000                19998       99982       1       0  model reduction problem
+  Nasa/nasa4704                       4704      104756       1       0  structural problem
+  Boeing/crystm01                     4875      105339       1       0  materials problem
+  HB/bcsstk15                         3948      117816       1       0  structural problem
+  Pothen/bodyy4                      17546      121550       1       0  structural problem
+  Okunbor/aft01                       8205      125567       1       0  acoustics problem
+  Pothen/bodyy5                      18589      128853       1       0  structural problem
+  Pothen/bodyy6                      19366      134208       1       0  structural problem
+  Bindel/ted_B                       10605      144579       1       0  thermal problem
+  Bindel/ted_B_unscaled              10605      144579       1       0  thermal problem
+  HB/bcsstk18                        11948      149090       1       0  structural problem
+  HB/bcsstk24                         3562      159910       1       0  structural problem
+  MathWorks/Muu                       7102      170134       1       0  structural problem
+  Nasa/nasa2910                       2910      174296       1       0  structural problem
+  Oberwolfach/t2dah_e                11445      176117       1       0  duplicate model reduction problem
+  GHS_psdef/obstclae                 40000      197608       1       0  optimization problem
+  GHS_psdef/torsion1                 40000      197608       1       0  duplicate optimization problem
+  GHS_psdef/jnlbrng1                 40000      199200       1       0  optimization problem
+  GHS_psdef/minsurfo                 40806      203622       1       0  optimization problem
+  Cylshell/s3rmt3m3                   5357      207123       1       0  structural problem
+  Cylshell/s1rmt3m1                   5489      217651       1       0  structural problem
+  Cylshell/s3rmt3m1                   5489      217669       1       0  structural problem
+  Cylshell/s2rmt3m1                   5489      217681       1       0  structural problem
+  HB/bcsstk28                         4410      219024       1       0  structural problem
+  HB/bcsstk25                        15439      252241       1       0  structural problem
+  UTEP/Dubcova1                      16129      253009       1       0  2D/3D problem
+  Cylshell/s1rmq4m1                   5489      262411       1       0  structural problem
+  Cylshell/s3rmq4m1                   5489      262943       1       0  structural problem
+  Cylshell/s2rmq4m1                   5489      263351       1       0  structural problem
+  HB/bcsstk16                         4884      290378       1       0  structural problem
+  Boeing/crystm02                    13965      322905       1       0  materials problem
+  MaxPlanck/shallow_water1           81920      327680       1       0  computational fluid dynamics problem
+  MaxPlanck/shallow_water2           81920      327680       1       0  computational fluid dynamics problem
+  MathWorks/Kuu                       7102      340200       1       0  structural problem
+  Oberwolfach/gyro_m                 17361      340431       1       0  duplicate model reduction problem
+  GHS_psdef/cvxbqp1                  50000      349968       1       0  optimization problem
+  Boeing/bcsstk38                     8032      355460       1       0  structural problem
+  HB/bcsstk17                        10974      428650       1       0  structural problem
+  GHS_psdef/wathen100                30401      471601       1       0  random 2D/3D problem
+  FlowIPM22/uni_chimera_i5          100000      499982       1       0  undirected weighted graph
+  GHS_psdef/gridgena                 48962      512084       1       0  optimization problem
+  GHS_psdef/apache1                  80800      542184       1       0  structural problem
+  JGD_Trefethen/Trefethen_20000b     19999      554435       1       0  combinatorial problem
+  JGD_Trefethen/Trefethen_20000      20000      554466       1       0  combinatorial problem
+  GHS_psdef/wathen120                36441      565761       1       0  random 2D/3D problem
+  Schmid/thermal1                    82654      574458       1       0  thermal problem
+  Boeing/crystm03                    24696      583770       1       0  materials problem
+  Mulvey/finan512                    74752      596992       1       0  economic problem
+  TKK/cbuckle                        13681      676515       1       0  structural problem
+  ACUSIM/Pres_Poisson                14822      715804       1       0  computational fluid dynamics problem
+  Andrews/Andrews                    60000      760154       1       0  computer graphics/vision problem
+  Lourakis/bundle1                   10581      770811       1       0  computer graphics/vision problem
+  FlowIPM22/uni_chimera_i2          100000      797974       1       0  undirected weighted graph
+  Simon/olafu                        16146     1015156       1       0  structural problem
+  Oberwolfach/gyro                   17361     1021159       1       0  model reduction problem
+  Oberwolfach/gyro_k                 17361     1021159       1       0  duplicate model reduction problem
+  UTEP/Dubcova2                      65025     1030225       1       0  2D/3D problem
+  FlowIPM22/uni_chimera_i1          100000     1100592       1       0  undirected weighted graph
+  Boeing/msc23052                    23052     1142686       1       0  structural problem
+  Boeing/bcsstk36                    23052     1143140       1       0  structural problem
+  Castrillon/denormal                89400     1156224       1       0  counter-example problem
+  Boeing/msc10848                    10848     1229776       1       0  structural problem
+  Simon/raefsky4                     19779     1316789       1       0  structural problem
+  Cunningham/qa8fm                   66127     1660579       1       0  acoustics problem
+  Rothberg/cfd1                      70656     1825580       1       0  computational fluid dynamics problem
+# 114 matrices, 34069414 nonzeros in total, 20 kinds

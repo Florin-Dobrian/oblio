@@ -186,10 +186,12 @@ OBLIO_PUBLIC=1 make test                    # repo root
 OBLIO_PUBLIC=1 make test                    # experiments/ordering
 OBLIO_PUBLIC=1 make                         # benchmarks/ordering
 OBLIO_PUBLIC=1 make                         # benchmarks/pipeline
+OBLIO_PUBLIC=1 make                         # benchmarks/matrices
 ```
 
-`benchmarks/matrices` is not on that list and needs no switch: nothing in it selects a vendored
-ordering, so `private/` changes neither what it builds nor what it prints.
+`benchmarks/matrices` gained the switch on 2026-08-11: its accuracy driver names no vendored
+ordering, but its performance driver names all four, so `private/` decides whether the MMD and AMD
+rows of that table carry numbers or a refusal.
 
 `export OBLIO_PUBLIC=1` once and a whole shell session builds that way. On any other machine the
 variable changes nothing, `private/` being absent already. It is harmless on every target: `clean`

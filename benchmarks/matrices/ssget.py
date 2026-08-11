@@ -7,6 +7,7 @@ Two modes, deliberately separate, because one of them chooses and the other pays
     ./ssget.py list --max-n 200000       the same, with a different range
     ./ssget.py list --per-kind 2 --max-nnz 500000     a spread across kinds, cheap end only
     ./ssget.py list --per-kind 6 --values             only matrices that carry values
+    ./ssget.py list --posdef --max-nnz 500000         the whole set Cholesky can factor
     ./ssget.py fetch candidates.txt      download the ones named in a file
     ./ssget.py fetch --all               download everything the filter matches
 
@@ -23,6 +24,13 @@ Market file stores one triangle under a `symmetric` header and is symmetric both
 and numerically by construction. A matrix stored `general` whose values happen to be symmetric
 is excluded, and so is anything complex or pattern-only. Widening any of that is a change here
 and a change in the reader together.
+
+POSITIVE DEFINITENESS IS MARKED, and `--posdef` is the one filter in this script that selects on
+a numerical property rather than a structural one. The collection establishes it and records it, so
+it costs nothing here. It is what a Cholesky-only study wants, and the set it returns is small
+enough that `--per-kind` is usually unnecessary: sampling a pool of 88 is worse than taking all of
+it. Note the flag says nothing about the COMPLEX side of the collection, where the marking is
+sparse to the point of being unusable, one matrix in 23.
 
 BINARY MEANS PATTERN HERE, which is what `--values` is for. A binary matrix has values that are
 all 1, so the collection stores its pattern and nothing else, and the file's Matrix Market field
@@ -152,7 +160,7 @@ def load_index(data_dir, refresh):
     return matrices
 
 
-def select(matrices, min_n, max_n, max_nnz, per_kind, values_only):
+def select(matrices, min_n, max_n, max_nnz, per_kind, values_only, posdef_only):
     """Real, square, numerically symmetric, in the size range, and optionally sampled by kind."""
     chosen = []
     for m in matrices:
@@ -167,6 +175,8 @@ def select(matrices, min_n, max_n, max_nnz, per_kind, values_only):
         if max_nnz is not None and m.nnz > max_nnz:
             continue
         if values_only and m.is_binary:
+            continue
+        if posdef_only and not m.posdef:
             continue
         chosen.append(m)
 
@@ -340,6 +350,9 @@ def main():
     parser.add_argument("--values", action="store_true",
                         help="exclude binary matrices, which this collection stores WITHOUT "
                              "values; use it when the run needs numbers rather than a pattern")
+    parser.add_argument("--posdef", action="store_true",
+                        help="only matrices the collection marks positive definite, which is the "
+                             "set Cholesky can factor")
     parser.add_argument("--data", default=None, help="where matrices go (default the repo's data/)")
     parser.add_argument("--refresh", action="store_true", help="download the index again")
     args = parser.parse_args()
@@ -347,7 +360,7 @@ def main():
     data_dir = args.data if args.data else repo_data_dir()
     index = load_index(data_dir, args.refresh)
     matrices = select(index, args.min_n, args.max_n, args.max_nnz, args.per_kind,
-                      args.values)
+                      args.values, args.posdef)
 
     if not matrices:
         sys.exit("nothing matches the filter in that size range")

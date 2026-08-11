@@ -188,6 +188,9 @@ OBLIO_PUBLIC=1 make                         # benchmarks/ordering
 OBLIO_PUBLIC=1 make                         # benchmarks/pipeline
 ```
 
+`benchmarks/matrices` is not on that list and needs no switch: nothing in it selects a vendored
+ordering, so `private/` changes neither what it builds nor what it prints.
+
 `export OBLIO_PUBLIC=1` once and a whole shell session builds that way. On any other machine the
 variable changes nothing, `private/` being absent already. It is harmless on every target: `clean`
 removes the same things either way, so there is nothing to remember about when it applies.
@@ -226,6 +229,7 @@ work in the clone with no `private/` present:
 cd /tmp/oblio-clone/experiments/ordering && make test    # every layer agrees, 35 comparisons
 cd /tmp/oblio-clone/benchmarks/ordering  && make         # builds; MMD and AMD rows refuse
 cd /tmp/oblio-clone/benchmarks/pipeline  && make         # builds
+cd /tmp/oblio-clone/benchmarks/matrices  && make         # builds; running it needs data/
 cd /tmp/oblio-clone && cmake -S . -B bld && cmake --build bld && (cd bld && ctest)
 ```
 

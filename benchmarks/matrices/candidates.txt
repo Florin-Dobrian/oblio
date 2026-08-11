@@ -1,0 +1,121 @@
+# matrix                                  n         nnz  posdef  binary  kind
+  HB/bcsstm08                          1074        1074       1       0  structural problem
+  HB/bcsstm09                          1083        1083       1       0  structural problem
+  HB/zenios                            2873        1314       0       0  optimization problem
+  HB/bcsstm11                          1473        1473       1       0  structural problem
+  HB/bcsstm26                          1922        1922       1       0  structural problem
+  HB/bcsstm23                          3134        3134       1       0  structural problem
+  HB/bcsstm24                          3562        3562       1       0  structural problem
+  HB/bcsstm21                          3600        3600       1       0  structural problem
+  HB/saylr3                            1000        3750       0       0  computational fluid dynamics problem
+  HB/sherman1                          1000        3750       0       0  computational fluid dynamics problem
+  HB/1138_bus                          1138        4054       1       0  power network problem
+  Oberwolfach/t2dal_e                  4257        4257       1       0  duplicate model reduction problem
+  Newman/netscience                    1589        5484       0       0  undirected weighted graph
+  Cunningham/m3plates                 11107        6639       0       0  acoustics problem
+  Bates/Chem97ZtZ                      2541        7361       1       0  statistical/mathematical problem
+  Gset/G32                             2000        8000       0       0  undirected weighted random graph
+  Gset/G33                             2000        8000       0       0  undirected weighted random graph
+  Gset/G34                             2000        8000       0       0  undirected weighted random graph
+  Oberwolfach/rail_1357                1357        8985       0       0  model reduction problem
+  GHS_indef/laser                      3002        9000       0       0  materials problem
+  Boeing/bcsstm38                      8032       10485       0       0  structural problem
+  Oberwolfach/filter2D                 1668       10750       0       0  model reduction problem
+  FIDAP/ex32                           1159       11047       0       0  computational fluid dynamics problem
+  VDOL/freeFlyingRobot_2               1338       11600       0       0  optimal control problem
+  VDOL/freeFlyingRobot_3               1718       12922       0       0  optimal control problem
+  ML_Graph/mice_10NN                   1077       13484       0       0  undirected weighted graph
+  VDOL/hangGlider_2                    1647       14754       0       0  optimal control problem
+  Schenk_IBMNA/c-18                    2169       15145       0       0  optimization problem
+  VDOL/spaceStation_5                  1019       15219       0       0  optimal control problem
+  VDOL/dynamicSoaringProblem_2         1591       15588       0       0  optimal control problem
+  ML_Graph/collins_15NN                1000       16492       0       0  undirected weighted graph
+  VDOL/spaceStation_10                 1272       17478       0       0  optimal control problem
+  VDOL/spaceStation_6                  1111       17595       0       0  optimal control problem
+  VDOL/reorientation_2                 1544       17910       0       0  optimal control problem
+  Oberwolfach/spiral                   1434       18228       0       0  model reduction problem
+  ML_Graph/cnae9_10NN                  1080       18278       0       0  undirected weighted graph
+  Bai/mhd3200b                         3200       18316       1       0  electromagnetics problem
+  ML_Graph/Binaryalphadigs_10NN        1404       19392       0       0  undirected weighted graph
+  Gset/G57                             5000       20000       0       0  undirected weighted random graph
+  Oberwolfach/t3dl_e                  20360       20360       1       0  duplicate model reduction problem
+  Schenk_IBMNA/c-20                    2921       20445       0       0  optimization problem
+  HB/bcsstm13                          2003       21181       0       0  computational fluid dynamics problem
+  ML_Graph/plantstexture_10NN          1599       21204       0       0  undirected weighted graph
+  Schenk_IBMNA/c-19                    2327       21817       0       0  optimization problem
+  ML_Graph/Plants_10NN                 1600       21930       0       0  undirected weighted graph
+  FIDAP/ex33                           1733       22189       1       0  computational fluid dynamics problem
+  ML_Graph/semeion_10NN                1593       22226       0       0  undirected weighted graph
+  HB/saylr4                            3564       22316       0       0  computational fluid dynamics problem
+  Gset/G40                             2000       23532       0       0  undirected weighted random graph
+  Gset/G39                             2000       23556       0       0  undirected weighted random graph
+  Gset/G42                             2000       23558       0       0  undirected weighted random graph
+  Gset/G41                             2000       23570       0       0  undirected weighted random graph
+  TSOPF/TSOPF_FS_b9_c1                 2454       25032       0       0  power network problem
+  Grund/meg4                           5860       25258       0       0  circuit simulation problem
+  Bai/mhd4800b                         4800       27520       1       0  electromagnetics problem
+  Schenk_IBMNA/c-22                    3792       28870       0       0  optimization problem
+  Schenk_IBMNA/c-28                    4598       30590       0       0  optimization problem
+  Schenk_IBMNA/c-27                    4563       30927       0       0  optimization problem
+  Schenk_IBMNA/c-23                    3969       31079       0       0  optimization problem
+  FIDAP/ex4                            1601       31849       0       0  computational fluid dynamics problem
+  HB/plat1919                          1919       32399       1       0  2D/3D problem
+  HB/bcsstk12                          1473       34241       1       0  duplicate structural problem
+  Oberwolfach/rail_5177                5177       35185       0       0  model reduction problem
+  Oberwolfach/t2dal                    4257       37465       0       0  model reduction problem
+  Oberwolfach/t2dal_a                  4257       37465       0       0  duplicate model reduction problem
+  Oberwolfach/t2dal_bci                4257       37465       0       0  model reduction problem
+  Boeing/nasa1824                      1824       39208       0       0  duplicate structural problem
+  JGD_Trefethen/Trefethen_2000         2000       41906       1       0  combinatorial problem
+  Alemdar/Alemdar                      6245       42581       0       0  2D/3D problem
+  Marini/eurqsa                        7245       46142       0       0  economic problem
+  Arenas/PGPgiantcompo                10680       48632       0       0  undirected multigraph
+  GHS_indef/tuma2                     12992       49365       0       0  2D/3D problem
+  GHS_indef/bloweybq                  10001       49999       1       0  materials problem
+  FIDAP/ex3                            1821       52685       1       0  computational fluid dynamics problem
+  GHS_indef/sit100                    10262       61046       0       0  2D/3D problem
+  Oberwolfach/flowmeter0               9669       67391       0       0  model reduction problem
+  GHS_indef/aug3d                     24300       69984       0       0  2D/3D problem
+  GHS_indef/aug2d                     29008       76832       0       0  2D/3D problem
+  Oberwolfach/LFAT5000                19994       79966       1       0  model reduction problem
+  GHS_indef/aug2dc                    30200       80000       0       0  2D/3D problem
+  Norris/fv1                           9604       85264       1       0  2D/3D problem
+  GHS_indef/linverse                  11999       95977       0       0  statistical/mathematical problem
+  Boeing/crystm01                      4875      105339       1       0  materials problem
+  GHS_indef/bloweybl                  30003      109999       0       0  materials problem
+  Okunbor/aft01                        8205      125567       1       0  acoustics problem
+  IPSO/OPF_3754                       15435      141478       0       0  power network problem
+  Bindel/ted_B                        10605      144579       1       0  thermal problem
+  Bindel/ted_B_unscaled               10605      144579       1       0  thermal problem
+  QY/case9                            14454      147972       0       0  power network problem sequence
+  TSOPF/TSOPF_FS_b9_c6                14454      147972       0       0  power network problem
+  GHS_indef/bloweya                   30004      150009       0       0  materials problem
+  PARSEC/SiH4                          5041      171903       0       0  theoretical/quantum chemistry problem
+  Oberwolfach/t2dah_a                 11445      176117       0       0  duplicate model reduction problem
+  Oberwolfach/t2dah_e                 11445      176117       1       0  duplicate model reduction problem
+  GHS_psdef/torsion1                  40000      197608       1       0  duplicate optimization problem
+  PARSEC/SiNa                          5743      198787       0       0  theoretical/quantum chemistry problem
+  GHS_indef/spmsrtls                  29995      229947       0       0  statistical/mathematical problem
+  TAMU_SmartGridCenter/ACTIVSg70K     69999      238627       0       0  power network problem
+  PARSEC/benzene                       8219      242669       0       0  theoretical/quantum chemistry problem
+  IPSO/OPF_6000                       29902      274697       0       0  power network problem
+  Pajek/Reuters911                    13332      296076       0       0  undirected weighted graph sequence
+  Cote/vibrobox                       12328      301700       0       0  acoustics problem
+  PARSEC/Na5                           5832      305630       0       0  theoretical/quantum chemistry problem
+  Boeing/crystk01                      4875      315891       0       0  materials problem
+  Boeing/crystm02                     13965      322905       1       0  materials problem
+  Oberwolfach/gyro_m                  17361      340431       1       0  duplicate model reduction problem
+  Nemeth/nemeth02                      9506      394808       0       0  subsequent theoretical/quantum chemistry problem
+  Nemeth/nemeth03                      9506      394808       0       0  subsequent theoretical/quantum chemistry problem
+  Nemeth/nemeth04                      9506      394808       0       0  subsequent theoretical/quantum chemistry problem
+  Nemeth/nemeth05                      9506      394808       0       0  subsequent theoretical/quantum chemistry problem
+  Nemeth/nemeth06                      9506      394808       0       0  subsequent theoretical/quantum chemistry problem
+  Nemeth/nemeth07                      9506      394812       0       0  subsequent theoretical/quantum chemistry problem
+  Nemeth/nemeth08                      9506      394816       0       0  subsequent theoretical/quantum chemistry problem
+  Nemeth/nemeth09                      9506      395506       0       0  subsequent theoretical/quantum chemistry problem
+  IPSO/OPF_10000                      43887      426898       0       0  power network problem
+  Guettel/TEM27623                    27623      439469       0       0  electromagnetics problem
+  Schenk_IBMNA/c-66b                  49989      444851       0       0  subsequent optimization problem
+  Schenk_IBMNA/c-66                   49989      444853       0       0  optimization problem sequence
+  GHS_psdef/wathen100                 30401      471601       1       0  random 2D/3D problem
+# 119 matrices, 12502777 nonzeros in total, 28 kinds

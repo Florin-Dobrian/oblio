@@ -57,6 +57,12 @@ experiments/ordering/mmd_int64.cpp
 experiments/ordering/amd_raw.cpp
 benchmarks/ordering/amd_raw.cpp
 
+# Matrices downloaded from the SuiteSparse Matrix Collection, and the collection's index file.
+# Not ours, large, and reproducible from benchmarks/matrices/ssget.py, which is what is committed
+# instead. The layout is data/<Group>/<name>.mtx, the collection's own, so a file says where it
+# came from.
+data/
+
 *.pdf
 
 REPO_MAP.md

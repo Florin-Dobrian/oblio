@@ -1,11 +1,16 @@
 # Benchmarks
 
-Timing and profiling work, one self-contained folder per subject.
+Measurement against the current tree, one self-contained folder per subject. Two of the three
+measure time; the third measures accuracy, and the folder is named for what it measures rather
+than for how.
 
 - **`ordering/`** measures one phase against itself: what each ordering method costs and how much
   it fills.
 - **`pipeline/`** measures the phases against each other: what share of a solve the ordering is,
   and after how many factorizations a slower-analyzing ordering pays for itself.
+- **`matrices/`** measures accuracy on real matrices from the SuiteSparse Matrix Collection, where
+  the other two run on generated grids. It is named for its input rather than for what it compares,
+  because what distinguishes it is the matrices. Nothing in it is timed yet.
 
 The second exists because the first cannot answer whether its own subject matters, and the answer
 was not the expected one. Ordering is a substantial share of a one-shot solve rather than a

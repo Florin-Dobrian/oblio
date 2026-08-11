@@ -340,10 +340,12 @@ examples/           , eight usage examples, named example_* as the tests are nam
   example_analysis.cpp         , example_indefinite.cpp
   example_reuse.cpp            , example_amalgamation.cpp
   example_pipeline_real.cpp    , example_pipeline_complex.cpp
-benchmarks/         , timing against the current tree, and expected to keep compiling as it moves
+benchmarks/         , measurement against the current tree, expected to keep compiling as it moves
   ordering/         , one phase against itself: what each ordering costs, in time and in fill
-  pipeline/         , the phases against each other: what share of a solve the ordering is, and
-                      after how many factorizations a slower-analyzing ordering pays for itself
+  pipeline/         , the phases against each other, and how the cost grows with problem size
+                      (SCALING.md)
+  matrices/         , the pipeline on real matrices from SuiteSparse, accuracy and performance
+                      (ACCURACY.md, PERFORMANCE.md)
 experiments/        , frozen design studies, each answering one question with a measurement
   ordering/         , the minimum-degree family rebuilt one mechanism at a time, in C++ and Python
   storage-options/  , flat against vector-of-vectors, and the accessor that spans both

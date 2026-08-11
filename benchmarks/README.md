@@ -1,19 +1,13 @@
 # Benchmarks
 
-Measurement against the current tree, one self-contained folder per subject.
+Timing and profiling work, one self-contained folder per subject.
 
 - **`ordering/`** measures one phase against itself: what each ordering method costs and how much
   it fills.
 - **`pipeline/`** measures the phases against each other: what share of a solve the ordering is,
-  and after how many factorizations a slower-analyzing ordering pays for itself.
-- **`matrices/`** measures both, on real matrices from the SuiteSparse Matrix Collection where the
-  other two run on generated grids. It is named for its input rather than for what it compares,
-  because what distinguishes it is the matrices, and it carries the two reports written for
-  readers outside this tree: `ACCURACY.md` and `PERFORMANCE.md`.
-
-The third exists because neither of the first two can answer whether its results survive contact
-with matrices nobody generated. On that set the ordering fill gap collapses from thirteen percent
-to one, which is the sharpest thing either grid folder has learned about itself.
+  and after how many factorizations a slower-analyzing ordering pays for itself. It also measures
+  how the cost GROWS, over a longer ladder and every factorization Oblio has, which is
+  `SCALING.md` there.
 
 The second exists because the first cannot answer whether its own subject matters, and the answer
 was not the expected one. Ordering is a substantial share of a one-shot solve rather than a

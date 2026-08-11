@@ -1,8 +1,8 @@
-# NEXT: real matrices arrived, and what they said about the orderings
+# NEXT: real matrices and a scaling ladder arrived, and what they said
 
-A handover note between sessions, rewritten 2026-08-11 after two commits added a real-matrix
-benchmark and its two reports, and updated 2026-08-10 before that when three commits closed the
-constant factor on the amd branch. **It is meant to be deleted** once the items below are done or
+A handover note between sessions, rewritten 2026-08-11 after three commits added a real-matrix
+benchmark, a scaling benchmark and the three reports drawn from them, and updated 2026-08-10 before
+that when three commits closed the constant factor on the amd branch. **It is meant to be deleted** once the items below are done or
 abandoned.
 Everything in it that outlives the task is already somewhere durable and this file only points at
 those places:
@@ -17,6 +17,9 @@ those places:
 - `benchmarks/matrices/README.md`, everything the real matrices said, including the two ordering
   investigations of 2026-08-11 in full. Its `ACCURACY.md` and `PERFORMANCE.md` are the reports
   drawn from it, written for readers outside this tree.
+- `benchmarks/pipeline/README.md`, the scaling ladders in full including the two rungs beyond the
+  committed six, and why those matrices carry a dominance margin the short ladder's do not. Its
+  `SCALING.md` is the third report.
 
 If you find yourself about to record something here that a later reader would want, put it in one
 of those instead. The previous `NEXT.md` went stale precisely because it accumulated content that
@@ -101,6 +104,25 @@ traversal by roughly a third, 1.028 against 1.364 and 1.388, which is the cleare
 benchmark folder has produced. And Cholesky agreed with the inertia on every matrix of four
 independent samples, at 35, 58, 88 and 106, which is the only place two parts of the library check
 each other.
+
+**And a scaling ladder followed it the same day.** `benchmarks/pipeline/pipeline_scaling.cpp` runs
+six square grids to n = 360000 and six cubic ones to n = 110592, over four orderings, three
+traversals and **every factorization Oblio has across all three value types**, which is eight arms.
+Every matrix is diagonally dominant by 25 percent, so nothing perturbs and nothing delays, and the
+run checks that rather than assuming it. `SCALING.md` is the report.
+
+**What it settled.** Factorization time tracks fill almost exactly for Cholesky and static LDL, at
+an exponent of 0.94 to 1.04 against nnz(L) in both families across a factor of 173 in fill: the
+cost is the arithmetic and not the bookkeeping. Multifrontal wins by 2.11x in 2D and 1.13x in 3D,
+so the 1.33x on real matrices sits between them and neither grid figure would have predicted it.
+Complex costs 2.74x real in 2D and 4.50x in 3D, straddling the 4x the flop count predicts.
+
+**And it sharpened the pivoting question considerably**, which is the item below. Dynamic LDL
+grows as nnz(L)^1.31 where static grows as nnz(L)^1.01, reaching **6.98x at the 48 cube with zero
+columns delayed**. That is the pivot search alone, on matrices constructed to need none of it, and
+it is the only place in any of the three reports where cost outruns fill. The mechanism is that
+the search is charged per front-column against a front that grows, where the factorization is
+charged per entry, and 3D grids have far larger fronts than 2D ones at comparable fill.
 
 **Two fusions landed and the constant factor on cubes is largely gone, 2026-08-10.** The hash key
 is accumulated in the bound's walks and the first scan is folded into the prune through
@@ -546,15 +568,29 @@ routine's. `benchmarks/README.md` records how far an attempt to get them got and
   which is the one number that names a numerically singular matrix directly. The accuracy benchmark
   stands in with the inertia's zero count, whose own header warns it is least reliable on singular
   input, which is exactly where it is being used. A small library change.
-- **Why dynamic pivoting cascades on a chain.** NEW on 2026-08-11 and the largest question the real
-  matrices raised about the library rather than about a benchmark. `Oberwolfach/LFAT5000` delays
-  3.1 million columns for a 232-fold increase in fill on a matrix that is POSITIVE DEFINITE, where
-  no pivot needed delaying at all; `GHS_indef/bloweya` does the same past 32 GB and cannot be
-  factored. `GHS_indef/bloweybq` is the control: the same chain shape, definite, zero delays.
+- **What dynamic pivoting costs, which is now two questions with two kinds of evidence.** NEW on
+  2026-08-11 and the largest thing this tree learned about the library rather than about a
+  benchmark.
+
+  **The search costs even when it finds nothing**, which the scaling ladder measured cleanly
+  because its matrices are built to need no pivoting: 1.48x static in 2D and **6.98x in 3D**, with
+  zero columns delayed, growing as nnz(L)^1.31 against static's nnz(L)^1.01. Charged per
+  front-column against a growing front. That is a cost anyone paying it unnecessarily should be
+  able to avoid, and Oblio already lets them, by asking for Cholesky or static LDL.
+
+  **And the delays themselves cascade on a chain**, which the real matrices showed:
+  `Oberwolfach/LFAT5000` delays 3.1 million columns for a 232-fold increase in fill on a matrix
+  that is POSITIVE DEFINITE, where no pivot needed delaying at all; `GHS_indef/bloweya` does the
+  same past 32 GB and cannot be factored. `GHS_indef/bloweybq` is the control: the same chain
+  shape, definite, zero delays.
+
   Ashcraft, Grimes and Lewis name the mechanism and give four routes out, all four recorded in
   `benchmarks/matrices/ACCURACY.md`. The first is free: relax `setPivotThreshold` from its default
-  of 0.1, which they study directly and recommend loosening.
-- **`benchmarks/ordering` and `benchmarks/pipeline` build nothing on a bare `make`**, their first
-  rule being `help`, so `CLAUDE.md`'s pre-release clone checklist has been passing vacuously for
-  both. `benchmarks/matrices` sets `.DEFAULT_GOAL := all` and the three are now inconsistent. One
+  of 0.1, which they study directly and recommend loosening. **It would test both halves at once**,
+  since a looser threshold accepts more pivots and so both delays fewer columns and, if the search
+  short-circuits on acceptance, searches less.
+- **`benchmarks/ordering` builds nothing on a bare `make`**, its first rule being `help`, so
+  `CLAUDE.md`'s pre-release clone checklist has been passing vacuously for it.
+  `benchmarks/matrices` and `benchmarks/pipeline` both set `.DEFAULT_GOAL := all` now and the three
+  are inconsistent. One
   line each.

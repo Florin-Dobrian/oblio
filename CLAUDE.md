@@ -186,12 +186,7 @@ OBLIO_PUBLIC=1 make test                    # repo root
 OBLIO_PUBLIC=1 make test                    # experiments/ordering
 OBLIO_PUBLIC=1 make                         # benchmarks/ordering
 OBLIO_PUBLIC=1 make                         # benchmarks/pipeline
-OBLIO_PUBLIC=1 make                         # benchmarks/matrices
 ```
-
-`benchmarks/matrices` gained the switch on 2026-08-11: its accuracy driver names no vendored
-ordering, but its performance driver names all four, so `private/` decides whether the MMD and AMD
-rows of that table carry numbers or a refusal.
 
 `export OBLIO_PUBLIC=1` once and a whole shell session builds that way. On any other machine the
 variable changes nothing, `private/` being absent already. It is harmless on every target: `clean`
@@ -230,8 +225,7 @@ work in the clone with no `private/` present:
 ```
 cd /tmp/oblio-clone/experiments/ordering && make test    # every layer agrees, 35 comparisons
 cd /tmp/oblio-clone/benchmarks/ordering  && make         # builds; MMD and AMD rows refuse
-cd /tmp/oblio-clone/benchmarks/pipeline  && make         # builds
-cd /tmp/oblio-clone/benchmarks/matrices  && make         # builds; running it needs data/
+cd /tmp/oblio-clone/benchmarks/pipeline  && make         # builds both drivers
 cd /tmp/oblio-clone && cmake -S . -B bld && cmake --build bld && (cd bld && ctest)
 ```
 

@@ -75,22 +75,28 @@ a matrix fetched for one report costs the other nothing.
 ### A list can name anything the collection has
 
 `fetch` looks names up in the **full index**, not in the filtered one, so a list may name a matrix
-no filter here would select:
+no filter here would select. `extras.txt` is committed as the third such list, beside the two
+candidates files, and holds three of them:
 
 ```
-cat > extras.txt <<'END'
-PARSEC/Si87H76
-PARSEC/Ga41As41H72
-Schenk/nlpkkt80
-END
 ./ssget.py fetch extras.txt
 ```
 
-That is deliberate and it was not always so. **The filter's job is to PRODUCE candidates; once a
-list exists, the list IS the selection.** An earlier version looked names up in the filtered set
-and answered `not in the filtered index`, which made a recommended set from somebody else unusable
-without first widening a filter to admit matrices nobody wanted to select on. Only a name the
-collection does not have is refused now.
+```
+PARSEC/Si87H76
+PARSEC/Ga41As41H72
+Schenk/nlpkkt80
+```
+
+**It is a hand-written list rather than generated**, which is the difference from the two
+candidates files: no command produced it, so nothing regenerates it and editing it is the way it
+changes. Add to it, or write another beside it, whenever a set is wanted that no filter describes.
+
+That `fetch` accepts such a list is deliberate and it was not always so. **The filter's job is to
+PRODUCE candidates; once a list exists, the list IS the selection.** An earlier version looked
+names up in the filtered set and answered `not in the filtered index`, which made a recommended
+set from somebody else unusable without first widening a filter to admit matrices nobody wanted to
+select on. Only a name the collection does not have is refused now.
 
 **Nothing checks whether the drivers can use what arrives, and nothing needs to.** Each driver
 screens what it reads: `matrix_accuracy_cpp` by field type, by structural rank and by predicted
@@ -98,11 +104,11 @@ fill, with a fork guard behind that; `matrix_performance_cpp` by definiteness an
 fill. And neither reads `data/` directly, both taking their own candidates file, so a matrix
 fetched by hand appears in a run only if a list names it.
 
-The three above are the case that prompted this. They are standard hard matrices from the sparse
-direct literature and all three are far beyond what either report covers: `Si87H76` is n = 240369
-with 10.7 million nonzeros, and Oblio's analysis predicts **5.68 billion entries of fill under
-MMD3**, which is 42.3 GB of values. The accuracy driver reported that and declined, which is the
-cap working: the analysis completed, since the symbolic factor stores index sets rather than
+The three in `extras.txt` are the case that prompted this. They are standard hard matrices from
+the sparse direct literature and all three are far beyond what either report covers: `Si87H76` is
+n = 240369 with 10.7 million nonzeros, and Oblio's analysis predicts **5.68 billion entries of fill
+under MMD3**, which is 42.3 GB of values. The accuracy driver reported that and declined, which is
+the cap working: the analysis completed, since the symbolic factor stores index sets rather than
 entries, and only the numeric phase would have allocated. `PARSEC` matrices fill this way under any
 minimum degree ordering; what they want is nested dissection, which Oblio does not have.
 

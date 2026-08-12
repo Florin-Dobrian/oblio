@@ -57,7 +57,7 @@ rather than edited. Two are committed, one per report, and the commands that pro
 
 ```
 ./ssget.py list --per-kind 8 --values --max-nnz 500000 > accuracy_candidates.txt
-./ssget.py list --posdef --max-nnz 500000              > performance_candidates.txt
+./ssget.py list --posdef --max-nnz 2000000            > performance_candidates.txt
 ```
 
 A difference in one of these files is meaningful only if the command that produced it changed, so
@@ -68,9 +68,43 @@ by problem kind, since structural variety is what generated grids lack. The perf
 **every** positive definite matrix in range without sampling, `--posdef` narrowing the pool to 89
 by itself, and sampling a pool that small would be worse than taking all of it.
 
-**And `data/` holds the union**, around 218 files, which is the point of keeping the pool separate
-from the run: neither list has to be curated when the other changes, and a matrix fetched for one
-report costs the other nothing.
+**And `data/` holds the union**, plus whatever else has been fetched by hand, which is the point of
+keeping the pool separate from the run: neither list has to be curated when the other changes, and
+a matrix fetched for one report costs the other nothing.
+
+### A list can name anything the collection has
+
+`fetch` looks names up in the **full index**, not in the filtered one, so a list may name a matrix
+no filter here would select:
+
+```
+cat > extras.txt <<'END'
+PARSEC/Si87H76
+PARSEC/Ga41As41H72
+Schenk/nlpkkt80
+END
+./ssget.py fetch extras.txt
+```
+
+That is deliberate and it was not always so. **The filter's job is to PRODUCE candidates; once a
+list exists, the list IS the selection.** An earlier version looked names up in the filtered set
+and answered `not in the filtered index`, which made a recommended set from somebody else unusable
+without first widening a filter to admit matrices nobody wanted to select on. Only a name the
+collection does not have is refused now.
+
+**Nothing checks whether the drivers can use what arrives, and nothing needs to.** Each driver
+screens what it reads: `matrix_accuracy_cpp` by field type, by structural rank and by predicted
+fill, with a fork guard behind that; `matrix_performance_cpp` by definiteness and by predicted
+fill. And neither reads `data/` directly, both taking their own candidates file, so a matrix
+fetched by hand appears in a run only if a list names it.
+
+The three above are the case that prompted this. They are standard hard matrices from the sparse
+direct literature and all three are far beyond what either report covers: `Si87H76` is n = 240369
+with 10.7 million nonzeros, and Oblio's analysis predicts **5.68 billion entries of fill under
+MMD3**, which is 42.3 GB of values. The accuracy driver reported that and declined, which is the
+cap working: the analysis completed, since the symbolic factor stores index sets rather than
+entries, and only the numeric phase would have allocated. `PARSEC` matrices fill this way under any
+minimum degree ordering; what they want is nested dissection, which Oblio does not have.
 
 **The filter is narrow and matches what the reader accepts**: real, square, and numerically
 symmetric. A matrix stored `general` whose values happen to be symmetric is excluded, and so is
@@ -156,15 +190,14 @@ Test/spd_grid.mtx    400      1920       3648       3648    1.0x
 ```
 
 **`predicted` is what the analysis said and `actual` is what the factorization held, and the ratio
-between them is the price of the pivoting.** They can differ ONLY under dynamic pivoting: a delayed column widens its parent's front, so the gap is
-exactly what the delays cost, and the `actual` column is read from the dynamic run for that
-reason. A statically pivoted factor moves nothing and the two agree, which is every row with no
-`Nd` in its note.
+between them is the price of the pivoting.** They differ ONLY under dynamic pivoting: a delayed
+column widens its parent's front, so the gap is exactly what the delays cost, and the `actual`
+column is read from the dynamic run for that reason.
 
 A statically pivoted factor reads 1.0x, which is every row with no `Nd` in its note, so the column
 is self-checking. `eurqsa` is the case worth seeing: 40281 delayed columns take the factor from
-156243 entries to 3101560, **twenty times the prediction**. That is the price of the pivoting that gave it a
-backward error of 6.6e-19 where static LDL, refusing to move, got 3.8e-02.
+156243 entries to 3101560, **twenty times the prediction**. That is the price of the pivoting that
+gave it a backward error of 6.6e-19 where static LDL, refusing to move, got 3.8e-02.
 
 ### The cap, and why nothing before the analysis could have set it
 
@@ -827,8 +860,10 @@ Removing every column above AMD's own threshold, alpamayo, milliseconds:
 
 ```
                      n  threshold  dense    MMD             MMD3            AMD           AMD3
-bloweybq         10001       1000      1    70.70 -> 0.83  145.37 -> 1.31  1.36 -> 1.35  470.32 -> 1.54
-bundle1          10581       1028    252   259.34 -> 10.98 322.25 -> 15.93 7.47 -> 2.46  107.30 -> 11.12
+bloweybq         10001       1000      1    70.70 -> 0.83  145.37 -> 1.31  1.36 -> 1.35  470.32 ->
+1.54
+bundle1          10581       1028    252   259.34 -> 10.98 322.25 -> 15.93 7.47 -> 2.46  107.30 ->
+11.12
 ```
 
 The vendored AMD barely moves, having already done this internally; everything else falls by one
@@ -964,7 +999,8 @@ grids say. Both differences are small enough that the honest statement is that n
 **Analysis is where the spread lives**, 1.045 to 1.416, and the section above explains most of it:
 the dense-row rule the vendored AMD has and nothing else does.
 
-**The fill cap fired five times**, including `FlowIPM22/uni_chimera_i1` at a predicted 1.2 **billion**
+**The fill cap fired five times**, including `FlowIPM22/uni_chimera_i1` at a predicted 1.2
+**billion**
 entries, about 10 GB of values. Without it that would have been another `bloweya`.
 
 **And the vendored pair is an oracle in every row.** MMD and MMD3 agreed on nnz(L) on all 107

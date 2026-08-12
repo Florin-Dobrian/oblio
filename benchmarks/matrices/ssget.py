@@ -8,7 +8,7 @@ Two modes, deliberately separate, because one of them chooses and the other pays
     ./ssget.py list --per-kind 2 --max-nnz 500000     a spread across kinds, cheap end only
     ./ssget.py list --per-kind 6 --values             only matrices that carry values
     ./ssget.py list --posdef --max-nnz 500000         the whole set Cholesky can factor
-    ./ssget.py fetch candidates.txt      download the ones named in a file
+    ./ssget.py fetch candidates.txt      download the ones named in a file, filtered or not
     ./ssget.py fetch --all               download everything the filter matches
 
 `list` reads one small index file and downloads no matrix at all, so it is cheap to re-run
@@ -289,18 +289,33 @@ def fetch_one(matrix, data_dir):
     return target, False
 
 
-def do_fetch(matrices, wanted, data_dir):
-    by_name = {m.full_name: m for m in matrices}
+def do_fetch(matrices, everything, wanted, data_dir):
+    """Download a named set, or the whole filtered set with --all.
+
+    A NAMED SET IS LOOKED UP IN THE FULL INDEX, not in the filtered one, and that is the point of
+    having two arguments here. The filter's job is to PRODUCE candidates; once a list exists, the
+    list IS the selection, and it may perfectly well name a matrix the filter would have dropped:
+    somebody else's recommended set, or a matrix wanted precisely because it is too large for the
+    current runs. An earlier version looked names up in the filtered set and reported `not in the
+    filtered index`, which made a curated list unusable without first widening a filter to admit
+    matrices nobody wanted to select on.
+
+    What the filter still does for a named set is nothing at all, deliberately. A matrix the
+    drivers cannot use is still worth having on disk: each driver screens what it reads, by field
+    type, by definiteness, and by predicted fill, so an oversized or indefinite matrix in `data/`
+    costs a skipped line and no more.
+    """
+    by_name = {m.full_name: m for m in everything}
 
     if wanted is None:
-        selected = matrices
+        selected = matrices          # --all: the filtered set, which is what the filter is for
     else:
         selected = []
         for name in wanted:
             if name in by_name:
                 selected.append(by_name[name])
             else:
-                print("%-40s SKIP  not in the filtered index" % name)
+                print("%-40s SKIP  no such matrix in the collection's index" % name)
 
     failed = 0
     cached_count = 0
@@ -375,7 +390,7 @@ def main():
         sys.exit("fetch takes a listing file or --all, not both")
 
     wanted = None if args.all else read_wanted(args.listing)
-    do_fetch(matrices, wanted, data_dir)
+    do_fetch(matrices, index, wanted, data_dir)
 
 
 if __name__ == "__main__":

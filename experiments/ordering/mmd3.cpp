@@ -263,7 +263,7 @@ using Graph = std::vector<std::vector<std::int32_t>>;
 struct Cliques {
     std::vector<std::vector<std::int32_t>> members;
     std::vector<bool> live;
-    std::size_t count = 0;
+    std::uint32_t count = 0;
 
     explicit Cliques(std::size_t n) : members(n), live(n, false) {}
     const std::vector<std::int32_t>& at(std::int32_t c) const { return members[c]; }
@@ -325,7 +325,7 @@ struct Buckets {
 // Print a quotient graph: adjacency, incidence, cliques, in the order the
 // structure holds them.
 void mmd3Show(const Graph& A, const Graph& I, const Cliques& C,
-             const std::vector<std::size_t>& degrees, const std::string& title = "",
+             const std::vector<std::uint32_t>& degrees, const std::string& title = "",
              const std::vector<bool>* eliminated = nullptr) {
     const std::size_t n = A.size();
     int width = static_cast<int>(std::to_string(n > 0 ? n - 1 : 0).size());
@@ -378,8 +378,8 @@ void mmd3Show(const Graph& A, const Graph& I, const Cliques& C,
 
 // Print the state arrays: degrees, buckets, min degree, members, eliminated,
 // and the order so far.
-void mmd3ShowState(const std::vector<std::size_t>& degrees, const Buckets& buckets,
-                  std::size_t minDegree,
+void mmd3ShowState(const std::vector<std::uint32_t>& degrees, const Buckets& buckets,
+                  std::uint32_t minDegree,
                   const std::vector<std::vector<std::int32_t>>& superMembers,
                   const std::vector<bool>& eliminated,
                   const std::vector<std::int32_t>& pivots, const std::string& title = "") {
@@ -516,7 +516,7 @@ std::size_t mmd3Degree(const Graph& A, const Graph& I, const Cliques& C,
                        const std::vector<std::vector<std::int32_t>>& superMembers,
                        std::vector<std::int32_t>& mark, std::int32_t& tag,
                        std::int32_t u) {
-    std::size_t degree = 0;
+    std::uint32_t degree = 0;
     for (std::int32_t v : mmd3Neighbors(A, I, C, eliminated, mark, tag, u))
         degree += superMembers[v].size();
     return degree;
@@ -637,7 +637,7 @@ mmd3Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
 // everything the picker asks of it. What it does not give is a minimum, which is
 // why minDegree walks. A sorted container would hand over the minimum directly and
 // charge a log on every file, and files outnumber picks.
-void mmd3Refile(Buckets& buckets, std::vector<std::size_t>& degrees,
+void mmd3Refile(Buckets& buckets, std::vector<std::uint32_t>& degrees,
                std::int32_t u, std::size_t newDegree) {
     buckets.unfile(degrees[u], u);
     degrees[u] = newDegree;
@@ -667,7 +667,7 @@ std::vector<std::int32_t> mmd3MinimumDegree(const Graph& G, std::int32_t delta =
     // removed: a pivot can carry mass-merged vertices out with it, and from mmd1 up
     // an iteration batches several eliminations before one degree update pass. The three
     // counts coincide only where both of those are absent.
-    std::size_t numEliminations = 0;
+    std::uint32_t numEliminations = 0;
     // Summed over the eliminations, |C[p]| being the new clique AFTER the trim, so
     // in supernodal terms the update rather than the front. It is the raw reach of
     // the eliminations, undeduplicated: where a layer deduplicates, the degree
@@ -680,10 +680,10 @@ std::vector<std::int32_t> mmd3MinimumDegree(const Graph& G, std::int32_t delta =
     std::vector<bool> eliminated(n, false);
     std::vector<bool> outmatched(n, false);       // withheld from the buckets, not merged
     std::vector<std::int32_t> pivots;             // the order over supervariables
-    std::size_t numEliminatedVertices = 0;                // a counter, not a scan of eliminated
+    std::uint32_t numEliminatedVertices = 0;                // a counter, not a scan of eliminated
     std::size_t nnzL = 0;
 
-    std::vector<std::size_t> degrees(n);          // a degree counts, so it measures
+    std::vector<std::uint32_t> degrees(n);          // a degree counts, so it measures
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) degrees[u] = A[u].size();
     // Only the updates are counted. The total, including the initial pass over all
     // n vertices, is that plus n, so the report derives it rather than keeping a
@@ -701,9 +701,9 @@ std::vector<std::int32_t> mmd3MinimumDegree(const Graph& G, std::int32_t delta =
         degrees[u] = std::max<std::size_t>(degrees[u], 1);
         buckets.file(degrees[u], u);
     }
-    std::size_t minDegree = n > 0 ? *std::min_element(degrees.begin(), degrees.end()) : 0;
+    std::uint32_t minDegree = n > 0 ? *std::min_element(degrees.begin(), degrees.end()) : 0;
     std::size_t numBucketProbes = 0;
-    std::size_t numIterations = 0;                    // batches, the metric this layer adds
+    std::uint32_t numIterations = 0;                    // batches, the metric this layer adds
     std::size_t ncsub = 0;                        // genmmd's subscript estimate
     std::size_t pairMerges = 0;                   // q2h merges, the coarser supervariables
     std::size_t outmatchedCount = 0;              // withheld rather than refiled
@@ -727,7 +727,7 @@ std::vector<std::int32_t> mmd3MinimumDegree(const Graph& G, std::int32_t delta =
         prepassVertices.push_back(v);
     for (std::int32_t u : prepassVertices) {
         buckets.unfile(degrees[u], u);
-        std::size_t externalDegree = 0;
+        std::uint32_t externalDegree = 0;
         for (std::int32_t v : A[u]) if (!eliminated[v]) ++externalDegree;
         nnzL += externalDegree + 1;
         eliminated[u] = true;
@@ -775,7 +775,7 @@ std::vector<std::int32_t> mmd3MinimumDegree(const Graph& G, std::int32_t delta =
         // bucket array off its end.
         std::size_t batchLimit = minDegree;      // delta > 0 here, so no narrowing
         if (delta > 0)
-            batchLimit = std::min(minDegree + delta, n - 1);
+            batchLimit = std::min(minDegree + delta, static_cast<std::uint32_t>(n) - 1);
         std::vector<std::int32_t> batch;
         std::vector<std::int32_t> touched;    // first-touch order, no set and no sort
         while (true) {
@@ -786,7 +786,7 @@ std::vector<std::int32_t> mmd3MinimumDegree(const Graph& G, std::int32_t delta =
                 continue;
             }
             std::int32_t pivot = buckets.head[minDegree];
-            std::size_t degree = degrees[pivot];
+            std::uint32_t degree = degrees[pivot];
             buckets.unfile(degree, pivot);
 
             // Sweep the tag back before it can wrap. Two sites in this layer, one
@@ -834,8 +834,8 @@ std::vector<std::int32_t> mmd3MinimumDegree(const Graph& G, std::int32_t delta =
             // its diagonal, the next ext + w - 2, down to ext, and each column
             // contributes its own diagonal.
             ncsub += degree + superMembers[pivot].size() - 2;   // genmmd's *ncsub
-            std::size_t superSize = superMembers[pivot].size();
-            std::size_t externalDegree = 0;
+            std::uint32_t superSize = superMembers[pivot].size();
+            std::uint32_t externalDegree = 0;
             for (std::int32_t v : C[pivot])
                 if (!eliminated[v]) externalDegree += superMembers[v].size();
             nnzL += superSize * externalDegree + superSize * (superSize - 1) / 2 + superSize;
@@ -924,7 +924,7 @@ std::vector<std::int32_t> mmd3MinimumDegree(const Graph& G, std::int32_t delta =
             ++tag;                              // dg0's members, marked once
             const std::int32_t elementTag = tag;
             for (std::int32_t v : elementMembers) mark[v] = elementTag;
-            std::size_t dg0 = 0;
+            std::uint32_t dg0 = 0;
             for (std::int32_t v : elementMembers) dg0 += superMembers[v].size();
 
             // Set view of the split. reach(u) has |A[u]| + |I[u]| sources once the
@@ -936,7 +936,7 @@ std::vector<std::int32_t> mmd3MinimumDegree(const Graph& G, std::int32_t delta =
             qxh.clear();
             for (std::int32_t u : elementMembers) {
                 if (buckets.filed[u] || outmatched[u]) continue;  // done, or withheld
-                std::size_t otherSources = A[u].size() + I[u].size() - 1;
+                std::uint32_t otherSources = A[u].size() + I[u].size() - 1;
                 (otherSources == 1 ? q2h : qxh).push_back(u);
             }
 
@@ -959,7 +959,7 @@ std::vector<std::int32_t> mmd3MinimumDegree(const Graph& G, std::int32_t delta =
                 // the one AFTER the merge. Subtracting first files a supervariable one bucket
                 // too high per merged vertex, so it is not picked as early as its size has
                 // earned. See the ledger, entry 5.
-                std::size_t degree = dg0;
+                std::uint32_t degree = dg0;
                 for (std::int32_t v : A[u]) {
                     if (eliminated[v] || mark[v] == vertexTag) continue;
                     if (mark[v] == elementTag) continue;        // already in dg0
@@ -1011,7 +1011,7 @@ std::vector<std::int32_t> mmd3MinimumDegree(const Graph& G, std::int32_t delta =
             for (auto uu = qxh.rbegin(); uu != qxh.rend(); ++uu) {
                 const std::int32_t u = *uu;
                 if (eliminated[u] || outmatched[u]) continue;
-                std::size_t degree = mmd3Degree(A, I, C, eliminated, superMembers, mark, tag, u);
+                std::uint32_t degree = mmd3Degree(A, I, C, eliminated, superMembers, mark, tag, u);
                 degrees[u] = std::max<std::size_t>(degree + 1, 1);  // dg - qsize + 1
                 buckets.file(degrees[u], u);
                 refreshedVertices.push_back(u);

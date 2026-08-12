@@ -15,13 +15,13 @@ std::vector<std::int32_t> orderMmd1(const std::vector<std::size_t>&  colPtr,
     QuotientGraph qg(colPtr, rowIdx);
     std::vector<std::int32_t> pivots;              // the order over supervariables
     pivots.reserve(size);
-    std::size_t numEliminated = 0;                 // a counter, not a scan of the flags
+    std::uint32_t numEliminated = 0;               // a counter, not a scan of the flags
 
     // The degree cache, exact throughout: this branch keeps the honest set union and pays for it
     // by refreshing rarely. No weight array, because mass elimination merges only into the
     // pivot, which is eliminated in the same call, so no live vertex ever stands for more than
     // one original vertex.
-    std::vector<std::size_t> degrees(size);
+    std::vector<std::uint32_t> degrees(size);
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u)
         degrees[u] = qg.adjacencySize(u);
 
@@ -32,7 +32,7 @@ std::vector<std::int32_t> orderMmd1(const std::vector<std::size_t>&  colPtr,
     Buckets buckets(size);
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u)
         buckets.file(degrees[u], u);
-    std::size_t minDegree = *std::min_element(degrees.begin(), degrees.end());
+    std::uint32_t minDegree = *std::min_element(degrees.begin(), degrees.end());
 
     // The round a vertex was last evicted in, which accumulates the refresh set without a set
     // and without a sort: a vertex reached by two pivots in the same round is listed once.
@@ -46,9 +46,10 @@ std::vector<std::int32_t> orderMmd1(const std::vector<std::size_t>&  colPtr,
         // ---- one batch, no degree refreshed inside it ---------------------------------
         // Clamped, since a live vertex's degree cannot exceed size - 1 and a wider window would
         // walk the bucket array off its end.
-        std::size_t batchLimit = minDegree;
+        std::uint32_t batchLimit = minDegree;
         if (delta > 0)
-            batchLimit = std::min(minDegree + static_cast<std::size_t>(delta), size - 1);
+            batchLimit = std::min(minDegree + static_cast<std::uint32_t>(delta),
+                                  static_cast<std::uint32_t>(size) - 1);
 
         touched.clear();
         while (true) {
@@ -65,7 +66,7 @@ std::vector<std::int32_t> orderMmd1(const std::vector<std::size_t>&  colPtr,
 
             const std::vector<std::int32_t>& merged = qg.eliminate(pivot);
             pivots.push_back(pivot);
-            numEliminated += 1 + merged.size();
+            numEliminated += 1 + static_cast<std::uint32_t>(merged.size());
             for (std::int32_t u : merged) {
                 buckets.unfile(degrees[u], u);          // unfile before zeroing: the bucket
                 degrees[u] = 0;                         //   index is read from the degree
@@ -77,8 +78,8 @@ std::vector<std::int32_t> orderMmd1(const std::vector<std::size_t>&  colPtr,
             // with a stale degree is not a candidate, because it is not in a bucket to be found
             // in.
             const std::int32_t* pivotClique = qg.clique(pivot);
-            const std::size_t pivotCliqueSize = qg.cliqueSize(pivot);
-            for (std::size_t k = 0; k < pivotCliqueSize; ++k) {
+            const std::uint32_t pivotCliqueSize = qg.cliqueSize(pivot);
+            for (std::uint32_t k = 0; k < pivotCliqueSize; ++k) {
                 const std::int32_t u = pivotClique[k];
                 buckets.unfile(degrees[u], u);
                 if (touchedRound[u] != numRounds) {

@@ -70,7 +70,8 @@ said about the orderings, in order of how much it should affect the plan:
    vendored AMD does not move. **Fill is unaffected**, so this is time only. It belongs in the
    shared quotient graph so all six drivers gain it at once.
 3. **The descriptor struct**, `docs/TODO.md` question 3, if that profile says stalls. Item 2d.
-4. **Narrow the one-dimensional sizes.** Self-contained, rules settled, ordering first. Item 2e.
+4. **Narrow the one-dimensional sizes. THE ORDERING IS COMPLETE, 2026-08-11**; the symbolic and
+   numeric phases remain and are the larger half. Item 2e.
 5. **Why `Amd3` and the vendored `AMD` disagree on fill on real matrices.** NEW on 2026-08-11.
    `make amdorder` shows exact agreement on all 38 acceptance cases, which are grids and random
    patterns; on the 107-matrix performance set they differ on a minority, once by 4 percent on
@@ -379,7 +380,40 @@ oracles; their speed has no consumer. It is listed because it is evidence about 
 if folding `explicitPart` away is worth something in `Amd2B`, that is a second data point for the
 stream hypothesis at no risk to the default.
 
-**2e. NARROW THE ONE-DIMENSIONAL SIZES, decided 2026-08-10, not yet done.** The integer model
+**2e. NARROW THE ONE-DIMENSIONAL SIZES. THE ORDERING IS COMPLETE, 2026-08-11.** Eleven steps, each
+with the permutation checked against the pre-change tree on 2D grids to 80 a side, 3D to 16 and
+three random patterns at n = 2000, all identical, and each clean under `-Wall -Wextra` and under
+`-fsanitize=address,undefined`. What landed: the four `QuotientGraph` arrays and the accessors over
+them, `Buckets`'s signatures, `degrees` with the scalars that travel with it, the four scan arrays
+with the two structs that bind them, then `usedKeys` and its hash locals, `sizeU` and `sizeV`,
+`reachableSize`, `absorb`'s `vertexCount`, and one entity loop in `Amd3` brought back to the
+`int32_t` form. `docs/DESIGN_DECISIONS.md` (2026-08-11) carries the account and
+`docs/CODING_RULES.md` now states the three-way rule.
+
+**Three things came out of it that the list below did not anticipate**, all in the design entry:
+disjointness rather than arity is what bounds an accumulation, so nine sites needed no widening; a
+narrowing cast goes outside an expression and a widening cast must go on an operand, which removed
+the last arithmetic depending on the cap on n; and `bound` in four drivers was narrowed and had to
+be reverted, being a fixed sum at its declaration and an accumulator three lines later.
+
+**What remains `std::size_t` in the ordering is correct, and the list is short enough to check
+against.** The `colPtr` parameters and the `cp` loop over them; `mSourcePtr` and `mCliquePtr`; the
+five accumulators, `bound` in the four accumulating amd drivers, `deg` in `Amd3` and the hash `key`
+in three, together with their `std::min<std::size_t>` calls and operand casts; `size()`;
+`Buckets`'s constructor; the driver-local `size`; and `numFlagSweeps`, a diagnostic counter bounded
+by the tag range rather than by n, which the dimension rule does not decide and which was left
+deliberately.
+
+**What is left of this item is everything outside the ordering.** The symbolic and numeric phases
+are untouched and are the larger half. **And two casts hold n prisoner**, neither reachable and
+both left deliberately:
+`Amd3`'s `modulus = static_cast<std::int32_t>(size + 1)` fails at exactly the largest n
+`checkIndexRange` admits, and `mark[incidenceU[i] + cliqueStamp]` in the three hash drivers reaches
+`2n - 1` in signed `int32_t` and is undefined above `n = 2^30`. The design entry says why they were
+not fixed with the rest.
+
+**The original text of the item follows, kept because the target list is what the work was driven
+from.** The integer model
 becomes: **`std::uint32_t` for one-dimensional sizes, `std::size_t` for two-dimensional ones, and
 `std::int32_t` for indices and for anything that carries NIL.** This reverses the 2026-08-08
 `DESIGN_DECISIONS` entry, which kept the wide one-dimensional types as a considered trade; that
@@ -395,12 +429,80 @@ can exceed what the narrow type holds:
   even that, a supernode's columns and its update rows being disjoint subsets of the same n
   indices.
 
-**What changes in `QuotientGraph`.** `mAdjacencySize`, `mIncidenceSize`, `mCliqueSize` and
-`mWeight` narrow: all are counts bounded by n. `mSourcePtr` and `mCliquePtr` stay `std::size_t`,
-their values being offsets into arenas sized by nnz. They would FIT in 32 bits at any size we can
-factor, and they stay wide because of what they mean, which is the rule doing its job rather than
-the rule being slack. In the drivers `degrees`, `cliqueDegree`, `outside`, `explicitPart`, `degme`,
-`numLive` and `numLeft` narrow the same way, and `Buckets`'s signatures move with `degrees`.
+### The targets, enumerated, 2026-08-11
+
+Taken from a reading of the ordering sources on that date, so an item is either done or not and
+nothing has to be re-derived per session. Four buckets. **The split came out cleaner than expected:
+nothing currently `std::int32_t` wants to become `std::uint32_t`, so the narrowing set is exactly
+the currently-`std::size_t` set minus the two `Ptr` arrays, minus the two accumulators.**
+
+**Bucket 1, stays `std::size_t`, being two-dimensional.** Two arrays, both in `QuotientGraph`, and
+both positions rather than counts:
+
+- `mSourcePtr[u]`, where u's run starts in `mSource`; bounded by nnz(A).
+- `mCliquePtr[c]`, where c's block starts in `mCliqueArena`; bounded by the sum of every clique
+  ever formed, which grows toward nnz(L).
+
+Both would FIT in 32 bits at any size we can factor. They stay wide because of what they mean,
+which is the rule doing its job rather than the rule being slack.
+
+**Bucket 2, stays `std::int32_t`, carrying NIL or a sign.** Larger than it looks, and no work:
+
+- Index payloads: `mSource`, `mCliqueArena`, and the drivers' id lists, `pivots`,
+  `touchedCliques`, `deadCliques`, `touched`, `batch`, `elementMembers`, `q2h`, `qxh`,
+  `refreshed`, `mMerged`.
+- Links: `mSuperNext`, `mSuperLast`, `hashHead`, `hashNext`, and `Buckets`'s `mHead`, `mNext`,
+  `mPrev`, which carries two sentinels, `NIL` and `UNFILED = -2`.
+- Stamps: `mMark` and `mTag`, the drivers' `mark` and `tag`, `touchedRound`.
+- `Amd3`'s `w`, `wflg`, `lemax`, `wbig`, signed by requirement rather than by sentinel; see below.
+
+`mEliminated` and `Mmd2`/`Mmd3`'s `outmatched` are `std::uint8_t` and stay.
+
+**Bucket 3, narrows to `std::uint32_t`.** In `QuotientGraph`, four arrays and one scalar, all
+bounded by n: `mAdjacencySize`, `mIncidenceSize`, `mCliqueSize`, `mWeight`, and the per-pivot
+`mCliqueWeight`. The accessors over them move too, `adjacencySize`, `incidenceSize`, `cliqueSize`,
+`weight`, `cliqueWeight`, `reachableSize` and `reachableWeight`, which is what takes the casts out
+of the hot loops.
+
+In the drivers, **twenty-three declarations across the eight files**:
+
+| array | where | what it holds |
+|---|---|---|
+| `degrees` | all eight | the filed degree, at most n |
+| `outside` | `Amd1`, `Amd1B`, `Amd2`, `Amd2B` | per clique, `\|C[c] - C[p]\|` weighted |
+| `cliqueDegree` | the five amd drivers other than `Amd3`, plus `Amd3` | per clique, `\|C[c]\|` weighted |
+| `explicitPart` | `Amd1B`, `Amd2B` | per vertex, weight summed over the pruned `A[u]` |
+| `partial` | `Amd3` | the half-formed bound, ledger entry 4 |
+| `usedKeys` | `Amd2`, `Amd2B`, `Amd3` | hash values in [0, n]; a count by the range test, though it does not read as one |
+
+`Amd3` has no `outside`, carrying `Amd.cpp`'s tagged `w` in its place, which is why the amd column
+is not uniform. The two scan structs hold references to these same arrays, three in
+`ApproximateScan` and two in `TaggedScan`, and move with them rather than being separate targets.
+
+And the scalars that move with the arrays: `numEliminated`, `numLive`, `minDegree`, `degme`,
+`numLeft`, `batchLimit`, `dg0`, `weightU`, `weightV`, `sizeU`, `sizeV`, `otherSources`, and the
+hoisted lengths `pivotCliqueSize`, `adjacencySize`, `incidenceSize`, `membersSize`, `cliqueSize`.
+
+**Bucket 4, must stay wide.** The two accumulators below, which the operative test catches and a
+per-array reading does not.
+
+### Three decisions to take before the first edit
+
+Each is a decision rather than a consequence, and each reaches every file, so taking them in order
+is what keeps the change mechanical afterwards.
+
+1. **Does `n` itself narrow?** `QuotientGraph::size()` returns `mAdjacencySize.size()`, a container
+   size, so it is `std::size_t` whatever the element type becomes. If the accessors return
+   `std::uint32_t` while `size()` does not, every comparison between a count and n is a
+   mixed-width one. The likely answer is that `size()` returns `std::uint32_t` with the cast in
+   that one place, but it should be chosen rather than fallen into.
+2. **What `Buckets` becomes.** Its three arrays are `std::int32_t` links and do not change. What
+   changes is the signatures: `file`, `unfile`, `head` and `empty` taking a `std::uint32_t`
+   degree, and `refile` taking `std::vector<std::uint32_t>&`. Note `mHead` is sized n + 1 because
+   MMD files a vertex under its degree plus one, so the parameter's range reaches n exactly.
+3. **Whether the eight subtraction sites get anything beyond the note below.** They are correct by
+   invariant today and nothing enforces it; narrowing changes the wrap distance and not the
+   hazard.
 
 **The NIL-carrying set needs no work.** `mMark`, `mTag`, `mHead`, `mNext`, `mPrev`, `mSuperNext`,
 `mSuperLast`, `hashHead`, `hashNext` and `touchedCliques` are already `std::int32_t`.
@@ -430,10 +532,22 @@ which reads as a large degree rather than an absurd one. Worth knowing when one 
 **Expect the model and the deleted casts, not milliseconds.** Narrowing six of these arrays was
 tried on 2026-08-01: 17 percent fewer simulated D1 misses and zero on alpamayo. What it does buy is
 that the hot loops stop casting: `const std::int32_t adjacencySize = static_cast<std::int32_t>(
-mAdjacencySize[u])` and its siblings exist only because the array is wider than the loop. And it
-composes with item 2d: `{ size_t sourcePtr; uint32 adjacencySize; uint32 incidenceSize; }` is 16
+mAdjacencySize[u])` and its siblings exist only because the array is wider than the loop. **Eight
+of the eleven casts in `src/QuotientGraph.cpp` are that shape**, seven hoisting an adjacency or
+incidence length and one narrowing `cliqueDegree[c]` to add it to `wnvi`, so the count is a
+before-and-after worth recording rather than an estimate. And it composes with item 2d:
+`{ size_t sourcePtr; uint32 adjacencySize; uint32 incidenceSize; }` is 16
 bytes, four to a cache line, which makes the descriptor struct the natural next step rather than a
 separate argument.
+
+**The durable half has to be written before this item closes, not after.** This file is meant to be
+deleted, so a list worked through here leaves nothing behind unless two other files move with it:
+`docs/CODING_RULES.md`, whose index-type section states a TWO-way split, index against position,
+where this is a THREE-way one; and `docs/DESIGN_DECISIONS.md`, since narrowing reverses half of the
+2026-08-08 integer-model entry, which kept the wide one-dimensional types as a considered trade and
+named the count sweep as the cheap half. Nothing detects drift between the three, there being no
+invariant here of the kind that binds the suite to `docs/TESTING_SPECIFICATION.md`, so the
+`CODING_RULES` edit belongs in the same step as the last source file rather than as a follow-up.
 
 **3. The same widening is available to `make test`, cheaply.** Its prototype-against-production
 comparison still runs on 2D grids at sides 10 and 20 alone, and `graphs.h` holds the 3D and random

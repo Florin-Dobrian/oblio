@@ -143,7 +143,7 @@ using Graph = std::vector<std::vector<std::int32_t>>;
 struct Cliques {
     std::vector<std::vector<std::int32_t>> members;
     std::vector<bool> live;
-    std::size_t count = 0;
+    std::uint32_t count = 0;
 
     explicit Cliques(std::size_t n) : members(n), live(n, false) {}
     const std::vector<std::int32_t>& at(std::int32_t c) const { return members[c]; }
@@ -212,7 +212,7 @@ void mdam2Show(const Graph& A, const Graph& I, const Cliques& C,
             incidenceText << (first ? "" : " ") << "c" << c;
             first = false;
         }
-        std::size_t degree = mdam2Neighbors(A, I, C, mark, tag, u).size();
+        std::uint32_t degree = mdam2Neighbors(A, I, C, mark, tag, u).size();
         if (bounds[u] > degree) ++loose;
         std::cout << "  " << std::setw(width) << u << ": {" << adjacencyText.str()
                   << "} {" << incidenceText.str() << "} bound " << bounds[u]
@@ -248,7 +248,7 @@ void mdam2Show(const Graph& A, const Graph& I, const Cliques& C,
 // Nowhere in it is a walk over a clique's members, which is the whole difference
 // from mdm2's union.
 void mdam2RefreshBounds(const Graph& A, const Graph& I, const Cliques& C,
-                        std::vector<std::size_t>& bounds, std::vector<std::size_t>& outside,
+                        std::vector<std::size_t>& bounds, std::vector<std::uint32_t>& outside,
                         std::vector<std::int32_t>& mark, std::int32_t& tag,
                         std::int32_t pivot, const std::vector<std::int32_t>& clique) {
     ++tag;
@@ -404,7 +404,7 @@ std::vector<std::int32_t> mdam2MinimumDegree(const Graph& G) {
     // removed: a pivot can carry mass-merged vertices out with it, and from mmd1 up
     // an iteration batches several eliminations before one degree update pass. The three
     // counts coincide only where both of those are absent.
-    std::size_t numEliminations = 0;
+    std::uint32_t numEliminations = 0;
     // Summed over the eliminations, |C[p]| being the new clique AFTER the trim, so
     // in supernodal terms the update rather than the front. It is the raw reach of
     // the eliminations, undeduplicated: where a layer deduplicates, the degree
@@ -414,7 +414,7 @@ std::vector<std::int32_t> mdam2MinimumDegree(const Graph& G) {
     // Passes of the outer loop, each one a batch of eliminations followed by one
     // degree update pass. Here the batch is always a single elimination, so this
     // equals numEliminations; from mmd1 up the two come apart.
-    std::size_t numIterations = 0;
+    std::uint32_t numIterations = 0;
     // Only the updates are counted. The total, including the initial pass over all
     // n vertices, is that plus n, so the report derives it. That first pass finds
     // |A[u]| with no clique yet formed, which is the bound formula on an empty
@@ -434,7 +434,7 @@ std::vector<std::int32_t> mdam2MinimumDegree(const Graph& G) {
     // exact: reach(u) is A[u] and nothing else.
     std::vector<std::size_t> bounds(n);
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) bounds[u] = A[u].size();
-    std::vector<std::size_t> outside(n, 0);   // |C[c] - C[pivot]|, one slot per clique id
+    std::vector<std::uint32_t> outside(n, 0);   // |C[c] - C[pivot]|, one slot per clique id
 
     // NOT PRODUCTION: display only. The trace is what makes these files teachable and
     // is the whole reason they exist; nothing downstream reads it.
@@ -465,7 +465,7 @@ std::vector<std::int32_t> mdam2MinimumDegree(const Graph& G) {
             mdam2Eliminate(A, I, C, eliminated, mark, tag, pivot);
         ++numEliminations;
         numCliqueEntries += C[pivot].size();
-        std::size_t degree = neighbors.size();
+        std::uint32_t degree = neighbors.size();
         // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
         // No union is needed for it: the eliminator has just formed reach(pivot) as
         // the new clique, so degree IS the pivot's exact degree, free of charge.

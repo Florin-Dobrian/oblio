@@ -125,7 +125,7 @@ using Graph = std::vector<std::vector<std::int32_t>>;
 struct Cliques {
     std::vector<std::vector<std::int32_t>> members;
     std::vector<bool> live;
-    std::size_t count = 0;
+    std::uint32_t count = 0;
 
     explicit Cliques(std::size_t n) : members(n), live(n, false) {}
     const std::vector<std::int32_t>& at(std::int32_t c) const { return members[c]; }
@@ -187,8 +187,8 @@ struct Buckets {
 // Print a quotient graph: adjacency, incidence, cliques, in the order the
 // structure holds them.
 void amd4Show(const Graph& A, const Graph& I, const Cliques& C,
-              const std::vector<std::size_t>& degrees,
-              const std::vector<std::size_t>& exact, const std::string& title = "",
+              const std::vector<std::uint32_t>& degrees,
+              const std::vector<std::uint32_t>& exact, const std::string& title = "",
               const std::vector<bool>* eliminated = nullptr) {
     const std::size_t n = A.size();
     int width = static_cast<int>(std::to_string(n > 0 ? n - 1 : 0).size());
@@ -242,8 +242,8 @@ void amd4Show(const Graph& A, const Graph& I, const Cliques& C,
 
 // Print the state arrays: degrees, buckets, min degree, members, eliminated,
 // and the order so far.
-void amd4ShowState(const std::vector<std::size_t>& degrees, const Buckets& buckets,
-                  std::size_t minDegree,
+void amd4ShowState(const std::vector<std::uint32_t>& degrees, const Buckets& buckets,
+                  std::uint32_t minDegree,
                   const std::vector<std::vector<std::int32_t>>& superMembers,
                   const std::vector<bool>& eliminated,
                   const std::vector<std::int32_t>& pivots, const std::string& title = "") {
@@ -514,7 +514,7 @@ std::size_t amd4ExactDegree(const Graph& A, const Graph& I, const Cliques& C,
                             const std::vector<std::vector<std::int32_t>>& superMembers,
                             std::vector<std::int32_t>& mark, std::int32_t& tag,
                             std::int32_t u) {
-    std::size_t degree = 0;
+    std::uint32_t degree = 0;
     for (std::int32_t v : amd4Neighbors(A, I, C, eliminated, mark, tag, u))
         degree += superMembers[v].size();
     return degree;
@@ -641,7 +641,7 @@ amd4Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
 // everything the picker asks of it. What it does not give is a minimum, which is
 // why minDegree walks. A sorted container would hand over the minimum directly and
 // charge a log on every file, and files outnumber picks.
-void amd4Refile(Buckets& buckets, std::vector<std::size_t>& degrees,
+void amd4Refile(Buckets& buckets, std::vector<std::uint32_t>& degrees,
                std::int32_t u, std::size_t newDegree) {
     buckets.unfile(degrees[u], u);
     degrees[u] = newDegree;
@@ -673,7 +673,7 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
     // removed: a pivot can carry mass-merged vertices out with it, and from mmd1 up
     // an iteration batches several eliminations before one degree update pass. The three
     // counts coincide only where both of those are absent.
-    std::size_t numEliminations = 0;
+    std::uint32_t numEliminations = 0;
     // Summed over the eliminations, |C[p]| being the new clique AFTER the trim, so
     // in supernodal terms the update rather than the front. It is the raw reach of
     // the eliminations, undeduplicated: where a layer deduplicates, the degree
@@ -683,28 +683,28 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
     // Passes of the outer loop, each one a batch of eliminations followed by one
     // degree update pass. Here the batch is always a single elimination, so this
     // equals numEliminations; from mmd1 up the two come apart.
-    std::size_t numIterations = 0;
+    std::uint32_t numIterations = 0;
     std::vector<std::vector<std::int32_t>> superMembers(n);   // for the expansion
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u)
         superMembers[u].push_back(u);
     std::vector<bool> eliminated(n, false);
     std::vector<std::int32_t> pivots;             // the order over supervariables
-    std::size_t numEliminatedVertices = 0;
+    std::uint32_t numEliminatedVertices = 0;
     // Live ORIGINAL vertices, which is not n - numEliminatedVertices. numEliminatedVertices counts
     // what has left the SELECTION, and a hash merge folds v into a LIVE u, so v
     // stops being selectable while the vertices it stands for are still live inside
     // u. The first cap of the bound needs the second reading, so it gets its own
     // counter: only an elimination and a dense removal reduce it.
-    std::size_t numLive = n;                // a counter, not a scan of eliminated
+    std::uint32_t numLive = n;                // a counter, not a scan of eliminated
     std::size_t nnzL = 0;
 
     // The cache, and the count of degree computations, which is what this layer
     // exists to reduce. Built once, then touched only where it can be wrong.
     // The cache, as in md5, except that from the first elimination it holds a
     // BOUND rather than a degree. exact[] is carried alongside for the trace only.
-    std::vector<std::size_t> degrees(n);          // a degree counts, so it measures
+    std::vector<std::uint32_t> degrees(n);          // a degree counts, so it measures
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) degrees[u] = A[u].size();
-    std::vector<std::size_t> exact = degrees;
+    std::vector<std::uint32_t> exact = degrees;
     // Only the updates are counted. The total, including the initial pass over all
     // n vertices, is that plus n, so the report derives it. That first pass finds
     // |A[u]| with no clique yet formed, which is the bound formula on an empty
@@ -808,7 +808,7 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
 
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u)
         if (!eliminated[u]) buckets.file(degrees[u], u);
-    std::size_t minDegree = 0;
+    std::uint32_t minDegree = 0;
     bool haveMin = false;
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) {
         if (eliminated[u]) continue;
@@ -850,7 +850,7 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
         numCliqueEntries += C[pivot].size();
         isElement[pivot] = true;
         for (std::int32_t c : absorbedCliques) parent[c] = pivot;   // its children
-        std::size_t degree = neighbors.size();
+        std::uint32_t degree = neighbors.size();
         pivots.push_back(pivot);
         numEliminatedVertices += 1 + mergedVertices.size();
         for (std::int32_t u : mergedVertices) {   // the pivot now stands for them too
@@ -896,7 +896,7 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
         ++tag;
         const std::int32_t inClique = tag;      // membership of C[pivot], one test
         for (std::int32_t v : pivotClique) mark[v] = inClique;
-        std::size_t degme = 0;
+        std::uint32_t degme = 0;
         for (std::int32_t v : pivotClique) degme += superMembers[v].size();
         cliqueDegree[pivot] = degme;            // what scan 1 subtracts from
 
@@ -916,11 +916,11 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
         // and paid sum |C[c]|. Amd.cpp's scan 1 does the same thing at
         // `we = Degree[e] + wnvi` then `we -= nvi`.
         std::vector<std::int32_t> touchedCliques;
-        std::vector<std::size_t> outside(n, 0);
+        std::vector<std::uint32_t> outside(n, 0);
         ++tag;
         const std::int32_t seenClique = tag;
         for (std::int32_t u : pivotClique) {
-            const std::size_t weightU = superMembers[u].size();
+            const std::uint32_t weightU = superMembers[u].size();
             for (std::int32_t c : I[u]) {
                 if (c == pivot) continue;
                 if (mark[c] != seenClique) {    // first sighting: start from |C[c]|
@@ -961,7 +961,7 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
             numAbsorbed += deadCliques.size();
         }
 
-        const std::size_t numLeft = numLive;
+        const std::uint32_t numLeft = numLive;
         const std::vector<std::int32_t>& refreshedVertices = pivotClique;
         for (std::int32_t u : refreshedVertices) {
             // bound = |A[u]| + |C[pivot] - {u}| + sum |C[c] - C[pivot]| over the
@@ -1002,7 +1002,7 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
         // cleared only where it was used, which is Amd.cpp's Head[hval]. A map keyed
         // by the hash would cost a log per insertion and a node per group, for a
         // quantity that is already an index into 0 .. n.
-        std::vector<std::size_t> usedKeys;
+        std::vector<std::uint32_t> usedKeys;
         for (std::int32_t u : pivotClique) {
             if (eliminated[u]) continue;
             // The hash stands for the PAIR of sets (A[u], I[u]), so equal sets
@@ -1059,14 +1059,14 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
                     }
                     ++tag;
                     const std::int32_t other = tag;
-                    std::size_t sizeV = 0;
+                    std::uint32_t sizeV = 0;
                     for (std::int32_t w : A[v])
                         if (w != u && !eliminated[w]) { mark[w] = other; ++sizeV; }
                     for (std::int32_t c : I[v]) {        // stamped past the vertices
                         mark[c + static_cast<std::int32_t>(n)] = other;
                         ++sizeV;
                     }
-                    std::size_t sizeU = 0;
+                    std::uint32_t sizeU = 0;
                     bool same = true;
                     for (std::int32_t w : A[u]) {
                         if (w == v || eliminated[w]) continue;
@@ -1118,8 +1118,8 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
         // member left there is a live vertex standing for itself alone. The first
         // column then holds ext + w - 1 entries below its diagonal, the next
         // ext + w - 2, down to ext, and each column contributes its own diagonal.
-        std::size_t superSize = superMembers[pivot].size();
-        std::size_t externalDegree = 0;
+        std::uint32_t superSize = superMembers[pivot].size();
+        std::uint32_t externalDegree = 0;
         for (std::int32_t v : C[pivot])
             if (!eliminated[v]) externalDegree += superMembers[v].size();
         // The dense rows were taken out but they still sit below every column of

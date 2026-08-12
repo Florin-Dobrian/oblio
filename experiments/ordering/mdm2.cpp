@@ -107,7 +107,7 @@ using Graph = std::vector<std::vector<std::int32_t>>;
 struct Cliques {
     std::vector<std::vector<std::int32_t>> members;
     std::vector<bool> live;
-    std::size_t count = 0;
+    std::uint32_t count = 0;
 
     explicit Cliques(std::size_t n) : members(n), live(n, false) {}
     const std::vector<std::int32_t>& at(std::int32_t c) const { return members[c]; }
@@ -137,7 +137,7 @@ std::vector<std::int32_t> mdm2Neighbors(const Graph& A, const Graph& I, const Cl
 // Takes the cached degrees and advances no tag: md2 had to recompute a degree to
 // print one, and the point of this file is that nobody recomputes.
 void mdm2Show(const Graph& A, const Graph& I, const Cliques& C,
-             const std::vector<std::size_t>& degrees,
+             const std::vector<std::uint32_t>& degrees,
              const std::string& title = "",
              const std::vector<bool>* eliminated = nullptr) {
     const std::size_t n = A.size();
@@ -315,7 +315,7 @@ std::vector<std::int32_t> mdm2MinimumDegree(const Graph& G) {
     // removed: a pivot can carry mass-merged vertices out with it, and from mmd1 up
     // an iteration batches several eliminations before one degree update pass. The three
     // counts coincide only where both of those are absent.
-    std::size_t numEliminations = 0;
+    std::uint32_t numEliminations = 0;
     // Summed over the eliminations, |C[p]| being the new clique AFTER the trim, so
     // in supernodal terms the update rather than the front. It is the raw reach of
     // the eliminations, undeduplicated: where a layer deduplicates, the degree
@@ -325,7 +325,7 @@ std::vector<std::int32_t> mdm2MinimumDegree(const Graph& G) {
     // Passes of the outer loop, each one a batch of eliminations followed by one
     // degree update pass. Here the batch is always a single elimination, so this
     // equals numEliminations; from mmd1 up the two come apart.
-    std::size_t numIterations = 0;
+    std::uint32_t numIterations = 0;
     // Only the updates are counted. The total, including the initial pass over all
     // n vertices, is that plus n, so the report derives it rather than keeping a
     // second counter that could drift from this one.
@@ -339,7 +339,7 @@ std::vector<std::int32_t> mdm2MinimumDegree(const Graph& G) {
 
     // No clique yet, so a vertex's reachable set is exactly its adjacency and the
     // first degrees need no union at all.
-    std::vector<std::size_t> degrees(n);
+    std::vector<std::uint32_t> degrees(n);
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) degrees[u] = A[u].size();
 
     // NOT PRODUCTION: display only. The trace is what makes these files teachable and
@@ -369,7 +369,7 @@ std::vector<std::int32_t> mdm2MinimumDegree(const Graph& G) {
             mdm2Eliminate(A, I, C, eliminated, mark, tag, pivot);
         ++numEliminations;
         numCliqueEntries += C[pivot].size();
-        std::size_t degree = neighbors.size();
+        std::uint32_t degree = neighbors.size();
         order.push_back(pivot);
         degreeSum += degree;
 

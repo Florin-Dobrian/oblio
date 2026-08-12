@@ -76,7 +76,7 @@ using Graph = std::vector<std::vector<std::int32_t>>;
 struct Cliques {
     std::vector<std::vector<std::int32_t>> members;
     std::vector<bool> live;
-    std::size_t count = 0;
+    std::uint32_t count = 0;
 
     explicit Cliques(std::size_t n) : members(n), live(n, false) {}
     const std::vector<std::int32_t>& at(std::int32_t c) const { return members[c]; }
@@ -140,7 +140,7 @@ void md3Show(const Graph& A, const Graph& I, const Cliques& C,
             incidenceText << (first ? "" : " ") << "c" << c;
             first = false;
         }
-        std::size_t degree = md3Neighbors(A, I, C, mark, tag, u).size();
+        std::uint32_t degree = md3Neighbors(A, I, C, mark, tag, u).size();
         std::cout << "  " << std::setw(width) << u << ": {" << adjacencyText.str()
                   << "} {" << incidenceText.str() << "} degree " << degree << "\n";
     }
@@ -366,7 +366,7 @@ std::vector<std::int32_t> md3MinimumDegree(const Graph& G) {
     // removed: a pivot can carry mass-merged vertices out with it, and from mmd1 up
     // an iteration batches several eliminations before one degree update pass. The three
     // counts coincide only where both of those are absent.
-    std::size_t numEliminations = 0;
+    std::uint32_t numEliminations = 0;
     // Summed over the eliminations, |C[p]| being the new clique AFTER the trim, so
     // in supernodal terms the update rather than the front. It is the raw reach of
     // the eliminations, undeduplicated: where a layer deduplicates, the degree
@@ -376,7 +376,7 @@ std::vector<std::int32_t> md3MinimumDegree(const Graph& G) {
     // Passes of the outer loop, each one a batch of eliminations followed by one
     // degree update pass. Here the batch is always a single elimination, so this
     // equals numEliminations; from mmd1 up the two come apart.
-    std::size_t numIterations = 0;
+    std::uint32_t numIterations = 0;
     std::size_t numDegreeComputations = 0;
     // Sweeps of the tag back to zero. Expected to be 0 at every size we run, so it
     // is here as the witness that the guard is inert rather than as a statistic.
@@ -386,7 +386,7 @@ std::vector<std::int32_t> md3MinimumDegree(const Graph& G) {
         superMembers[u].push_back(u);
     std::vector<bool> eliminated(n, false);
     std::vector<std::int32_t> pivots;             // the order over supervariables
-    std::size_t numEliminatedVertices = 0;                // a counter, not a scan of eliminated
+    std::uint32_t numEliminatedVertices = 0;                // a counter, not a scan of eliminated
     std::size_t nnzL = 0;
 
     // NOT PRODUCTION: display only. The trace is what makes these files teachable and
@@ -413,7 +413,7 @@ std::vector<std::int32_t> md3MinimumDegree(const Graph& G) {
         for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) {
             if (eliminated[u]) continue;
             ++numDegreeComputations;
-            std::size_t degree = md3Neighbors(A, I, C, mark, tag, u).size();
+            std::uint32_t degree = md3Neighbors(A, I, C, mark, tag, u).size();
             if (pivot == NIL || degree < best) { pivot = u; best = degree; }
         }
         // The second site. Not inside md3Eliminate, which holds three stamps live in
@@ -429,7 +429,7 @@ std::vector<std::int32_t> md3MinimumDegree(const Graph& G) {
             md3Eliminate(A, I, C, eliminated, mark, tag, pivot);
         ++numEliminations;
         numCliqueEntries += C[pivot].size();
-        std::size_t degree = neighbors.size();
+        std::uint32_t degree = neighbors.size();
         pivots.push_back(pivot);
         numEliminatedVertices += 1 + mergedVertices.size();
         for (std::int32_t u : mergedVertices) {   // the pivot now stands for them too
@@ -444,8 +444,8 @@ std::vector<std::int32_t> md3MinimumDegree(const Graph& G) {
         // member left there is a live vertex standing for itself alone. The first
         // column then holds ext + w - 1 entries below its diagonal, the next
         // ext + w - 2, down to ext, and each column contributes its own diagonal.
-        std::size_t superSize = superMembers[pivot].size();
-        std::size_t externalDegree = C[pivot].size();
+        std::uint32_t superSize = superMembers[pivot].size();
+        std::uint32_t externalDegree = C[pivot].size();
         nnzL += superSize * externalDegree + superSize * (superSize - 1) / 2 + superSize;
 
         std::ostringstream absorbedCliquesText;

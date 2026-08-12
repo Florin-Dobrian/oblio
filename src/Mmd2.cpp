@@ -15,18 +15,18 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
     QuotientGraph qg(colPtr, rowIdx);
     std::vector<std::int32_t> pivots;
     pivots.reserve(size);
-    std::size_t numEliminated = 0;
+    std::uint32_t numEliminated = 0;
 
     // The filed value, not the degree. mmdint files a degree-0 vertex under 1, `if(dg==0)dg=1`,
     // and the refresh below files under degree + 1, so from here on this array holds what MMD
     // compares and files by rather than the degree itself.
-    std::vector<std::size_t> degrees(size);
+    std::vector<std::uint32_t> degrees(size);
     Buckets buckets(size);
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u) {
-        degrees[u] = std::max<std::size_t>(qg.adjacencySize(u), 1);
+        degrees[u] = std::max<std::uint32_t>(qg.adjacencySize(u), 1);
         buckets.file(degrees[u], u);
     }
-    std::size_t minDegree = *std::min_element(degrees.begin(), degrees.end());
+    std::uint32_t minDegree = *std::min_element(degrees.begin(), degrees.end());
 
     // Withheld from the buckets rather than refiled, which is genmmd's bwd[nd] = -maxint. Not the
     // same as merged: the vertex is still live and still reachable, it simply cannot be the
@@ -61,9 +61,10 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
         while (buckets.empty(minDegree)) ++minDegree;
 
         // ---- one batch, no degree refreshed inside it ---------------------------
-        std::size_t batchLimit = minDegree;
+        std::uint32_t batchLimit = minDegree;
         if (delta > 0)
-            batchLimit = std::min(minDegree + static_cast<std::size_t>(delta), size - 1);
+            batchLimit = std::min(minDegree + static_cast<std::uint32_t>(delta),
+                                  static_cast<std::uint32_t>(size) - 1);
 
         batch.clear();
         touched.clear();
@@ -79,7 +80,7 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
             const std::vector<std::int32_t>& merged = qg.eliminate(pivot);
             batch.push_back(pivot);
             pivots.push_back(pivot);
-            numEliminated += 1 + merged.size();
+            numEliminated += 1 + static_cast<std::uint32_t>(merged.size());
             for (std::int32_t u : merged) {
                 buckets.unfile(degrees[u], u);
                 degrees[u] = 0;
@@ -87,8 +88,8 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
             degrees[pivot] = 0;
 
             const std::int32_t* clique     = qg.clique(pivot);
-            const std::size_t   cliqueSize = qg.cliqueSize(pivot);
-            for (std::size_t k = 0; k < cliqueSize; ++k) {
+            const std::uint32_t cliqueSize = qg.cliqueSize(pivot);
+            for (std::uint32_t k = 0; k < cliqueSize; ++k) {
                 const std::int32_t u = clique[k];
                 outmatched[u] = 0;                  // mmdelm's bwd[rn] = 0, back in the running
                 buckets.unfile(degrees[u], u);      // evict, with a stale degree
@@ -106,16 +107,16 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
         refreshed.clear();
         for (std::int32_t element : batch) {
             const std::int32_t* members     = qg.clique(element);
-            const std::size_t   membersSize = qg.cliqueSize(element);
+            const std::uint32_t membersSize = qg.cliqueSize(element);
 
             elementMembers.clear();
-            for (std::size_t k = 0; k < membersSize; ++k)
+            for (std::uint32_t k = 0; k < membersSize; ++k)
                 if (!qg.eliminated(members[k])) elementMembers.push_back(members[k]);
 
             ++tag;
             const std::int32_t elementTag = tag;    // dg0's members, marked once for the element
             for (std::int32_t v : elementMembers) mark[v] = elementTag;
-            std::size_t dg0 = 0;
+            std::uint32_t dg0 = 0;
             for (std::int32_t v : elementMembers) dg0 += qg.weight(v);
 
             // reach(u) has |A[u]| + |I[u]| sources once the new element is counted, so one other
@@ -126,7 +127,7 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
             qxh.clear();
             for (std::int32_t u : elementMembers) {
                 if (buckets.filed(u) || outmatched[u] != 0) continue;   // done, or withheld
-                const std::size_t otherSources = qg.adjacencySize(u) + qg.incidenceSize(u) - 1;
+                const std::uint32_t otherSources = qg.adjacencySize(u) + qg.incidenceSize(u) - 1;
                 (otherSources == 1 ? q2h : qxh).push_back(u);
             }
 
@@ -142,7 +143,7 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
                 // high per merged vertex, so it is never picked as early as its size has earned.
                 // This was a DEFECT here until 2026-08-07, found by aligning Mmd3 against
                 // genmmd; see experiments/ordering/mmd3.py, ledger entry 5.
-                std::size_t degree = dg0;
+                std::uint32_t degree = dg0;
 
                 // Not hoisted, deliberately. A q2h vertex has adjacencySize + incidenceSize == 2
                 // by the test that put it on this list, so these two loops run over at most two
@@ -150,7 +151,7 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
                 // saving. Hoist where a loop is long; leave it where the loop is short or exits
                 // early. Measured both ways.
                 const std::int32_t* adjacency = qg.adjacency(u);
-                for (std::size_t a = 0; a < qg.adjacencySize(u); ++a) {
+                for (std::uint32_t a = 0; a < qg.adjacencySize(u); ++a) {
                     const std::int32_t v = adjacency[a];
                     if (qg.eliminated(v) || mark[v] == vertexTag) continue;
                     if (mark[v] == elementTag) continue;           // already counted in dg0
@@ -158,12 +159,12 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
                     degree += qg.weight(v);
                 }
                 const std::int32_t* incidence = qg.incidence(u);
-                for (std::size_t i = 0; i < qg.incidenceSize(u); ++i) {
+                for (std::uint32_t i = 0; i < qg.incidenceSize(u); ++i) {
                     const std::int32_t c = incidence[i];
                     if (c == element) continue;
                     const std::int32_t* other     = qg.clique(c);
-                    const std::size_t   otherSize = qg.cliqueSize(c);
-                    for (std::size_t k = 0; k < otherSize; ++k) {
+                    const std::uint32_t otherSize = qg.cliqueSize(c);
+                    for (std::uint32_t k = 0; k < otherSize; ++k) {
                         const std::int32_t v = other[k];
                         if (v == u || qg.eliminated(v) || mark[v] == vertexTag) continue;
                         if (mark[v] == elementTag) {
@@ -183,15 +184,15 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
                     }
                 }
 
-                degrees[u] = std::max<std::size_t>(degree - qg.weight(u) + 1, 1);
+                degrees[u] = std::max<std::uint32_t>(degree - qg.weight(u) + 1, 1);
                 buckets.file(degrees[u], u);
                 refreshed.push_back(u);
             }
 
             for (std::int32_t u : qxh) {                 // the full union, as md5 computes it
                 if (qg.eliminated(u) || outmatched[u] != 0) continue;
-                const std::size_t degree = qg.reachableWeight(u);   // reach excludes u already
-                degrees[u] = std::max<std::size_t>(degree + 1, 1);
+                const std::uint32_t degree = qg.reachableWeight(u); // reach excludes u already
+                degrees[u] = std::max<std::uint32_t>(degree + 1, 1);
                 buckets.file(degrees[u], u);
                 refreshed.push_back(u);
             }

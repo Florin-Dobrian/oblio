@@ -68,6 +68,11 @@ public:
     // driver calls it. mmd3 read it 115931 times. So one branch paid for a byte array it never
     // consulted, and the other kept information it could have derived from a link it already
     // touches. Amd.cpp has Head, Next and Last and no flag, for the same reason.
+    // A DEGREE IS ONE DIMENSIONAL and so `std::uint32_t` in every signature here. The links stay
+    // `std::int32_t`, carrying NIL and UNFILED; only the key does not. The heads are indexed by
+    // degree and the links by vertex, which are not the same range: a true degree is at most
+    // n - 1, but MMD files a vertex under its degree PLUS ONE, so the key reaches n and the heads
+    // need one slot more than there are vertices.
     static constexpr std::int32_t UNFILED = -2;
 
     explicit Buckets(std::size_t size)
@@ -77,7 +82,7 @@ public:
     // list, so the winner among equal degrees is whatever was filed last rather than the lowest
     // index. That is the vendored convention and it is why an ordering differs from an exact
     // scan's in its ties.
-    void file(std::size_t degree, std::int32_t u) {
+    void file(std::uint32_t degree, std::int32_t u) {
         mNext[u] = mHead[degree];
         mPrev[u] = NIL;                                // filed, and at the head
         if (mHead[degree] != NIL) mPrev[mHead[degree]] = u;
@@ -87,7 +92,7 @@ public:
     // buckets[degree].discard(u). Idempotent, which matters during a batch: a vertex evicted
     // early can be merged away by a later pivot in the same round, and unfiling it twice must
     // not splice a list it is no longer in.
-    void unfile(std::size_t degree, std::int32_t u) {
+    void unfile(std::uint32_t degree, std::int32_t u) {
         if (mPrev[u] == UNFILED) return;               // already gone; see the sentinel's note
         if (mPrev[u] != NIL) mNext[mPrev[u]] = mNext[u];
         else                 mHead[degree]   = mNext[u];
@@ -100,7 +105,7 @@ public:
     // together, which is why this is one call: the bucket a vertex sits in is read from its
     // degree, so writing the degree first would erase it from the wrong list. A vertex whose
     // degree did not change is removed and reinserted into the same list, which is harmless.
-    void refile(std::vector<std::size_t>& degrees, std::int32_t u, std::size_t newDegree) {
+    void refile(std::vector<std::uint32_t>& degrees, std::int32_t u, std::uint32_t newDegree) {
         unfile(degrees[u], u);
         degrees[u] = newDegree;
         file(newDegree, u);
@@ -112,8 +117,8 @@ public:
     std::int32_t next(std::int32_t u) const      { return mNext[u]; }
     bool         filed(std::int32_t u) const     { return mPrev[u] != UNFILED; }
 
-    std::int32_t head(std::size_t degree) const  { return mHead[degree]; }
-    bool         empty(std::size_t degree) const { return mHead[degree] == NIL; }
+    std::int32_t head(std::uint32_t degree) const  { return mHead[degree]; }
+    bool         empty(std::uint32_t degree) const { return mHead[degree] == NIL; }
 
 private:
     std::vector<std::int32_t> mHead;   // mHead[d], the first live vertex of degree d
@@ -147,12 +152,12 @@ private:
 // `tag` is the only member that moves, and the driver sets it before each elimination, exactly as
 // it would before its own scan. The rest are bound once and reused for the whole ordering.
 struct ApproximateScan {
-    std::vector<std::size_t>&       explicitPart;    // per vertex, sum of weight over the pruned A[u]
-    std::vector<std::size_t>&       outside;         // per clique, |C[c] - C[p]| weighted
-    const std::vector<std::size_t>& cliqueDegree;    // per clique, |C[c]| weighted
-    std::vector<std::int32_t>&      touchedCliques;  // the cliques this step reached, once each
-    std::vector<std::int32_t>&      mark;            // the driver's membership scratch
-    std::int32_t                    tag;             // its stamp for this elimination
+    std::vector<std::uint32_t>&       explicitPart;  // per vertex, sum of weight over the pruned A[u]
+    std::vector<std::uint32_t>&       outside;       // per clique, |C[c] - C[p]| weighted
+    const std::vector<std::uint32_t>& cliqueDegree;  // per clique, |C[c]| weighted
+    std::vector<std::int32_t>&        touchedCliques;// the cliques this step reached, once each
+    std::vector<std::int32_t>&        mark;          // the driver's membership scratch
+    std::int32_t                      tag;           // its stamp for this elimination
 };
 
 // The same thing for a driver that carries `Amd.cpp`'s TAGGED W ARRAY instead of a value array and
@@ -181,13 +186,13 @@ struct ApproximateScan {
 // side when this fusion was first built, which is the footprint trade REPORT.md names and the
 // same one that sank the 2026-08-08 key fusion.
 struct TaggedScan {
-    std::vector<std::size_t>&       explicitPart;    // per vertex, sum of weight over the pruned A[u]
-    std::vector<std::int32_t>&      key;             // per vertex, the whole hash key, reduced
-    std::vector<std::int32_t>&      w;               // per clique, Amd.cpp's tagged W
-    const std::vector<std::size_t>& cliqueDegree;    // per clique, |C[c]| weighted
-    std::vector<std::int32_t>&      touchedCliques;  // the cliques this step reached, once each
-    std::int32_t                    wflg;            // the tag for this elimination
-    std::int32_t                    modulus;         // the driver's bucket count, n + 1
+    std::vector<std::uint32_t>&       explicitPart;  // per vertex, sum of weight over the pruned A[u]
+    std::vector<std::int32_t>&        key;           // per vertex, the whole hash key, reduced
+    std::vector<std::int32_t>&        w;             // per clique, Amd.cpp's tagged W
+    const std::vector<std::uint32_t>& cliqueDegree;  // per clique, |C[c]| weighted
+    std::vector<std::int32_t>&        touchedCliques;// the cliques this step reached, once each
+    std::int32_t                      wflg;          // the tag for this elimination
+    std::int32_t                      modulus;       // the driver's bucket count, n + 1
 };
 
 // The quotient graph itself: the three lists above, the liveness flags, and the supervariable
@@ -218,7 +223,7 @@ public:
     const std::int32_t* clique(std::int32_t c) const {
         return mCliqueArena.data() + mCliquePtr[c];
     }
-    std::size_t cliqueSize(std::int32_t c) const { return mCliqueSize[c]; }
+    std::uint32_t cliqueSize(std::int32_t c) const { return mCliqueSize[c]; }
 
     // |C[pivot]| WEIGHTED, which every amd driver needs and all four used to compute for
     // themselves in a pass of their own, one scattered weight load per member per pivot. It is
@@ -241,7 +246,7 @@ public:
     // Over the UNTRIMMED clique, which is what the drivers want: mass elimination runs after the
     // absorption in Amd3, and the value that pass needs is the one before any trimming. Amd3
     // recomputes it afterwards over the trimmed clique, which is ledger entry 7 and stays.
-    std::size_t cliqueWeight() const { return mCliqueWeight; }
+    std::uint32_t cliqueWeight() const { return mCliqueWeight; }
 
     // The two halves of the neighbor relation, read by an approximate degree, which decomposes
     // reach(u) rather than forming it: A[u] contributes its own term and each clique in I[u]
@@ -255,12 +260,12 @@ public:
     const std::int32_t* adjacency(std::int32_t u) const {
         return mSource.data() + mSourcePtr[u];
     }
-    std::size_t adjacencySize(std::int32_t u) const { return mAdjacencySize[u]; }
+    std::uint32_t adjacencySize(std::int32_t u) const { return mAdjacencySize[u]; }
 
     const std::int32_t* incidence(std::int32_t u) const {
         return mSource.data() + mSourcePtr[u] + mAdjacencySize[u];
     }
-    std::size_t incidenceSize(std::int32_t u) const { return mIncidenceSize[u]; }
+    std::uint32_t incidenceSize(std::int32_t u) const { return mIncidenceSize[u]; }
 
     // How many original vertices u stands for. One until mass elimination merges into it, so a
     // degree that counts vertices has to count this rather than entries.
@@ -269,7 +274,7 @@ public:
     // have to be: its members are a chain rather than a list, so the size is no longer free to
     // read. Caching it purely for locality was measured earlier and made no difference at all,
     // 2.77x against 2.76x, so the array is here for the chain and not for the cache.
-    std::size_t weight(std::int32_t u) const { return mWeight[u]; }
+    std::uint32_t weight(std::int32_t u) const { return mWeight[u]; }
 
 
     // reach(u), as above. Not const: the mark array and its tag are scratch, and threading them
@@ -283,12 +288,12 @@ public:
     // an exact refresh stops allocating once per refreshed vertex. That is the dominant
     // allocation in a branch that keeps its degrees exact, and none at all in one that bounds
     // them, which is most of why the two differ in speed by more than they differ in work.
-    std::size_t reachableSize(std::int32_t u);
+    std::uint32_t reachableSize(std::int32_t u);
 
     // The same set, weighted: the number of ORIGINAL vertices reach(u) stands for. Once a branch
     // merges into live vertices, a reached vertex can stand for several, and a degree that counts
     // vertices has to count those rather than entries.
-    std::size_t reachableWeight(std::int32_t u);
+    std::uint32_t reachableWeight(std::int32_t u);
 
     // Eliminate the pivot: turn it into a clique, absorb the cliques it belonged to, prune the
     // edges the new clique now implies, and merge in whatever it makes indistinguishable.
@@ -417,8 +422,9 @@ public:
     // dies when it is found to lie wholly inside a newer one, which is aggressive absorption, and
     // the vertices to purge are the newer clique's members, since those are the only lists that
     // can still name it.
+    // `vertexCount` is `|C[p]|`, so one dimensional; every caller passes `cliqueSize(pivot)`.
     void absorb(const std::vector<std::int32_t>& cliques,
-                const std::int32_t* vertices, std::size_t vertexCount);
+                const std::int32_t* vertices, std::uint32_t vertexCount);
 
     // Expand a pivot sequence into an elimination order over the original vertices. A pivot
     // stands for its whole supervariable, whose members are eliminated consecutively, so this is
@@ -458,10 +464,20 @@ private:
     //
     // C[c] gets none of this and needs its own arena below: a clique's members are its pivot's
     // reach, which nothing about the pivot's own column bounds.
-    std::vector<std::int32_t> mSource;         // every A[u] then I[u], run after run
-    std::vector<std::size_t>  mSourcePtr;      // where u's run starts, fixed at construction
-    std::vector<std::size_t>  mAdjacencySize;  // A[u]'s length, from the run's start
-    std::vector<std::size_t>  mIncidenceSize;  // I[u]'s length, immediately behind A[u]
+    // ONE DIMENSIONAL SIZES ARE `std::uint32_t`, POSITIONS ARE `std::size_t`. `mSourcePtr` offsets
+    // into the pool and is bounded by nnz(A), so it is two dimensional and stays wide; the two
+    // lengths are bounded by deg(u) and so by n, which the constructor caps at `MAX_IDX`. The two
+    // kinds meet at exactly one place, the constructor's crossing, where a difference of positions
+    // is written as a count, and that is where the cast belongs. `mIncidenceSize` has no such
+    // crossing at all: it is only ever written from a cursor or from another length.
+    //
+    // The CONSERVATION LEMMA is why one uint32 covers both. Their sum is bounded by u's column of
+    // A for the whole run, so neither can reach n on its own where the other is nonzero, and
+    // `adjacencySize(u) + incidenceSize(u)` cannot overflow either.
+    std::vector<std::int32_t>  mSource;         // every A[u] then I[u], run after run
+    std::vector<std::size_t>   mSourcePtr;      // where u's run starts, fixed at construction
+    std::vector<std::uint32_t> mAdjacencySize;  // A[u]'s length, from the run's start
+    std::vector<std::uint32_t> mIncidenceSize;  // I[u]'s length, immediately behind A[u]
 
     // C[c] is flat too, and for a second property rather than the adjacency's. Its members are
     // not known in advance, so its block cannot be placed at construction; but they are known
@@ -474,9 +490,13 @@ private:
     // of every clique ever formed, which is bounded by nnz(L) and is a few megabytes at the sizes
     // we run. The offsets being indices rather than pointers is what lets the arena simply grow
     // instead, since a reallocation leaves every offset valid.
-    std::vector<std::int32_t> mCliqueArena;  // every C[c] ever formed, end to end
-    std::vector<std::size_t>  mCliquePtr;    // where c's block starts, fixed once written
-    std::vector<std::size_t>  mCliqueSize;   // how much of it is still live
+    // The same split as the source pool above, and for the same reason: `mCliquePtr` offsets into
+    // the arena, which grows toward nnz(L), so it is two dimensional; `mCliqueSize` is a member
+    // count bounded by n. The one crossing is in `beginElimination`, where the arena's new length
+    // less the block's start is written as a count.
+    std::vector<std::int32_t>  mCliqueArena;  // every C[c] ever formed, end to end
+    std::vector<std::size_t>   mCliquePtr;    // where c's block starts, fixed once written
+    std::vector<std::uint32_t> mCliqueSize;   // how much of it is still live
 
     // The supervariable a vertex stands for, as a chain rather than a list per vertex. A list
     // meant one allocation per vertex before anything had happened, n of them for a structure
@@ -484,10 +504,16 @@ private:
     // three arrays allocated once: the next member, the last one (so an absorption appends in
     // O(1) and the members keep their order, which the emitted permutation depends on), and the
     // count, which a chain no longer gives away for free.
-    std::vector<std::int32_t> mSuperNext;
-    std::vector<std::int32_t> mSuperLast;
-    std::vector<std::size_t>  mWeight;
-    std::size_t               mCliqueWeight = 0;   // see cliqueWeight(); per-pivot, not per-vertex
+    // `mWeight` is one dimensional and so `std::uint32_t`, and the bound is not the term count but
+    // DISJOINTNESS: the weights partition the original vertices, so a sum of them over a set of
+    // distinct vertices is at most n however many terms it has. That covers every accumulation of
+    // weights in the ordering, in `reachableWeight`, in the clique weight below, and in the
+    // drivers' bound and refresh passes. An accumulation over an unbounded number of one
+    // dimensional terms would otherwise need a wider type, and this is the exception to that.
+    std::vector<std::int32_t>  mSuperNext;
+    std::vector<std::int32_t>  mSuperLast;
+    std::vector<std::uint32_t> mWeight;
+    std::uint32_t              mCliqueWeight = 0;  // see cliqueWeight(); per-pivot, not per-vertex
     std::vector<std::uint8_t> mEliminated;   // a byte per vertex; see reachableSet on why the flag stays
 
     std::vector<std::int32_t> mMerged;   // scratch for the vertices an elimination merges away

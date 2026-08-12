@@ -116,7 +116,7 @@ using Graph = std::vector<std::vector<std::int32_t>>;
 struct Cliques {
     std::vector<std::vector<std::int32_t>> members;
     std::vector<bool> live;
-    std::size_t count = 0;
+    std::uint32_t count = 0;
 
     explicit Cliques(std::size_t n) : members(n), live(n, false) {}
     const std::vector<std::int32_t>& at(std::int32_t c) const { return members[c]; }
@@ -183,7 +183,7 @@ void mda2Show(const Graph& A, const Graph& I, const Cliques& C,
             incidenceText << (first ? "" : " ") << "c" << c;
             first = false;
         }
-        std::size_t degree = mda2Neighbors(A, I, C, mark, tag, u).size();
+        std::uint32_t degree = mda2Neighbors(A, I, C, mark, tag, u).size();
         std::size_t bound = mda2Bound(A, I, C, u);
         if (bound > degree) ++loose;
         std::cout << "  " << std::setw(width) << u << ": {" << adjacencyText.str()
@@ -355,7 +355,7 @@ std::vector<std::int32_t> mda2MinimumDegree(const Graph& G) {
     // removed: a pivot can carry mass-merged vertices out with it, and from mmd1 up
     // an iteration batches several eliminations before one degree update pass. The three
     // counts coincide only where both of those are absent.
-    std::size_t numEliminations = 0;
+    std::uint32_t numEliminations = 0;
     // Summed over the eliminations, |C[p]| being the new clique AFTER the trim, so
     // in supernodal terms the update rather than the front. It is the raw reach of
     // the eliminations, undeduplicated: where a layer deduplicates, the degree
@@ -365,7 +365,7 @@ std::vector<std::int32_t> mda2MinimumDegree(const Graph& G) {
     // Passes of the outer loop, each one a batch of eliminations followed by one
     // degree update pass. Here the batch is always a single elimination, so this
     // equals numEliminations; from mmd1 up the two come apart.
-    std::size_t numIterations = 0;
+    std::uint32_t numIterations = 0;
     // Every bound this layer computes. No split into a build and updates, because
     // nothing is maintained: the picker recomputes each candidate's bound from
     // scratch on every iteration, as md2 and md3 do with exact degrees.
@@ -409,7 +409,7 @@ std::vector<std::int32_t> mda2MinimumDegree(const Graph& G) {
             mda2Eliminate(A, I, C, eliminated, mark, tag, pivot);
         ++numEliminations;
         numCliqueEntries += C[pivot].size();
-        std::size_t degree = neighbors.size();
+        std::uint32_t degree = neighbors.size();
         // NOT PRODUCTION: instrumentation, counting how often the bound was loose.
         // No union is needed for it: the eliminator has just formed reach(pivot) as
         // the new clique, so degree IS the pivot's exact degree, free of charge.

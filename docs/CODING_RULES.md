@@ -295,18 +295,37 @@ softer layer: conventions for consistency, not correctness.
   bare forms (`size_t`) rely on a global-namespace leak that isn't guaranteed by the
   C++ headers. This is the correct spelling even where a matching codebase uses the
   bare form, that codebase is the one to fix, not this one.
-- **Index types.** The same index/position split as in the naming rules above, now as types.
-  (The design decision calls these IDs and offsets, which is the older vocabulary for the same
-  thing.)
+- **Index types, and there are THREE of them.** The index/position split of the naming rules
+  above, with sizes split off from positions by DIMENSION. (The design decision calls indices and
+  positions IDs and offsets, which is the older vocabulary for the same thing. The third category
+  arrived on 2026-08-11 and is applied in the ordering; the rest of the tree still holds one
+  dimensional sizes wide, and that is drift rather than a second rule.)
 
   - **An index is a `std::int32_t`.** It names a vertex, row, column or supernode, and may
     carry the sentinel **`NIL = -1`** (a `constexpr std::int32_t`, never
     `static_cast<std::size_t>(-1)`). E.g. `SparseMatrix::rowIdx`, the permutation maps, the
     forest's parent/child/sibling/map arrays. Cost: a ~2.1 billion cap, accepted for a clean
     signed sentinel, and matching the graph code and the vendored `int`-based AMD/MMD.
-  - **A position is a `std::size_t`.** It measures rather than names: an offset into a buffer,
-    a count, a dimension. Never negative, never `NIL`, free to exceed 2^31. E.g.
-    `SparseMatrix::colPtr`, `size()`, `nnz()`.
+  - **A one dimensional size is a `std::uint32_t`.** It counts along one side of the matrix and is
+    bounded by n, which the constructors cap at `MAX_IDX`. Never negative and never `NIL`, so the
+    sign bit is not spent. E.g. `QuotientGraph::mAdjacencySize`, `mIncidenceSize`, `mCliqueSize`,
+    `mWeight`, the drivers' `degrees` and the arrays the scan structs bind.
+  - **A two dimensional position is a `std::size_t`.** It offsets into an object sized by an area,
+    so it is bounded by nnz rather than by n and routinely exceeds 2^31. E.g.
+    `SparseMatrix::colPtr`, `QuotientGraph::mSourcePtr` and `mCliquePtr`, `nnz()`.
+
+  **The two meet only where a difference of positions is written as a size**, which is where the
+  narrowing cast belongs. There are exactly two such crossings in `QuotientGraph` and both are a
+  block being sized from the arena that holds it.
+
+  **An accumulation is the case the dimension test does not settle by itself.** A sum of a fixed
+  few one dimensional terms is one dimensional; a sum over an unbounded number of them is not, and
+  goes in `std::size_t`. The exception, and it covers most of the ordering: **a sum of WEIGHTS over
+  DISJOINT sets is bounded by n however many terms it has**, the weights partitioning the original
+  vertices. So `reached += weight(v)` over a reachable set is narrow and `bound += outside[c]` over
+  an incidence list is wide, and the difference is disjointness rather than arity. Narrow at a
+  named point after whatever cap brings the value back into range, not at the declaration: a
+  variable that reads as a fixed sum where it is declared may be an accumulator three lines later.
   - **A loop counter takes the type of what it counts, and direction does not change the type.**
     A loop over *entities* (columns, supernodes) counts indices, so the counter is `std::int32_t`
     and the bound is cast once in the condition. Ascending:
@@ -321,7 +340,10 @@ softer layer: conventions for consistency, not correctness.
     *position* loop is still `std::size_t`, but must not test `p >= 0` (always true, it never
     terminates); use `while (p-- > 0)` or an explicit guard. What is forbidden is an `int32_t`
     counter compared against a container size *without* the cast, which is where the signed/unsigned
-    warning comes from.
+    warning comes from. A loop over a one dimensional SIZE counts that size, so it takes its type:
+    `for (std::uint32_t k = 0; k < adjacencySize; ++k)`, with no cast at all, the array and the
+    counter being the same width. That third case is what deletes the casts the ordering used to
+    carry at every hoisted length.
 
   Three rules about casting, and they matter more than they look, since we got each of them
   wrong at least once.
@@ -332,6 +354,13 @@ softer layer: conventions for consistency, not correctness.
     subscripting a container with an `std::int32_t` is legal, is silent under `-Wall -Wextra`,
     and is correct for every value that is not `NIL`. Write `parent[jj]`, never
     `parent[static_cast<std::size_t>(jj)]`.
+  - **A narrowing cast goes outside the expression; a widening cast cannot.**
+    `static_cast<std::uint32_t>(a - b)` is right: both operands are already wide, the subtraction
+    happens wide, and the cast narrows the result. `static_cast<std::size_t>(a + b)` is NOT its
+    mirror: with both operands narrow the addition happens in 32 bits and the cast widens the
+    wreckage. Widening has to be done to an OPERAND, and **one is enough**, the other promoting to
+    meet it: `static_cast<std::size_t>(degrees[u]) + degme`. This is not a matter of taste; the two
+    spellings compute different things.
   - **A widening cast is not a NIL guard, and must not be mistaken for one.**
     `static_cast<std::size_t>(NIL)` yields `SIZE_MAX` exactly as silently as the implicit
     conversion would: **the cast performs the mistake, it does not prevent it.** What prevents

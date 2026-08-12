@@ -67,6 +67,138 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-08-11: one dimensional sizes narrow to `std::uint32_t`, and the rule that took the cap out of the arithmetic
+
+**The integer model is now three types rather than two.** `std::size_t` for two dimensional
+positions, `std::uint32_t` for one dimensional sizes, and `std::int32_t` for indices and for
+anything carrying `NIL`. This reverses half of the 2026-08-08 entry, which kept the wide one
+dimensional types as a considered trade and named the count sweep as the cheap half; this is that
+half, taken in the ordering alone, which is self contained and holds the shared class.
+
+**What moved, in seven steps with the permutation checked after each.** The four `QuotientGraph`
+arrays (`mAdjacencySize`, `mIncidenceSize`, `mCliqueSize`, `mWeight`, plus the `mCliqueWeight`
+scalar and the accessors over them), `Buckets`'s signatures, `degrees` in all eight drivers with
+the scalars that travel with it, and the four scan arrays (`outside`, `cliqueDegree`,
+`explicitPart`, `partial`) with the two scan structs that hold references to them. `mSourcePtr` and
+`mCliquePtr` stay `std::size_t`, being offsets into arenas sized by nnz(A) and nnz(L).
+
+**The whole class has exactly TWO crossings from two dimensions to one**, and both are the same
+shape, a block being sized from the arena that holds it: the constructor's
+`mSourcePtr[aj + 1] - mSourcePtr[aj]`, and `beginElimination`'s
+`mCliqueArena.size() - mCliquePtr[pivot]`. Each carries an explicit cast and a note. Everything else
+in the narrowing set is written from a cursor, from another length, or from zero.
+
+### Disjointness bounds an accumulation, not arity, and that is the exception the operative test needs
+
+The test as written says an accumulation over an unbounded number of one dimensional terms can
+always exceed the type. Read literally it fires on nine sites in the ordering and is wrong at every
+one of them: `reachableWeight`'s `reached`, the clique weight, both `explicitPart` sums in the
+prune, the two in the amd drivers, `dg0`, and both `degree` accumulations in the mmd refresh. Each
+sums weights over a set of DISTINCT vertices, and the weights partition the original vertices, so
+the sum is at most n whatever the term count.
+
+**So the operative test wants a second clause: an accumulation is bounded when its terms are
+weights of disjoint sets, however many there are.** Without it the rule would have widened nine
+arrays for nothing, and with it the genuinely unbounded accumulators stand out, which is the point.
+There are five and they stay `std::size_t`: `bound` in the four accumulating amd drivers, `deg` in
+`Amd3`, and the hash `key` in `Amd2`, `Amd2B` and `Amd3`. Each sums O(n) terms each up to n over a
+list that has no disjointness to appeal to.
+
+### A variable that is a sum at its declaration may be an accumulator three lines later
+
+`bound` was narrowed in the `degrees` step and had to be reverted. It reads as a fixed sum at its
+declaration, `explicitPart + degme - weight(u)`, which is bounded by n; the loop underneath then
+adds `outside[c]` over `I[u]`, which is the same O(n^2) shape as `Amd3`'s `deg`, and that one had
+been left wide correctly. **The declaration is not where the question can be answered.** It was
+found by auditing every `+=` in the ordering rather than by any check: the permutations were
+identical, both sanitizers were clean, and no size we can run comes near the overflow.
+
+The repair is also the pattern the other four now share. Stay wide through the arithmetic, take the
+caps wide, and narrow once at a named point after them, `const std::uint32_t filed`, which is what
+`refile` and `minDegree` then take. The narrowing sits where the value is provably at most n
+instead of being asserted to be.
+
+### Narrowing casts go outside, widening casts cannot
+
+The two directions are different operations and the tree had been treating them as one rule with a
+sign. `static_cast<std::uint32_t>(a - b)` is correct: the operands are already wide, the subtraction
+happens wide, and the cast narrows the result. `static_cast<std::size_t>(a + b)` is NOT the mirror
+of it: with both operands narrow the addition happens in 32 bits and the cast widens the wreckage.
+**Only an operand cast works, and one is enough, the other promoting to meet it.**
+
+That distinction removed the last piece of arithmetic in the ordering that depended on the cap on n.
+Five sites formed `degrees[u] + degme` or `partial[u] + degme` with both addends at most n, so the
+sum reached 2n, which is `2^32 - 2` at the largest n the constructor admits. It fit, by two. Casting
+one operand forms it in `std::size_t` and the dependency is gone, at the cost of nothing measurable,
+being once per survivor on a value already in a register. Four comments claiming this was the one
+sum in the ordering with no headroom were deleted rather than kept, since the change made them
+false.
+
+### And one cast holds n prisoner, which is a defect of a kind we had not looked for
+
+`Amd3` builds its `TaggedScan` with `modulus = static_cast<std::int32_t>(size + 1)`. At
+`n = 2^31 - 1`, which is exactly what `checkIndexRange` admits, `size + 1` is `2^31` and the
+conversion does not fit. So `SparseMatrix` accepts a matrix that `Amd3` cannot order, and the
+advertised cap and the working cap disagree at the boundary.
+
+The mark array in the same three drivers is the same shape and bites far earlier:
+`mark[incidenceU[i] + cliqueStamp]` reaches `2n - 1` in signed `int32_t` arithmetic, so it is
+undefined above `n = 2^30`. The vector is `2 * size` and fine; it is the index expression that is
+narrow and signed.
+
+**Neither is reachable and neither is new**, `n = 2^30` being a billion vertices whose ordering
+arrays alone would run to tens of gigabytes. What is worth recording is the shape: **the cap is
+enforced at one door and depended on at several unrelated interior sites, and nothing connects
+them.** The narrowing work removed that dependency everywhere it appeared in arithmetic; these two
+are in a cast and in an index expression, and they are left as they stand deliberately, pending a
+decision about whether the hash should be computed in an unsigned type.
+
+### The tail, and what the remaining `std::size_t` in the ordering is
+
+Four more narrowings followed the seven above and closed the ordering: `usedKeys` with its hash
+locals and range loops, `sizeU` and `sizeV` in the exact hash comparison, `reachableSize` and its
+counter, and `absorb`'s `vertexCount`. One entity loop in `Amd3`'s flag sweep was put back to the
+`std::int32_t` form the file's other init loops use, which is a consistency fix rather than a
+narrowing.
+
+What stays wide is worth listing, because a rule is easier to hold when its exceptions are
+enumerated: the `colPtr` parameters and the position loop over them; `mSourcePtr` and `mCliquePtr`;
+the five accumulators with their `std::min<std::size_t>` calls and operand casts; `size()`;
+`Buckets`'s constructor; the driver-local `size`; and `numFlagSweeps`. That last one is the only
+judgment call in the set: it counts tag sweeps over a run rather than anything along a side of the
+matrix, so the dimension test does not apply to it, and it was left alone rather than narrowed by
+analogy.
+
+### What it measured, and the honest scope of that
+
+Taken on alpamayo after the FIRST TWO steps only, `mAdjacencySize` and `mIncidenceSize`; the five
+later steps are unmeasured. `AMD3 / AMD` on square grids, original against the two steps:
+
+```
+side      32     64    100    140    200    280    400
+original 1.37   1.57   1.76   1.58   1.59   1.74   1.93
++adj     1.31   1.05   1.63   1.50   1.53   1.58   1.73
++inc     1.42   1.38   1.54   1.49   1.52   1.54   1.66
+```
+
+The four largest sizes improve at each step and the growth term flattens: the rise from 32 a side to
+400 was 41 percent and is 17. On cubic grids the movement is inside the run to run spread. `MMD3` is
+unchanged within drift on both families, which is what the mechanism predicts: the amd branch walked
+these lists through a `static_cast` in the prune and the mmd branch spends its time in the exact
+refresh instead.
+
+**Read the ratios rather than the milliseconds, and read them loosely.** The vendored control moved
+about 20 percent between runs at some sizes, which is well outside the stated 3 percent floor, so
+what carries the result is the consistency of sign across sizes and not any single figure. The
+2026-08-01 experiment narrowed six of these arrays and measured zero; the difference now is that
+this change also deleted six casts from the hottest loop in the ordering and narrowed its induction
+variables, which the earlier one did not.
+
+**What was expected and did land regardless of the timing:** nine casts gone from
+`src/QuotientGraph.cpp`'s prune and read walks, and one model in place of a per array judgment.
+
+---
+
 ## 2026-08-10: the algorithm was the smaller half
 
 **`Amd3` comes within a few percent of the vendored routine on cubic grids at moderate sizes.**

@@ -156,11 +156,11 @@ std::vector<std::int32_t> md1MinimumDegree(const Graph& G) {
     // removed: a pivot can carry mass-merged vertices out with it, and from mmd1 up
     // an iteration batches several eliminations before one degree update pass. The three
     // counts coincide only where both of those are absent.
-    std::size_t numEliminations = 0;
+    std::uint32_t numEliminations = 0;
     // Passes of the outer loop, each one a batch of eliminations followed by one
     // degree update pass. Here the batch is always a single elimination, so this
     // equals numEliminations; from mmd1 up the two come apart.
-    std::size_t numIterations = 0;
+    std::uint32_t numIterations = 0;
     std::size_t numDegreeComputations = 0;
     // Sweeps of the tag back to zero. Expected to be 0 at every size we run, so it
     // is here as the witness that the guard is inert rather than as a statistic.
@@ -202,7 +202,7 @@ std::vector<std::int32_t> md1MinimumDegree(const Graph& G) {
         }
         auto [neighbors, fillEdges] = md1Eliminate(A, mark, tag, eliminated, pivot);
         ++numEliminations;
-        std::size_t degree = neighbors.size();
+        std::uint32_t degree = neighbors.size();
         order.push_back(pivot);
         totalFill += fillEdges.size();
         degreeSum += degree;

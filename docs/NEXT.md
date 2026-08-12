@@ -59,9 +59,14 @@ said about the orderings, in order of how much it should affect the plan:
 
 **What is open, shortest first.**
 
-1. **A profile that compares `amd3` against itself at two sizes**, 140 and 400 a side. It decides
+1. **THE HASH KEY IS STILL NOT THE VENDORED ONE.** FOUR divergences, none of which any output we
+   check can see, in the mechanism that already cost several sessions once. Nothing measured, and
+   the fix is not obvious, but matching comes before anything clever here. Item 2a-hash, and it
+   goes above the profile because the profile measures a routine that is not yet the routine we
+   are trying to match.
+2. **A profile that compares `amd3` against itself at two sizes**, 140 and 400 a side. It decides
    the next item and takes ten minutes. Item 2d.
-2. **A dense-row threshold in `QuotientGraph`.** NEW on 2026-08-11 and the largest ordering-time
+3. **A dense-row threshold in `QuotientGraph`.** NEW on 2026-08-11 and the largest ordering-time
    item the real matrices found. A single vertex adjacent to everything makes minimum degree
    quadratic; the vendored AMD sets such rows aside before ordering, above `max(16, 10*sqrt(n))`
    entries, and places them last, and its own source says the cost of not doing so is O(n^2). Oblio
@@ -69,10 +74,10 @@ said about the orderings, in order of how much it should affect the plan:
    degree 5, removing it by hand takes MMD from 70.7 ms to 0.83 and AMD3 from 470 to 1.5, while the
    vendored AMD does not move. **Fill is unaffected**, so this is time only. It belongs in the
    shared quotient graph so all six drivers gain it at once.
-3. **The descriptor struct**, `docs/TODO.md` question 3, if that profile says stalls. Item 2d.
-4. **Narrow the one-dimensional sizes. THE ORDERING IS COMPLETE, 2026-08-11**; the symbolic and
+4. **The descriptor struct**, `docs/TODO.md` question 3, if that profile says stalls. Item 2d.
+5. **Narrow the one-dimensional sizes. THE ORDERING IS COMPLETE, 2026-08-11**; the symbolic and
    numeric phases remain and are the larger half. Item 2e.
-5. **Why `Amd3` and the vendored `AMD` disagree on fill on real matrices.** NEW on 2026-08-11.
+6. **Why `Amd3` and the vendored `AMD` disagree on fill on real matrices.** NEW on 2026-08-11.
    `make amdorder` shows exact agreement on all 38 acceptance cases, which are grids and random
    patterns; on the 107-matrix performance set they differ on a minority, once by 4 percent on
    `HB/bcsstk08`, 29922 against 31153. **Ours fills less where they differ**, so it is not urgent,
@@ -311,6 +316,81 @@ growing one says the fix is a better filter rather than a faster loop. One count
 prototypes already keep. `benchmarks/ordering/README.md`, "What the two families say about where
 the amd gap is", carries the tables.
 
+**2a-hash. OUR HASH KEY IS NOT `Amd.cpp`'s. FOUR DIVERGENCES, FOUND 2026-08-12, NOT FIXED.**
+
+This is in the mechanism that cost several sessions in 2026-08-09, where a stride and a modulus
+annihilated each other and turned the key into a function of the adjacency alone. That defect was
+found and fixed. **What was not done then, and should have been, is a line-by-line comparison of the
+whole key computation against the vendored one.** Doing that comparison now, while looking at
+something else entirely, turns up four places where we compute a different number from `AMD_2`.
+
+Each of the four preserves the EQUIVALENCE CLASSES, since two indistinguishable vertices have
+identical lists and therefore identical keys under any of these schemes. So the merges found are
+the same, which is exactly why every check we have is blind to all four: permutations match, the
+twins agree, the fill columns are identical. **What differs is the BUCKET ASSIGNMENT**, which
+decides the collision rate, and the collision rate is what the 2026-08-09 defect showed can cost a
+factor of three.
+
+**Divergence 1: the term. We add `v + 1` and `c + 1`; `Amd.cpp` adds `e` and `j`.**
+
+```
+Amd.cpp:   hval += e ;                  hval += j ;
+ours:      key = (key + v + 1) % mod;   key += c + 1;
+```
+
+Our key is therefore the vendored one plus the NUMBER OF TERMS. The `+ 1` is a leftover: it was
+part of the `(c + 1) * (size + 1)` stride removed on 2026-08-09, and only the multiplication was
+taken out. Nothing now requires it.
+
+**Divergence 2: we include the pivot; `Amd.cpp` does not include `me`.** Our loop takes every entry
+of `I[u]` with the pivot among them. In `Amd.cpp`, `hval` is accumulated in scan 2 over `p1..p2`,
+the OLD element list, and `Iw [p1] = me` happens AFTERWARDS, in the "add me to the list for i"
+block. The new element is not in the sum.
+
+**And the comment at `src/Amd3.cpp` justifying this says the opposite**: "its scan 2 accumulates
+`hval += e` over the element list it is compacting, which by then holds the new element". The
+vendored source does not support that reading. **Either the comment is wrong or my reading is; that
+has to be settled before anything is changed**, and it is the first thing to do on this item.
+
+**Divergence 3: the modulus. Ours is `n + 1`, `Amd.cpp`'s is `n`.**
+
+```
+Amd.cpp:   hval = hval % n ;
+ours:      hash = key % (size + 1);
+```
+
+The `n + 1` is the other half of the removed stride: it was chosen so the modulus would not divide
+the stride, and with no stride left there is nothing for it to be coprime to. It is also the
+`n + 1` that overflows `int32_t` at `MAX_IDX` and holds n prisoner, so this divergence and the type
+question are the same question.
+
+**Divergence 4: overflow. `Amd.cpp` WRAPS at 2^32 and we never do.** Its `hval` is a `UInt`
+accumulated unreduced over both lists, so a long list wraps before the reduction; the header
+comment says the type is unsigned so that `%` is defined, not to prevent wrap. We reduce as we
+accumulate in the prune and sum wide in the driver, so we compute the exact sum. When the true sum
+exceeds 2^32 the two land in different buckets, because `2^32 mod n` is not 0. Reachable only on a
+long list at large n, but it is a real difference in the function.
+
+**None of this is measured.** The right first step is a collision counter, pairs tested per pivot
+and the bucket size distribution, on 2D and 3D at comparable n, against the vendored routine's
+0.33 and 0.48 recorded in the `Amd3.cpp` comment. That number is the one that moved by a factor of
+three last time, and it is the only output any of these four can change.
+
+**Why this is item 1 and not item 6.** Item 2d proposes profiling `amd3` against itself to decide
+whether the descriptor struct is worth building. That profile measures a routine whose hash is not
+the one we are trying to match, and the hash sits in the loop the profile is aimed at. **Matching
+first, then measuring, then getting clever, in that order**, which is the rule the 2026-08-09
+episode was supposed to have taught and evidently only half taught.
+
+**The general lesson, since it is the second time.** Reinvention concentrates where outputs cannot
+see the difference. A hash is the purest case of that in the whole ordering: it is a filter and
+never the decision, so ANY key that respects the equivalence classes produces identical output and
+differs only in speed. **That makes it the one place where "we match the vendored routine" has to be
+checked by reading, because no test will ever check it for us.** The same is true of any future
+filter, guard, or early-out.
+
+---
+
 **2b. Taking `AMD1B` and `AMD2B` out of the public enum: DEFERRED 2026-08-10, deliberately.** The
 reasoning below still holds and the work is still worth doing eventually. It is not being done now
 because a third B name is in circulation that is not an oracle at all: `Amd3B` is a VEHICLE,
@@ -539,6 +619,14 @@ before-and-after worth recording rather than an estimate. And it composes with i
 `{ size_t sourcePtr; uint32 adjacencySize; uint32 incidenceSize; }` is 16
 bytes, four to a cache line, which makes the descriptor struct the natural next step rather than a
 separate argument.
+
+**The rule itself is now stated in its derived form**, in `docs/CODING_RULES.md` and in the
+2026-08-12 design entry: a size is always unsigned, one dimensional in 32 bits and two dimensional
+in 64; an index is signed 32 bits and only because `NIL` has to share a type with the values it
+stands in for. Anything that can exceed n is computed in `std::size_t`, not because 2n overflows,
+which it does not, but because its safety would otherwise be inherited from a cap enforced
+elsewhere for an unrelated reason. **The rest of the tree is drift against that rule, to be closed
+incrementally**: n itself, the symbolic phase, the numeric phase.
 
 **The durable half has to be written before this item closes, not after.** This file is meant to be
 deleted, so a list worked through here leaves nothing behind unless two other files move with it:

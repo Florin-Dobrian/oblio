@@ -295,28 +295,48 @@ softer layer: conventions for consistency, not correctness.
   bare forms (`size_t`) rely on a global-namespace leak that isn't guaranteed by the
   C++ headers. This is the correct spelling even where a matching codebase uses the
   bare form, that codebase is the one to fix, not this one.
-- **Index types, and there are THREE of them.** The index/position split of the naming rules
-  above, with sizes split off from positions by DIMENSION. (The design decision calls indices and
-  positions IDs and offsets, which is the older vocabulary for the same thing. The third category
-  arrived on 2026-08-11 and is applied in the ordering; the rest of the tree still holds one
-  dimensional sizes wide, and that is drift rather than a second rule.)
+- **Integer types. THREE of them, and the rule DERIVES rather than asserts.** A SIZE IS ALWAYS
+  UNSIGNED. One dimensional in 32 bits, two dimensional in 64. An INDEX IS SIGNED 32 BITS, and only
+  because of `NIL`. (The design decision calls indices and positions IDs and offsets, which is the
+  older vocabulary. The three-way form was settled on 2026-08-12 and is applied in the ordering;
+  the rest of the tree still holds one dimensional sizes wide, which is DRIFT to be closed
+  incrementally rather than a second rule.)
 
-  - **An index is a `std::int32_t`.** It names a vertex, row, column or supernode, and may
-    carry the sentinel **`NIL = -1`** (a `constexpr std::int32_t`, never
-    `static_cast<std::size_t>(-1)`). E.g. `SparseMatrix::rowIdx`, the permutation maps, the
-    forest's parent/child/sibling/map arrays. Cost: a ~2.1 billion cap, accepted for a clean
-    signed sentinel, and matching the graph code and the vendored `int`-based AMD/MMD.
-  - **A one dimensional size is a `std::uint32_t`.** It counts along one side of the matrix and is
-    bounded by n, which the constructors cap at `MAX_IDX`. Never negative and never `NIL`, so the
-    sign bit is not spent. E.g. `QuotientGraph::mAdjacencySize`, `mIncidenceSize`, `mCliqueSize`,
-    `mWeight`, the drivers' `degrees` and the arrays the scan structs bind.
-  - **A two dimensional position is a `std::size_t`.** It offsets into an object sized by an area,
-    so it is bounded by nnz rather than by n and routinely exceeds 2^31. E.g.
-    `SparseMatrix::colPtr`, `QuotientGraph::mSourcePtr` and `mCliquePtr`, `nnz()`.
+  - **An index is a `std::int32_t`, and the sentinel is the whole reason.** It names a vertex, row,
+    column, clique or supernode, and the array that holds it usually has to be able to say "none":
+    `parent[j]` is another column or `NIL`, `mate[u]` is another vertex or `NIL`. **A sentinel must
+    share a type with the values it stands in for**, so one `NIL` in an array makes the array
+    signed, and every index array follows for uniformity. `NIL = -1` is a `constexpr
+    std::int32_t`, never `static_cast<std::size_t>(-1)`. E.g. `SparseMatrix::rowIdx`, the
+    permutation maps, the forest's parent/child/sibling/map arrays.
+  - **A one dimensional size is a `std::uint32_t`, and nothing forces it signed.** It counts along
+    one side of the matrix, is bounded by n, and has nothing to stand in for, so no sentinel and no
+    sign bit spent. The length of an adjacency list is a size, not an index, however close to one
+    it looks. E.g. `QuotientGraph::mAdjacencySize`, `mIncidenceSize`, `mCliqueSize`, `mWeight`, the
+    drivers' `degrees` and the arrays the scan structs bind.
+  - **A two dimensional size or position is a `std::size_t`.** It measures or offsets into an
+    object sized by an AREA, so it is bounded by nnz rather than by n and routinely exceeds 2^31.
+    E.g. `SparseMatrix::colPtr`, `QuotientGraph::mSourcePtr` and `mCliquePtr`, `nnz()`, and every
+    fill or storage total.
 
-  **The two meet only where a difference of positions is written as a size**, which is where the
-  narrowing cast belongs. There are exactly two such crossings in `QuotientGraph` and both are a
+  **The two dimensions meet only where a difference of positions is written as a size**, which is
+  where the narrowing cast belongs. There are exactly two such crossings in `QuotientGraph`, both a
   block being sized from the arena that holds it.
+
+  **THE HALF RANGE IS DELIBERATE, AND IS NOT HEADROOM TO SPEND.** Because n is capped by the index
+  type, a one dimensional size uses only the bottom half of its `std::uint32_t`. That is fine, and
+  it is why `2 * n` happens to be expressible. **It is not a licence to rely on it.** The arithmetic
+  is one value wide at the top:
+
+  - `2n` is `2^32 - 2`. Fits, one to spare.
+  - `2n + 1` is `2^32 - 1`, exactly `UINT32_MAX`. Fits with NOTHING to spare, which is worse than
+    not fitting, because it reads as safe.
+  - `2n + 2` is the first failure. `3n` fails far earlier.
+
+  **So the rule is: anything that can exceed n gets computed in `std::size_t`.** Not because 2n
+  overflows, but because its safety is inherited from a cap enforced somewhere else entirely, for
+  an unrelated reason, and nothing at the site says so. Cutting that dependency is the point; the
+  overflow is a side benefit.
 
   **An accumulation is the case the dimension test does not settle by itself.** A sum of a fixed
   few one dimensional terms is one dimensional; a sum over an unbounded number of them is not, and
@@ -326,6 +346,11 @@ softer layer: conventions for consistency, not correctness.
   an incidence list is wide, and the difference is disjointness rather than arity. Narrow at a
   named point after whatever cap brings the value back into range, not at the declaration: a
   variable that reads as a fixed sum where it is declared may be an accumulator three lines later.
+
+  **n itself is a one dimensional size**, so the rule says `std::uint32_t` for it too. Today
+  `QuotientGraph::size()`, `SparseMatrix::mSize` and every driver's `colPtr.size() - 1` are
+  `std::size_t`, and the casts at `numLive`, `numLeft` and `batchLimit` exist only because of that.
+  Known drift, listed here so it is not rediscovered as a finding.
   - **A loop counter takes the type of what it counts, and direction does not change the type.**
     A loop over *entities* (columns, supernodes) counts indices, so the counter is `std::int32_t`
     and the bound is cast once in the condition. Ascending:

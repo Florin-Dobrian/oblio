@@ -43,6 +43,12 @@ already holds the pointer.
 | `nodeIdx(jj)` | `const std::int32_t*`, where jj's node indices start | `mNodeIdx.data() + mSnodeNodeIdxPtr[jj]` | `mNodeIdx[jj].data()` |
 | `val(jj)` | `const Val*`, where jj's value block starts | `mVal.data() + mSnodeValPtr[jj]` | `mVal[jj].data()` |
 
+**The `std::size_t` in four of those rows is DRIFT against the current integer rule, not a
+decision.** `size()`, `snodeSize()`, `frontSize()` and `updateSize()` are one dimensional sizes and
+should be `std::uint32_t`; see `docs/CODING_RULES.md` and the 2026-08-12 design entry. The ordering
+was converted on 2026-08-11 and the symbolic and numeric phases have not been, so this table is
+accurate about the code as it stands and will change as that drift closes.
+
 ### Who reads what
 
 The contract is not one set. Each consumer uses the part it needs, and the differences are

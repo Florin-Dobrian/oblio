@@ -12,6 +12,14 @@ reasoning, not the conclusion.
 
 ## 1. The index-type rule, and whether it should narrow to storage
 
+**Written before 2026-08-12, and the rule it argues against has since changed shape.** The current
+rule derives from a sentinel argument rather than from storage cost: an index is signed because
+`NIL` has to share a type with the values it stands in for, and a size is unsigned because it has
+nothing to stand in for, one dimensional in 32 bits and two dimensional in 64. That gives the loop
+counter a third case this section does not consider, a loop over a one dimensional size taking that
+size's type with no cast at all. `docs/CODING_RULES.md` and the 2026-08-12 design entry carry it.
+The question below is still open in its own terms and is left as written.
+
 **What.** CODING_RULES currently says a loop counter takes the type of what it counts: a loop over
 entities counts indices, so the counter is `std::int32_t` and the bound is cast once in the
 condition. The playground arrived at a narrower rule instead, `std::int32_t` for indices that are

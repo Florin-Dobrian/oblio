@@ -67,6 +67,61 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-08-12: the integer rule, stated so that it derives instead of asserting
+
+The 2026-08-11 entry below states a three-way model as three assertions. **It is one principle and
+one consequence, and saying it that way makes the boundary cases decide themselves.**
+
+**A SIZE IS ALWAYS UNSIGNED. One dimensional in 32 bits, two dimensional in 64. An INDEX IS SIGNED
+32 BITS, and only because of `NIL`.**
+
+**The sentinel is the barrier, and it is the only barrier.** `parent[j]` holds another column or
+`NIL`. `mate[u]` holds another vertex or `NIL`. A sentinel has to share a type with the values it
+stands in for, so a single `NIL` makes the whole array signed, and the rest of the index arrays
+follow it for uniformity rather than out of need. **A size has nothing to stand in for.** The length
+of an adjacency list is never absent; it is zero. So nothing forces it signed, and the earlier form
+of the rule, which simply declared one dimensional sizes unsigned, had been recording the
+conclusion without the argument.
+
+That distinction is worth having because it tells you what to do with a case the categories do not
+obviously cover: ask whether the thing can be absent. If yes it is an index and signed; if no it is
+a size and unsigned, and its width is set by whether it is bounded by n or by nnz.
+
+### The half range is deliberate, and the temptation it creates
+
+n is capped by the INDEX type, at `2^31 - 1`, so a one dimensional size uses only the bottom half of
+its `std::uint32_t`. **That is fine, and it is also a trap**, because it makes `2 * n` expressible
+and therefore tempting to rely on. The top of the range is one value wide:
+
+- `2n` is `2^32 - 2`. Fits, one to spare.
+- `2n + 1` is `2^32 - 1`, exactly `UINT32_MAX`. **Fits with nothing to spare.** Worse than not
+  fitting: it reads as safe and it is at the boundary.
+- `2n + 2` is the first failure, and `3n` fails far earlier.
+
+**So the rule is that anything which can exceed n is computed in `std::size_t`, and the reason is
+not the overflow.** The reason is that the safety of a `2n` expression is inherited from a cap
+enforced at a constructor, for a reason about sentinels, with nothing at the site connecting the
+two. That is the same shape as the two casts recorded in the entry below, which hold n prisoner:
+one door enforces, unrelated interior sites depend, and nothing links them. **Casting beyond n cuts
+the dependency; not overflowing is the side benefit.**
+
+### What this makes drift rather than a decision
+
+n itself is a one dimensional size, so by the rule it is a `std::uint32_t`. Today
+`QuotientGraph::size()`, `SparseMatrix::mSize` and every driver's `colPtr.size() - 1` are
+`std::size_t`, and the three casts added at `numLive`, `numLeft` and `batchLimit` exist only
+because of that. The symbolic and numeric phases hold their one dimensional sizes wide throughout.
+**None of that is a second rule; it is code the rule has not reached yet**, to be closed
+incrementally the way the ordering was, and recorded here so it is not rediscovered later as a
+finding.
+
+The one exception that survives unchanged is the disjointness clause: a sum of weights over
+disjoint sets is bounded by n however many terms it has, because the weights partition the original
+vertices. Nine sites in the ordering are that shape, and without the clause the rule would widen
+all nine for nothing.
+
+---
+
 ## 2026-08-11: one dimensional sizes narrow to `std::uint32_t`, and the rule that took the cap out of the arithmetic
 
 **The integer model is now three types rather than two.** `std::size_t` for two dimensional

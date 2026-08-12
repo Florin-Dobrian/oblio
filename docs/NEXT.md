@@ -41,7 +41,8 @@ the prune. **The walk axis is finished**: `Amd3` walks `I[u]` twice per pivot an
 which is `AMD_2`'s count exactly.
 
 **Item 4 of the previous list is done.** Real matrices are in, `benchmarks/matrices/` holds the
-benchmark and two reports, and they changed what the other items are measured against. What they
+benchmark and two of the three reports, and they changed what the other items are measured
+against. What they
 said about the orderings, in order of how much it should affect the plan:
 
 - **The fill gap between MMD and AMD collapses on real structure**, to one to three percent from up
@@ -589,6 +590,26 @@ routine's. `benchmarks/README.md` records how far an attempt to get them got and
   of 0.1, which they study directly and recommend loosening. **It would test both halves at once**,
   since a looser threshold accepts more pivots and so both delays fewer columns and, if the search
   short-circuits on acceptance, searches less.
+- **Nested dissection, which Oblio does not have and which one matrix family badly wants.** NEW on
+  2026-08-11. `PARSEC/Si87H76`, an electronic structure Hamiltonian at n = 240369 with 10.7 million
+  nonzeros, predicts **5.68 billion entries of fill under MMD3**, which is 42.3 GB of values and
+  beyond the machine. AMD3 will not rescue it: the two agree to within a few percent everywhere we
+  have measured, so an approximation of a metric will not save a matrix the metric itself handles
+  badly. What that family wants is a partitioning ordering rather than a greedy one, which is what
+  MUMPS and CHOLMOD reach for on exactly these matrices.
+
+  **Worth knowing that every ordering result in the three reports is minimum degree against minimum
+  degree**, two variants of one idea, agreeing to within a few percent nearly everywhere. Nested
+  dissection is the first thing that would say whether that agreement is because both are good or
+  because both share a blind spot, and `PARSEC` is the sharpest available test of it. METIS is
+  source-available and would slot in beside the vendored pair through the existing `Ordering` enum
+  and `OrderEngine` dispatch, though it is a directory with its own build rather than two files,
+  and its licence wants reading against the PolyForm plan. A simple separator-based ordering
+  written here would answer the question less well and cost nothing external.
+
+  The three matrices are fetched and sit in `data/`, named by `benchmarks/matrices/extras.txt`;
+  the caps keep them out of every run.
+
 - **`benchmarks/ordering` builds nothing on a bare `make`**, its first rule being `help`, so
   `CLAUDE.md`'s pre-release clone checklist has been passing vacuously for it.
   `benchmarks/matrices` and `benchmarks/pipeline` both set `.DEFAULT_GOAL := all` now and the three

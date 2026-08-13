@@ -177,7 +177,7 @@ wildcard, so a new `tests/*.cpp` file needs no edit in either.
 ### Makefile
 
 ```bash
-make            # print the target list (bare make builds nothing)
+make            # print the target list; same as make help (bare make builds nothing)
 make all        # build everything (tests and examples)
 make test       # build and run the test suites, then run the examples for exit status
 make tests      # build the test binaries only

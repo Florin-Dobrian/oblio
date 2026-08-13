@@ -221,7 +221,7 @@ document's own style. This file holds only what applies across all prose.
 
 ### README build targets
 
-The README's Build section lists the whole-project targets a user reaches for (`make`,
+The README's Build section lists the whole-project targets a user reaches for (`make`, `make all`,
 `make test`, `make tests`, `make examples`, `make clean`). Single-unit and inner-loop targets,
 `make objs` and the per-file `%_cpp` / `example_%_cpp` rules, stay in the Makefile's own header
 comment, which is the exhaustive list; the README is the curated subset. The test: a target that
@@ -229,3 +229,9 @@ acts on a whole category (all tests, all examples, the whole build) is user-faci
 both; one that compiles a single unit or just checks that the core builds is a contributor
 convenience and stays in the Makefile. So updating the Makefile obliges a README edit only when a
 whole-category verb changes, which is why adding `objs` did not.
+
+`make help` is named on the `make` line rather than given a row of its own. It is not a
+whole-category verb and does nothing the default goal has not already done, so a row would be the
+only entry in that block adding a name rather than a capability. It is still worth naming, because
+the README is read on GitHub by people who never run anything, and `help` is the name they would
+try first.

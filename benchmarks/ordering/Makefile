@@ -1,13 +1,16 @@
 # ordering benchmark - what each ordering method costs, in time and in fill.
 #
-#:   make        build the benchmark
+#:   make          print this list (the default goal; `make help` is the same thing)
+#:   make all      build the benchmark
 #:   make run2d    build and run it, the default square-grid sizes, every method
 #:   make run3d    the same on cubic grids, which are a DIFFERENT PROBLEM FAMILY
 #:   make scale2d  a wider ladder, one branch at a time, with the gap columns
 #:   make scale3d  the same, cubic
 #:                 Also scale-mmd-2d, scale-amd-2d, scale-mmd-3d, scale-amd-3d for one branch
+#:   make profile  build order_profile_cpp, the binary the invocations below run: one method in
+#:                 a loop, with symbols, for attaching a sampling profiler
 #:   make clean
-#:   make help   print this list
+#:   make help     print this list
 #:
 #: ./order_profile_cpp amd3 140 200      one method in a loop, for a sampling profiler
 #: ./order_profile_cpp amd3 3d 26 200    the same on a CUBIC grid: profile the family the
@@ -84,6 +87,12 @@ endif
 .PHONY: all run2d run3d scale2d scale3d scale-mmd-2d scale-amd-2d scale-mmd-3d \
         scale-amd-3d profile clean help
 
+# Bare `make` prints the target list rather than building. Stated explicitly because the default
+# goal is otherwise the FIRST target in the file, so moving a rule would silently change it and the
+# header above would stop being true with nothing to catch it. Every Makefile in this tree answers
+# `make` the same way; see docs/CODING_RULES.md.
+.DEFAULT_GOAL := help
+
 # Print the target list from this file's header. Those lines are marked with #: so there is one
 # source of truth: the header comment is the help text.
 help:
@@ -151,5 +160,16 @@ order_profile_cpp: order_profile.cpp $(OBLIO_SRCS) $(OBLIO_HDRS) $(VENDOR_SRCS) 
 	$(CXX) $(CXXFLAGS) -g -fno-omit-frame-pointer $(VENDOR_DEFS) order_profile.cpp $(OBLIO_SRCS) \
 	  $(VENDOR_OBJS) $(BLAS_LIBS) -o $@
 
+# `make profile` links with -g, and on macOS Apple clang then runs dsymutil, which drops a .dSYM
+# debug bundle beside the executable. It is a DIRECTORY, so `rm -f` cannot remove it and
+# .gitignore's *_cpp does not match it either (the name does not end there); both are handled, here
+# with -rf and there with an explicit *.dSYM/ entry. Every clean rule in the tree carries the -rf
+# line, because CXXFLAGS is overridable everywhere and any directory produces a bundle under
+# `make CXXFLAGS="... -g"`, which is what debugging looks like.
+#
+# The comment lives ABOVE the rule and not inside it: make echoes every recipe line before running
+# it, and a # there is a shell comment rather than a make one, so an explanation written in the
+# recipe gets printed in full every time someone types `make clean`.
 clean:
 	rm -f .build-mode order_timing_cpp order_profile_cpp Amd.o Mmd.o amd_raw.cpp
+	rm -rf *.dSYM

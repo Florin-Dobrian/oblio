@@ -4,6 +4,13 @@
 *.so
 *.dylib
 
+# macOS debug-symbol bundles. Apple clang runs dsymutil on any executable linked with -g and
+# drops one of these beside it; benchmarks/ordering's `make profile` is the committed case. It
+# is a DIRECTORY, not a file, so *_cpp above does not match it (the name does not end there) and
+# a clean rule needs rm -rf rather than rm -f. Both were missing until 2026-08-13, which left a
+# 400 KB bundle sitting untracked and visible after `make clean`.
+*.dSYM/
+
 # CMake out-of-source build
 build/
 cmake-build-*/

@@ -153,6 +153,36 @@ sparse-to-dense routing itself is the point, name that directly: the *scatter*, 
 assembly is meant, as in Cholesky folding its diagonal into `C`, or a prepass being folded into a
 driver to keep one shape. The rule is about the operation, not about the word.
 
+## References, and why the rule differs by artifact
+
+Only one case is restricted: **a reference from a coding artifact to another coding artifact.**
+Everything else is free.
+
+**In any `.md` file, anywhere in the tree, link freely.** No restriction at all. Cross-references
+are how the record works and there is no reason to ration them. Markdown is a special category:
+the set is small, it is under constant scrutiny, it is reorganized as a deliberate act in which
+every reference can be brought along at once, and a stale link is caught the next time anyone
+reads the paragraph. **Pointing from code INTO a `.md` file is equally free**, for the same
+reason: the target is a document whose job is to be pointed at.
+
+**Between coding artifacts, keep it tight.** Sources, headers and Makefiles get a stricter rule
+for one reason: nobody re-reads a comment to check whether its pointer still resolves. A reference
+in code is never audited, so it has to be one that cannot go quietly wrong.
+
+- **Reference along tight connections, not loose ones.** A reference is safe when something already
+  binds the two files, so it cannot rot in silence: a Makefile naming a source it compiles, a rule
+  naming its own prerequisite, a header naming the unit that implements it. If that file moves, the
+  build or the compile breaks immediately and loudly, and the breakage is what keeps the comment
+  honest. A reference is unsafe when nothing binds them, and one Makefile in an experiment pointing
+  at another Makefile in a benchmark is the clearest case: they share no dependency, either may be
+  renamed, moved or deleted with everything still building, and the pointer dies without a sound.
+- **A comment is complete where it stands.** Even along a tight connection, the reference adds
+  DEPTH and never carries the explanation. Someone who never opens the other file must be able to
+  tell what the line does and why it is there. `See X: without this the binary goes stale` is the
+  shape to avoid, since it leaves a sentence with its subject in another file. The test is to
+  delete the reference and read what remains: if it no longer explains, the explanation was in the
+  wrong place. Never cite a line number.
+
 ## Dated entries (DESIGN_DECISIONS, CHANGELOG, the devlog)
 
 **Read the date before writing it.** An entry is stamped with the date it is *written*, and that

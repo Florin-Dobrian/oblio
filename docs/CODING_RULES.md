@@ -17,6 +17,25 @@ softer layer: conventions for consistency, not correctness.
   for C++ (`_rs` for Rust, etc.). E.g. `test_smoke_real_cpp`, `test_multiply_implicit_cpp`.
   Applies to the executable's output name, not source files. Keep `.gitignore`, the
   CMake target/output names, and any Makefile targets in sync when adding one.
+- **Every Makefile answers `make` with its own target list.** Bare `make` and `make help` print
+  the same thing, the `#:` lines of that file's own header, so the header comment IS the help
+  text and the two cannot drift. State `.DEFAULT_GOAL := help` explicitly rather than relying on
+  `help:` being the first rule: the default goal is otherwise whichever target appears first, so
+  moving a rule would change the behavior silently and the header would stop being true with
+  nothing to catch it. Every Makefile has `all`, `clean` and `help`, so those three words mean
+  the same thing in all nine directories and nothing has to be relearned on arrival. `test` is
+  present exactly where something can FAIL, which is why the three benchmark directories do not
+  have one: a benchmark prints a table to read, not a verdict, and an alias for `run2d` that
+  passes whenever it does not crash would make `test` mean two different things in one tree.
+  Those name their run targets for what they run instead. A build is something the reader asks
+  for by name. **`clean` removes what a build in that directory CAN produce, not what the
+  committed flags happen to produce**, since `CXXFLAGS` is overridable everywhere and the
+  reader's toolchain is not the author's: `make CXXFLAGS="... -g"` leaves a `.dSYM` bundle on
+  macOS in any of the nine, so every `clean` carries `rm -rf *.dSYM` and `.gitignore` carries
+  `*.dSYM/`. An artifact that only one platform emits is still that directory's artifact.
+  **Comments explaining a rule go ABOVE it, never inside the recipe**: make echoes every recipe
+  line before running it, and a `#` there is a shell comment rather than a make one, so an
+  explanation written in the recipe is printed in full to anyone who types `make clean`.
 - **Optimization level: `-O3`.** Manual builds and Makefiles use `-O3` (the highest
   standard level). Use it consistently across every build file. (CMake derives its
   own level from the build type, Release is `-O3`; see the CMake note when that tree

@@ -1,7 +1,8 @@
 # matrices benchmark - accuracy and performance of the pipeline on real matrices, from the
 # SuiteSparse Matrix Collection. One driver per report, sharing the reader.
 #
-#:   make             build the three programs
+#:   make             print this list (the default goal; `make help` is the same thing)
+#:   make all         build the three programs
 #:   make accuracy    the accuracy pass over accuracy_candidates.txt
 #:   make performance the timing pass over performance_candidates.txt
 #:   make read        the reader alone over data/, an inventory of what is usable
@@ -96,14 +97,16 @@ MATRICES = ../../data/*/*.mtx
 # cap of 50 million entries and no address-space limit on the child processes. Both are
 # command-line flags; call the binary directly to change them.
 
-# `make` builds, as the comment above says it does. Without this, the default goal is the first
-# rule in the file, which is `help`, and a bare `make` would print the usage block and build
-# nothing. ../ordering and ../pipeline have the same shape and therefore the same behavior, which
-# is worth knowing when reading CLAUDE.md's clone checklist.
-.DEFAULT_GOAL := all
+# Bare `make` prints the target list rather than building. Stated explicitly because the default
+# goal is otherwise the FIRST target in the file, so moving a rule would silently change it and the
+# header above would stop being true with nothing to catch it. Every Makefile in this tree answers
+# `make` the same way; see docs/CODING_RULES.md.
+.DEFAULT_GOAL := help
 
 .PHONY: all read accuracy performance clean help
 
+# Print the target list from this file's header. Those lines are marked with #: so there is one
+# source of truth: the header comment is the help text.
 help:
 	@grep '^#:' $(firstword $(MAKEFILE_LIST)) | cut -c3-
 
@@ -146,6 +149,10 @@ accuracy: matrix_accuracy_cpp
 performance: matrix_performance_cpp
 	@./matrix_performance_cpp $(PERFORMANCE_SET)
 
+# The *.dSYM line removes macOS debug-symbol bundles, which are directories, hence -rf rather
+# than -f. Nothing here emits one under the committed flags, and that is not the test: CXXFLAGS
+# is overridable, `make CXXFLAGS="... -g"` produces one on macOS, and clean removes what a build
+# in this directory CAN produce.
 clean:
 	rm -f mmread_cpp matrix_accuracy_cpp matrix_performance_cpp Amd.o Mmd.o .build-mode
 	rm -rf *.dSYM

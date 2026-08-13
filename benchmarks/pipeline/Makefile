@@ -1,6 +1,7 @@
 # pipeline benchmark - where a solve's time goes, across all its phases.
 #
-#:   make          build both benchmarks
+#:   make          print this list (the default goal; `make help` is the same thing)
+#:   make all      build both benchmarks
 #:   make run2d    where a solve's time goes, the default square-grid sizes, every ordering
 #:   make run3d    the same on cubic grids, which are a DIFFERENT PROBLEM FAMILY
 #:   make scale2d  how the cost GROWS, a longer square ladder, every factorization
@@ -56,8 +57,9 @@ endif
 # that asks for Ordering::MMD or Ordering::AMD reports a refusal.
 OBLIO_SRCS  = $(wildcard ../../src/*.cpp)
 
-# See benchmarks/ordering/Makefile: without this a header-only change is invisible to make and the
-# benchmark reports a stale binary as if it were current.
+# The headers are prerequisites too, not just the sources. Without them a change to
+# include/oblio/ alone leaves the binaries stale, and the benchmark reports last session's numbers
+# as if they were current: make sees no newer .cpp and rebuilds nothing.
 OBLIO_HDRS  = $(wildcard ../../include/oblio/*.h)
 # OBLIO_PUBLIC=1 builds as everyone else does, ignoring private/ even when it is there. Same word
 # in every Makefile here that links the library, so one habit covers all of them.
@@ -81,10 +83,11 @@ ifneq ($(VENDOR_SRCS),)
   VENDOR_OBJS = Amd.o Mmd.o
 endif
 
-# `make` builds, as the header says it does. Without this the default goal is the first rule in
-# the file, which is `help`, and a bare `make` would print the usage block and build nothing.
-# CLAUDE.md's pre-release clone checklist runs `make` here and expects a build.
-.DEFAULT_GOAL := all
+# Bare `make` prints the target list rather than building. Stated explicitly because the default
+# goal is otherwise the FIRST target in the file, so moving a rule would silently change it and the
+# header above would stop being true with nothing to catch it. Every Makefile in this tree answers
+# `make` the same way; see docs/CODING_RULES.md.
+.DEFAULT_GOAL := help
 
 .PHONY: all run2d run3d scale2d scale3d clean help
 
@@ -117,5 +120,10 @@ scale2d: pipeline_scaling_cpp
 scale3d: pipeline_scaling_cpp
 	./pipeline_scaling_cpp 3d
 
+# The *.dSYM line removes macOS debug-symbol bundles, which are directories, hence -rf rather
+# than -f. Nothing here emits one under the committed flags, and that is not the test: CXXFLAGS
+# is overridable, `make CXXFLAGS="... -g"` produces one on macOS, and clean removes what a build
+# in this directory CAN produce.
 clean:
 	rm -f .build-mode pipeline_timing_cpp pipeline_scaling_cpp Amd.o Mmd.o
+	rm -rf *.dSYM

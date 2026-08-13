@@ -187,5 +187,10 @@ objs: $(LIB_OBJS)
 # private/*.o is named directly rather than through $(LIB_OBJS), which is empty of it under
 # OBLIO_PUBLIC: clean should remove everything a build can leave behind regardless of which mode
 # it is invoked in, so that the switch is never something to remember here.
+# The *.dSYM line removes macOS debug-symbol bundles, which are directories, hence -rf rather
+# than -f. Nothing here emits one under the committed flags, and that is not the test: CXXFLAGS
+# is overridable, `make CXXFLAGS="... -g"` produces one on macOS, and clean removes what a build
+# in this directory CAN produce.
 clean:
 	rm -f $(TEST_BINS) $(EXAMPLE_BINS) $(OBLIO_OBJS) private/Amd.o private/Mmd.o .build-mode
+	rm -rf *.dSYM

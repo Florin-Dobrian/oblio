@@ -184,8 +184,8 @@ one per directory:
 ```
 OBLIO_PUBLIC=1 make test                    # repo root
 OBLIO_PUBLIC=1 make test                    # experiments/ordering
-OBLIO_PUBLIC=1 make                         # benchmarks/ordering
-OBLIO_PUBLIC=1 make                         # benchmarks/pipeline
+OBLIO_PUBLIC=1 make all                     # benchmarks/ordering
+OBLIO_PUBLIC=1 make all                     # benchmarks/pipeline
 ```
 
 `export OBLIO_PUBLIC=1` once and a whole shell session builds that way. On any other machine the
@@ -224,8 +224,8 @@ work in the clone with no `private/` present:
 
 ```
 cd /tmp/oblio-clone/experiments/ordering && make test    # every layer agrees, 35 comparisons
-cd /tmp/oblio-clone/benchmarks/ordering  && make         # builds; MMD and AMD rows refuse
-cd /tmp/oblio-clone/benchmarks/pipeline  && make         # builds both drivers
+cd /tmp/oblio-clone/benchmarks/ordering  && make all     # builds; MMD and AMD rows refuse
+cd /tmp/oblio-clone/benchmarks/pipeline  && make all     # builds both drivers
 cd /tmp/oblio-clone && cmake -S . -B bld && cmake --build bld && (cd bld && ctest)
 ```
 

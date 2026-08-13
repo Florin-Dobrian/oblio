@@ -1,9 +1,11 @@
 # friend-access experiment - matvec via public API vs friend direct access vs BLAS.
 # Reference/teaching only; not part of the main Oblio build.
 #
-#   make        build the test executable
-#   make test   build and run it
-#   make clean
+#:   make        print this list (the default goal; `make help` is the same thing)
+#:   make all    build the test executable
+#:   make test   build and run it
+#:   make clean
+#:   make help   print this list
 #
 # The executable carries the _cpp language suffix (coding convention) and is gitignored.
 #
@@ -27,7 +29,18 @@ endif
 
 SRCS = Matrix.cpp Vector.cpp MultiplyEngine.cpp
 
-.PHONY: all test clean
+.PHONY: all test clean help
+
+# Bare `make` prints the target list rather than building. Stated explicitly because the default
+# goal is otherwise the FIRST target in the file, so moving a rule would silently change it and the
+# header above would stop being true with nothing to catch it. Every Makefile in this tree answers
+# `make` the same way; see docs/CODING_RULES.md.
+.DEFAULT_GOAL := help
+
+# Print the target list from this file's header. Those lines are marked with #: so there is one
+# source of truth: the header comment is the help text.
+help:
+	@grep '^#:' $(firstword $(MAKEFILE_LIST)) | cut -c3-
 
 all: test_multiply_cpp
 
@@ -37,5 +50,10 @@ test_multiply_cpp: test_multiply.cpp $(SRCS) Matrix.h Vector.h MultiplyEngine.h
 test: all
 	./test_multiply_cpp
 
+# The *.dSYM line removes macOS debug-symbol bundles, which are directories, hence -rf rather
+# than -f. Nothing here emits one under the committed flags, and that is not the test: CXXFLAGS
+# is overridable, `make CXXFLAGS="... -g"` produces one on macOS, and clean removes what a build
+# in this directory CAN produce.
 clean:
 	rm -f test_multiply_cpp
+	rm -rf *.dSYM

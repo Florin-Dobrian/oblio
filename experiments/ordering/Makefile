@@ -1,7 +1,8 @@
 # ordering experiment - the minimum degree family, built up one mechanism at a time.
 # Reference/teaching only; not part of the main Oblio build.
 #
-#:   make          build every C++ prototype
+#:   make          print this list (the default goal; `make help` is the same thing)
+#:   make all      build every C++ prototype
 #:   make test     build them, run each, check the C++ agrees with its Python twin, and check
 #:                 each ported layer agrees with the production driver extracted from it
 #:   make production   the production drivers on these graphs, linked from ../../src
@@ -147,7 +148,7 @@ PROD_SRCS   = $(wildcard ../../src/*.cpp)
 
 # The headers too. Without them a change to include/oblio/QuotientGraph.h alone leaves
 # production_cpp stale, and `make test` then compares this session's prototype against LAST
-# session's production and reports agreement. See benchmarks/ordering/Makefile.
+# session's production and reports agreement.
 PROD_HDRS   = $(wildcard ../../include/oblio/*.h)
 #
 # VENDOR_SRCS is spelled the same here, in ../../Makefile and in both benchmark Makefiles, so
@@ -164,6 +165,12 @@ else
 endif
 
 .PHONY: all test production vendored width amdorder mmdorder aligned clean help
+
+# Bare `make` prints the target list rather than building. Stated explicitly because the default
+# goal is otherwise the FIRST target in the file, so moving a rule would silently change it and the
+# header above would stop being true with nothing to catch it. Every Makefile in this tree answers
+# `make` the same way; see docs/CODING_RULES.md.
+.DEFAULT_GOAL := help
 
 # Print the target list from this file's header. Those lines are marked with #: so there is one
 # source of truth: the header comment is the help text.
@@ -395,6 +402,11 @@ width: width_cpp
 	./width_cpp
 endif
 
+# The *.dSYM line removes macOS debug-symbol bundles, which are directories, hence -rf rather
+# than -f. Nothing here emits one under the committed flags, and that is not the test: CXXFLAGS
+# is overridable, `make CXXFLAGS="... -g"` produces one on macOS, and clean removes what a build
+# in this directory CAN produce.
 clean:
 	rm -f $(BINS) vendored_cpp production_cpp width_cpp amdorder_cpp mmdorder_cpp \
 	      amd_int64.cpp mmd_int64.cpp amd_raw.cpp Amd.o Mmd.o
+	rm -rf *.dSYM

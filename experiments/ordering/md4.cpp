@@ -47,9 +47,13 @@
 // pass is linear in what it touches. That is what the vendored codes and Oblio's
 // own SymFactorEngine do. See the README section on complexity.
 //
-// Types follow Oblio's rule: an INDEX names a vertex or a clique and is a
-// std::int32_t, with NIL for "none"; a POSITION locates something inside a vector
-// and is a std::size_t.
+// Types follow Oblio's rule, and there are THREE of them. An INDEX names a vertex
+// or a clique and is a std::int32_t, signed only because NIL has to share a type
+// with the values it stands in for. A ONE DIMENSIONAL SIZE is bounded by n and is
+// a std::uint32_t: nothing to stand in for, so no sentinel and no sign bit spent.
+// A TWO DIMENSIONAL size or position is bounded by nnz and is a std::size_t. An
+// entity loop therefore has a signedness cast where its int32 counter meets a
+// uint32 bound.
 constexpr std::int32_t NIL = -1;
 
 // The mark array is a set and the tag names it, so a tag must never repeat: a
@@ -66,66 +70,127 @@ constexpr std::int32_t TAG_CEILING = (1 << 30) - 1;
 // to produce. What still prints at every size is the end of the run, the counters and
 // the order, since each is O(1) lines and that is what the twin comparison comes down
 // to. To watch a larger run, raise this.
-constexpr std::size_t SHOW_THRESHOLD = 32;
+constexpr std::uint32_t SHOW_THRESHOLD = 32;
 
-using Graph = std::vector<std::vector<std::int32_t>>;
+// TWO GRAPHS, NOT ONE ALIAS. Both hold one list of int32 per vertex and differ only in what the
+// entries MEAN: A[u] holds vertices and I[u] holds clique ids. An alias made them one type, so
+// nothing but a variable name said which was which and nothing stopped one being passed for the
+// other. Two classes cost the duplication below and buy a compiler that knows the difference.
+//
+// `mSize` is what makes them classes rather than pairs of vectors: it is the id space, a one
+// dimensional size, so `std::uint32_t`. Holding it here is what keeps `n` out of `std::size_t` for
+// the whole layer, and every vector length in the file is then bounded by it. Oblio's
+// QuotientGraph owns both roles in one class and will get the same treatment iteratively.
+class AdjacencyGraph {
+public:
+    explicit AdjacencyGraph(std::uint32_t size) : mSize(size), mAdjacency(size) {}
+    // For the examples at the bottom, which are written as brace lists of neighbor lists.
+    AdjacencyGraph(std::initializer_list<std::vector<std::int32_t>> rows)
+        : mSize(static_cast<std::uint32_t>(rows.size())), mAdjacency(rows) {}
+
+    std::uint32_t size() const { return mSize; }
+    const std::vector<std::int32_t>& operator[](std::int32_t u) const { return mAdjacency[u]; }
+    std::vector<std::int32_t>&       operator[](std::int32_t u)       { return mAdjacency[u]; }
+
+private:
+    std::uint32_t                          mSize;
+    std::vector<std::vector<std::int32_t>> mAdjacency;
+};
+
+class IncidenceGraph {
+public:
+    explicit IncidenceGraph(std::uint32_t size) : mSize(size), mIncidence(size) {}
+
+    std::uint32_t size() const { return mSize; }
+    const std::vector<std::int32_t>& operator[](std::int32_t u) const { return mIncidence[u]; }
+    std::vector<std::int32_t>&       operator[](std::int32_t u)       { return mIncidence[u]; }
+
+private:
+    std::uint32_t                          mSize;
+    std::vector<std::vector<std::int32_t>> mIncidence;
+};
+
 
 // C[c] holds the members of clique c, and cliqueLive[c] says whether c exists.
 // A clique id is the pivot that created it, so the id space is the vertex space.
-struct Cliques {
-    std::vector<std::vector<std::int32_t>> members;
-    std::vector<bool> live;
-    std::uint32_t count = 0;
+class Cliques {
+public:
+    explicit Cliques(std::uint32_t size) : mSize(size), mMembers(size), mLive(size, false) {}
 
-    explicit Cliques(std::size_t n) : members(n), live(n, false) {}
-    const std::vector<std::int32_t>& at(std::int32_t c) const { return members[c]; }
-    std::vector<std::int32_t>& operator[](std::int32_t c) { return members[c]; }
-    void create(std::int32_t c, std::vector<std::int32_t> m) {
-        if (!live[c]) ++count;
-        live[c] = true;
-        members[c] = std::move(m);
+    // THE ACCESSORS FOLLOW THE MEMBERS, one for one and in the same order, so the four here read
+    // as the four in the private section below. `size` and `live` exist at all because the m
+    // prefix made the reads from outside visible: the show pass and the storage count had been
+    // walking the fields directly.
+    //
+    // ONE ID SPACE, c in [0, size()), of which numLive() are live at any moment. `size` is the id
+    // space and not the population, which is the sense every other size() in the tree has.
+    std::uint32_t size() const    { return mSize; }
+    std::uint32_t numLive() const { return mNumLive; }
+
+    // Both overloads, so C[c] reads the same whether the reference is const or not. There was an
+    // at() here instead of the const one until 2026-08-12, which compiled but borrowed a name the
+    // standard library uses for the BOUNDS-CHECKED subscript. This at() checked nothing, so the
+    // name promised something it did not do and the two spellings looked like a choice.
+    const std::vector<std::int32_t>& operator[](std::int32_t c) const { return mMembers[c]; }
+    std::vector<std::int32_t>&       operator[](std::int32_t c)       { return mMembers[c]; }
+
+    bool live(std::int32_t c) const { return mLive[c]; }
+
+    void create(std::int32_t c, std::vector<std::int32_t> members) {
+        if (!mLive[c]) ++mNumLive;
+        mLive[c]    = true;
+        mMembers[c] = std::move(members);
     }
     void erase(std::int32_t c) {
-        if (live[c]) --count;
-        live[c] = false;
-        members[c].clear();
+        if (mLive[c]) --mNumLive;
+        mLive[c] = false;
+        mMembers[c].clear();
     }
-    std::size_t size() const { return count; }
+
+private:
+    // Declaration order is initialization order, so the two scalars come first and the vectors
+    // they size come after. `mSize` is set by the caller and carries no default; `mNumLive` is
+    // zero by the type, a fresh Cliques having nothing live, and says so where it is declared
+    // rather than in a constructor that a second constructor could forget.
+    std::uint32_t                          mSize;          // the id space, and both vectors' length
+    std::uint32_t                          mNumLive = 0;   // how many of those ids are live now
+    std::vector<std::vector<std::int32_t>> mMembers;
+    std::vector<bool>                      mLive;
 };
 
 // I[u] cliques that contain u
 // C[c] vertices that c contains
 
-std::vector<std::int32_t> md4Neighbors(const Graph& A, const Graph& I, const Cliques& C,
+std::vector<std::int32_t> md4Neighbors(const AdjacencyGraph& A, const IncidenceGraph& I, const Cliques& C,
                                        std::vector<std::int32_t>& mark, std::int32_t& tag,
                                        std::int32_t u);
 
 // Print a quotient graph: adjacency, incidence, cliques, in the order the
 // structure holds them.
-void md4Show(const Graph& A, const Graph& I, const Cliques& C,
+void md4Show(const AdjacencyGraph& A, const IncidenceGraph& I, const Cliques& C,
              const std::vector<std::uint32_t>& degrees, const std::string& title = "",
              const std::vector<bool>* eliminated = nullptr) {
-    const std::size_t n = A.size();
+    const std::uint32_t n = A.size();
     int width = static_cast<int>(std::to_string(n > 0 ? n - 1 : 0).size());
-    std::vector<std::int32_t> aliveVertices;
+    std::vector<std::int32_t> liveVertices;
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u)
-        if (eliminated == nullptr || !(*eliminated)[u]) aliveVertices.push_back(u);
-    std::size_t numAliveEdges = 0;
-    for (std::int32_t u : aliveVertices) numAliveEdges += A[u].size();
-    numAliveEdges /= 2;
-    std::size_t numAliveIncidences = 0;
-    for (std::int32_t u : aliveVertices) numAliveIncidences += I[u].size();
-    std::size_t numAliveCliques = C.size();
+        if (eliminated == nullptr || !(*eliminated)[u]) liveVertices.push_back(u);
+    std::size_t numLiveEdges = 0;
+    for (std::int32_t u : liveVertices) numLiveEdges += A[u].size();
+    numLiveEdges /= 2;
+    std::size_t numLiveIncidences = 0;
+    for (std::int32_t u : liveVertices) numLiveIncidences += I[u].size();
+    std::uint32_t numLiveCliques = C.numLive();
     if (!title.empty()) std::cout << title << "\n";
-    std::ostringstream aliveVerticesText;
-    if (eliminated == nullptr) aliveVerticesText << n;
-    else aliveVerticesText << aliveVertices.size() << " of " << n;
-    std::cout << "num alive vertices = " << aliveVerticesText.str()
-              << ", num alive edges = " << numAliveEdges
-              << ", num alive cliques = " << numAliveCliques
-              << ", storage = " << 2 * numAliveEdges << " + " << 2 * numAliveIncidences
-              << " = " << 2 * (numAliveEdges + numAliveIncidences) << "\n";
-    for (std::int32_t u : aliveVertices) {
+    std::ostringstream liveVerticesText;
+    if (eliminated == nullptr) liveVerticesText << n;
+    else liveVerticesText << liveVertices.size() << " of " << n;
+    std::cout << "num live vertices = " << liveVerticesText.str()
+              << ", num live edges = " << numLiveEdges
+              << ", num live cliques = " << numLiveCliques
+              << ", storage = " << 2 * numLiveEdges << " + " << 2 * numLiveIncidences
+              << " = " << 2 * (numLiveEdges + numLiveIncidences) << "\n";
+    for (std::int32_t u : liveVertices) {
         std::ostringstream adjacencyText;
         bool first = true;
         for (std::int32_t v : A[u]) {
@@ -142,10 +207,10 @@ void md4Show(const Graph& A, const Graph& I, const Cliques& C,
                   << "} {" << incidenceText.str() << "} degree " << degrees[u] << "\n";
     }
     for (std::int32_t c = 0; c < static_cast<std::int32_t>(n); ++c) {
-        if (!C.live[c]) continue;
+        if (!C.live(c)) continue;
         std::ostringstream cliqueMembersText;
         bool first = true;
-        for (std::int32_t u : C.at(c)) {
+        for (std::int32_t u : C[c]) {
             cliqueMembersText << (first ? "" : " ") << std::setw(width) << u;
             first = false;
         }
@@ -159,7 +224,7 @@ void md4ShowState(const std::vector<std::uint32_t>& degrees,
                   const std::vector<std::vector<std::int32_t>>& superMembers,
                   const std::vector<bool>& eliminated,
                   const std::vector<std::int32_t>& pivots, const std::string& title = "") {
-    const std::size_t n = superMembers.size();
+    const std::uint32_t n = static_cast<std::uint32_t>(superMembers.size());
     int width = static_cast<int>(std::to_string(n > 0 ? n - 1 : 0).size());
     if (!title.empty()) std::cout << title << "\n";
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) {
@@ -196,7 +261,7 @@ void md4ShowState(const std::vector<std::uint32_t>& degrees,
     std::cout << "  members: [" << superMembersText.str() << "]\n";
     std::cout << "  eliminated: [" << eliminatedText.str() << "]\n";
     std::cout << "  pivots: [";
-    for (std::size_t k = 0; k < pivots.size(); ++k)
+    for (std::uint32_t k = 0; k < pivots.size(); ++k)
         std::cout << (k == 0 ? "" : ", ") << pivots[k];
     std::cout << "]\n";
     std::cout << "  order: [";
@@ -212,12 +277,12 @@ void md4ShowState(const std::vector<std::uint32_t>& degrees,
 // Entries actually stored. Each edge costs two, one per endpoint in A. Each
 // incidence costs two as well, the clique id in I and the member in C. Watch
 // the total fall monotonically; the naive graph's only rises.
-std::size_t md4Storage(const Graph& A, const Graph& I, const Cliques& C) {
-    std::size_t total = 0;
-    for (const std::vector<std::int32_t>& adjacency : A) total += adjacency.size();
-    for (const std::vector<std::int32_t>& incidence : I) total += incidence.size();
-    for (std::size_t c = 0; c < C.members.size(); ++c)
-        if (C.live[c]) total += C.members[c].size();
+std::size_t md4Storage(const AdjacencyGraph& A, const IncidenceGraph& I, const Cliques& C) {
+    std::size_t total = 0;   // TWO DIMENSIONAL, a count of entries, so it stays wide
+    for (std::int32_t u = 0; u < static_cast<std::int32_t>(A.size()); ++u) total += A[u].size();
+    for (std::int32_t u = 0; u < static_cast<std::int32_t>(I.size()); ++u) total += I[u].size();
+    for (std::int32_t c = 0; c < static_cast<std::int32_t>(C.size()); ++c)
+        if (C.live(c)) total += C[c].size();
     return total;
 }
 
@@ -225,7 +290,7 @@ std::size_t md4Storage(const Graph& A, const Graph& I, const Cliques& C) {
 // members of every clique that contains u, minus u itself, which the cliques
 // always carry. This is George and Liu's reachable set, and it is what the
 // elimination graph would hold explicitly.
-std::vector<std::int32_t> md4Neighbors(const Graph& A, const Graph& I, const Cliques& C,
+std::vector<std::int32_t> md4Neighbors(const AdjacencyGraph& A, const IncidenceGraph& I, const Cliques& C,
                                        std::vector<std::int32_t>& mark, std::int32_t& tag,
                                        std::int32_t u) {
     // In set terms this is one line, and it is worth keeping in view because the
@@ -240,12 +305,17 @@ std::vector<std::int32_t> md4Neighbors(const Graph& A, const Graph& I, const Cli
     // One pass per source, with the mark array doing the deduplication, so the
     // cost is linear in what is touched. Nothing is sorted: the order is the order
     // the sources were walked in.
+    //
+    // A REACH TAG, ABOUT VERTEX u, LABELLING reach(u) together with u. Not about any clique: the
+    // cliques in I[u] are read here as SOURCES of members, never stamped as ids. Consumed before
+    // this function returns, unlike the eliminator's two, which stay live across its whole prune
+    // loop; that is why the sweep guard may sit before this call and not before those.
     ++tag;
     std::vector<std::int32_t> neighbors;
     mark[u] = tag;                          // never its own neighbor
     for (std::int32_t v : A[u]) { mark[v] = tag; neighbors.push_back(v); }
     for (std::int32_t c : I[u])
-        for (std::int32_t v : C.at(c))
+        for (std::int32_t v : C[c])
             if (mark[v] != tag) { mark[v] = tag; neighbors.push_back(v); }
     return neighbors;
 }
@@ -281,7 +351,7 @@ std::vector<std::int32_t> md4Neighbors(const Graph& A, const Graph& I, const Cli
 //     C[pivot] = C[pivot] - merged
 std::tuple<std::vector<std::int32_t>, std::vector<std::int32_t>,
            std::vector<std::pair<std::int32_t, std::int32_t>>, std::vector<std::int32_t>>
-md4Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
+md4Eliminate(AdjacencyGraph& A, IncidenceGraph& I, Cliques& C, std::vector<bool>& eliminated,
              std::vector<std::int32_t>& mark, std::int32_t& tag, std::int32_t pivot) {
     const std::vector<std::int32_t> neighbors = md4Neighbors(A, I, C, mark, tag, pivot);
     const std::vector<std::int32_t> absorbedCliques = I[pivot];
@@ -289,24 +359,43 @@ md4Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
         C.erase(c);
     C.create(pivot, neighbors);     // becomes the column pattern of the pivot
 
-    // Stamp the new clique once, and the absorbed cliques once. Membership is then
-    // a comparison, and both loops below are compactions in place. cliqueTag is the
-    // set C[pivot] and absorbedTag is the set I[pivot], each built in one pass and
-    // then queried for free.
+    // THREE TAGS IN THIS ELIMINATOR, and it is worth naming what each is about and what it
+    // labels, since the mark array is shared and a tag is the only thing saying which set a stamp
+    // belongs to. Two are md2's, about cliques, differing in WHICH SIDE of a clique they name:
+    //
+    //     pivotCliqueTag       about the PIVOT'S clique, labels its MEMBERS,  so stamps VERTICES
+    //     absorbedCliquesTag   about the ABSORBED cliques, labels their IDS,  so stamps CLIQUE IDS
+    //
+    // Each side is what one loop below needs: pruning A[u] asks whether a VERTEX is in C[pivot],
+    // pruning I[u] asks whether a CLIQUE ID is one of the absorbed. Each set is built in one pass
+    // and then queried for free, and both loops are compactions in place.
+    //
+    // THE THIRD IS MASS ELIMINATION'S, further down, and it is the first tag in the family on the
+    // MEMBER side alongside pivotCliqueTag: it labels the merged vertices so C[pivot] can be
+    // compacted against them. Two consequences. It is CONDITIONAL, fired only when something
+    // merged, so this layer's eliminate advance is a bound, at most 4, where md2's is exactly 3.
+    // And md2's two tags could have shared one value, their sides being disjoint; here they could
+    // not, because two of the three now stamp vertices.
     ++tag;
-    const std::int32_t cliqueTag = tag;
-    for (std::int32_t v : neighbors) mark[v] = cliqueTag;
+    const std::int32_t pivotCliqueTag = tag;
+    for (std::int32_t v : neighbors) mark[v] = pivotCliqueTag;
     ++tag;
-    const std::int32_t absorbedTag = tag;
-    for (std::int32_t c : absorbedCliques) mark[c] = absorbedTag;
+    const std::int32_t absorbedCliquesTag = tag;
+    for (std::int32_t c : absorbedCliques) mark[c] = absorbedCliquesTag;
 
     std::vector<std::pair<std::int32_t, std::int32_t>> prunedEdges;
+
+    // ONE SCRATCH BUFFER FOR EVERY COMPACTION, here and in the mass elimination below. Each use
+    // is a filter into it followed by a swap, so after the swap it holds the list that was just
+    // replaced; clear() then empties it while keeping that capacity, and the next fill reuses the
+    // allocation. Named buffers would read no better and would allocate more. The uses are
+    // labeled, since the same name means a different list a few lines apart.
     std::vector<std::int32_t> kept;
     for (std::int32_t u : neighbors) {
-        kept.clear();
+        kept.clear();                            // KEPT IS ADJACENCY here: A[u] - C[pivot] - {pivot}
         for (std::int32_t v : A[u]) {
             if (v == pivot) continue;            // the pivot is no longer a variable
-            if (mark[v] == cliqueTag) {          // both ends inside the new clique
+            if (mark[v] == pivotCliqueTag) {     // both ends inside the new clique
                 if (u < v) prunedEdges.push_back({u, v});
                 continue;                        // implicit now: drop the explicit copy
             }
@@ -314,9 +403,9 @@ md4Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
         }
         A[u].swap(kept);                         // what survives is A[u] - C[pivot] - {pivot}
 
-        kept.clear();                            // I[u] loses the absorbed cliques
+        kept.clear();                            // KEPT IS INCIDENCE here: I[u] - I[pivot], + pivot
         for (std::int32_t c : I[u])
-            if (mark[c] != absorbedTag) kept.push_back(c);
+            if (mark[c] != absorbedCliquesTag) kept.push_back(c);
         kept.push_back(pivot);                   // u joins the new clique, id = pivot
         I[u].swap(kept);
     }
@@ -339,9 +428,12 @@ md4Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
         }
     }
     if (!mergedVertices.empty()) {           // C[pivot] - merged, one compaction pass
+        // THE MERGED TAG: about the vertices this step absorbed into the pivot, labeling them
+        // directly. On the MEMBER side, like pivotCliqueTag, and the only conditional advance in
+        // the file.
         ++tag;
         for (std::int32_t u : mergedVertices) mark[u] = tag;
-        kept.clear();
+        kept.clear();                        // KEPT IS CLIQUE MEMBERS here: C[pivot] - merged
         for (std::int32_t v : C[pivot])
             if (mark[v] != tag) kept.push_back(v);
         C[pivot].swap(kept);
@@ -355,14 +447,14 @@ md4Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
 
 // Same as md3, with the degrees kept in an array instead of recomputed. The
 // picker reads cached integers; only the new clique's members are refreshed.
-std::vector<std::int32_t> md4MinimumDegree(const Graph& G) {
-    const std::size_t n = G.size();
+std::vector<std::int32_t> md4MinimumDegree(const AdjacencyGraph& G) {
+    const std::uint32_t n = G.size();
     std::size_t nnzTrilA = 0;
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) nnzTrilA += G[u].size();
     nnzTrilA = nnzTrilA / 2 + n;
-    Graph A = G;                                  // explicit vertex neighbors
-    Graph I(n);                                   // cliques that contain each vertex
-    Cliques C(n);      // clique id -> member list
+    AdjacencyGraph A = G;                                  // explicit vertex neighbors
+    IncidenceGraph I(n);                                   // cliques that contain each vertex
+    Cliques        C(n);      // clique id -> member list
     std::vector<std::int32_t> mark(n, NIL);       // scratch for membership, with tag
     std::int32_t tag = 0;
     // Calls to the eliminate procedure, one per pivot. Not the count of vertices
@@ -410,17 +502,17 @@ std::vector<std::int32_t> md4MinimumDegree(const Graph& G) {
     while (numEliminatedVertices < n) {
         ++numIterations;
         std::int32_t pivot = NIL;
-        std::size_t best = 0;
+        std::uint32_t minDegree = 0;   // a degree, so one dimensional
         for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) {
             if (eliminated[u]) continue;
-            if (pivot == NIL || degrees[u] < best) { pivot = u; best = degrees[u]; }
+            if (pivot == NIL || degrees[u] < minDegree) { pivot = u; minDegree = degrees[u]; }
         }
         // Sweep the tag back before it can wrap. Two sites in this layer, one before
         // each region that advances the tag, and each placed where nothing in mark is
         // live. The regions have swapped places since md3: the pivot search is an
         // array read now and spends no tag, so the first is the elimination. Not
-        // inside md4Eliminate, which holds three stamps live in turn: cliqueTag and
-        // absorbedTag across the prune loop, then the merged set across the C[pivot]
+        // inside md4Eliminate, which holds three stamps live in turn: pivotCliqueTag and
+        // absorbedCliquesTag across the prune loop, then the merged set across the C[pivot]
         // compaction. Never observed to fire.
         if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
@@ -469,7 +561,12 @@ std::vector<std::int32_t> md4MinimumDegree(const Graph& G) {
         // ext + w - 2, down to ext, and each column contributes its own diagonal.
         std::uint32_t superSize = superMembers[pivot].size();
         std::uint32_t externalDegree = C[pivot].size();
-        nnzL += superSize * externalDegree + superSize * (superSize - 1) / 2 + superSize;
+        // ONE FACTOR WIDENED: a product of two one-dimensional quantities is TWO dimensional, so
+        // it is formed in std::size_t. Widening cannot be done after the multiply the way
+        // narrowing is done after a subtraction; one operand is enough, the other promoting to
+        // meet it. Both factors are bounded by n, so the product reaches n^2.
+        nnzL += static_cast<std::size_t>(superSize) * externalDegree
+              + static_cast<std::size_t>(superSize) * (superSize - 1) / 2 + superSize;
 
         std::ostringstream absorbedCliquesText;
         if (absorbedCliques.empty()) {
@@ -540,7 +637,7 @@ std::vector<std::int32_t> md4MinimumDegree(const Graph& G) {
               << ", degree updates: " << numDegreeUpdates << "\n";
     std::cout << "tag sweeps: " << numTagSweeps << "\n";
     std::cout << "order: [";
-    for (std::size_t k = 0; k < order.size(); ++k)
+    for (std::uint32_t k = 0; k < order.size(); ++k)
         std::cout << (k == 0 ? "" : ", ") << order[k];
     std::cout << "]\n";
     return order;
@@ -552,9 +649,9 @@ std::vector<std::int32_t> md4MinimumDegree(const Graph& G) {
 //
 // It must match the Python twin's grid_graph exactly, vertex for vertex, or `make test` would be
 // diffing two different problems.
-static Graph gridGraph(int side) {
+static AdjacencyGraph gridGraph(int side) {
     const int n = side * side;
-    Graph graph(n);
+    AdjacencyGraph graph(static_cast<std::uint32_t>(n));
     for (int r = 0; r < side; ++r)
         for (int c = 0; c < side; ++c) {
             const int u = r * side + c;
@@ -566,7 +663,7 @@ static Graph gridGraph(int side) {
     return graph;
 }
 
-void run(const std::string& name, const Graph& G) {
+void run(const std::string& name, const AdjacencyGraph& G) {
     std::cout << "=== " << name << " ===\n";
     md4MinimumDegree(G);
     std::cout << "\n";
@@ -610,13 +707,13 @@ int main(int argc, char** argv) {
     //
     //      edges: 0-1 0-3 0-8 1-2 1-6 1-8 2-3 2-5 3-4 4-5
     //             5-6 5-9 6-7 6-10 7-8 8-9 9-10 10-11
-    Graph graph1 = {
+    AdjacencyGraph graph1 = {
         {1, 3}, {0, 2}, {1, 3}, {0, 2},
     };
-    Graph graph2 = {
+    AdjacencyGraph graph2 = {
         {1, 2}, {0, 3}, {0, 4}, {1, 4, 5}, {2, 3, 5}, {3, 4},
     };
-    Graph graph3 = {
+    AdjacencyGraph graph3 = {
         {1, 3, 8},        // 0
         {0, 2, 6, 8},     // 1
         {1, 3, 5},        // 2
@@ -642,7 +739,7 @@ int main(int argc, char** argv) {
     // it as an ordinary denser test.
     //
     //   edges: 0-2 0-3 0-4 0-7 1-3 1-4 1-6 1-7 2-3 2-5 3-6 3-7 4-5 5-6
-    Graph graph4 = {
+    AdjacencyGraph graph4 = {
         {2, 3, 4, 7},     // 0
         {3, 4, 6, 7},     // 1
         {0, 3, 5},        // 2
@@ -663,7 +760,7 @@ int main(int argc, char** argv) {
     // C[pivot] would merge it. See the README section on mass elimination.
     //
     //   edges: 0-3 0-4 1-2 1-4
-    Graph graph5 = {
+    AdjacencyGraph graph5 = {
         {3, 4},           // 0
         {2, 4},           // 1
         {1},              // 2
@@ -683,7 +780,7 @@ int main(int argc, char** argv) {
     // external degree.
     //
     //   edges: 0-2 0-3 0-4 1-3 2-3 2-4 2-5 3-4
-    Graph graph6 = {
+    AdjacencyGraph graph6 = {
         {2, 3, 4},        // 0
         {3},              // 1
         {0, 3, 4, 5},     // 2
@@ -703,7 +800,7 @@ int main(int argc, char** argv) {
     // against each other.
     //
     //   edges: 0-1 0-2 0-4 1-4 2-3 2-4 3-4
-    Graph graph7 = {
+    AdjacencyGraph graph7 = {
         {1, 2, 4},        // 0
         {0, 4},           // 1
         {0, 3, 4},        // 2
@@ -711,7 +808,7 @@ int main(int argc, char** argv) {
         {0, 1, 2, 3},     // 4
     };
 
-    std::vector<std::pair<std::string, Graph>> examples = {
+    std::vector<std::pair<std::string, AdjacencyGraph>> examples = {
         {"graph1", graph1}, {"graph2", graph2},
         {"graph3", graph3}, {"graph4", graph4},
         {"graph5", graph5}, {"graph6", graph6},

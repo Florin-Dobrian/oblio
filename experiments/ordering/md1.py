@@ -39,15 +39,15 @@ def md1_show(A, title=None, eliminated=None):
     """Print a graph: adjacency lists, in the order the structure holds them."""
     n = len(A)
     width = len(str(max(n - 1, 0)))
-    alive_vertices = [u for u in range(n) if eliminated is None or not eliminated[u]]
-    num_alive_edges = sum(len(A[u]) for u in alive_vertices) // 2
+    live_vertices = [u for u in range(n) if eliminated is None or not eliminated[u]]
+    num_live_edges = sum(len(A[u]) for u in live_vertices) // 2
     if title:
         print(title)
-    alive_vertices_text = f"{n}" if eliminated is None else f"{len(alive_vertices)} of {n}"
-    print(f"num alive vertices = {alive_vertices_text}, "
-          f"num alive edges = {num_alive_edges}, "
-          f"storage = {2 * num_alive_edges}")
-    for u in alive_vertices:
+    live_vertices_text = f"{n}" if eliminated is None else f"{len(live_vertices)} of {n}"
+    print(f"num live vertices = {live_vertices_text}, "
+          f"num live edges = {num_live_edges}, "
+          f"storage = {2 * num_live_edges}")
+    for u in live_vertices:
         adjacency_text = " ".join(f"{v:>{width}}" for v in A[u])
         print(f"  {u:>{width}}: {{{adjacency_text}}} degree {len(A[u])}")
     print()
@@ -79,6 +79,22 @@ def md1_eliminate(A, mark, tag, eliminated, pivot):
     Nothing is sorted. Membership comes from the mark array, one stamp per query,
     which is what the vendored codes do and what keeps every pass linear in what
     it touches.
+
+    One tag per neighbor, each about one neighbor u and labeling what u already
+    sees: A[u], with u and the pivot stamped alongside so they fail the test below
+    and never become fill. A tag is about a vertex here, never about a set of
+    vertices shared by several of them, because there is no such set in this layer:
+    the fill is pairwise and each neighbor's missing edges are its own. So the set a
+    stamp belongs to changes every time round the loop, and the eliminator's advance
+    is len(A[pivot]), at most n - 1, which is the whole of this layer's cost in the
+    tag-overflow table.
+
+    md2 is where that collapses, and the reason is what its tags are about rather
+    than how many there are. The quotient graph gives the fill a name, the clique,
+    so its eliminator stamps sets that belong to the pivot rather than to each
+    neighbor: the pivot's reach, the members of the clique that reach becomes, and
+    the ids of the cliques it absorbs. Three, whatever the pivot's degree, against
+    one per neighbor here.
     """
     neighbors = list(A[pivot])
     fill_edges = []
@@ -133,16 +149,16 @@ def md1_minimum_degree(G):
         md1_show(A, "start: every edge explicit, no fill yet", eliminated=eliminated)
     for iteration in range(n):
         num_iterations += 1
-        # The scan asks every alive vertex for its degree, so the count is the alive
+        # The scan asks every live vertex for its degree, so the count is the live_vertices
         # count summed over iterations, n(n+1)/2 here since exactly one vertex leaves
         # per iteration. Two things keep it from being comparable with the layers
         # above. There is no initial build to charge for, degrees being computed here
         # and nowhere else, so this starts at 0 where md4 and md5 start at n. And a
         # degree computation is len(A[u]) rather than a union over A[u] and the
         # cliques in I[u], so it is the same count of a much cheaper operation.
-        alive = [u for u in range(n) if not eliminated[u]]
-        num_degree_computations += len(alive)
-        pivot = min(alive, key=lambda u: len(A[u]))
+        live_vertices = [u for u in range(n) if not eliminated[u]]
+        num_degree_computations += len(live_vertices)
+        pivot = min(live_vertices, key=lambda u: len(A[u]))
         # Sweep the tag back before it can wrap. Here because nothing in mark is
         # live between eliminations: every pass inside md1_eliminate stamps what
         # it reads in the same pass, so there is nothing to erase. One elimination

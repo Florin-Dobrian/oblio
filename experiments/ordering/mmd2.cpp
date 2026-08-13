@@ -127,9 +127,13 @@
 // pass is linear in what it touches. That is what the vendored codes and Oblio's
 // own SymFactorEngine do. See the README section on complexity.
 //
-// Types follow Oblio's rule: an INDEX names a vertex or a clique and is a
-// std::int32_t, with NIL for "none"; a POSITION locates something inside a vector
-// and is a std::size_t.
+// Types follow Oblio's rule, and there are THREE of them. An INDEX names a vertex
+// or a clique and is a std::int32_t, signed only because NIL has to share a type
+// with the values it stands in for. A ONE DIMENSIONAL SIZE is bounded by n and is
+// a std::uint32_t: nothing to stand in for, so no sentinel and no sign bit spent.
+// A TWO DIMENSIONAL size or position is bounded by nnz and is a std::size_t. An
+// entity loop therefore has a signedness cast where its int32 counter meets a
+// uint32 bound.
 constexpr std::int32_t NIL = -1;
 
 // The mark array is a set and the tag names it, so a tag must never repeat: a
@@ -146,100 +150,181 @@ constexpr std::int32_t TAG_CEILING = (1 << 30) - 1;
 // to produce. What still prints at every size is the end of the run, the counters and
 // the order, since each is O(1) lines and that is what the twin comparison comes down
 // to. To watch a larger run, raise this.
-constexpr std::size_t SHOW_THRESHOLD = 32;
+constexpr std::uint32_t SHOW_THRESHOLD = 32;
 
-using Graph = std::vector<std::vector<std::int32_t>>;
+// TWO GRAPHS, NOT ONE ALIAS. Both hold one list of int32 per vertex and differ only in what the
+// entries MEAN: A[u] holds vertices and I[u] holds clique ids. An alias made them one type, so
+// nothing but a variable name said which was which and nothing stopped one being passed for the
+// other. Two classes cost the duplication below and buy a compiler that knows the difference.
+//
+// `mSize` is what makes them classes rather than pairs of vectors: it is the id space, a one
+// dimensional size, so `std::uint32_t`. Holding it here is what keeps `n` out of `std::size_t` for
+// the whole layer, and every vector length in the file is then bounded by it. Oblio's
+// QuotientGraph owns both roles in one class and will get the same treatment iteratively.
+class AdjacencyGraph {
+public:
+    explicit AdjacencyGraph(std::uint32_t size) : mSize(size), mAdjacency(size) {}
+    // For the examples at the bottom, which are written as brace lists of neighbor lists.
+    AdjacencyGraph(std::initializer_list<std::vector<std::int32_t>> rows)
+        : mSize(static_cast<std::uint32_t>(rows.size())), mAdjacency(rows) {}
+
+    std::uint32_t size() const { return mSize; }
+    const std::vector<std::int32_t>& operator[](std::int32_t u) const { return mAdjacency[u]; }
+    std::vector<std::int32_t>&       operator[](std::int32_t u)       { return mAdjacency[u]; }
+
+private:
+    std::uint32_t                          mSize;
+    std::vector<std::vector<std::int32_t>> mAdjacency;
+};
+
+class IncidenceGraph {
+public:
+    explicit IncidenceGraph(std::uint32_t size) : mSize(size), mIncidence(size) {}
+
+    std::uint32_t size() const { return mSize; }
+    const std::vector<std::int32_t>& operator[](std::int32_t u) const { return mIncidence[u]; }
+    std::vector<std::int32_t>&       operator[](std::int32_t u)       { return mIncidence[u]; }
+
+private:
+    std::uint32_t                          mSize;
+    std::vector<std::vector<std::int32_t>> mIncidence;
+};
+
 
 // C[c] holds the members of clique c, and cliqueLive[c] says whether c exists.
 // A clique id is the pivot that created it, so the id space is the vertex space.
-struct Cliques {
-    std::vector<std::vector<std::int32_t>> members;
-    std::vector<bool> live;
-    std::uint32_t count = 0;
+class Cliques {
+public:
+    explicit Cliques(std::uint32_t size) : mSize(size), mMembers(size), mLive(size, false) {}
 
-    explicit Cliques(std::size_t n) : members(n), live(n, false) {}
-    const std::vector<std::int32_t>& at(std::int32_t c) const { return members[c]; }
-    std::vector<std::int32_t>& operator[](std::int32_t c) { return members[c]; }
-    void create(std::int32_t c, std::vector<std::int32_t> m) {
-        if (!live[c]) ++count;
-        live[c] = true;
-        members[c] = std::move(m);
+    // THE ACCESSORS FOLLOW THE MEMBERS, one for one and in the same order, so the four here read
+    // as the four in the private section below. `size` and `live` exist at all because the m
+    // prefix made the reads from outside visible: the show pass and the storage count had been
+    // walking the fields directly.
+    //
+    // ONE ID SPACE, c in [0, size()), of which numLive() are live at any moment. `size` is the id
+    // space and not the population, which is the sense every other size() in the tree has.
+    std::uint32_t size() const    { return mSize; }
+    std::uint32_t numLive() const { return mNumLive; }
+
+    // Both overloads, so C[c] reads the same whether the reference is const or not. There was an
+    // at() here instead of the const one until 2026-08-12, which compiled but borrowed a name the
+    // standard library uses for the BOUNDS-CHECKED subscript. This at() checked nothing, so the
+    // name promised something it did not do and the two spellings looked like a choice.
+    const std::vector<std::int32_t>& operator[](std::int32_t c) const { return mMembers[c]; }
+    std::vector<std::int32_t>&       operator[](std::int32_t c)       { return mMembers[c]; }
+
+    bool live(std::int32_t c) const { return mLive[c]; }
+
+    void create(std::int32_t c, std::vector<std::int32_t> members) {
+        if (!mLive[c]) ++mNumLive;
+        mLive[c]    = true;
+        mMembers[c] = std::move(members);
     }
     void erase(std::int32_t c) {
-        if (live[c]) --count;
-        live[c] = false;
-        members[c].clear();
+        if (mLive[c]) --mNumLive;
+        mLive[c] = false;
+        mMembers[c].clear();
     }
-    std::size_t size() const { return count; }
+
+private:
+    // Declaration order is initialization order, so the two scalars come first and the vectors
+    // they size come after. `mSize` is set by the caller and carries no default; `mNumLive` is
+    // zero by the type, a fresh Cliques having nothing live, and says so where it is declared
+    // rather than in a constructor that a second constructor could forget.
+    std::uint32_t                          mSize;          // the id space, and both vectors' length
+    std::uint32_t                          mNumLive = 0;   // how many of those ids are live now
+    std::vector<std::vector<std::int32_t>> mMembers;
+    std::vector<bool>                      mLive;
 };
-
-// I[u] cliques that contain u
-// C[c] vertices that c contains
-
-std::vector<std::int32_t> mmd2Neighbors(const Graph& A, const Graph& I, const Cliques& C,
-                                       const std::vector<bool>& eliminated,
-                                       std::vector<std::int32_t>& mark, std::int32_t& tag,
-                                       std::int32_t u);
 
 // The degree buckets, as the vendored codes hold them: one doubly linked list per
 // degree, threaded through arrays of size n. Push, pop and splice are all O(1),
 // which an ordered container cannot give. MMD spells these fwd/bwd and AMD
 // Next/Last. The Python twin mirrors the same sequence with a list whose position
 // 0 is the head, so both pick the same pivot.
-struct Buckets {
-    std::vector<std::int32_t> head;   // head[d], the first live vertex of degree d
-    std::vector<std::int32_t> next;   // next[u], toward the tail
-    std::vector<std::int32_t> prev;   // prev[u], toward the head
-    std::vector<bool> filed;          // whether u is in a bucket at all
+class Buckets {
+public:
+    explicit Buckets(std::uint32_t size)
+        : mSize(size), mHead(size, NIL), mNext(size, NIL), mPrev(size, NIL), mFiled(size, false) {}
 
-    explicit Buckets(std::size_t n)
-        : head(n, NIL), next(n, NIL), prev(n, NIL), filed(n, false) {}
+    // The accessors follow the members, one for one and in the same order. `size` and `next`
+    // exist for the display walk, which is the only thing outside this class that needs to see a
+    // chain; production's Buckets has no display and so has neither. `filed` is this layer's: a
+    // batch WITHHOLDS vertices rather than refiling them, so the driver asks whether one is in
+    // a bucket at all. Production derives the same answer from mPrev == UNFILED and keeps no
+    // flag array. A DEGREE is one dimensional
+    // and so std::uint32_t; the links are std::int32_t, carrying NIL.
+    std::uint32_t size() const                 { return mSize; }
+    std::int32_t  head(std::uint32_t d) const  { return mHead[d]; }
+    bool          empty(std::uint32_t d) const { return mHead[d] == NIL; }
+    std::int32_t  next(std::int32_t u) const   { return mNext[u]; }
+    bool          filed(std::int32_t u) const  { return mFiled[u]; }
 
-    void file(std::size_t d, std::int32_t u) {          // buckets[d].add(u), at the head
-        next[u] = head[d];
-        prev[u] = NIL;
-        if (head[d] != NIL) prev[head[d]] = u;
-        head[d] = u;
-        filed[u] = true;
+    void file(std::uint32_t d, std::int32_t u) {        // buckets[d].add(u), at the head
+        mNext[u] = mHead[d];
+        mPrev[u] = NIL;
+        if (mHead[d] != NIL) mPrev[mHead[d]] = u;
+        mHead[d] = u;
+        mFiled[u] = true;
     }
-    void unfile(std::size_t d, std::int32_t u) {        // buckets[d].discard(u)
-        if (!filed[u]) return;                          // idempotent, as set.discard was
-        if (prev[u] != NIL) next[prev[u]] = next[u];
-        else head[d] = next[u];
-        if (next[u] != NIL) prev[next[u]] = prev[u];
-        next[u] = NIL;
-        prev[u] = NIL;
-        filed[u] = false;
+    void unfile(std::uint32_t d, std::int32_t u) {      // buckets[d].discard(u)
+        if (!mFiled[u]) return;                         // idempotent, as set.discard was
+        if (mPrev[u] != NIL) mNext[mPrev[u]] = mNext[u];
+        else mHead[d] = mNext[u];
+        if (mNext[u] != NIL) mPrev[mNext[u]] = mPrev[u];
+        mNext[u] = NIL;
+        mPrev[u] = NIL;
+        mFiled[u] = false;
     }
-    bool empty(std::size_t d) const { return head[d] == NIL; }
+
+private:
+    // INDEXED BY one thing, HOLDING another, and it is what they hold that sets the type. mHead is
+    // subscripted by a DEGREE, which is one dimensional and so std::uint32_t in every signature
+    // above; what it stores is a VERTEX or NIL, so its elements are std::int32_t. mNext and mPrev
+    // are subscripted by a vertex and store one too.
+    std::uint32_t             mSize;    // the id space, and every vector's length
+    std::vector<std::int32_t> mHead;    // [degree] -> first live vertex of that degree, or NIL
+    std::vector<std::int32_t> mNext;    // [vertex] -> next vertex toward the tail, or NIL
+    std::vector<std::int32_t> mPrev;    // [vertex] -> previous vertex toward the head, or NIL
+    std::vector<bool>         mFiled;   // [vertex] -> whether it is in a bucket at all
 };
+
+// I[u] cliques that contain u
+// C[c] vertices that c contains
+
+std::vector<std::int32_t> mmd2Neighbors(const AdjacencyGraph& A, const IncidenceGraph& I, const Cliques& C,
+                                       const std::vector<bool>& eliminated,
+                                       std::vector<std::int32_t>& mark, std::int32_t& tag,
+                                       std::int32_t u);
+
 
 // Print a quotient graph: adjacency, incidence, cliques, in the order the
 // structure holds them.
-void mmd2Show(const Graph& A, const Graph& I, const Cliques& C,
+void mmd2Show(const AdjacencyGraph& A, const IncidenceGraph& I, const Cliques& C,
              const std::vector<std::uint32_t>& degrees, const std::string& title = "",
              const std::vector<bool>* eliminated = nullptr) {
-    const std::size_t n = A.size();
+    const std::uint32_t n = A.size();
     int width = static_cast<int>(std::to_string(n > 0 ? n - 1 : 0).size());
-    std::vector<std::int32_t> aliveVertices;
+    std::vector<std::int32_t> liveVertices;
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u)
-        if (eliminated == nullptr || !(*eliminated)[u]) aliveVertices.push_back(u);
-    std::size_t numAliveEdges = 0;
-    for (std::int32_t u : aliveVertices) numAliveEdges += A[u].size();
-    numAliveEdges /= 2;
-    std::size_t numAliveIncidences = 0;
-    for (std::int32_t u : aliveVertices) numAliveIncidences += I[u].size();
-    std::size_t numAliveCliques = C.size();
+        if (eliminated == nullptr || !(*eliminated)[u]) liveVertices.push_back(u);
+    std::size_t numLiveEdges = 0;
+    for (std::int32_t u : liveVertices) numLiveEdges += A[u].size();
+    numLiveEdges /= 2;
+    std::size_t numLiveIncidences = 0;
+    for (std::int32_t u : liveVertices) numLiveIncidences += I[u].size();
+    std::uint32_t numLiveCliques = C.numLive();
     if (!title.empty()) std::cout << title << "\n";
-    std::ostringstream aliveVerticesText;
-    if (eliminated == nullptr) aliveVerticesText << n;
-    else aliveVerticesText << aliveVertices.size() << " of " << n;
-    std::cout << "num alive vertices = " << aliveVerticesText.str()
-              << ", num alive edges = " << numAliveEdges
-              << ", num alive cliques = " << numAliveCliques
-              << ", storage = " << 2 * numAliveEdges << " + " << 2 * numAliveIncidences
-              << " = " << 2 * (numAliveEdges + numAliveIncidences) << "\n";
-    for (std::int32_t u : aliveVertices) {
+    std::ostringstream liveVerticesText;
+    if (eliminated == nullptr) liveVerticesText << n;
+    else liveVerticesText << liveVertices.size() << " of " << n;
+    std::cout << "num live vertices = " << liveVerticesText.str()
+              << ", num live edges = " << numLiveEdges
+              << ", num live cliques = " << numLiveCliques
+              << ", storage = " << 2 * numLiveEdges << " + " << 2 * numLiveIncidences
+              << " = " << 2 * (numLiveEdges + numLiveIncidences) << "\n";
+    for (std::int32_t u : liveVertices) {
         std::ostringstream adjacencyText;
         bool first = true;
         for (std::int32_t v : A[u]) {
@@ -256,10 +341,10 @@ void mmd2Show(const Graph& A, const Graph& I, const Cliques& C,
                   << "} {" << incidenceText.str() << "} degree " << degrees[u] << "\n";
     }
     for (std::int32_t c = 0; c < static_cast<std::int32_t>(n); ++c) {
-        if (!C.live[c]) continue;
+        if (!C.live(c)) continue;
         std::ostringstream cliqueMembersText;
         bool first = true;
-        for (std::int32_t u : C.at(c)) {
+        for (std::int32_t u : C[c]) {
             cliqueMembersText << (first ? "" : " ") << std::setw(width) << u;
             first = false;
         }
@@ -275,7 +360,7 @@ void mmd2ShowState(const std::vector<std::uint32_t>& degrees, const Buckets& buc
                   const std::vector<std::vector<std::int32_t>>& superMembers,
                   const std::vector<bool>& eliminated,
                   const std::vector<std::int32_t>& pivots, const std::string& title = "") {
-    const std::size_t n = superMembers.size();
+    const std::uint32_t n = static_cast<std::uint32_t>(superMembers.size());
     int width = static_cast<int>(std::to_string(n > 0 ? n - 1 : 0).size());
     if (!title.empty()) std::cout << title << "\n";
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) {
@@ -310,11 +395,11 @@ void mmd2ShowState(const std::vector<std::uint32_t>& degrees, const Buckets& buc
         eliminatedText << (u == 0 ? "" : " ") << std::setw(width) << (eliminated[u] ? 1 : 0);
     std::ostringstream bucketsText;
     bool firstBucket = true;
-    for (std::size_t d = 0; d < buckets.head.size(); ++d) {
+    for (std::uint32_t d = 0; d < buckets.size(); ++d) {
         if (buckets.empty(d)) continue;
         bucketsText << (firstBucket ? "" : "  ") << d << ": [";
         bool firstMember = true;
-        for (std::int32_t v = buckets.head[d]; v != NIL; v = buckets.next[v]) {
+        for (std::int32_t v = buckets.head(d); v != NIL; v = buckets.next(v)) {
             bucketsText << (firstMember ? "" : " ") << v;
             firstMember = false;
         }
@@ -327,7 +412,7 @@ void mmd2ShowState(const std::vector<std::uint32_t>& degrees, const Buckets& buc
     std::cout << "  members: [" << superMembersText.str() << "]\n";
     std::cout << "  eliminated: [" << eliminatedText.str() << "]\n";
     std::cout << "  pivots: [";
-    for (std::size_t k = 0; k < pivots.size(); ++k)
+    for (std::uint32_t k = 0; k < pivots.size(); ++k)
         std::cout << (k == 0 ? "" : ", ") << pivots[k];
     std::cout << "]\n";
     std::cout << "  order: [";
@@ -343,12 +428,12 @@ void mmd2ShowState(const std::vector<std::uint32_t>& degrees, const Buckets& buc
 // Entries actually stored. Each edge costs two, one per endpoint in A. Each
 // incidence costs two as well, the clique id in I and the member in C. Watch
 // the total fall monotonically; the naive graph's only rises.
-std::size_t mmd2Storage(const Graph& A, const Graph& I, const Cliques& C) {
-    std::size_t total = 0;
-    for (const std::vector<std::int32_t>& adjacency : A) total += adjacency.size();
-    for (const std::vector<std::int32_t>& incidence : I) total += incidence.size();
-    for (std::size_t c = 0; c < C.members.size(); ++c)
-        if (C.live[c]) total += C.members[c].size();
+std::size_t mmd2Storage(const AdjacencyGraph& A, const IncidenceGraph& I, const Cliques& C) {
+    std::size_t total = 0;   // TWO DIMENSIONAL, a count of entries, so it stays wide
+    for (std::int32_t u = 0; u < static_cast<std::int32_t>(A.size()); ++u) total += A[u].size();
+    for (std::int32_t u = 0; u < static_cast<std::int32_t>(I.size()); ++u) total += I[u].size();
+    for (std::int32_t c = 0; c < static_cast<std::int32_t>(C.size()); ++c)
+        if (C.live(c)) total += C[c].size();
     return total;
 }
 
@@ -356,7 +441,7 @@ std::size_t mmd2Storage(const Graph& A, const Graph& I, const Cliques& C) {
 // members of every clique that contains u, minus u itself, which the cliques
 // always carry. This is George and Liu's reachable set, and it is what the
 // elimination graph would hold explicitly.
-std::vector<std::int32_t> mmd2Neighbors(const Graph& A, const Graph& I, const Cliques& C,
+std::vector<std::int32_t> mmd2Neighbors(const AdjacencyGraph& A, const IncidenceGraph& I, const Cliques& C,
                                        const std::vector<bool>& eliminated,
                                        std::vector<std::int32_t>& mark, std::int32_t& tag,
                                        std::int32_t u) {
@@ -379,7 +464,7 @@ std::vector<std::int32_t> mmd2Neighbors(const Graph& A, const Graph& I, const Cl
     for (std::int32_t v : A[u])
         if (!eliminated[v]) { mark[v] = tag; neighbors.push_back(v); }
     for (std::int32_t c : I[u])
-        for (std::int32_t v : C.at(c))
+        for (std::int32_t v : C[c])
             if (mark[v] != tag && !eliminated[v]) { mark[v] = tag; neighbors.push_back(v); }
     return neighbors;
 }
@@ -394,7 +479,7 @@ std::vector<std::int32_t> mmd2Neighbors(const Graph& A, const Graph& I, const Cl
 // superMembers[v].size(), which is O(1), so no weight array is kept: md3 through
 // mmd1 have none for the same reason. One becomes necessary only when the members
 // are chains over a flat array, where a size stops being free.
-std::size_t mmd2Degree(const Graph& A, const Graph& I, const Cliques& C,
+std::uint32_t mmd2Degree(const AdjacencyGraph& A, const IncidenceGraph& I, const Cliques& C,
                        const std::vector<bool>& eliminated,
                        const std::vector<std::vector<std::int32_t>>& superMembers,
                        std::vector<std::int32_t>& mark, std::int32_t& tag,
@@ -436,7 +521,7 @@ std::size_t mmd2Degree(const Graph& A, const Graph& I, const Cliques& C,
 //     C[pivot] = C[pivot] - merged
 std::tuple<std::vector<std::int32_t>, std::vector<std::int32_t>,
            std::vector<std::pair<std::int32_t, std::int32_t>>, std::vector<std::int32_t>>
-mmd2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
+mmd2Eliminate(AdjacencyGraph& A, IncidenceGraph& I, Cliques& C, std::vector<bool>& eliminated,
               std::vector<bool>& outmatched,
               std::vector<std::int32_t>& mark, std::int32_t& tag, std::int32_t pivot) {
     const std::vector<std::int32_t> neighbors = mmd2Neighbors(A, I, C, eliminated, mark, tag, pivot);
@@ -445,26 +530,45 @@ mmd2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
         C.erase(c);
     C.create(pivot, neighbors);     // becomes the column pattern of the pivot
 
-    // Stamp the new clique once, and the absorbed cliques once. Membership is then
-    // a comparison, and both loops below are compactions in place. cliqueTag is the
-    // set C[pivot] and absorbedTag is the set I[pivot], each built in one pass and
-    // then queried for free.
+    // THREE TAGS IN THIS ELIMINATOR, and it is worth naming what each is about and what it
+    // labels, since the mark array is shared and a tag is the only thing saying which set a stamp
+    // belongs to. Two are md2's, about cliques, differing in WHICH SIDE of a clique they name:
+    //
+    //     pivotCliqueTag       about the PIVOT'S clique, labels its MEMBERS,  so stamps VERTICES
+    //     absorbedCliquesTag   about the ABSORBED cliques, labels their IDS,  so stamps CLIQUE IDS
+    //
+    // Each side is what one loop below needs: pruning A[u] asks whether a VERTEX is in C[pivot],
+    // pruning I[u] asks whether a CLIQUE ID is one of the absorbed. Each set is built in one pass
+    // and then queried for free, and both loops are compactions in place.
+    //
+    // THE THIRD IS MASS ELIMINATION'S, further down, and it is the first tag in the family on the
+    // MEMBER side alongside pivotCliqueTag: it labels the merged vertices so C[pivot] can be
+    // compacted against them. Two consequences. It is CONDITIONAL, fired only when something
+    // merged, so this layer's eliminate advance is a bound, at most 4, where md2's is exactly 3.
+    // And md2's two tags could have shared one value, their sides being disjoint; here they could
+    // not, because two of the three now stamp vertices.
     ++tag;
-    const std::int32_t cliqueTag = tag;
-    for (std::int32_t v : neighbors) mark[v] = cliqueTag;
+    const std::int32_t pivotCliqueTag = tag;
+    for (std::int32_t v : neighbors) mark[v] = pivotCliqueTag;
     ++tag;
-    const std::int32_t absorbedTag = tag;
-    for (std::int32_t c : absorbedCliques) mark[c] = absorbedTag;
+    const std::int32_t absorbedCliquesTag = tag;
+    for (std::int32_t c : absorbedCliques) mark[c] = absorbedCliquesTag;
 
     std::vector<std::pair<std::int32_t, std::int32_t>> prunedEdges;
+
+    // ONE SCRATCH BUFFER FOR EVERY COMPACTION, here and in the mass elimination below. Each use
+    // is a filter into it followed by a swap, so after the swap it holds the list that was just
+    // replaced; clear() then empties it while keeping that capacity, and the next fill reuses the
+    // allocation. Named buffers would read no better and would allocate more. The uses are
+    // labeled, since the same name means a different list a few lines apart.
     std::vector<std::int32_t> kept;
     for (std::int32_t u : neighbors) {
         outmatched[u] = false;      // mmdelm's bwd[rn] = 0: back in the running
-        kept.clear();
+        kept.clear();                            // KEPT IS ADJACENCY here: A[u] - C[pivot] - {pivot}
         for (std::int32_t v : A[u]) {
             if (v == pivot) continue;            // the pivot is no longer a variable
             if (eliminated[v]) continue;         // numbered by the prepass, gone for good
-            if (mark[v] == cliqueTag) {          // both ends inside the new clique
+            if (mark[v] == pivotCliqueTag) {          // both ends inside the new clique
                 if (u < v) prunedEdges.push_back({u, v});
                 continue;                        // implicit now: drop the explicit copy
             }
@@ -472,9 +576,9 @@ mmd2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
         }
         A[u].swap(kept);                         // what survives is A[u] - C[pivot] - {pivot}
 
-        kept.clear();                            // I[u] loses the absorbed cliques
+        kept.clear();                            // KEPT IS INCIDENCE here: I[u] - I[pivot], + pivot
         for (std::int32_t c : I[u])
-            if (mark[c] != absorbedTag) kept.push_back(c);
+            if (mark[c] != absorbedCliquesTag) kept.push_back(c);
         kept.push_back(pivot);                   // u joins the new clique, id = pivot
         I[u].swap(kept);
     }
@@ -497,9 +601,12 @@ mmd2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
         }
     }
     if (!mergedVertices.empty()) {           // C[pivot] - merged, one compaction pass
+        // THE MERGED TAG: about the vertices this step absorbed into the pivot, labeling them
+        // directly. On the MEMBER side, like pivotCliqueTag, and the only conditional advance in
+        // the file.
         ++tag;
         for (std::int32_t u : mergedVertices) mark[u] = tag;
-        kept.clear();
+        kept.clear();                        // KEPT IS CLIQUE MEMBERS here: C[pivot] - merged
         for (std::int32_t v : C[pivot])
             if (mark[v] != tag) kept.push_back(v);
         C[pivot].swap(kept);
@@ -521,7 +628,7 @@ mmd2Eliminate(Graph& A, Graph& I, Cliques& C, std::vector<bool>& eliminated,
 // why minDegree walks. A sorted container would hand over the minimum directly and
 // charge a log on every file, and files outnumber picks.
 void mmd2Refile(Buckets& buckets, std::vector<std::uint32_t>& degrees,
-               std::int32_t u, std::size_t newDegree) {
+               std::int32_t u, std::uint32_t newDegree) {
     buckets.unfile(degrees[u], u);
     degrees[u] = newDegree;
     buckets.file(newDegree, u);
@@ -536,14 +643,14 @@ void mmd2Refile(Buckets& buckets, std::vector<std::uint32_t>& degrees,
 // delta is signed: negative means one pivot per iteration. It is compared against a
 // degree and its useful range stops at n - 1, so it is an index-like quantity by
 // Oblio's rule, a std::int32_t rather than a count.
-std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta = 0) {
-    const std::size_t n = G.size();
+std::vector<std::int32_t> mmd2MinimumDegree(const AdjacencyGraph& G, std::int32_t delta = 0) {
+    const std::uint32_t n = G.size();
     std::size_t nnzTrilA = 0;
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) nnzTrilA += G[u].size();
     nnzTrilA = nnzTrilA / 2 + n;
-    Graph A = G;                                  // explicit vertex neighbors
-    Graph I(n);                                   // cliques that contain each vertex
-    Cliques C(n);      // clique id -> member list
+    AdjacencyGraph A = G;                                  // explicit vertex neighbors
+    IncidenceGraph I(n);                                   // cliques that contain each vertex
+    Cliques        C(n);      // clique id -> member list
     std::vector<std::int32_t> mark(n, NIL);       // scratch for membership, with tag
     std::int32_t tag = 0;
     // Calls to the eliminate procedure, one per pivot. Not the count of vertices
@@ -581,7 +688,7 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
     // degrees[] holds that filed value, which is what MMD compares and files by.
     Buckets buckets(n);
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) {
-        degrees[u] = std::max<std::size_t>(degrees[u], 1);
+        degrees[u] = std::max<std::uint32_t>(degrees[u], 1);
         buckets.file(degrees[u], u);
     }
     std::uint32_t minDegree = n > 0 ? *std::min_element(degrees.begin(), degrees.end()) : 0;
@@ -606,7 +713,7 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
     // formed, nothing is pruned, and the neighbors keep degrees that still count
     // these vertices. That staleness is the point, and it is what genmmd does.
     std::vector<std::int32_t> prepassVertices;
-    for (std::int32_t v = buckets.head[1]; v != NIL; v = buckets.next[v])
+    for (std::int32_t v = buckets.head(1); v != NIL; v = buckets.next(v))
         prepassVertices.push_back(v);
     for (std::int32_t u : prepassVertices) {
         buckets.unfile(degrees[u], u);
@@ -619,7 +726,7 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
     }
     if (!prepassVertices.empty()) {
         std::ostringstream prepassText;
-        for (std::size_t k = 0; k < prepassVertices.size(); ++k)
+        for (std::uint32_t k = 0; k < prepassVertices.size(); ++k)
             prepassText << (k == 0 ? "" : ", ") << prepassVertices[k];
         std::ostringstream title;
         title << "prepass: numbered " << prepassVertices.size() << ": " << prepassText.str();
@@ -668,7 +775,7 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
                 ++numBucketProbes;
                 continue;
             }
-            std::int32_t pivot = buckets.head[minDegree];
+            std::int32_t pivot = buckets.head(minDegree);
             std::uint32_t degree = degrees[pivot];
             buckets.unfile(degree, pivot);
 
@@ -678,8 +785,8 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
             // it, since a batch takes several pivots and each calls the eliminator.
             // Safe between eliminations because the eviction that follows stamps
             // touchedIteration and filed, which are separate arrays. Not inside
-            // mmd2Eliminate, which holds three stamps live in turn: cliqueTag and
-            // absorbedTag across the prune loop, then the merged set across the
+            // mmd2Eliminate, which holds three stamps live in turn: pivotCliqueTag and
+            // absorbedCliquesTag across the prune loop, then the merged set across the
             // C[pivot] compaction. Never observed to fire.
             if (tag > TAG_CEILING) {
                 std::fill(mark.begin(), mark.end(), NIL);
@@ -721,7 +828,12 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
             std::uint32_t externalDegree = 0;
             for (std::int32_t v : C[pivot])
                 if (!eliminated[v]) externalDegree += superMembers[v].size();
-            nnzL += superSize * externalDegree + superSize * (superSize - 1) / 2 + superSize;
+            // ONE FACTOR WIDENED: a product of two one-dimensional quantities is TWO dimensional, so
+        // it is formed in std::size_t. Widening cannot be done after the multiply the way
+        // narrowing is done after a subtraction; one operand is enough, the other promoting to
+        // meet it. Both factors are bounded by n, so the product reaches n^2.
+        nnzL += static_cast<std::size_t>(superSize) * externalDegree
+              + static_cast<std::size_t>(superSize) * (superSize - 1) / 2 + superSize;
 
             // NOT PRODUCTION: display only, and silent above the threshold.
             if (n <= SHOW_THRESHOLD) {
@@ -815,7 +927,7 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
             q2h.clear();
             qxh.clear();
             for (std::int32_t u : elementMembers) {
-                if (buckets.filed[u] || outmatched[u]) continue;  // done, or withheld
+                if (buckets.filed(u) || outmatched[u]) continue;  // done, or withheld
                 std::uint32_t otherSources = A[u].size() + I[u].size() - 1;
                 (otherSources == 1 ? q2h : qxh).push_back(u);
             }
@@ -852,7 +964,7 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
                         if (mark[v] == elementTag) {
                             // v is in the new element AND in this same other
                             // source, so it sees at least what u sees.
-                            if (buckets.filed[v] || outmatched[v]) continue;
+                            if (buckets.filed(v) || outmatched[v]) continue;
                             if (A[v].size() + I[v].size() - 1 == 1) {
                                 // v is q2h too, so its only other source is this
                                 // one: identical reach, and u absorbs it. Set view:
@@ -881,7 +993,8 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
                         degree += superMembers[v].size();
                     }
                 }
-                degrees[u] = std::max<std::size_t>(degree - superMembers[u].size() + 1, 1);
+                degrees[u] = std::max<std::uint32_t>(
+                    degree - static_cast<std::uint32_t>(superMembers[u].size()) + 1, 1);
                 buckets.file(degrees[u], u);
                 refreshedVertices.push_back(u);
             }
@@ -899,7 +1012,7 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
         ++numIterations;
 
         std::ostringstream batchText;
-        for (std::size_t k = 0; k < batch.size(); ++k)
+        for (std::uint32_t k = 0; k < batch.size(); ++k)
             batchText << (k == 0 ? "" : ", ") << batch[k];
         std::ostringstream refreshedVerticesText;
         if (refreshedVertices.empty()) {
@@ -939,7 +1052,7 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
               << ", ncsub: " << ncsub << "\n";
     std::cout << "tag sweeps: " << numTagSweeps << "\n";
     std::cout << "order: [";
-    for (std::size_t k = 0; k < order.size(); ++k)
+    for (std::uint32_t k = 0; k < order.size(); ++k)
         std::cout << (k == 0 ? "" : ", ") << order[k];
     std::cout << "]\n";
     return order;
@@ -952,9 +1065,9 @@ std::vector<std::int32_t> mmd2MinimumDegree(const Graph& G, std::int32_t delta =
 //
 // It must match the Python twin's grid_graph exactly, vertex for vertex, or `make test` would be
 // diffing two different problems.
-static Graph gridGraph(int side) {
+static AdjacencyGraph gridGraph(int side) {
     const int n = side * side;
-    Graph graph(n);
+    AdjacencyGraph graph(static_cast<std::uint32_t>(n));
     for (int r = 0; r < side; ++r)
         for (int c = 0; c < side; ++c) {
             const int u = r * side + c;
@@ -966,7 +1079,7 @@ static Graph gridGraph(int side) {
     return graph;
 }
 
-void run(const std::string& name, const Graph& G) {
+void run(const std::string& name, const AdjacencyGraph& G) {
     std::cout << "=== " << name << " ===\n";
     mmd2MinimumDegree(G);
     std::cout << "\n";
@@ -1010,13 +1123,13 @@ int main(int argc, char** argv) {
     //
     //      edges: 0-1 0-3 0-8 1-2 1-6 1-8 2-3 2-5 3-4 4-5
     //             5-6 5-9 6-7 6-10 7-8 8-9 9-10 10-11
-    Graph graph1 = {
+    AdjacencyGraph graph1 = {
         {1, 3}, {0, 2}, {1, 3}, {0, 2},
     };
-    Graph graph2 = {
+    AdjacencyGraph graph2 = {
         {1, 2}, {0, 3}, {0, 4}, {1, 4, 5}, {2, 3, 5}, {3, 4},
     };
-    Graph graph3 = {
+    AdjacencyGraph graph3 = {
         {1, 3, 8},        // 0
         {0, 2, 6, 8},     // 1
         {1, 3, 5},        // 2
@@ -1042,7 +1155,7 @@ int main(int argc, char** argv) {
     // it as an ordinary denser test.
     //
     //   edges: 0-2 0-3 0-4 0-7 1-3 1-4 1-6 1-7 2-3 2-5 3-6 3-7 4-5 5-6
-    Graph graph4 = {
+    AdjacencyGraph graph4 = {
         {2, 3, 4, 7},     // 0
         {3, 4, 6, 7},     // 1
         {0, 3, 5},        // 2
@@ -1063,7 +1176,7 @@ int main(int argc, char** argv) {
     // C[pivot] would merge it. See the README section on mass elimination.
     //
     //   edges: 0-3 0-4 1-2 1-4
-    Graph graph5 = {
+    AdjacencyGraph graph5 = {
         {3, 4},           // 0
         {2, 4},           // 1
         {1},              // 2
@@ -1083,7 +1196,7 @@ int main(int argc, char** argv) {
     // external degree.
     //
     //   edges: 0-2 0-3 0-4 1-3 2-3 2-4 2-5 3-4
-    Graph graph6 = {
+    AdjacencyGraph graph6 = {
         {2, 3, 4},        // 0
         {3},              // 1
         {0, 3, 4, 5},     // 2
@@ -1103,7 +1216,7 @@ int main(int argc, char** argv) {
     // against each other.
     //
     //   edges: 0-1 0-2 0-4 1-4 2-3 2-4 3-4
-    Graph graph7 = {
+    AdjacencyGraph graph7 = {
         {1, 2, 4},        // 0
         {0, 4},           // 1
         {0, 3, 4},        // 2
@@ -1111,7 +1224,7 @@ int main(int argc, char** argv) {
         {0, 1, 2, 3},     // 4
     };
 
-    std::vector<std::pair<std::string, Graph>> examples = {
+    std::vector<std::pair<std::string, AdjacencyGraph>> examples = {
         {"graph1", graph1}, {"graph2", graph2},
         {"graph3", graph3}, {"graph4", graph4},
         {"graph5", graph5}, {"graph6", graph6},

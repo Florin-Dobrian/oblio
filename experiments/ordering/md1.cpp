@@ -30,9 +30,13 @@
 // do. See the README section on complexity.
 //
 // Types follow Oblio's rule, since this code is meant to grow into the ordering
-// engine: an INDEX names a vertex and is a std::int32_t, with NIL for "none"; a
-// POSITION locates something inside a vector and is a std::size_t. A vector of
-// indices is std::vector<std::int32_t>; both kinds are subscripted by position.
+// engine, and there are THREE of them. An INDEX names a vertex and is a
+// std::int32_t, signed only because NIL has to share a type with the values it
+// stands in for. A ONE DIMENSIONAL SIZE is bounded by n and is a std::uint32_t:
+// nothing to stand in for, so no sentinel and no sign bit spent. A TWO
+// DIMENSIONAL size or position is bounded by nnz and is a std::size_t. A vector
+// of indices is std::vector<std::int32_t>; an entity loop therefore has a
+// signedness cast where its int32 counter meets a uint32 bound.
 constexpr std::int32_t NIL = -1;
 
 // The mark array is a set and the tag names it, so a tag must never repeat: a
@@ -49,29 +53,48 @@ constexpr std::int32_t TAG_CEILING = (1 << 30) - 1;
 // to produce. What still prints at every size is the end of the run, the counters and
 // the order, since each is O(1) lines and that is what the twin comparison comes down
 // to. To watch a larger run, raise this.
-constexpr std::size_t SHOW_THRESHOLD = 32;
+constexpr std::uint32_t SHOW_THRESHOLD = 32;
 
-using Graph = std::vector<std::vector<std::int32_t>>;
+// ONE GRAPH HERE, and it is a class rather than an alias. `mSize` is the id space, a one
+// dimensional size, so `std::uint32_t`, and holding it here is what keeps `n` out of
+// `std::size_t` for the whole layer: every vector length in the file is then bounded by it.
+// md2 onward add an IncidenceGraph beside this one, which is the point at which having two
+// TYPES rather than two variables of one alias starts to matter.
+class AdjacencyGraph {
+public:
+    explicit AdjacencyGraph(std::uint32_t size) : mSize(size), mAdjacency(size) {}
+    // For the examples at the bottom, which are written as brace lists of neighbor lists.
+    AdjacencyGraph(std::initializer_list<std::vector<std::int32_t>> rows)
+        : mSize(static_cast<std::uint32_t>(rows.size())), mAdjacency(rows) {}
+
+    std::uint32_t size() const { return mSize; }
+    const std::vector<std::int32_t>& operator[](std::int32_t u) const { return mAdjacency[u]; }
+    std::vector<std::int32_t>&       operator[](std::int32_t u)       { return mAdjacency[u]; }
+
+private:
+    std::uint32_t                          mSize;
+    std::vector<std::vector<std::int32_t>> mAdjacency;
+};
 
 // Print a graph: adjacency lists, in the order the structure holds them.
-void md1Show(const Graph& A, const std::string& title = "",
+void md1Show(const AdjacencyGraph& A, const std::string& title = "",
              const std::vector<bool>* eliminated = nullptr) {
-    const std::size_t n = A.size();
+    const std::uint32_t n = A.size();
     int width = static_cast<int>(std::to_string(n > 0 ? n - 1 : 0).size());  // setw field
-    std::vector<std::int32_t> aliveVertices;
+    std::vector<std::int32_t> liveVertices;
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u)
-        if (eliminated == nullptr || !(*eliminated)[u]) aliveVertices.push_back(u);
-    std::size_t numAliveEdges = 0;
-    for (std::int32_t u : aliveVertices) numAliveEdges += A[u].size();
-    numAliveEdges /= 2;
+        if (eliminated == nullptr || !(*eliminated)[u]) liveVertices.push_back(u);
+    std::size_t numLiveEdges = 0;
+    for (std::int32_t u : liveVertices) numLiveEdges += A[u].size();
+    numLiveEdges /= 2;
     if (!title.empty()) std::cout << title << "\n";
-    std::ostringstream aliveVerticesText;
-    if (eliminated == nullptr) aliveVerticesText << n;
-    else aliveVerticesText << aliveVertices.size() << " of " << n;
-    std::cout << "num alive vertices = " << aliveVerticesText.str()
-              << ", num alive edges = " << numAliveEdges
-              << ", storage = " << 2 * numAliveEdges << "\n";
-    for (std::int32_t u : aliveVertices) {
+    std::ostringstream liveVerticesText;
+    if (eliminated == nullptr) liveVerticesText << n;
+    else liveVerticesText << liveVertices.size() << " of " << n;
+    std::cout << "num live vertices = " << liveVerticesText.str()
+              << ", num live edges = " << numLiveEdges
+              << ", storage = " << 2 * numLiveEdges << "\n";
+    for (std::int32_t u : liveVertices) {
         std::ostringstream adjacencyText;
         bool first = true;
         for (std::int32_t v : A[u]) {
@@ -86,9 +109,9 @@ void md1Show(const Graph& A, const std::string& title = "",
 
 // What the graph currently costs: one entry per edge endpoint. Compare with md2,
 // where the same number falls monotonically. Here fill pushes it back up.
-std::size_t md1Storage(const Graph& A) {
-    std::size_t total = 0;
-    for (const std::vector<std::int32_t>& adjacency : A) total += adjacency.size();
+std::size_t md1Storage(const AdjacencyGraph& A) {
+    std::size_t total = 0;   // TWO DIMENSIONAL, a count of entries, so it stays wide
+    for (std::int32_t u = 0; u < static_cast<std::int32_t>(A.size()); ++u) total += A[u].size();
     return total;
 }
 
@@ -109,7 +132,7 @@ std::size_t md1Storage(const Graph& A) {
 // and keep whatever is unstamped. Two passes over vectors rather than a hash per
 // element, and A[pivot] is captured before the loop because u is inside it.
 std::pair<std::vector<std::int32_t>, std::vector<std::pair<std::int32_t, std::int32_t>>>
-md1Eliminate(Graph& A, std::vector<std::int32_t>& mark, std::int32_t& tag,
+md1Eliminate(AdjacencyGraph& A, std::vector<std::int32_t>& mark, std::int32_t& tag,
              std::vector<bool>& eliminated, std::int32_t pivot) {
     const std::vector<std::int32_t> neighbors = A[pivot];
     std::vector<std::pair<std::int32_t, std::int32_t>> fillEdges;
@@ -117,6 +140,20 @@ md1Eliminate(Graph& A, std::vector<std::int32_t>& mark, std::int32_t& tag,
     // Nothing is sorted. For each neighbor u, stamp what u already sees, then walk
     // the clique once and append what is missing. One pass per neighbor, O(d) each,
     // against the O(d log d) a merge would cost to keep an order nobody needs.
+    //
+    // ONE TAG PER NEIGHBOR, EACH ABOUT ONE NEIGHBOR u AND LABELLING WHAT u ALREADY SEES: A[u],
+    // with u and the pivot stamped alongside so they fail the test below and never become fill.
+    // A tag is about a VERTEX here, never about a set of vertices shared by several of them,
+    // because there is no such set in this layer: the fill is pairwise and each neighbor's
+    // missing edges are its own. So the set a stamp belongs to changes every time round the
+    // loop, and the eliminator's advance is |A[pivot]|, at most n - 1, which is the whole of
+    // this layer's cost in the tag-overflow table.
+    //
+    // md2 is where that collapses, and the reason is what its tags are ABOUT rather than how
+    // many there are. The quotient graph gives the fill a name, the clique, so its eliminator
+    // stamps sets that belong to the PIVOT rather than to each neighbor: the pivot's reach, the
+    // members of the clique that reach becomes, and the ids of the cliques it absorbs. Three,
+    // whatever the pivot's degree, against one per neighbor here.
     for (std::int32_t u : neighbors) {
         ++tag;
         for (std::int32_t v : A[u]) mark[v] = tag;
@@ -144,12 +181,12 @@ md1Eliminate(Graph& A, std::vector<std::int32_t>& mark, std::int32_t& tag,
 }
 
 // Eliminate the least-degree vertex each iteration, naming the fill it makes.
-std::vector<std::int32_t> md1MinimumDegree(const Graph& G) {
-    const std::size_t n = G.size();
+std::vector<std::int32_t> md1MinimumDegree(const AdjacencyGraph& G) {
+    const std::uint32_t n = G.size();
     std::size_t nnzTrilA = 0;                      // before we mutate it
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) nnzTrilA += G[u].size();
     nnzTrilA = nnzTrilA / 2 + n;
-    Graph A = G;
+    AdjacencyGraph A = G;
     std::vector<std::int32_t> mark(n, NIL);   // scratch for membership, stamped with tag
     std::int32_t tag = 0;
     // Calls to the eliminate procedure, one per pivot. Not the count of vertices
@@ -175,10 +212,10 @@ std::vector<std::int32_t> md1MinimumDegree(const Graph& G) {
     if (n <= SHOW_THRESHOLD) {
         md1Show(A, "start: every edge explicit, no fill yet", &eliminated);
     }
-    for (std::int32_t iteration = 0; iteration < static_cast<std::int32_t>(n); ++iteration) {
+    for (std::uint32_t iteration = 0; iteration < n; ++iteration) {
         ++numIterations;
         std::int32_t pivot = NIL;
-        // The scan asks every alive vertex for its degree, so the count is the alive
+        // The scan asks every live vertex for its degree, so the count is the live
         // count summed over iterations, n(n+1)/2 here since exactly one vertex leaves
         // per iteration. Two things keep it from being comparable with the layers
         // above. There is no initial build to charge for, degrees being computed here
@@ -240,7 +277,7 @@ std::vector<std::int32_t> md1MinimumDegree(const Graph& G) {
     std::cout << "degree computations: " << numDegreeComputations << "\n";
     std::cout << "tag sweeps: " << numTagSweeps << "\n";
     std::cout << "order: [";
-    for (std::size_t k = 0; k < order.size(); ++k)
+    for (std::uint32_t k = 0; k < order.size(); ++k)
         std::cout << (k == 0 ? "" : ", ") << order[k];
     std::cout << "]\n";
     return order;
@@ -252,9 +289,9 @@ std::vector<std::int32_t> md1MinimumDegree(const Graph& G) {
 //
 // It must match the Python twin's grid_graph exactly, vertex for vertex, or `make test` would be
 // diffing two different problems.
-static Graph gridGraph(int side) {
+static AdjacencyGraph gridGraph(int side) {
     const int n = side * side;
-    Graph graph(n);
+    AdjacencyGraph graph(static_cast<std::uint32_t>(n));
     for (int r = 0; r < side; ++r)
         for (int c = 0; c < side; ++c) {
             const int u = r * side + c;
@@ -266,7 +303,7 @@ static Graph gridGraph(int side) {
     return graph;
 }
 
-void run(const std::string& name, const Graph& G) {
+void run(const std::string& name, const AdjacencyGraph& G) {
     std::cout << "=== " << name << " ===\n";
     md1MinimumDegree(G);
     std::cout << "\n";
@@ -310,13 +347,13 @@ int main(int argc, char** argv) {
     //
     //      edges: 0-1 0-3 0-8 1-2 1-6 1-8 2-3 2-5 3-4 4-5
     //             5-6 5-9 6-7 6-10 7-8 8-9 9-10 10-11
-    Graph graph1 = {
+    AdjacencyGraph graph1 = {
         {1, 3},   // 0
         {0, 2},   // 1
         {1, 3},   // 2
         {0, 2},   // 3
     };
-    Graph graph2 = {
+    AdjacencyGraph graph2 = {
         {1, 2},      // 0
         {0, 3},      // 1
         {0, 4},      // 2
@@ -325,7 +362,7 @@ int main(int argc, char** argv) {
         {3, 4},      // 5
     };
 
-    Graph graph3 = {
+    AdjacencyGraph graph3 = {
         {1, 3, 8},        // 0
         {0, 2, 6, 8},     // 1
         {1, 3, 5},        // 2
@@ -351,7 +388,7 @@ int main(int argc, char** argv) {
     // it as an ordinary denser test.
     //
     //   edges: 0-2 0-3 0-4 0-7 1-3 1-4 1-6 1-7 2-3 2-5 3-6 3-7 4-5 5-6
-    Graph graph4 = {
+    AdjacencyGraph graph4 = {
         {2, 3, 4, 7},     // 0
         {3, 4, 6, 7},     // 1
         {0, 3, 5},        // 2
@@ -372,7 +409,7 @@ int main(int argc, char** argv) {
     // C[pivot] would merge it. See the README section on mass elimination.
     //
     //   edges: 0-3 0-4 1-2 1-4
-    Graph graph5 = {
+    AdjacencyGraph graph5 = {
         {3, 4},           // 0
         {2, 4},           // 1
         {1},              // 2
@@ -392,7 +429,7 @@ int main(int argc, char** argv) {
     // external degree.
     //
     //   edges: 0-2 0-3 0-4 1-3 2-3 2-4 2-5 3-4
-    Graph graph6 = {
+    AdjacencyGraph graph6 = {
         {2, 3, 4},        // 0
         {3},              // 1
         {0, 3, 4, 5},     // 2
@@ -412,7 +449,7 @@ int main(int argc, char** argv) {
     // against each other.
     //
     //   edges: 0-1 0-2 0-4 1-4 2-3 2-4 3-4
-    Graph graph7 = {
+    AdjacencyGraph graph7 = {
         {1, 2, 4},        // 0
         {0, 4},           // 1
         {0, 3, 4},        // 2
@@ -420,7 +457,7 @@ int main(int argc, char** argv) {
         {0, 1, 2, 3},     // 4
     };
 
-    std::vector<std::pair<std::string, Graph>> examples = {
+    std::vector<std::pair<std::string, AdjacencyGraph>> examples = {
         {"graph1", graph1}, {"graph2", graph2},
         {"graph3", graph3}, {"graph4", graph4},
         {"graph5", graph5}, {"graph6", graph6},

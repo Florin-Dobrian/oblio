@@ -83,18 +83,18 @@ def md5_show(A, I, C, degrees, title=None, eliminated=None):
     recomputed, which is the point of this layer."""
     n = len(A)
     width = len(str(max(n - 1, 0)))
-    alive_vertices = [u for u in range(n) if eliminated is None or not eliminated[u]]
-    num_alive_edges = sum(len(A[u]) for u in alive_vertices) // 2
-    num_alive_incidences = sum(len(I[u]) for u in alive_vertices)
-    num_alive_cliques = len(C)
+    live_vertices = [u for u in range(n) if eliminated is None or not eliminated[u]]
+    num_live_edges = sum(len(A[u]) for u in live_vertices) // 2
+    num_live_incidences = sum(len(I[u]) for u in live_vertices)
+    num_live_cliques = len(C)
     if title:
         print(title)
-    alive_vertices_text = f"{n}" if eliminated is None else f"{len(alive_vertices)} of {n}"
-    print(f"num alive vertices = {alive_vertices_text}, "
-          f"num alive edges = {num_alive_edges}, "
-          f"num alive cliques = {num_alive_cliques}, "
-          f"storage = {2 * num_alive_edges} + {2 * num_alive_incidences} = {2 * (num_alive_edges + num_alive_incidences)}")
-    for u in alive_vertices:
+    live_vertices_text = f"{n}" if eliminated is None else f"{len(live_vertices)} of {n}"
+    print(f"num live vertices = {live_vertices_text}, "
+          f"num live edges = {num_live_edges}, "
+          f"num live cliques = {num_live_cliques}, "
+          f"storage = {2 * num_live_edges} + {2 * num_live_incidences} = {2 * (num_live_edges + num_live_incidences)}")
+    for u in live_vertices:
         adjacency_text = " ".join(f"{v:>{width}}" for v in A[u])
         incidence_text = " ".join(f"c{c}" for c in I[u])
         print(f"  {u:>{width}}: {{{adjacency_text}}} {{{incidence_text}}} degree {degrees[u]}")
@@ -162,6 +162,12 @@ def md5_neighbors(A, I, C, mark, tag, u):
     One pass per source, with the mark array doing the deduplication, so the cost
     is linear in what is touched. Returns (neighbors, tag): nothing is sorted, and
     the order is the order the sources were walked in.
+
+    A reach tag, about vertex u, labeling reach(u) together with u. Not about any
+    clique: the cliques in I[u] are read here as sources of members, never stamped
+    as ids. Consumed before this function returns, unlike the eliminator's two,
+    which stay live across its whole prune loop; that is why the sweep guard may
+    sit before this call and not before those.
     """
     tag += 1
     neighbors = []
@@ -215,32 +221,54 @@ def md5_eliminate(A, I, C, mark, tag, eliminated, pivot):
     C[pivot] = list(neighbors)      # becomes the column pattern of the pivot
 
     # Stamp the new clique once, and the absorbed cliques once. Membership is then
-    # a comparison, and both loops below are compactions in place. clique_tag is
-    # the set C[pivot] and absorbed_tag is the set I[pivot], each built in one pass
-    # and then queried for free.
+    # a comparison, and both loops below are compactions in place.
+    #
+    # Three tags in this eliminator. Two are md2's, about cliques, differing in
+    # which SIDE of a clique they name:
+    #
+    #     pivot_clique_tag      about the PIVOT'S clique, labels its MEMBERS,
+    #                           so stamps VERTICES
+    #     absorbed_cliques_tag  about the ABSORBED cliques, labels their IDS,
+    #                           so stamps CLIQUE IDS
+    #
+    # Each side is what one loop below needs: pruning A[u] asks whether a VERTEX is
+    # in C[pivot], pruning I[u] asks whether a CLIQUE ID is one of the absorbed.
+    #
+    # The third is mass elimination's, further down, and it is the first tag in the
+    # family on the MEMBER side alongside pivot_clique_tag: it labels the merged
+    # vertices so C[pivot] can be compacted against them. Two consequences. It is
+    # conditional, fired only when something merged, so this layer's eliminate
+    # advance is a bound, at most 4, where md2's is exactly 3. And md2's two tags
+    # could have shared one value, their sides being disjoint; here they could not,
+    # because two of the three now stamp vertices.
     tag += 1
-    clique_tag = tag
+    pivot_clique_tag = tag
     for v in neighbors:
-        mark[v] = clique_tag
+        mark[v] = pivot_clique_tag
     tag += 1
-    absorbed_tag = tag
+    absorbed_cliques_tag = tag
     for c in absorbed_cliques:
-        mark[c] = absorbed_tag
+        mark[c] = absorbed_cliques_tag
 
     pruned_edges = []
+    # One name for both compactions, as in the C++ twin, so the two read as the same
+    # code. What the name means changes four lines apart, so each use is labeled.
+    # The twin has one buffer it clears and refills, the swap handing it the list it
+    # just replaced; here the name is simply rebound and there is nothing to reuse.
     for u in neighbors:
-        kept = []
+        kept = []                       # KEPT IS ADJACENCY here: A[u] - C[pivot] - {pivot}
         for v in A[u]:
             if v == pivot:              # the pivot is no longer a variable
                 continue
-            if mark[v] == clique_tag:   # both ends inside the new clique
+            if mark[v] == pivot_clique_tag:   # both ends inside the new clique
                 if u < v:
                     pruned_edges.append((u, v))
                 continue                # implicit now: delete the explicit copy
             kept.append(v)
         A[u] = kept                     # what survives is A[u] - C[pivot] - {pivot}
 
-        kept = [c for c in I[u] if mark[c] != absorbed_tag]   # I[u] - I[pivot]
+        # KEPT IS INCIDENCE here: I[u] - I[pivot], plus the pivot
+        kept = [c for c in I[u] if mark[c] != absorbed_cliques_tag]
         kept.append(pivot)              # u joins the new clique, whose id is the pivot
         I[u] = kept
 
@@ -260,6 +288,9 @@ def md5_eliminate(A, I, C, mark, tag, eliminated, pivot):
             eliminated[u] = True
             merged_vertices.append(u)
     if merged_vertices:                 # C[pivot] - merged, in one compaction pass
+        # The merged tag: about the vertices this step absorbed into
+        # the pivot, labeling them directly. On the MEMBER side, like
+        # pivot_clique_tag, and the only conditional advance in the file.
         tag += 1
         for u in merged_vertices:
             mark[u] = tag
@@ -375,7 +406,7 @@ def md5_minimum_degree(G):
         # each region that advances the tag, and each placed where nothing in mark is
         # live. The bucket walk above spends no tag, so the first region is the
         # elimination. Not inside md5_eliminate, which holds three stamps live in
-        # turn: clique_tag and absorbed_tag across the prune loop, then the merged
+        # turn: pivot_clique_tag and absorbed_cliques_tag across the prune loop, then the merged
         # set across the C[pivot] compaction. Never observed to fire.
         if tag > TAG_CEILING:
             mark = [-1] * n

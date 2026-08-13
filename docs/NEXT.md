@@ -59,8 +59,10 @@ said about the orderings, in order of how much it should affect the plan:
 
 **What is open, shortest first.**
 
-1. **THE HASH KEY IS STILL NOT THE VENDORED ONE.** FOUR divergences, none of which any output we
-   check can see, in the mechanism that already cost several sessions once. Nothing measured, and
+1. **WE STILL DO NOT COMPUTE WHAT THE VENDORED ROUTINE COMPUTES.** FOUR divergences in the hash
+   key, the mechanism that already cost several sessions once, a FIFTH in the mass-elimination
+   test, and a SIXTH in the hash's storage, where we allocate 2n int32 that `Amd.cpp` does not.
+   None of them is visible to any output we check. Nothing measured, and
    the fix is not obvious, but matching comes before anything clever here. Item 2a-hash, and it
    goes above the profile because the profile measures a routine that is not yet the routine we
    are trying to match.
@@ -316,7 +318,7 @@ growing one says the fix is a better filter rather than a faster loop. One count
 prototypes already keep. `benchmarks/ordering/README.md`, "What the two families say about where
 the amd gap is", carries the tables.
 
-**2a-hash. OUR HASH KEY IS NOT `Amd.cpp`'s. FOUR DIVERGENCES, FOUND 2026-08-12, NOT FIXED.**
+**2a-hash. WE DO NOT COMPUTE WHAT `Amd.cpp` COMPUTES. FIVE DIVERGENCES, FOUND 2026-08-12, NONE FIXED.**
 
 This is in the mechanism that cost several sessions in 2026-08-09, where a stride and a modulus
 annihilated each other and turned the key into a function of the adjacency alone. That defect was
@@ -376,6 +378,52 @@ and the bucket size distribution, on 2D and 3D at comparable n, against the vend
 0.33 and 0.48 recorded in the `Amd3.cpp` comment. That number is the one that moved by a factor of
 three last time, and it is the only output any of these four can change.
 
+**A FIFTH DIVERGENCE, in a different mechanism, found 2026-08-12 while reading the twins.** The
+mass-elimination test in `QuotientGraph::massEliminate` has three conjuncts where `AMD_2` has two:
+
+```
+Amd.cpp:   if (Elen [i] == 1 && p3 == pn)
+ours:      if (mAdjacencySize[u] == 0 && mIncidenceSize[u] == 1 &&
+               mSource[mSourcePtr[u]] == pivot)
+```
+
+`AMD_2` asks for one element left and no surviving variables, and never checks WHICH element.
+Ours adds that check, and **it is provably redundant**: all three prune variants append the pivot
+unconditionally, at `src/QuotientGraph.cpp` lines 395, 460 and 533, each followed immediately by
+`mIncidenceSize[u] = write - kept`, so a count of one forces the sole entry to be the pivot. The
+`mVendoredListOrder` swap is guarded by `write - kept > 1` and cannot move anything at a count of
+one, and the first conjunct is what puts the incidence run at `mSourcePtr[u]`.
+
+**Unlike the four above, this one cannot change any output.** Being redundant it always passes, so
+permutations, fill and merges are identical with or without it. It is pure cost: `&&` short
+circuits, so it runs once per MERGED vertex rather than per candidate, and costs two dependent
+loads into an arena the prune has walked past since writing it. On grids, where mass elimination
+fires often, that is a modest number of avoidable misses in a hot region. Removing it is free in
+every sense; it is listed here rather than done so that it is decided deliberately.
+
+**AND THE HASH'S STORAGE DIVERGES TOO, not only its arithmetic.** Found 2026-08-12 while reading
+`Buckets`. `AMD_2` allocates NO arrays for supervariable detection: `Head [hval]` doubles as the
+hash bucket head when the degree list there is empty, distinguished by the `FLIP` encoding, and
+`Last [i]` doubles as the stored key. Each amd driver here allocates `hashHead(size + 1)` and
+`hashNext(size)`, so **about 2n extra `int32`**, roughly 1.3 MB at 400 a side, touched about twice
+per survivor per elimination.
+
+**A lead rather than a plan, and it has a reason it may be declined.** Production already takes
+half of `Amd.cpp`'s trick, the running key riding in `hashNext` rather than a third array of its
+own. The other half, overlaying the hash heads on the degree heads, is the `FLIP` encoding that
+`docs/DESIGN_DECISIONS.md` calls an anti-model. What would settle it is a measurement rather than
+an argument: the 2026-08-08 note records two extra arrays of size n costing 12 percent in 2D at
+400 a side across the phase boundary, which is the same order of footprint in a different place.
+
+**Two smaller differences in `Buckets`, both examined and both left alone.** `AMD_2` removes a
+vertex from its degree list with no guard, needing none because `Nv [i] = -nvi` flags `i` the
+moment it enters `Lme` and nothing revisits it; our `unfile` carries an `UNFILED` early return
+for the MMD branch, where a batch can evict a vertex a later pivot in the same round then merges
+away. And `AMD_2` leaves `Next [i]` and `Last [i]` stale after a removal where we clear them, two
+stores per unfile and 224054 unfiles on a 140x140 grid. The clear is not droppable: `file` always
+rewrites `mNext[u]`, but MMD's `next(u)` walk would follow a stale link if it ever reached an
+unfiled vertex, which is the same batch hazard the guard exists for.
+
 **Why this is item 1 and not item 6.** Item 2d proposes profiling `amd3` against itself to decide
 whether the descriptor struct is worth building. That profile measures a routine whose hash is not
 the one we are trying to match, and the hash sits in the loop the profile is aimed at. **Matching
@@ -388,6 +436,58 @@ never the decision, so ANY key that respects the equivalence classes produces id
 differs only in speed. **That makes it the one place where "we match the vendored routine" has to be
 checked by reading, because no test will ever check it for us.** The same is true of any future
 filter, guard, or early-out.
+
+---
+
+**2a-twins. THE PROTOTYPE SWEEP: TEN LAYERS OF FIFTEEN DONE, 2026-08-12. `mda2`, `mdam2` and
+`amd1`-`amd4` REMAIN.** `experiments/ordering` was brought onto the current integer rule and given
+four proper classes. Done: `md1`-`md5`, `mdm2`, `mmd1`, `mmd2`, `mmd3`. Nothing in it changes
+behavior; every layer's output is identical to its pre-change self except for one word.
+
+**The recipe, in the order it works, so the remaining five go the same way.**
+
+1. **`using Graph = ...` becomes two classes**, `AdjacencyGraph` and `IncidenceGraph`. Identical
+   bodies, deliberately not shared: both hold one int32 list per vertex and differ only in what
+   the entries MEAN, `A[u]` vertices and `I[u]` clique ids. An alias made them one type, so
+   nothing but a variable name said which was which. `AdjacencyGraph` needs a second constructor
+   taking `std::initializer_list<std::vector<std::int32_t>>`, for the brace-written examples.
+2. **`Cliques` and `Buckets` become classes**, `public:` first and members `m`-prefixed in a
+   private section, which is production's layout and Core Guidelines NL.16. Members ordered
+   scalars first, since declaration order is initialization order; accessors follow the members
+   one for one and in the same order.
+3. **`n` leaves `std::size_t`.** `A.size()` returning `std::uint32_t` is what carries it: the
+   drivers' `n`, `SHOW_THRESHOLD`, the counters, the `pivots` and `order` loops all follow, and
+   the `Storage` function loses its range-`for` because the classes are indexed rather than
+   iterable.
+4. **`alive` becomes `live`**, in identifiers, printed text and prose, in BOTH twins together. A
+   bare `alive` list takes the suffix, `live_vertices`.
+5. **Comments last**: the reach-tag note, the eliminator's tag paragraph, the merged-tag note, the
+   scratch-buffer note.
+
+**What the verification has to be, because two of these checks are blind to different things.**
+Compile `-Wall -Wextra`; diff the C++ against the Python twin in examples AND grid mode; diff the
+C++ against its own pre-change output with `alive -> live` applied to the baseline, which proves
+the word is the ONLY change; and sanitize. Then diff the shared functions against the layer they
+came from, which is the check that caught `md3.py` keeping `candidate`/`best` while its own twin
+comparison passed.
+
+**Three traps, all hit at least once.**
+
+- **The mechanical `cliqueTag -> pivotCliqueTag` substitution breaks a trailing comment's column.**
+  It happened in `mdm2`, `md4`, `md5` and `mmd1`, every time, and only a cross-layer diff finds it.
+- **Signatures with extra parameters escape an exact-match replacement.** `mmd1MinimumDegree` takes
+  `std::int32_t delta = 0` and its `Graph` survived, failing the build with `'Graph' does not name
+  a type`. The amd layers will have their own.
+- **`std::max<std::size_t>` and function return types are not caught by any of the above.**
+  `mmd2Degree` and `mmd3Degree` returned `std::size_t` and needed narrowing by hand, and one
+  `std::max` needed a cast on `superMembers[u].size()` to form the expression in `uint32_t`.
+
+**What the remaining five will need beyond the recipe.** `mda2` and `mdam2` are md-family and
+should port like `mdm2`. **The four amd layers will not**: they carry the approximate bound,
+aggressive absorption and the hash, so their `Neighbors` and `Eliminate` will not match the mmd
+family and want reading rather than substitution. `amd2` onward also carry `hashHead`, `hashNext`
+and `usedKeys`, which is the machinery item 2a-hash is about, so the sweep and that item touch the
+same lines.
 
 ---
 

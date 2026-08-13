@@ -685,7 +685,12 @@ std::vector<std::int32_t> amd1MinimumDegree(const Graph& G) {
         // ext + w - 2, down to ext, and each column contributes its own diagonal.
         std::uint32_t superSize = superMembers[pivot].size();
         std::uint32_t externalDegree = C[pivot].size();
-        nnzL += superSize * externalDegree + superSize * (superSize - 1) / 2 + superSize;
+        // ONE FACTOR WIDENED: a product of two one-dimensional quantities is TWO dimensional, so
+        // it is formed in std::size_t. Widening cannot be done after the multiply the way
+        // narrowing is done after a subtraction; one operand is enough, the other promoting to
+        // meet it. Both factors are bounded by n, so the product reaches n^2.
+        nnzL += static_cast<std::size_t>(superSize) * externalDegree
+              + static_cast<std::size_t>(superSize) * (superSize - 1) / 2 + superSize;
 
         std::ostringstream absorbedCliquesText;
         if (absorbedCliques.empty()) {

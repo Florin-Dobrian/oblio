@@ -486,7 +486,7 @@ Two cautions learned the hard way:
 - **Brace counting.** Turning `else if(cond)stmt;}}}}` into `else if(cond){COUNT++;stmt;}}}}` eats a
   closing brace. The vendored code is dense and brace-heavy; count them.
 - **`goto` crosses initialization.** `genmmd` is transliterated Fortran and full of `goto`, and
-  adding `COUNT++;` on its own line before a labelled statement can make a declaration newly
+  adding `COUNT++;` on its own line before a labeled statement can make a declaration newly
   crossed and break compilation. Use the comma operator or put the counter after the label.
   (`AMD_2` has no `goto` at all, so this one is mmd's problem only.)
 
@@ -1369,8 +1369,9 @@ constant is revised: too low costs one `O(n)` fill per sweep, amortized to nothi
 is a correctness cliff with a silent wrong answer past it.
 
 **Where a check may go is the whole of the difficulty, and it is per layer.** A check is legal only
-where nothing in `mark` is live, and the eliminators are the obvious hazard: each holds `clique_tag`
-and `absorbed_tag` live across the prune loop and then the merged set across the `C[pivot]`
+where nothing in `mark` is live, and the eliminators are the obvious hazard: each holds
+`pivot_clique_tag` and `absorbed_cliques_tag` live across the prune loop and then the merged set
+across the `C[pivot]`
 compaction, so the guard goes before the call and never inside. Several other regions hold a stamp
 across a span the same way, and each was found by reading rather than assumed:
 
@@ -1433,10 +1434,10 @@ binds and `INT32_MAX - n` overflows.
               eliminate   degree work   hash pairs   ceiling
 md1           n           N/A           N/A          INT32_MAX - n
 md2           3           n             N/A          INT32_MAX - max(n, 3)
-md3           ?           ?             N/A          ?
-md4           ?           ?             N/A          ?
-md5           ?           ?             N/A          ?
-mdm2          ?           ?             N/A          ?
+md3           3 or 4      n             N/A          INT32_MAX - max(n, 4)
+md4           3 or 4      n             N/A          INT32_MAX - max(n, 4)
+md5           3 or 4      n             N/A          INT32_MAX - max(n, 4)
+mdm2          3           n             N/A          INT32_MAX - max(n, 3)
 mda2          ?           N/A           N/A          ?
 mdam2         ?           ?             N/A          ?
 mmd1          ?           ?             N/A          ?
@@ -1445,6 +1446,64 @@ amd1          ?           ?             N/A          ?
 amd2          ?           ?             ?            ?
 amd4          ?           ?             ?            ?
 ```
+
+**The n in the middle column is rounded, and from three different exact values.** Worth keeping
+straight, since the rounding is what makes the rows look alike:
+
+- **md1, exactly n - 1.** Its eliminate advances once per NEIGHBOR of the pivot, so the bound is
+  |A[pivot]|, largest at the first elimination of a complete graph. It appears in the eliminate
+  column rather than the middle one because md1 has no degree pass: the picker reads
+  `A[u].size()` and spends no tag.
+- **md2 and md3, exactly n.** The pivot search calls the neighbors function once per LIVE VERTEX,
+  and at the first iteration every one of the n is live.
+- **mdm2, exactly n - 1, and ATTAINED.** Maintenance replaces the pivot search with a refresh
+  over the members of C[pivot], and a reach excludes the pivot itself, so |C[pivot]| <= n - 1.
+  mdm2 has no mass elimination, so a first pivot adjacent to everything gives a refresh set of
+  exactly n - 1.
+- **md4 and md5, an UPPER BOUND of n - 1 that is NOT attained**, and the entry is n for safety
+  rather than because anything reaches it. Their refresh set is C[pivot] copied AFTER the
+  eliminator, so the merged vertices are already gone from it, and the two quantities are coupled:
+  pushing |C[pivot]| toward n - 1 is exactly what forces its members to merge.
+
+  At the first elimination this is provable. There are no cliques yet, so I[u] is empty for every
+  u and the prune leaves I[u] == {pivot}, which satisfies the second merge conjunct for every
+  member automatically. If |C[pivot]| = n - 1 then C[pivot] + {pivot} is every vertex, so
+  A[u] - C[pivot] - {pivot} is empty for every member and the first conjunct holds too. All n - 1
+  merge and the refresh set is EMPTY. A complete graph and a star both do this.
+
+  Later steps are harder and not worth settling. A construction that keeps the refresh set large
+  must give every member of C[pivot] a neighbor outside the clique AND have the pivot be a
+  minimum-degree vertex at that moment, and those pull against each other. The exact maximum is a
+  real combinatorial question whose answer nobody would use: the column records what the ceiling
+  must cover, so an upper bound is the correct entry and a loose one costs one unit out of two
+  billion.
+
+Rounding all of them to n costs nothing and keeps every row in `Amd.cpp`'s own form,
+`Int_MAX_VAL - n`, rather than introducing an n - 1 a reader would have to re-derive to trust. It
+does hide the layer's whole point in the mdm2 row: the refresh saves one advance in the WORST case
+and a great deal in the average, and a column recording maxima cannot show that.
+
+**Where a column reads "3 or 4" the advance is CONDITIONAL**, and the ceiling takes the larger.
+The pair is kept in the table rather than just the maximum because the two cases are different
+facts about the layer: md2 and mdm2 advance exactly 3 every elimination, md3 onward advance 3 when
+nothing mass-eliminates and 4 when something does.
+
+**The eliminate column is where the layers actually differ**, and it tracks what a tag is ABOUT.
+md1's tags are about each neighbor in turn, one per neighbor because the fill is pairwise and each
+neighbor's missing edges are its own. From md2 on, the quotient graph gives the fill a name, so
+the eliminator stamps sets belonging to the PIVOT: its reach, the members of the clique that reach
+becomes, and the ids of the cliques it absorbs. Three, whatever the pivot's degree. md3 adds a
+fourth, the merged vertices of mass elimination, and that one is conditional, so its row is a
+bound rather than an exact count. Each layer's eliminator carries the same account in its own
+comments.
+
+**md2 and mdm2 could each be 2 rather than 3**, and are not. The eliminator's two tags stamp
+opposite sides of a clique, `pivotCliqueTag` its members and `absorbedCliquesTag` the absorbed
+ids, and the two prune loops query opposite sides, so one value would still name each set
+correctly. Two are used so that each test is exact by the tag alone rather than by an invariant
+about which lists hold live vertices and which hold eliminated ones. Parked at md3, whose merged
+set is on the MEMBER side alongside C[pivot] and so is the first case where two tags would share
+one.
 
 The eliminate column is the only universal one, every layer having a check there. The middle
 column is one idea under two names, the pivot search in md2 and md3 and the refresh from md4 on,
@@ -1459,10 +1518,84 @@ worst case then lands at `INT32_MAX - 1` rather than exactly on `INT32_MAX`.
 
 **md2 spends 3 in the eliminator and `n` in the search, and the swap is the point of the layer.**
 The eliminator advances three times and none of them is in a loop: once inside `md2_neighbors`
-for the reachable set, then `clique_tag`, then `absorbed_tag`. Every loop after that only reads
-`mark` against those two stamps. That is the quotient graph paying off, one set built and many
-membership tests against it, where md1 built one set per neighbor. The cost moves to the pivot
-search, which calls `md2_neighbors` once per alive vertex, so up to `n`.
+for the reachable set, then `pivot_clique_tag`, then `absorbed_cliques_tag`. Every loop after that
+only reads `mark` against those two stamps. That is the quotient graph paying off, one set built
+and many membership tests against it, where md1 built one set per neighbor. The cost moves to the
+pivot search, which calls `md2_neighbors` once per live vertex, so up to `n`.
+
+**md3 spends 3 OR 4 in the eliminator and `n` in the search, and only the fourth is new.** Its
+neighbors function and its pivot search are BYTE-IDENTICAL to md2's, in both twins, so the middle
+column is the same by construction rather than by coincidence: one `tag += 1` at the top of the
+call, one call per live vertex, `n` at the first iteration.
+
+Its eliminator is md2's too, for the first 32 statements. Stripping comments, the two are the same
+line for line from the signature through the prune loop, and the first divergence is md3's
+`merged_vertices` declaration; the five statements after the mass elimination block are shared
+again. So the first three advances are md2's unchanged, in the same order and for the same sets:
+the reach inside the neighbors call, then `pivot_clique_tag`, then `absorbed_cliques_tag`.
+
+**The fourth is conditional, and that is what makes the row a bound.** It fires inside
+`if merged_vertices`, so an elimination that merges nothing advances 3 and one that merges
+advances 4. The table takes the maximum, which is what the ceiling has to cover, but the two cases
+are worth naming because md2's and mdm2's 3 is EXACT where this is not. On grids the fourth fires
+at most eliminations; on a path graph it never fires and md3's eliminator costs exactly what md2's
+does.
+
+It is also the first tag on the MEMBER side alongside `pivot_clique_tag`, which is what ends the
+two-into-one saving described above.
+
+**md4 and md5 have the SAME eliminator as md3, verified rather than assumed**: 53 statements each,
+identical to md3's after stripping comments, with every difference being a layer-name prefix or a
+tag name this sweep has not reached yet. Four `++tag` sites in each of the three files. So both
+rows will read 3 or 4 in the eliminate column, and their middle column is the only thing left to
+work out: md4 replaces the pivot search with a refresh the way mdm2 does for md2, so `n - 1` is
+what to expect there and to check.
+
+**mdm2 spends 3 in the eliminator and `n - 1` in the refresh, and the eliminator is md2's
+verbatim.** Its four shared functions are byte-identical to md2's after the name substitution, so
+maintenance changes nothing but where the degree work happens: the picker reads cached integers
+and spends no tag, and the `tag += 1` per call moves to a refresh over the members of `C[pivot]`.
+A reach excludes the pivot, so that is `n - 1`.
+
+**md4 is that same relationship one layer up, and it was checked rather than assumed.** Its
+neighbors function and its eliminator are byte-identical to md3's in both twins, the only
+difference anywhere being one docstring line saying so. So it inherits md3's 3 or 4, and its
+middle column is mdm2's `n - 1`: the picker reads cached degrees and spends no tag, and the
+refresh walks `refreshed_vertices`, a copy of `C[pivot]` taken AFTER the eliminator and therefore
+already trimmed of the merged vertices. Rounded, its row is md3's.
+
+**The mmd layers have SIX `++tag` sites, not four, and their rows are not worked out.** Recorded
+2026-08-12 from reading, not from finishing the argument. Four are the eliminator's, unchanged
+from md3. The other two are in the degree refresh, and they are the first case in the family where
+TWO TAG LEVELS ARE LIVE AT ONCE:
+
+- `elementTag`, stamped once per element of the batch and read all the way through that element's
+  q2h walk, where it decides both the pair merge and the outmatched case;
+- `vertexTag`, fresh per vertex and nested inside it, so one q2h vertex cannot hide a neighbor
+  from the next.
+
+That is mmdupd's `mt` against its `tag`, and it is why a sweep inside an element would erase marks
+about to be read: the guard sits before the element loop rather than inside it. The eliminator's
+guard sits in the batch loop, which is a second thing to settle, since a batch performs several
+eliminations between two visits to it.
+
+**So mmd1, mmd2 and mmd3 need two regions reasoned about rather than one**, and the second has a
+nesting the md layers never had. Their rows stay open until that is done. What is already known:
+mmd2 and mmd3 also read `buckets.filed`, which no md layer does, because a batch WITHHOLDS
+outmatched vertices rather than refiling them.
+
+**md5 spends 3 or 4 in the eliminator and at most n in the refresh, like md4.** Its eliminator and
+neighbors function are byte-identical to md3's, and its refresh set is built the same way md4's
+is, `const std::vector<std::int32_t> refreshedVertices = C[pivot];` taken after the eliminator.
+What md5 changes is how the MINIMUM is found, buckets instead of a linear scan, and the picker
+walks buckets rather than calling the neighbors function, so it spends no tag either way.
+
+**So the maintenance idea costs the same wherever it lands.** md2 -> mdm2 and md3 -> md4 are the
+same edit and move the same `tag += 1` from one region to the other, which is why both pairs of
+rows differ only by an n against an n - 1 that the rounding then erases. The one asymmetry is
+which layers ATTAIN their bound: mdm2 does, md4 and md5 do not, and the reason is mass
+elimination, the very mechanism that makes their eliminate column a bound rather than an exact
+count.
 
 **One consequence to note before this is applied.** The ceiling column differs by layer, so
 `TAG_CEILING` stops being one shared constant and becomes thirteen expressions. Today every file
@@ -2018,8 +2151,40 @@ which becomes the order of those vertices in the returned permutation.
 **The test reads post-prune state.** By this point A[u] has been compacted against the clique
 and the pivot dropped, and I[u] has lost the absorbed cliques and gained the pivot. So `not A[u]`
 means every explicit neighbor u had was inside the clique, and `I[u] == [pivot]` means the new
-clique is its only remaining route out. Together they say u's reachable set is contained in the
-clique, which is the fill-free condition.
+clique is its only remaining route out. **So "nothing left" means "everything was inside", and
+the prune is what turns one into the other**: a test framed before it would have to compare two
+sets, where this one compares two lengths.
+
+**The third conjunct is redundant.** The prune appends the pivot unconditionally, so I[u] always
+contains it and `len(I[u]) == 1` already forces `I[u] == [pivot]`. `Amd.cpp` tests only
+`Elen [i] == 1` for this reason. Ours is documentation of intent, not a check.
+
+**And what the two live conjuncts give is an EQUALITY, not a containment**, which is worth having
+exactly because the stronger statement is what makes the merge free:
+
+```
+reach(u) = A[u] union ( C[c] for c in I[u] ) - {u}
+         = {} union C[pivot] - {u}
+         = C[pivot] - {u}
+```
+
+Membership in C[pivot] supplies the adjacency, so u's reach is not merely inside the clique, it
+is exactly the rest of it. Read back into the graph as it stood before the elimination, where
+reach(pivot) = C[pivot] with u among its members and reach(u) contained the pivot:
+
+```
+N[u]     = reach(u) + {u}          = C[pivot] + {pivot}
+N[pivot] = reach(pivot) + {pivot}  = C[pivot] + {pivot}
+```
+
+The closed neighborhoods are equal, which is the definition of indistinguishable. Eliminating u
+next creates no fill the pivot has not already created, and that is the sense in which md2 -> md3
+is "a reordering, free iteration by iteration" in the table near the top.
+
+**The last two lines of the first block are the pivot's own.** `I[pivot] = []` and
+`eliminated[pivot] = True` appear verbatim a few lines further down, on the pivot itself. That is
+the whole content of a merge: u stops being a vertex on exactly the terms the pivot does, in the
+same step.
 
 **There is no weight array.** md3 merges only into the pivot, which is eliminated in the same
 call, so no live vertex ever stands for more than one original vertex, and the size of a
@@ -2043,6 +2208,17 @@ does that from merged_vertices, which keeps the eliminator free of expansion boo
 at the instant the first loop finishes, C[pivot] still contains the merged vertices, which is
 what the second loop fixes. That is also why the driver computes external_degree from
 C[pivot] AFTER the call and not before.
+
+**The test is sufficient, not necessary, and the gap has a name.** `len(I[u]) == 1` can fail
+while u is genuinely indistinguishable: let a clique c contain u but NOT the pivot, with C[c]
+lying inside C[pivot]. Ordinary absorption removes only I[pivot], the cliques containing the
+pivot, so c survives, `len(I[u]) == 2`, and the merge is declined although u reaches nothing
+outside the clique. That is `graph5` exactly, described in the test graphs section above. The cost
+is a little quality in the bound, never correctness, and `Amd.cpp` behaves the same way. `amd2`
+recovers this particular case with aggressive absorption, which kills any clique whose members
+all lie inside C[p] rather than only those the pivot touched. A DIFFERENT gap needs a different
+mechanism: no test framed against the pivot can see two vertices indistinguishable from each
+other but not absorbable into it, which is `graph7` and takes the hashing.
 
 **The second block touches C[pivot] only.** `I[u] == [pivot]` guarantees that u belongs to no
 other clique, so compacting C[pivot] against the merged set is the whole of it, one pass rather
@@ -3573,7 +3749,7 @@ know before porting it.
 That third group is the fifth thing `amd_order` bundles, and the largest. It predicts the fill and
 the operation counts for both LDL' and LU, plus the largest frontal matrix. Two observations. Our
 nnz(L) turns out to have BEEN `AMD_LNZ` all along, computed from the same expression, so part of
-Info was implemented in pass 4 without being labelled. And `AMD_NDIV` comes out exactly nnz(L)
+Info was implemented in pass 4 without being labeled. And `AMD_NDIV` comes out exactly nnz(L)
 minus n on all 207 graphs, which is the internal consistency check the two counts owe each other.
 
 It is also a prediction with two approximations already baked in, an upper bound wherever dense
@@ -4159,8 +4335,8 @@ ordered containers so the two would agree without effort. It is not any more: th
 for the vendored asymptotics, and the Python mirrors whatever structure decides an answer. The
 mapping below is what survives of the correspondence.
 
-The mapping is mechanical wherever it can be. Names translate from `alive_vertices` to
-`aliveVertices`, one identifier to one identifier, and docstrings become the comment block above
+The mapping is mechanical wherever it can be. Names translate from `live_vertices` to
+`liveVertices`, one identifier to one identifier, and docstrings become the comment block above
 the same function. The containers now correspond directly: a list of lists is
 `std::vector<std::vector<std::int32_t>>`, the clique store is a vector indexed by clique id with
 a liveness flag, a bucket is `head`/`next`/`prev` over n in C++ and a list whose position 0 is

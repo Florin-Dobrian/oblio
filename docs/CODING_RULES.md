@@ -398,7 +398,26 @@ softer layer: conventions for consistency, not correctness.
     different clothes. It is easy to make precisely because a size feels too humble to need the
     rule.
 
-- **Constructors initialize every member in the member-initializer list, in declaration order.**
+- **Every member is initialized where its value comes FROM, and never in a constructor body.**
+  Two places, and which one is not a preference:
+
+  - **A value that is a property of the TYPE gets a default member initializer at the
+    declaration.** `std::uint32_t mNumLive = 0;` because a fresh object has nothing live, whatever
+    anyone passes. One place instead of one per constructor, it covers constructors not yet
+    written, and the reader sees the starting value beside the type rather than by scrolling.
+  - **A value that comes from the CALLER goes in the member-initializer list.**
+    `mSize(static_cast<std::uint32_t>(size))`. It varies by call, so the declaration cannot state
+    it.
+
+  **Never both for one member.** A member-initializer list entry makes the default member
+  initializer dead: the declaration then claims an initial value nothing can observe. Add the
+  default back only when a second constructor appears that does not set the member.
+
+  **`std::vector` and other class-type members need neither.** They default-construct empty, so
+  there is no indeterminate state to guard. The hazard the default initializer removes is specific
+  to built-in scalars, where an unset member is indeterminate and reading it is undefined behavior
+  that no warning reliably catches.
+
   The body is left for work an initializer cannot do: a loop that fills, a call made for its side
   effect (`setIdentity()`). A member set by assignment in the body is default-constructed first and
   then overwritten, which for a `std::vector` is a wasted allocation the list would have avoided.

@@ -67,6 +67,64 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-08-12: default member initializers, reversing a C++98 habit
+
+**A member is initialized where its value COMES FROM.** A value that is a property of the type gets
+a default member initializer at the declaration; a value that comes from the caller goes in the
+member-initializer list. Never both for one member, and never in a constructor body.
+
+`CODING_RULES.md` said, until today, that constructors initialize EVERY member in the
+member-initializer list. **That is the C++98 rule, written when it was the only option**, and it
+was already contradicted by the code: `DirectSolver`, `ElmForest`, `NumFactorStatic`,
+`NumFactorDynamic`, `NumFactorEngine` and `ElmForestEngine` all carry `mSize = 0`,
+`mAnalyzed = false`, `mPivotThreshold = 0.1` and their like at the declaration. So this entry
+mostly ratifies what the tree does and retires a rule that had stopped describing it.
+
+### Why the declaration is the better place for a type-invariant value
+
+- **One place instead of one per constructor.** With two or three constructors an init-list default
+  is repeated in each, and the failure mode is the fourth constructor, added later, that forgets
+  one. A default member initializer covers constructors that do not exist yet.
+- **Forgetting stops being silent.** A built-in scalar with no initializer anywhere is
+  indeterminate, and reading it is undefined behavior that no warning reliably catches.
+- **The starting value sits beside the type**, which is where a reader already is.
+- **It separates the INVARIANT from the ARGUMENT.** `mNumLive` is zero because a fresh object has
+  nothing live, which is true of the type. `mSize` is whatever the caller passed, which is true of
+  the call. Putting both in the same list hides that difference.
+
+### The interaction that makes "both" wrong rather than merely redundant
+
+**If a constructor's member-initializer list initializes a member, that member's default member
+initializer is IGNORED.** So a member with both does not have a fallback; it has a declaration
+making a claim nothing can observe. `Cliques` in `experiments/ordering/md2.cpp` had exactly that
+for one revision, `mSize = 0` beside a constructor that always sets `mSize`, and the `= 0` came out
+again. The default goes back only when a second constructor appears that does not set the member.
+
+Class-type members need neither form. A `std::vector` default-constructs empty, so there is no
+indeterminate state and no wasted allocation to avoid. **The hazard is specific to built-in
+scalars**, which is also why the old blanket rule cost nothing where it was followed and bought
+nothing either.
+
+### What is unchanged
+
+Declaration order is still initialization order, so a member is declared after the ones it reads,
+and `-Wreorder` in `-Wall` catches a list written out of order. The body is still not a place to
+initialize. And the `checkIndexRange` guard still goes on the first member the size feeds, which is
+untouched by any of this: a guarded size is a caller value and belongs in the list by the rule
+above.
+
+**The vintage, since it is the reason the old rule existed.** Default member initializers are
+C++11. In C++11 they made a class a non-aggregate, which was a real cost; C++14 removed that, and
+this tree is C++17, so there is none. The Core Guidelines reach the same split in C.45 and C.48,
+where C.48's scope is precisely "constant initializers", meaning values that do not vary by
+constructor.
+
+**Adoption is incremental**, like the integer rule: existing classes are already largely
+conformant, the ordering twins are being brought over as they are touched, and nothing is being
+rewritten for this alone.
+
+---
+
 ## 2026-08-12: the integer rule, stated so that it derives instead of asserting
 
 The 2026-08-11 entry below states a three-way model as three assertions. **It is one principle and
@@ -2945,7 +3003,7 @@ rearranged into an addition, because the running fill total genuinely needs the 
 **Testing what survives tie-breaking.** Since the partition is not canonical, the tests assert
 only what is invariant under the tie-break: at threshold zero the stored-zero count is exactly
 zero; the factor's true nonzeros are all still present; the supernode count never rises, and a
-larger budget never raises it; the links, height and topological labelling stay valid. The
+larger budget never raises it; the links, height and topological labeling stay valid. The
 specific partition is deliberately not asserted, except on the star and the grid, where it is
 forced.
 

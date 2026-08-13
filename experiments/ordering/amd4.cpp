@@ -1127,7 +1127,12 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
         // r = degme + ndense, which makes nnz(L) an upper bound rather than a count
         // once anything is dense: a dense row is assumed nonzero everywhere.
         const std::size_t reachSize = externalDegree + denseVertices.size();
-        nnzL += superSize * reachSize + superSize * (superSize - 1) / 2 + superSize;
+        // ONE FACTOR WIDENED: a product of two one-dimensional quantities is TWO dimensional, so
+        // it is formed in std::size_t. Widening cannot be done after the multiply the way
+        // narrowing is done after a subtraction; one operand is enough, the other promoting to
+        // meet it. Both factors are bounded by n, so the product reaches n^2.
+        nnzL += static_cast<std::size_t>(superSize) * reachSize
+              + static_cast<std::size_t>(superSize) * (superSize - 1) / 2 + superSize;
         frontSize[pivot] = superSize + externalDegree;   // Amd.cpp: nvpiv + degme
         // Amd.cpp's Info, with f the pivots of this front and r what it reaches.
         {

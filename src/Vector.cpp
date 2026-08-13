@@ -20,8 +20,8 @@ Vector<Val>::Vector(std::size_t size)
       mVal(size, Val(0)) {}
 
 template<class Val>
-Vector<Val>::Vector(std::size_t size, std::vector<Val> val)
-    : mSize(checkIndexRange(size, "Vector size")),
+Vector<Val>::Vector(std::vector<Val> val)
+    : mSize(checkIndexRange(val.size(), "Vector size")),
       mVal(std::move(val)) {}
 
 template class Vector<double>;

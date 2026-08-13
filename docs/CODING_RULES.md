@@ -418,43 +418,82 @@ softer layer: conventions for consistency, not correctness.
     rule.
 
 - **Every member is initialized where its value comes FROM, and never in a constructor body.**
-  Two places, and which one is not a preference:
+  Three sources, and which one a member has is a fact about it rather than a preference:
 
   - **A value that is a property of the TYPE gets a default member initializer at the
-    declaration.** `std::uint32_t mNumLive = 0;` because a fresh object has nothing live, whatever
+    declaration** (the standard calls this a non-static data member initializer, NSDMI; the term is
+    given here once, and every other mention in the tree spells it out).
+    `std::uint32_t mNumLive = 0;` because a fresh object has nothing live, whatever
     anyone passes. One place instead of one per constructor, it covers constructors not yet
     written, and the reader sees the starting value beside the type rather than by scrolling.
   - **A value that comes from the CALLER goes in the member-initializer list.**
     `mSize(static_cast<std::uint32_t>(size))`. It varies by call, so the declaration cannot state
     it.
+  - **A value DERIVED from other members goes where its production allows**, and the split is
+    whether the value is already available or has to be produced:
+    - **Available, so a plain expression:** the list. `mNnz(mRowIdx.size())`, a query whose answer
+      exists the moment `mRowIdx` is constructed.
+    - **Produced, so statements:** the body, with the declaration carrying the SEED the statements
+      start from. `mNnz = 0` plus a loop that sums n inner vectors.
+
+    A derived value is not a caller value, which is the distinction that makes the third category
+    worth naming: nobody passes an nnz, they pass a `rowIdx` it is computed from. And the seed at
+    the declaration is not the member's value pretending to be a type property. `= 0` says "the
+    count starts at zero before any column is counted", which is true of every object of the type,
+    always. The caller's contribution arrives afterwards, through the loop.
+
+  **The test, for a member set in the body: does the body READ it, or only OVERWRITE it?** This is
+  what separates a seed from a mistake, and it is checkable by reading one line rather than by
+  judgment.
+
+  - **Reads it** -> correct. `mNnz += column.size()` needs the current value every iteration, so
+    the declaration's `= 0` is consumed and live.
+  - **Only overwrites it** -> the value was an expression and belonged in the list. That shape is
+    broken in both directions: with no declaration initializer the member is indeterminate between
+    construction and the assignment, and with one the initializer is written and never read, which
+    is the dead case below.
 
   **Never both for one member.** A member-initializer list entry makes the default member
   initializer dead: the declaration then claims an initial value nothing can observe. Add the
-  default back only when a second constructor appears that does not set the member.
+  default back only when a second constructor appears that does not set the member. A seed is not
+  an instance of "both": the member has no list entry, and the body reads what the declaration set.
 
   **`std::vector` and other class-type members need neither.** They default-construct empty, so
   there is no indeterminate state to guard. The hazard the default initializer removes is specific
   to built-in scalars, where an unset member is indeterminate and reading it is undefined behavior
-  that no warning reliably catches.
+  that no warning reliably catches. The preference for the list is also stronger for class types
+  than for scalars: a `std::vector` set by assignment in the body is default-constructed first and
+  then overwritten, which is a wasted allocation, where a scalar costs nothing either way and the
+  read-versus-overwrite test alone decides.
 
-  The body is left for work an initializer cannot do: a loop that fills, a call made for its side
-  effect (`setIdentity()`). A member set by assignment in the body is default-constructed first and
-  then overwritten, which for a `std::vector` is a wasted allocation the list would have avoided.
-  Where the initializer is not a plain copy but is still an *expression*, it goes in the list:
-  `mNnz(mRowIdx.size())`. **Where it is an accumulation, it goes in the body, seeded by a default
-  member initializer**, and that initializer is live rather than dead because the loop reads it:
+  **The worked example is `experiments/storage-options`, where the same member lands in two
+  different places for a reason that can be stated in a sentence.** The two classes hold the same
+  matrix and both answer `nnz()` in O(1):
 
   ```
-  std::size_t mNnz = 0;                       // the seed, at the declaration
+  // static: one flat buffer, so the count is a QUERY. List.
+  : mSize(size), mColPtr(...), mRowIdx(std::move(rowIdx)), mVal(std::move(val)),
+    mNnz(mRowIdx.size()) { ... }
+
+  // dynamic: n inner vectors, so the count is an ITERATION. Declaration seeds, body produces.
+  std::size_t mNnz = 0;
   ...
   for (const std::vector<std::int32_t>& column : mRowIdx)
-      mNnz += column.size();                  // the loop, in the body
+      mNnz += column.size();
   ```
 
-  This is the shape to prefer over folding the sum into the list with `std::accumulate`, which
-  `experiments/storage-options` carried until 2026-08-13. The loop needs no lambda, no seed whose
-  type is load-bearing (the accumulator's type is the member's), and no `<numeric>`; and it removes
-  two hazards the expression form carries, both silent:
+  Same name, same type, same meaning, different placement, because placement follows how the value
+  is produced and not what the member means. Neither is a deviation from the rule.
+
+  The body is otherwise left for work an initializer cannot do: a loop that fills, a call made for
+  its side effect (`setIdentity()`).
+
+  **Do not dress an iteration as an expression to keep it in the list.** The dynamic constructor
+  above did exactly that until 2026-08-13, folding the sum into `std::accumulate`, and the cost of
+  the disguise was a lambda, a seed whose type was load-bearing, and `<numeric>`, all of it bought
+  to satisfy a placement rule rather than to compute anything. The loop needs none of them, since
+  the accumulator's type is the member's. It also removes two hazards the expression form carries,
+  both silent:
 
   - **An initializer reads a MEMBER, never the parameter it was moved from.** `mRowIdx(std::move(rowIdx))`
     runs first, so `rowIdx` is empty by the time a later initializer could look at it, and summing
@@ -472,11 +511,27 @@ softer layer: conventions for consistency, not correctness.
   dimension or count that will size a `std::vector` of indices, or be stored as one, must fit
   `std::int32_t`. It passes through `checkIndexRange(size, "<what> size")` (declared in `Types.h`,
   defined in `Types.cpp`), which returns the size unchanged or throws `std::length_error` when it
-  exceeds `MAX_IDX` (`= 2^31 - 1`). Put the call in the member-initializer list on the *first*
-  member the size feeds, so it runs before any allocation:
-  `Vector(std::size_t size) : mSize(checkIndexRange(size, "Vector size")), mVal(size, Val(0)) {}`. Where the
-  constructor instead moves in already-built vectors (`SparseMatrix`), nothing is allocated from the
-  size, so the guard is a plain body check. The throw lives in `Types.cpp` and never inline in a
+  exceeds `MAX_IDX` (`= 2^31 - 1`). **Placement is a property of the CLASS, not of one
+  constructor.** If any constructor allocates from the size, the call goes in the member-initializer
+  list, on the *first* member the size feeds, so it runs before that allocation:
+  `Vector(std::size_t size) : mSize(checkIndexRange(size, "Vector size")), mVal(size, Val(0)) {}`.
+  Every other constructor of that class then spells it the same way, including one that allocates
+  nothing: `Vector(std::vector<Val> val)` moves its vector in, so nothing needs to precede it, but
+  a class whose two constructors guarded in two different places would invite a reader to look for
+  a meaning in the difference and find none, or worse to "fix" the first one and lose the early
+  throw. Only where NO constructor allocates from the size does the guard become a plain body check:
+  `SparseMatrix` and both `experiments/storage-options` matrices move in already-built vectors, so
+  there is nothing to protect and the check reads as validation rather than as initialization.
+
+  Why the early call matters where it does: `checkIndexRange` rejects a size above `MAX_IDX`, and a
+  caller passing three billion would otherwise allocate 24 GB and only then be told the size is out
+  of range.
+
+  A class guards each quantity that must fit the range, separately, so the message names whichever
+  overflowed. `Vector` and `Permutation` have one such quantity; `SparseMatrix` has two, a dimension
+  and an entry count that vary independently, and makes two calls.
+
+  The throw lives in `Types.cpp` and never inline in a
   header: a throwing body in a widely-included header degrades codegen of unrelated hot loops in the
   same translation unit (the in-header-throw finding in DESIGN_DECISIONS). A structure sized from
   user input or from A carries the guard (`SparseMatrix`, `Vector`, `Permutation`); a structure

@@ -163,11 +163,28 @@ array is sized from it, so the member is the source and the length is the copy. 
 the headers' own reasoning, `docs/ARCHITECTURE.md`'s accessor table and `test_pipeline`'s seventeen
 size assertions along with it.
 
-**One that looks like this and is not.** `Vector::mSize` is not guaranteed to equal `mVal.size()`:
-the two-argument constructor takes a size and a vector independently and checks no agreement between
-them, so `Vector(10, std::vector<double>(3))` constructs and reports size 10 over three values. That
-is a missing precondition rather than a redundancy, and it belongs with the input-validation item in
-`docs/TODO.md`.
+**One that looked like this and was not, now fixed.** `Vector::mSize` was not guaranteed to equal
+`mVal.size()`: the two-argument constructor took a size and a vector independently and checked no
+agreement between them, so `Vector(10, std::vector<double>(3))` constructed and reported size 10 over
+three values. A missing precondition rather than a redundancy.
+
+Closed the same day by changing the signature rather than by adding a check, which is the stronger
+of the two repairs: `Vector(std::vector<Val> val)` derives the size from the values, so the
+inconsistent object cannot be built and no test is needed to keep that true. A check would have made
+the bad state detectable; deriving makes it unrepresentable. The guard stays, since a vector longer
+than `MAX_IDX` must still be refused, and `val.size()` is read in `mSize`'s initializer, which runs
+before the move because `mSize` is declared first.
+
+**The change was free because nothing called it.** The two-argument constructor's only occurrence in
+the tree was its own definition: no test, example, benchmark or source used it, which is also why
+nobody had noticed it could build a lying object. A constructor that no caller exercises is a
+constructor whose contract nothing checks, and this one had been wrong for as long as it existed.
+The same repair a year from now would have meant migrating callers.
+
+What it does NOT close: `mSize` is still writable behind the class's back. `SolveEngine` and
+`MultiplyEngine` are friends and both do `assign` to `mVal` followed by a direct write to `mSize`,
+two statements in two other files that must agree. The public path to inconsistency is gone; the
+friend path remains, and it has the same root as the stored-length question above.
 
 ---
 

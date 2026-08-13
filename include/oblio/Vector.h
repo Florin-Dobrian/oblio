@@ -37,7 +37,25 @@ public:
     // compile the hot multiply and solve kernels (an in-header throw was measured to perturb such a
     // loop's codegen). The default constructor and the inline accessors below stay in the header.
     explicit Vector(std::size_t size);
-    Vector(std::size_t size, std::vector<Val> val);
+
+    // Takes the values and derives the size from them. This used to be Vector(size, val), taking
+    // both and checking neither against the other, so Vector(10, std::vector<double>(3)) built an
+    // object reporting size 10 over three values. Deriving makes that state unrepresentable rather
+    // than merely detected, which needs no test to stay true. Nothing in the tree called the
+    // two-argument form.
+    explicit Vector(std::vector<Val> val);
+
+    // **Values change in place; the SIZE changes by assignment.** Unlike SparseMatrix, this
+    // class is writable, so `x[i] = v` and the non-const `val()` are how a caller fills a
+    // vector, and that is what the solve and multiply paths do. Assignment is for the other
+    // case:
+    //
+    //   x = Vector<double>(n);                  // n zeros, whatever x held before
+    //   x = Vector<double>(std::move(vals));    // size derived from the values
+    //
+    // The copy and move operations are the compiler's, since none is declared here, so the old
+    // buffer is released and a copy is independent of its source. Assignment runs the
+    // constructor, so the size guard applies to the new object as it did to the first.
 
     std::size_t size() const { return mSize; }
 

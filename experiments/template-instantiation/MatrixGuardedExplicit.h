@@ -15,14 +15,18 @@
 //
 // **What the guard does NOT do here, measured rather than assumed.** The tempting reading
 // is that the defaulted constructor finally gives extern template something to suppress,
-// where a member with no visible body offers it nothing. It does not: a defaulted default
-// constructor over scalars and std::vector members is trivial, so the compiler emits no
-// out-of-line function for it and there is no symbol to suppress. Linking a program that
-// default-constructs a Matrix without this .cpp leaves the same undefined references as the
-// unguarded variant does, and Matrix<double>::Matrix() appears in neither list. So the
-// guard remains documentation here, exactly as it was before the body arrived. The rule is
-// what matters, not the mechanism: inline under the guard is a choice, inline without it is
-// the bug. See the README.
+// where a member with no visible body offers it nothing. It does not, and not for the reason
+// one might guess: the constructor is NOT trivial, Matrix holding a std::vector whose own
+// default constructor is non-trivial. It is that the definition is visible in this header, so
+// a translation unit needing the constructor instantiates its own weak copy and the linker
+// folds them, and extern template does not stop that. Compiled at -O0, where nothing is
+// inlined away, this variant and the unguarded one produce byte-identical symbol tables, both
+// carrying Matrix<double>::Matrix() as a weak symbol. Linking a program that
+// default-constructs a Matrix without this .cpp leaves the same undefined references either
+// way, and Matrix<double>::Matrix() appears in neither list. So the guard remains
+// documentation here, exactly as it was before the body arrived. The rule is what matters,
+// not the mechanism: inline under the guard is a choice, inline without it is the bug. See the
+// README.
 //
 // Adding a new scalar type (e.g. float) requires:
 //   1. One new extern template line here.

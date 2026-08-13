@@ -47,11 +47,15 @@ Executables carry the `_cpp` language suffix and are gitignored.
   interesting part.** Linking a program that default-constructs both classes *without* the
   `.cpp` files leaves the same three symbols undefined under each variant,
   `Matrix<double>::rows()`, `Matrix<double>::cols()` and `Vector<double>::size()`;
-  `Matrix<double>::Matrix()` is in neither list. A
-  defaulted default constructor over scalars and `std::vector` members is trivial, so no
-  out-of-line function is emitted for it at all, and there is no symbol for the guard to
-  suppress or for the linker to resolve. The prediction that the guard would gain mechanism
-  on that member was wrong, and measuring it took ten minutes.
+  `Matrix<double>::Matrix()` is in neither list. The reason is not that the constructor is
+  trivial, which it is not, `Matrix` holding a `std::vector` whose own default constructor is
+  non-trivial. It is that the constructor's DEFINITION is visible in the header, so any
+  translation unit needing it instantiates its own weak copy and the linker folds them; it never
+  becomes an undefined reference to import. Inspected at `-O0`, where nothing is inlined away,
+  the object file carries `Matrix<double>::Matrix()` as a weak symbol, and the two variants'
+  symbol tables are byte-identical, so `extern template` does not suppress even that. The
+  prediction that the guard would gain mechanism on that member was wrong, and measuring it took
+  ten minutes.
 
   **Checked on both toolchains**, since "no symbol is emitted" is an implementation matter
   rather than a guarantee, and this tree has been caught before by a negative result on one
@@ -61,7 +65,8 @@ Executables carry the `_cpp` language suffix and are gitignored.
   grouping the uses under each symbol.
 - So the shape to take from this is the *rule*, not a mechanism: a body in the header is
   safe **provided** the class stays explicitly instantiated with the guard present. Whether
-  the guard has work to do depends on the body, and for a trivial one it has none. The real
+  the guard has work to do turned out to be a narrower question than expected, and on this body
+  it has none. The real
   tree is this arrangement, which is why it is worth modelling: `include/oblio/Vector.h`
   carries `Vector() = default;` in an otherwise declaration-only header beside its
   `extern template` lines, and CLAUDE.md's definitions-in-cpp invariant names exactly this

@@ -72,15 +72,16 @@ thinking.
 The companion idiom is a by-value parameter plus `std::move` into the member:
 
 ```
-Vector(std::size_t size, std::vector<double> val)
-    : mSize(size), mVal(std::move(val)) {}
+Vector(std::vector<double> val)
+    : mSize(checkIndexRange(val.size(), "Vector size")), mVal(std::move(val)) {}
 ```
 
 This costs one copy for an lvalue argument and zero for an rvalue, where a `const&` parameter costs
 one copy always. The `std::move` is never a pessimization and should be there by default. The one
-thing to watch is a constructor body that reads the parameter after the initializer list has moved
-from it, which sees an emptied object; the fix is to hoist the read into the initializer list ahead
-of the move, which is where the size guard already sits.
+thing to watch is reading the parameter after it has been moved from, whether in the body or in a
+later initializer, since either sees an emptied object. Above, `val.size()` is read in the entry for
+`mSize`, which is declared before `mVal` and so runs before the move; had the two been declared the
+other way round, the size would come out zero with nothing to catch it.
 
 **Why this is not a blanket change.** Two distinctions matter, and separating them is the actual
 work:

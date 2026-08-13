@@ -153,6 +153,23 @@ sparse-to-dense routing itself is the point, name that directly: the *scatter*, 
 assembly is meant, as in Cholesky folding its diagonal into `C`, or a prepass being folded into a
 driver to keep one shape. The rule is about the operation, not about the word.
 
+**Spell the term out, and give the acronym once where the concept is defined.** The prose says
+*default member initializer*, not NSDMI, every time; the acronym appears exactly once, in
+parentheses at the rule in `CODING_RULES.md`. Two reasons, and the second is the one that gets
+forgotten. An acronym is opaque to a reader who has not met it, and expanding it every time is
+noise, so the full term as the standing form is simply easier to read. But a term that appears
+nowhere in its short form is also **unfindable**: someone who knows the concept by its acronym
+searches for it, gets nothing, and concludes the tree does not cover it. The single parenthetical
+is what makes a search from either direction land on the rule.
+
+This applies to jargon acronyms, the ones naming a language or library mechanism. Acronyms that
+are the field's ordinary vocabulary, BLAS, CSC, AMD, MMD, are used bare and need no expansion:
+the audience for a sparse direct solver has them already. The test is whether a competent reader
+of this codebase would have to look it up.
+
+Two existing gaps, left as they are for now: `OBLIO_NOTES_FROM_POLYGLOT.md` uses NRVO three times
+and `DESIGN_DECISIONS.md` uses RAII once, neither expanded anywhere.
+
 ## References, and why the rule differs by artifact
 
 Only one case is restricted: **a reference from a coding artifact to another coding artifact.**

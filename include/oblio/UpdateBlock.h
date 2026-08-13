@@ -35,6 +35,13 @@
 //
 // A slice versus the whole; per-pair versus per-supernode; immediate versus stacked. Calling both
 // "the update" would blur precisely the distinction that separates the three traversals.
+//
+// **The immediate lifetime is why this class has no default constructor**, where UpdateMatrix does.
+// A block is a local: formed at the top of a (jj, kk) step, assembled into kk, destroyed at the end
+// of that step, never outliving the loop body that made it. So nothing ever has to create one
+// before its dimensions are known, and there is no container to demand an empty state. The
+// dimensions are therefore always known at construction, which is what lets `UpdateBlock b;` fail
+// to compile rather than produce a degenerate 0 by 0 object that fails somewhere later.
 
 #include "oblio/Types.h"
 

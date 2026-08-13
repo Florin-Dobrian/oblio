@@ -3,6 +3,11 @@
 Tracks the migration of each 0.9 unit into the modern tree. After a context gap,
 read this first, it turns "refresh my context" into a two-minute scan.
 
+Two axes, tracked separately because they move separately. **What** a unit computes is the port,
+and the tables below carry it unit by unit. **How** it is written is the idiom, sweeps that run
+across the whole tree at once, listed in the two sections before the tables. A unit can be
+`verified` against 0.9 and still hold a 1998 idiom, and the reverse.
+
 ## How to use
 
 - One row per unit (a class or a small function-group).
@@ -33,6 +38,83 @@ Naming note: the modern tree renames as it ports. 0.9's `Matrix` is `SparseMatri
 `SymFactor` / `SymFactorEngine`, with `NumFactor` / `NumFactorEngine` to follow for the
 numeric phase. The table gives the modern name, with the 0.9 name in the notes where they
 differ.
+
+## Idiom modernization: C++11
+
+The tree compiles `-std=c++17`, and the jump being made is from **pre-C++11**. 0.9 predates C++11
+entirely, so porting a unit means carrying its algorithm over unchanged, which is the invariant,
+while its idioms come forward.
+
+C++11 is the large jump and the one to finish. Each entry below gives what was there, what replaced
+it, and every site it was applied at, so a later reader can tell whether a file has been through
+this and does not have to re-derive it by reading.
+
+**Swept 2026-08-13**, in commit `387689d`:
+
+- **A default constructor written only to zero scalars** -> a default member initializer at each
+  declaration, plus `= default` on the constructor. Eight classes:
+  `experiments/friend-access/{Matrix,Vector}.h` and
+  `experiments/template-instantiation/{Matrix,Vector}{Implicit,PlainExplicit,GuardedExplicit}.h`.
+  The six bodies in the matching `.cpp` files went with them.
+- **A default member initializer made dead by an initializer-list entry** -> delete one of the two.
+  Keep the declaration's only where a constructor exists that does not set the member, which is why
+  `SparseMatrix` and `UpdateMatrix` correctly carry both. One site:
+  `include/oblio/UpdateBlock.h`, `mHeight` and `mWidth`, unreachable behind the only constructor.
+- **`std::vector<T>().swap(v)` to force deallocation** -> assignment from a fresh object,
+  `*this = T()`. `clear()` does not free and `shrink_to_fit` is only a request, which is why the
+  1998 idiom existed. One site: `src/UpdateMatrix.cpp`, `discard()`. Multifrontal peak measured
+  identical to the byte before and after.
+- **Accumulating in the initializer list to avoid a body** -> a loop in the body, seeded by a
+  default member initializer. One site: `experiments/storage-options/SparseMatrixDynamic.cpp`, the
+  constructor's `mNnz`.
+- **Default construct, then assign field by field** -> aggregate initialization at the construction
+  site. One site: `experiments/storage-options/test_multiply.cpp`, `Columns` in `build`.
+
+**Swept earlier**, during the port of each unit rather than as a pass:
+
+- **`NULL`, `typedef`, iterator loops, `0` for null** -> `nullptr`, `using`, range-for. Applied by
+  `clang-tidy`'s `modernize-*` checks as each unit came over.
+- **Raw owning arrays, manual `new` / `delete`** -> `std::vector`, the default container. This one
+  is a CLAUDE.md invariant rather than a convention.
+
+The rules that came out of these live in `docs/CODING_RULES.md`, under C++; the reasoning and the
+two defects the sweep exposed are in the 2026-08-13 entry of `docs/DESIGN_DECISIONS.md`.
+
+Nothing here is known to remain, which is weaker than nothing remains: the sweep followed an audit
+of four sites plus two idioms found while there, not a systematic search. A `clang-tidy` run with
+the `modernize-*` checks over `src/` and `include/` would settle it either way and has not been
+done.
+
+## Idiom modernization: C++17
+
+Available to use, and no sweep is owed. C++17 adds far less to this codebase than C++11 did, and the
+parts that mattered are already adopted where they earn their place:
+
+- **`if constexpr`**, `src/SolveEngine.cpp`, where a branch is impossible rather than merely
+  untaken: the dynamic passes do not exist for a static factor.
+- **`std::optional`**, `include/oblio/DirectSolver.h` and `ElmForestEngine.h` with their `.cpp`
+  files, for amalgamation and threshold, so absent is a state rather than a sentinel value.
+- **`std::is_same_v`**, the variable-template spelling, `src/SolveEngine.cpp`.
+- **Pointer plus length** in place of `std::span`, which is C++20; one house convention, tree-wide.
+
+What is left is small, scattered, and worth doing when the surrounding line is being touched anyway
+rather than as a pass of its own. Each is listed with its site, so none of them has to be searched
+for twice:
+
+- **`[[nodiscard]]`**, used nowhere. Real value on the query accessors, `SparseMatrix::nnz`,
+  `DirectSolver::nnz` and `relativeResidual`, `Vector::size`, where a discarded result is always a
+  mistake. The largest of the four, and the only one that would catch a bug rather than tidy a
+  line.
+- **`std::is_same<Val, double>::value`**, `src/DirectSolver.cpp`, in `factor`. The one place still
+  using the C++11 spelling where the rest of the tree says `_v`. Consistency only, and not an
+  `if constexpr` candidate: the condition mixes a compile-time term with a runtime one.
+- **`(void)ldd;`**, `src/BlasLapack.cpp`, the C++98 spelling of `[[maybe_unused]]`.
+- **`std::string_view`** would suit `checkIndexRange`'s `const char* what`,
+  `include/oblio/Types.h` and `src/Types.cpp`. The `const char*` parameters in
+  `include/oblio/BlasLapack.h` must stay: that is the Fortran ABI, not a choice.
+
+Structured bindings have no site here, nothing returning a pair or a tuple. Nested namespace
+definitions buy nothing with a single namespace.
 
 ## Units
 

@@ -14,7 +14,7 @@ namespace Oblio {
 template<class Val>
 class Vector {
 public:
-    Vector() = default;   // the one body here; trivial, so nothing is emitted to suppress
+    Vector() = default;   // the one body here; visible, so each TU makes its own weak copy
     explicit Vector(std::size_t size);
 
     Val&       operator[](std::size_t i);

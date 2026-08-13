@@ -33,6 +33,14 @@
 // bounded. `discard` releases the storage rather than clearing it, so the peak is the storage live
 // at one cut across the tree, not the sum over the whole run.
 //
+// **This is where the default constructor comes from**, and it is a container requirement rather
+// than a claim that an empty Schur complement means something. A child's block must survive from
+// the child's iteration to the parent's, many iterations later, so it cannot be a local the way
+// UpdateBlock is; it has to live in something indexed by supernode, and `std::vector`'s sizing
+// constructor demands a default-constructible element. Hence `UpdateMatrix() = default` with
+// `mSize = 0` at the declaration, the slots starting empty and `discard` returning them to empty,
+// which is why the empty state has to be reachable again rather than only at the start.
+//
 // **It is not called a stack, deliberately.** The literature calls this the update stack and the
 // lifetimes are indeed nested, but nothing here is pushed or popped: the slots are independent
 // allocations indexed by supernode, freed in child order rather than from a top, and a parent's own

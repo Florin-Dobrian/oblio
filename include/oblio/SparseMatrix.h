@@ -1,12 +1,12 @@
 #pragma once
 
-// SparseMatrix.h — sparse matrix in compressed sparse column (CSC) form.
+// SparseMatrix.h - sparse matrix in compressed sparse column (CSC) form.
 //
 // Minimal on purpose: enough structure for an ordering engine to compute a
 // Permutation. Stored as three flat, contiguous vectors:
-//   colPtr — length size()+1; column j occupies rowIdx/val[colPtr[j] .. colPtr[j+1]-1]
-//   rowIdx — size nnz(); row indices, sorted ascending within each column
-//   val    — size nnz(); the corresponding values
+//   colPtr - length size()+1; column j occupies rowIdx/val[colPtr[j] .. colPtr[j+1]-1]
+//   rowIdx - size nnz(); row indices, sorted ascending within each column
+//   val    - size nnz(); the corresponding values
 // A symmetric matrix is stored FULLY (both triangles), matching Oblio 0.9/10.12:
 // each column holds its complete neighbor list plus the diagonal. Full storage
 // lets the structural phases (ordering, elimination forest, symbolic) read each
@@ -15,14 +15,14 @@
 // Values are carried but unused by the structural phases.
 //
 // Index types (see the "index types" design decision):
-//   colPtr — OFFSETS into rowIdx/val -> std::size_t (never negative, may exceed 2^31).
-//   rowIdx — row IDS -> std::int32_t (IDs may carry a -1/NIL sentinel elsewhere and
+//   colPtr - OFFSETS into rowIdx/val -> std::size_t (never negative, may exceed 2^31).
+//   rowIdx - row IDS -> std::int32_t (IDs may carry a -1/NIL sentinel elsewhere and
 //            must match the graph/ordering convention). Loop counters are std::size_t;
 //            an ID is cast to std::size_t only where it subscripts an array.
 //
 // Construction here is the single basic path: hand it arrays already in CSC form.
 // Other builders (e.g. from COO triplets, with sorting / duplicate merging / zero-
-// diagonal insertion) are deliberately not included yet — 0.9 is the oracle for those.
+// diagonal insertion) are deliberately not included yet, 0.9 is the oracle for those.
 
 #include <vector>
 #include <complex>
@@ -44,6 +44,23 @@ public:
                  std::vector<std::size_t>  colPtr,
                  std::vector<std::int32_t> rowIdx,
                  std::vector<Val>          val);
+
+    // **Changing a matrix: assign a new one.** There is no setter and none is wanted:
+    //
+    //   A = SparseMatrix<double>(size, std::move(colPtr), std::move(rowIdx), std::move(val));
+    //
+    // Works over an existing matrix or over a default-constructed one, as often as wanted; the
+    // copy and move operations are the compiler's, since none is declared here. Four things
+    // come free that a setStructure() would have to earn: it goes through the constructor
+    // above, so both guards run and mNnz is derived, leaving ONE path into a valid state; every
+    // member follows at once, including any added later; the old buffers are released; and a
+    // rejected assignment leaves the target untouched rather than half-updated, because the
+    // temporary is built and validated before anything moves into it.
+    //
+    // What this cannot do is change VALUES while keeping the structure, which is the
+    // refactorization case, one analyze serving many factor calls. Assignment discards the
+    // structure the symbolic phase was computed from, which is the thing that case needs to
+    // keep. See docs/TODO.md.
 
     std::size_t size() const;   // matrix dimension (number of rows / columns)
     std::size_t nnz()  const;   // number of stored entries

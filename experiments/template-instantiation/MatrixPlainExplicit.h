@@ -13,11 +13,13 @@
 // does NOT make this variant differ from its guarded twin. A defaulted member is defined at
 // its declaration, so the obvious reading is that it can be instantiated per translation
 // unit here, where nothing suppresses it, and not in _GuardedExplicit, whose `extern
-// template` lines would act on it. Measured, that is false: a defaulted default constructor
-// over scalars and std::vector members is trivial, so no out-of-line function is emitted
-// for it at all and there is no symbol either to suppress or to link. Linking a program
-// that default-constructs a Matrix without this .cpp leaves the same undefined references
-// under both variants, and Matrix<double>::Matrix() is in neither list. See the README.
+// template` lines would act on it. Measured, that is false: the definition is visible in this
+// header, so a translation unit that needs the constructor instantiates its own WEAK copy and
+// the linker folds them, and it never becomes an undefined reference either way. At -O0, where
+// nothing is inlined away, both variants' object files carry the constructor as a weak symbol
+// and their symbol tables are identical. Linking a program that default-constructs a Matrix
+// without this .cpp leaves the same undefined references under both, and
+// Matrix<double>::Matrix() is in neither list. See the README.
 //
 // It is written this way deliberately, because the real tree does exactly this (see
 // include/oblio/Vector.h and CLAUDE.md's inline-under-the-guard exception), and a study of

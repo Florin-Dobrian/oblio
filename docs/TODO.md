@@ -461,7 +461,47 @@ None of this belongs in the structural realignment of the pivot loop drafted in
 counts are what verify the reshaping was faithful, and folding an optimization into the same change
 would spend that check.
 
-### Multiple right-hand sides### Multiple right-hand sides
+### Changing a matrix: wholesale replacement works today, values-only does not
+
+Two different needs, and only one of them is missing.
+
+**Replacing the whole matrix needs no new code.** `SparseMatrix` declares no copy or move operations,
+so the compiler-generated ones are there, and
+
+```
+A = SparseMatrix<double>(size, std::move(colPtr), std::move(rowIdx), std::move(val));
+```
+
+works on a default-constructed matrix or over an existing one, as often as wanted. This is better
+than a `setStructure()` method rather than merely equivalent, and the reasons are worth recording so
+nobody adds the method later:
+
+- It goes through the constructor, so `checkIndexRange` runs on both quantities and `mNnz` is
+  derived. There stays exactly ONE path into a valid state, where a setter would be a second path
+  obliged to re-establish the same invariants and free to drift from them.
+- Every member follows at once, including any member added later. A hand-written setter is where
+  one gets forgotten.
+- The old buffers are released: measured 2026-08-13, overwriting a 1000-column matrix with a
+  4-column one nets -19920 bytes.
+- The target survives a rejected assignment. The temporary is built and validated before anything
+  moves into `A`, so a matrix that fails its guard leaves the old one intact, reporting its previous
+  size and nnz. That is the strong exception guarantee for free; a setter assigning member by member
+  would have to work for it and probably would not.
+
+**Changing VALUES while keeping the structure is the real gap.** This is the refactorization
+pattern, a Newton iteration or a time step where the sparsity is fixed and only the numbers move,
+and it is what lets one `analyze` serve many `factor` calls. Assignment cannot express it: replacing
+the object discards the structure the symbolic phase was computed from, which is precisely what we
+want to keep.
+
+The design work is already done, in `experiments/storage-options`. `setValues` there is cheap on both
+layouts, reuses the buffer, leaves pointers valid, and established the rule that value mutation does
+not invalidate while structural mutation does. What is missing is the method on `SparseMatrix`,
+whose header currently says A "is input and has no writer", and the question that comes with it: how
+`DirectSolver` learns it may skip `analyze`, which is the same boundary the reuse item raises from
+the solver's side.
+
+### Multiple right-hand sides
 
 `Vector<Val>` carries one right-hand side and the solve is scalar, which is the right call for one
 column: there is no level-3 BLAS to be had. Many right-hand sides make a supernode a matrix

@@ -1,7 +1,8 @@
 # Builds the Oblio units and every test in tests/. A simple alternative to the
 # CMake build (CMakeLists.txt); both compile the same src/ and tests/.
 #
-#:   make            build everything (tests and examples)
+#:   make            print this list (the default goal; `make help` is the same thing)
+#:   make all        build everything (tests and examples)
 #:   make tests      build the test executables
 #:   make test       build and run the tests, then run the examples for exit status
 #:   make examples   build the example programs (examples/*.cpp)
@@ -115,6 +116,14 @@ EXAMPLE_SRCS = $(wildcard examples/*.cpp)
 EXAMPLE_BINS = $(patsubst examples/%.cpp,%_cpp,$(EXAMPLE_SRCS))
 
 .PHONY: all tests test examples objs clean help
+
+# Bare `make` prints the target list rather than building, which is a decision and not an
+# accident of ordering: a newcomer's first command in a repository root should say what is on
+# offer, and the build everyone actually wants here is `make test` rather than `make all`.
+# Stated explicitly because the default goal is otherwise the FIRST target in the file, so
+# moving `help` below `all` would silently change it, and the header above would stop being
+# true with nothing to catch it.
+.DEFAULT_GOAL := help
 
 # Print the target list from this file's header. The lines there are marked with #: so there is one
 # source of truth: the header comment is the help text, and neither can drift from the other.

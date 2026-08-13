@@ -20,6 +20,10 @@ SparseMatrix<Val>::SparseMatrix(std::size_t size,
     // in that range (indices name rows; nnz is cast to int at the AMD/MMD boundary). The vectors are
     // moved in, not allocated here, so there is nothing to precede: guard after the moves. Two calls,
     // so the message names whichever overflowed.
+    //
+    // Note mRowIdx above, the MEMBER: the parameter it was moved from is empty by this point, so an
+    // initializer that read `rowIdx` would sum an empty vector and set mNnz to zero, silently. See
+    // the 2026-08-13 entry in docs/DESIGN_DECISIONS.md.
     checkIndexRange(mSize, "SparseMatrix size");
     checkIndexRange(mNnz, "SparseMatrix nnz");
 }

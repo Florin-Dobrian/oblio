@@ -11,11 +11,15 @@ void UpdateMatrix<Val>::allocate(std::size_t size) {
 
 template<class Val>
 void UpdateMatrix<Val>::discard() {
-    mSize = 0;
-    // Free rather than clear: clear keeps the capacity, which would let the stack's peak grow to
-    // the sum of every block ever allocated. Swapping with an empty vector releases the storage.
-    std::vector<std::int32_t>().swap(mRowIdx);
-    std::vector<Val>().swap(mVal);
+    // Back to the default-constructed state, which is where the empty values are stated: mSize's
+    // own initializer and two empty vectors. Move-assigning from a fresh object deallocates both
+    // buffers, where clear() would keep the capacity and let the stack's peak grow to the sum of
+    // every block ever allocated. Freeing is what keeps the peak bounded.
+    //
+    // `std::vector<T>().swap(v)` did the same job here until 2026-08-13 and is the pre-C++11 idiom
+    // for it, from when clear() did not free and shrink_to_fit did not exist. shrink_to_fit is not
+    // the replacement: it is a non-binding request, so it cannot be relied on to free.
+    *this = UpdateMatrix<Val>();
 }
 
 // Explicit instantiation. See the note in NumFactorStatic.cpp.

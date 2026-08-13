@@ -15,9 +15,8 @@ namespace Oblio {
 template<class Val>
 class Vector {
 public:
-    // Constructs an empty vector.
-    Vector()
-        : mSize(0) {}
+    // Constructs an empty vector, from the member's own initializer below.
+    Vector() = default;
 
     // Constructs a zero-initialised vector of the given size.
     explicit Vector(std::size_t size)
@@ -36,7 +35,7 @@ public:
     std::size_t size() const { return mSize; }
 
 private:
-    std::size_t      mSize;
+    std::size_t      mSize = 0;
     std::vector<Val> mVals;
 };
 

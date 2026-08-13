@@ -71,8 +71,8 @@ private:
     std::int32_t* rowIdx() { return mRowIdx.data(); }
     Val*          val()    { return mVal.data(); }
 
-    std::size_t mHeight = 0;
-    std::size_t mWidth  = 0;
+    std::size_t mHeight;
+    std::size_t mWidth;
 
     // The global row index of each local row. Length mHeight.
     std::vector<std::int32_t> mRowIdx;

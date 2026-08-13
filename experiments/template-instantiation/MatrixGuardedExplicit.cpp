@@ -1,6 +1,7 @@
 // MatrixGuardedExplicit.cpp - Guarded explicit: plain explicit + extern template guard
 //
-// Full template implementation lives here, not in the header. This translation
+// Every template body except the defaulted default constructor lives here, not in the
+// header. This translation
 // unit is compiled once. The two explicit instantiations at the bottom cause
 // the compiler to emit object code for double and complex<double>. All other
 // translation units pick up those symbols at link time via MatrixGuardedExplicit.o.
@@ -9,10 +10,6 @@
 #include <cassert>
 
 namespace Oblio {
-
-template<class Val>
-Matrix<Val>::Matrix()
-    : mRows(0), mCols(0) {}
 
 template<class Val>
 Matrix<Val>::Matrix(std::size_t rows, std::size_t cols,

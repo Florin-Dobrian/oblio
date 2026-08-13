@@ -421,11 +421,31 @@ softer layer: conventions for consistency, not correctness.
   The body is left for work an initializer cannot do: a loop that fills, a call made for its side
   effect (`setIdentity()`). A member set by assignment in the body is default-constructed first and
   then overwritten, which for a `std::vector` is a wasted allocation the list would have avoided.
-  Where the initializer is not a plain copy, use an expression, not a body assignment and not a
-  helper with internal linkage: `mNnz(std::accumulate(rowIdx.begin(), rowIdx.end(), std::size_t{0},
-  ...))`, and note the `std::size_t{0}` seed is load-bearing, it fixes the accumulator type so the
-  sum does not overflow an `int`. Two consequences: the list runs in *declaration* order whatever
-  order it is written in, so declare a member after the ones it reads; and a guard on the first
+  Where the initializer is not a plain copy but is still an *expression*, it goes in the list:
+  `mNnz(mRowIdx.size())`. **Where it is an accumulation, it goes in the body, seeded by a default
+  member initializer**, and that initializer is live rather than dead because the loop reads it:
+
+  ```
+  std::size_t mNnz = 0;                       // the seed, at the declaration
+  ...
+  for (const std::vector<std::int32_t>& column : mRowIdx)
+      mNnz += column.size();                  // the loop, in the body
+  ```
+
+  This is the shape to prefer over folding the sum into the list with `std::accumulate`, which
+  `experiments/storage-options` carried until 2026-08-13. The loop needs no lambda, no seed whose
+  type is load-bearing (the accumulator's type is the member's), and no `<numeric>`; and it removes
+  two hazards the expression form carries, both silent:
+
+  - **An initializer reads a MEMBER, never the parameter it was moved from.** `mRowIdx(std::move(rowIdx))`
+    runs first, so `rowIdx` is empty by the time a later initializer could look at it, and summing
+    it yields zero with nothing to catch it. Write `mRowIdx`, not `rowIdx`. (This rule's own example
+    said `rowIdx` until 2026-08-13, which is the defect it warns about.)
+  - **The list runs in declaration order**, so an expression over another member is correct only
+    while that member is declared first, and reordering two lines in the header breaks it silently.
+    A body loop has no such dependency: every member is constructed before the body runs.
+
+  Two consequences: declare a member after the ones it reads; and a guard on the first
   member runs before any later member allocates, which is how check-before-allocate and init-list
   purity coexist (see the next rule).
 

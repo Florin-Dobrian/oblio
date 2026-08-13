@@ -19,7 +19,7 @@ class MultiplyEngine;  // befriended below
 template<class Val>
 class Matrix {
 public:
-    Matrix();
+    Matrix() = default;   // empty: 0 by 0, per the members' initializers below
     Matrix(std::size_t rows, std::size_t cols, const std::vector<Val>& vals);
 
     Val  operator()(std::size_t i, std::size_t j) const;
@@ -29,8 +29,8 @@ public:
     std::size_t cols() const;
 
 private:
-    std::size_t      mRows;
-    std::size_t      mCols;
+    std::size_t      mRows = 0;
+    std::size_t      mCols = 0;
     std::vector<Val> mVals;
 
     // Grants MultiplyEngine direct access to mRows/mCols/mVals for the fast path.

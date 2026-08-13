@@ -34,7 +34,7 @@ namespace StorageOptions {
 
 class SparseMatrixDynamic {
 public:
-    // Defined in SparseMatrixDynamic.cpp, not here, on purpose: it sums the column sizes to seed
+    // Defined in SparseMatrixDynamic.cpp, not here, on purpose: it sums the column sizes into
     // mNnz and can throw on an over-range dimension/nnz, and an in-header throw was measured to
     // perturb the codegen of the templated multiply compiled in the same translation unit. Keeping
     // the throwing body in the .cpp confines the exception path there, matching the static sibling
@@ -130,7 +130,8 @@ private:
     std::size_t                            mSize;
     std::vector<std::vector<std::int32_t>> mRowIdx;    // one vector per column
     std::vector<std::vector<double>>       mVal;       // one vector per column
-    std::size_t                            mNnz;       // sum of column sizes; set in ctor, kept by setColumn
+    std::size_t                            mNnz = 0;   // sum of column sizes; summed in the ctor's
+                                                       // body, kept by setColumn thereafter
 };
 
 } // namespace StorageOptions

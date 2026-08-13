@@ -7,7 +7,6 @@
 
 #include "SparseMatrixDynamic.h"
 
-#include <numeric>     // std::accumulate
 #include <stdexcept>   // std::length_error
 #include <utility>     // std::move
 
@@ -16,13 +15,15 @@ namespace StorageOptions {
 SparseMatrixDynamic::SparseMatrixDynamic(std::size_t size,
                                          std::vector<std::vector<std::int32_t>> rowIdx,
                                          std::vector<std::vector<double>>       val)
-    : mSize(size), mRowIdx(std::move(rowIdx)), mVal(std::move(val)),
-      mNnz(std::accumulate(mRowIdx.begin(), mRowIdx.end(), std::size_t{0},
-                           [](std::size_t sum, const auto& rowIdx) { return sum + rowIdx.size(); })) {
-    // mNnz is the sum of the per-column entry counts, seeded once here and maintained by setColumn
-    // thereafter, so nnz() stays O(1). The std::size_t{0} seed is load-bearing: it fixes the
-    // accumulator type, so the sum cannot silently overflow an int.
-    //
+    : mSize(size), mRowIdx(std::move(rowIdx)), mVal(std::move(val)) {
+    // mNnz is the sum of the per-column entry counts, summed once here and maintained by setColumn
+    // thereafter, so nnz() stays O(1). A loop is what an initializer cannot do, so it belongs in
+    // the body, and mNnz's own `= 0` at its declaration is the seed the loop accumulates onto,
+    // which is why that initializer is live rather than a value waiting to be overwritten. The
+    // accumulator's type is the member's, so the sum cannot silently overflow an int.
+    for (const std::vector<std::int32_t>& column : mRowIdx)
+        mNnz += column.size();
+
     // Same cap as the static sibling and the main-code matrix: dimension and nnz must fit the
     // std::int32_t index range, since nnz narrows to int at the AMD/MMD ordering boundary.
     if (mSize > MAX_IDX || mNnz > MAX_IDX)

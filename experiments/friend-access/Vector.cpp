@@ -3,10 +3,6 @@
 namespace Oblio {
 
 template<class Val>
-Vector<Val>::Vector()
-    : mSize(0) {}
-
-template<class Val>
 Vector<Val>::Vector(std::size_t size)
     : mSize(size), mVals(size, Val{0}) {}
 

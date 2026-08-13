@@ -3,10 +3,6 @@
 namespace Oblio {
 
 template<class Val>
-Matrix<Val>::Matrix()
-    : mRows(0), mCols(0) {}
-
-template<class Val>
 Matrix<Val>::Matrix(std::size_t rows, std::size_t cols, const std::vector<Val>& vals)
     : mRows(rows), mCols(cols), mVals(vals) {
     assert(vals.size() == rows * cols);

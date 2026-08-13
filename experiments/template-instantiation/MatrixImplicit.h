@@ -17,9 +17,8 @@ namespace Oblio {
 template<class Val>
 class Matrix {
 public:
-    // Constructs an empty 0x0 matrix.
-    Matrix()
-        : mRows(0), mCols(0) {}
+    // Constructs an empty 0x0 matrix, from the members' own initializers below.
+    Matrix() = default;
 
     // Constructs a rows x cols matrix from a flat row-major value array.
     // The values vector must have exactly rows * cols entries.
@@ -43,8 +42,8 @@ public:
     std::size_t cols() const { return mCols; }
 
 private:
-    std::size_t      mRows;
-    std::size_t      mCols;
+    std::size_t      mRows = 0;
+    std::size_t      mCols = 0;
     std::vector<Val> mVals;
 };
 

@@ -17,7 +17,7 @@ class MultiplyEngine;  // befriended below
 template<class Val>
 class Vector {
 public:
-    Vector();
+    Vector() = default;   // empty: size 0, per the member's initializer below
     explicit Vector(std::size_t size);
 
     Val&       operator[](std::size_t i);
@@ -26,7 +26,7 @@ public:
     std::size_t size() const;
 
 private:
-    std::size_t      mSize;
+    std::size_t      mSize = 0;
     std::vector<Val> mVals;
 
     friend class MultiplyEngine;

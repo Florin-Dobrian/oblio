@@ -38,10 +38,8 @@ struct Columns {
 };
 
 Columns build(std::size_t size, std::size_t bandwidth, std::mt19937& rng) {
-    Columns c;
-    c.size = size;
-    c.rowIdx.resize(size);
-    c.val.resize(size);
+    Columns c{size, std::vector<std::vector<std::int32_t>>(size),
+                    std::vector<std::vector<double>>(size)};
     std::uniform_real_distribution<double> uniform(-1.0, 1.0);
 
     for (std::int32_t j = 0; j < static_cast<std::int32_t>(size); ++j) {

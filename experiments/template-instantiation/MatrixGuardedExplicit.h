@@ -2,10 +2,27 @@
 
 // MatrixGuardedExplicit.h - Guarded explicit: plain explicit + extern template guard
 //
-// The header contains only the class declaration. The implementation lives in
-// MatrixGuardedExplicit.cpp, which is compiled exactly once. extern template tells every
-// other translation unit not to instantiate these specialisations themselves;
-// they will be resolved at link time from MatrixGuardedExplicit.o.
+// The header contains the class declaration and one body, the defaulted default
+// constructor. The rest of the implementation lives in MatrixGuardedExplicit.cpp, which is
+// compiled exactly once. extern template tells every other translation unit not to
+// instantiate these specialisations themselves; they will be resolved at link time from
+// MatrixGuardedExplicit.o.
+//
+// **This is the variant the real tree uses**, and the defaulted constructor is why: a body
+// in the header is permitted precisely because the class stays explicitly instantiated with
+// the guard present. That is CLAUDE.md's exception to definitions-in-cpp, and
+// include/oblio/Vector.h is the same arrangement.
+//
+// **What the guard does NOT do here, measured rather than assumed.** The tempting reading
+// is that the defaulted constructor finally gives extern template something to suppress,
+// where a member with no visible body offers it nothing. It does not: a defaulted default
+// constructor over scalars and std::vector members is trivial, so the compiler emits no
+// out-of-line function for it and there is no symbol to suppress. Linking a program that
+// default-constructs a Matrix without this .cpp leaves the same undefined references as the
+// unguarded variant does, and Matrix<double>::Matrix() appears in neither list. So the
+// guard remains documentation here, exactly as it was before the body arrived. The rule is
+// what matters, not the mechanism: inline under the guard is a choice, inline without it is
+// the bug. See the README.
 //
 // Adding a new scalar type (e.g. float) requires:
 //   1. One new extern template line here.
@@ -21,7 +38,7 @@ namespace Oblio {
 template<class Val>
 class Matrix {
 public:
-    Matrix();
+    Matrix() = default;   // the one body in this header; see the note above on the guard
     Matrix(std::size_t rows, std::size_t cols, const std::vector<Val>& vals);
 
     Val  operator()(std::size_t i, std::size_t j) const;
@@ -31,8 +48,8 @@ public:
     std::size_t cols() const;
 
 private:
-    std::size_t      mRows;
-    std::size_t      mCols;
+    std::size_t      mRows = 0;
+    std::size_t      mCols = 0;
     std::vector<Val> mVals;
 };
 

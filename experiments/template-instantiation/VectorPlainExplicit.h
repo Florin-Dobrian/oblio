@@ -15,7 +15,7 @@ namespace Oblio {
 template<class Val>
 class Vector {
 public:
-    Vector();
+    Vector() = default;   // a body, unlike the members below; see MatrixPlainExplicit.h
     explicit Vector(std::size_t size);
 
     Val&       operator[](std::size_t i);
@@ -24,7 +24,7 @@ public:
     std::size_t size() const;
 
 private:
-    std::size_t      mSize;
+    std::size_t      mSize = 0;
     std::vector<Val> mVals;
 };
 

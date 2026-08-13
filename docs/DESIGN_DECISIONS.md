@@ -67,6 +67,110 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ---
 
+## 2026-08-13: two things the initializer rule was hiding, and both were found by applying it
+
+The 2026-08-12 entry below settled where a member's value goes. Sweeping the tree for conformance
+found four sites, three of them ordinary, and turned up two things worth more than the sweep.
+
+### The rule's own example read a moved-from parameter
+
+`CODING_RULES.md` gave the derived-member idiom as
+`mNnz(std::accumulate(rowIdx.begin(), rowIdx.end(), std::size_t{0}, ...))`, naming the CONSTRUCTOR
+PARAMETER. The code it was written from names the MEMBER, `mRowIdx`. The difference is the whole
+thing: `mRowIdx(std::move(rowIdx))` runs first, so by the time a later initializer could look at
+`rowIdx` it is an empty vector, and the sum comes out ZERO. `nnz()` then reports zero, the index-range
+guard never fires, and no test in the tree would notice, the experiment printing `nnz` from its own
+builder rather than from the class.
+
+**Nobody had written the bug; the rule had.** The code was correct and the documentation was
+wrong, which is the reverse of the usual direction and worse in one specific way: prose is what a
+reader copies when they write the next class. `OBLIO_NOTES_FROM_POLYGLOT.md` even names this hazard,
+for a constructor BODY reading a moved-from parameter, and the rule reproduced it in the
+initializer list two sections away.
+
+**The repair is not a corrected example but a different shape**, and it is the one the rule already
+implies. A derived value that is an EXPRESSION over an already-constructed member goes in the list,
+`mNnz(mRowIdx.size())`. A value that is an ACCUMULATION goes in the BODY as a loop, seeded by a
+default member initializer:
+
+```
+std::size_t mNnz = 0;                       // the seed, at the declaration
+for (const std::vector<std::int32_t>& column : mRowIdx)
+    mNnz += column.size();                  // the loop, in the body
+```
+
+This is not the dead-initializer case the entry below forbids: the loop READS `mNnz` on every
+iteration, so the `= 0` is the accumulation's seed rather than a value waiting to be overwritten.
+The loop form also deletes three things the expression form needed and one it hid. Gone: the lambda,
+the `std::size_t{0}` seed whose type was load-bearing (the accumulator's type is now the member's),
+and `<numeric>`. Hidden: **the list runs in declaration order**, so the expression form was correct
+only while `mNnz` was declared after `mRowIdx`, and reordering two lines in a header would have
+broken it silently. A body loop has no such dependency, every member being constructed before the
+body runs.
+
+### A trivial defaulted constructor gives `extern template` nothing to suppress
+
+Bringing `experiments/template-instantiation` onto the current idiom put a body into headers whose
+subject is having none, and the prediction written into them was that this would finally give the
+guard mechanism: a member with no visible body cannot be instantiated by an includer anyway, where a
+defaulted one can. **Measured, that is false.** Linking a program that default-constructs the classes
+without their `.cpp` files leaves the same three symbols undefined under both explicit variants,
+`Matrix<double>::rows()`, `cols()` and `Vector<double>::size()`, and `Matrix<double>::Matrix()`
+appears in neither list. A defaulted default constructor over scalars and `std::vector` members is
+trivial, so no out-of-line function is emitted for it and there is no symbol either to suppress or
+to link.
+
+**Checked on both toolchains deliberately**, Apple clang on arm64 and GCC 13 on x86-64, naming the
+same three symbols. "No symbol is emitted" is an implementation matter rather than a guarantee, and
+this tree has twice recorded a negative result on one toolchain being read as a result about
+another, the loop hoist that GCC performs and Apple clang does not, and the warning sets that differ
+under one `-Wall -Wextra`. Count symbols and not lines if it is re-run: GNU `ld` reports one line per
+use site and Apple's groups the uses under each symbol, so the two counts differ where the finding
+does not.
+
+**What survives is the rule rather than a mechanism**, and it is CLAUDE.md's exception as already
+written: a body in a header is a choice when the class stays explicitly instantiated with the guard
+present, and a bug without it. Whether the guard has work to do depends on the body, and for a
+trivial one it has none. The experiment now models the arrangement the tree actually uses, which it
+did not before: `include/oblio/Vector.h`, `SparseMatrix.h` and four more carry `= default` in
+declaration-only headers beside their `extern template` lines.
+
+**The prediction was written into the prose before it was checked**, and corrected the same hour.
+That is the 2026-08-09 lesson holding, and the ten minutes it took is the point: this one was cheap
+because a link error is a complete oracle, where the earlier cases needed an instrument built first.
+
+### A third thing, smaller and NOT acted on: a stored length is a second name for one value
+
+`SparseMatrix::mNnz` is `mRowIdx.size()`, kept as a member with a comment saying so, and there are
+four more of the shape: `SymFactor::mNumNodeIdx`, `NumFactorStatic::mNumNodeIdx` and `mNumVal`, and
+`UpdateMatrix::mSize`. `CODING_RULES.md`'s one-name-per-entity rule reaches all five and says
+explicitly that it applies to counts and sizes as much as to indices, being "easy to make precisely
+because a size feels too humble to need the rule".
+
+**Every one of them stays, and the reason to record this is the mistake rather than the
+observation.** Two of them were deleted during this pass, `SparseMatrix::mNnz` and its counterpart
+in `experiments/storage-options`, and both were restored within the hour because nobody had asked
+for them to go. **A rule about where a value is written does not license a change to which values
+exist.** The initialization question and the redundancy question met on one line, which is exactly
+what made them easy to conflate, and an audit that starts improving structure has stopped being an
+audit.
+
+The arguments are real on both sides, which is why it is a decision and not a cleanup. Against the
+member: it can go stale where a vector's own length cannot, and it is an agreement a reader has to
+check. For it: it names a concept rather than a buffer's length, it survives a change of
+representation, and in the four factor-class cases the prefix sum computes the member BEFORE the
+array is sized from it, so the member is the source and the length is the copy. Taking it would move
+the headers' own reasoning, `docs/ARCHITECTURE.md`'s accessor table and `test_pipeline`'s seventeen
+size assertions along with it.
+
+**One that looks like this and is not.** `Vector::mSize` is not guaranteed to equal `mVal.size()`:
+the two-argument constructor takes a size and a vector independently and checks no agreement between
+them, so `Vector(10, std::vector<double>(3))` constructs and reports size 10 over three values. That
+is a missing precondition rather than a redundancy, and it belongs with the input-validation item in
+`docs/TODO.md`.
+
+---
+
 ## 2026-08-12: default member initializers, reversing a C++98 habit
 
 **A member is initialized where its value COMES FROM.** A value that is a property of the type gets

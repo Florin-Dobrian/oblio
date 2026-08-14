@@ -292,11 +292,12 @@ def md2_minimum_degree(G):
         order.append(pivot)
         degree_sum += degree
 
-        absorbed_cliques_text = ", ".join(f"c{c}" for c in absorbed_cliques) if absorbed_cliques else "none"
-        pruned_edges_text = ", ".join(f"{u}-{v}" for u, v in pruned_edges) if pruned_edges else "none"
-        # NOT PRODUCTION: display only. The trace is what makes these files teachable and
-        # is the whole reason they exist; nothing downstream reads it.
+        # NOT PRODUCTION: display only, and silent above the threshold. Built INSIDE
+        # the guard, so a run above the threshold formats nothing: these are per
+        # elimination, and on a grid that is work for a line nobody prints.
         if n <= SHOW_THRESHOLD:
+            absorbed_cliques_text = ", ".join(f"c{c}" for c in absorbed_cliques) if absorbed_cliques else "none"
+            pruned_edges_text = ", ".join(f"{u}-{v}" for u, v in pruned_edges) if pruned_edges else "none"
             tag = md2_show(A, I, C, mark, tag,
                            (f"iteration {iteration}: eliminate {pivot} (degree {degree}), "
                             f"absorbed cliques: {absorbed_cliques_text}, "

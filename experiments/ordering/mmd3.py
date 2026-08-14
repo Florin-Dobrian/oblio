@@ -578,7 +578,20 @@ def mmd3_minimum_degree(G, delta=0):
     # mmdint files a degree-0 vertex under degree 1, `if(dg==0)dg=1`, so the
     # bucket a vertex sits in is max(degree, 1) rather than its degree. From here
     # degrees[] holds that filed value, which is what MMD compares and files by.
-    buckets = [[] for _ in range(n)]           # buckets[d] holds the live degree-d
+    #
+    # THE FLOOR IS HERE TO MATCH THE VENDORED OUTPUT, not to find the prepass
+    # vertices. Taking bucket 0 and then bucket 1 finds the same vertices, and the
+    # fill comes out identical; what changes is the ORDER within the prepass, since
+    # the floor puts both degrees on ONE list where they interleave by insertion and
+    # separate buckets group them by degree. Measured: same prepass set and same
+    # nnz(L) on all 300 random graphs tried, different permutation on 212 of them.
+    # So this is a tie-break of the same kind as mmd3's four, and dropping it would
+    # be a fifth alignment defect that no fill check could see.
+    # max(n, 2) and not n: the floor above files a degree-0 vertex under 1, so index 1
+    # has to exist even when the whole graph is one vertex. Bucket 0 is never used from
+    # here on, the floor having taken it out of the range, and the largest index any of
+    # the three filing sites can produce is max(n - 1, 1).
+    buckets = [[] for _ in range(max(n, 2))]   # buckets[d] holds the live degree-d
     filed = [False] * n                        # whether u is in a bucket at all
     for u in range(n):
         degrees[u] = max(degrees[u], 1)
@@ -602,7 +615,7 @@ def mmd3_minimum_degree(G, delta=0):
     # empty. Nothing is eliminated in the quotient-graph sense: no clique is
     # formed, nothing is pruned, and the neighbors keep degrees that still count
     # these vertices. That staleness is the point, and it is what genmmd does.
-    prepass_vertices = list(buckets[1]) if n > 1 else list(buckets[1])
+    prepass_vertices = list(buckets[1])
     for u in prepass_vertices:
         mmd3_unfile(buckets, filed, degrees[u], u)
         external_degree = sum(1 for v in A[u] if not eliminated[v])
@@ -831,11 +844,12 @@ def mmd3_minimum_degree(G, delta=0):
         min_degree = min([min_degree] + [degrees[u] for u in refreshed_vertices])
         num_iterations += 1
 
-        batch_text = ", ".join(str(u) for u in batch)
-        refreshed_vertices_text = ", ".join(str(u) for u in refreshed_vertices) if refreshed_vertices else "none"
-        # NOT PRODUCTION: display only. The trace is what makes these files teachable and
-        # is the whole reason they exist; nothing downstream reads it.
+        # NOT PRODUCTION: display only, and silent above the threshold. Built INSIDE
+        # the guard, as the per-elimination line above is, so a run above the
+        # threshold formats nothing.
         if n <= SHOW_THRESHOLD:
+            batch_text = ", ".join(str(u) for u in batch)
+            refreshed_vertices_text = ", ".join(str(u) for u in refreshed_vertices) if refreshed_vertices else "none"
             mmd3_show(A, I, C, degrees,
                       (f"iteration {num_iterations - 1} done: batch of {len(batch)}: {batch_text}, "
                        f"refreshed vertices: {refreshed_vertices_text}"),

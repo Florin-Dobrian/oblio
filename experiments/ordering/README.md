@@ -3230,7 +3230,28 @@ production counterpart, and mmd1 and mmd2 both have one.
 mmd1 is multiple elimination and nothing else. genmmd is multiple elimination plus six other
 things, none of them an idea and all of them load-bearing for matching the vendored routine.
 mmd2 adds them one pass at a time, and this section grows a subsection per pass. The checklist
-and its vendored references are in the plan section above.
+and its vendored references are in the plan section above. The numbering here is the source
+file's, so a subsection and the `mmd2.py` header agree; passes 3 and 4 share one subsection
+because both are decided inside the same walk, and the heading says so.
+
+**Where the six land in the file, since four of them never leave one function.** Passes 2, 3, 5
+and 6 are entirely inside `mmd2_minimum_degree`, which is why that function is 131 of the 158
+changed lines. Only two reach the helpers, and they reach different ones. The prepass touches
+`mmd2_neighbors`, which gains an `eliminated` parameter and skips numbered vertices in both
+halves of its walk, and `mmd2_eliminate`, which drops them when the prune rewrites an adjacency
+list; both are genmmd's `marker[mn] = maxint`, which no `marker[nb] < tag` test can pass.
+Outmatched marking touches `mmd2_eliminate` alone, one line clearing the flag for everything the
+new clique reaches, which is `mmdelm`'s `bwd[rn] = 0`. `mmd2_file`, `mmd2_unfile`, `mmd2_storage`
+and the two display functions are byte-identical to mmd1's. `mmd2_degree` is new, and pass 3 is
+the reason: once a candidate can stand for several original vertices, a degree has to count
+those rather than entries.
+
+**Evictions continue; the evicted LIST goes.** The unfile per member of `C[pivot]` is still there
+and still leaves the reached vertices out of the buckets. What mmd1 also did was accumulate who
+was unfiled, stamped by iteration, and walk that list at the refresh. mmd2's refresh walks the
+new elements instead and re-derives the same vertices from `C[element]`, deduplicating with the
+`filed` flag, so the list and its stamp array have no reader and are not carried. genmmd makes
+the same trade, chaining its new elements in `list` and building no vertex set at all.
 
 ### Pass 1: the prepass
 
@@ -3310,7 +3331,7 @@ identical: on the grids, nnz(L) goes 636 to 633, 2088 to 2101, and 4684 to 4684 
 A vertex reached by two pivots in the same iteration is still updated once, skipped on the second
 visit by the `filed` flag, which is `if (bwd[en] != 0) goto n2200` there.
 
-### Pass 3: the pairwise merge, and outmatched marking
+### Passes 3 and 4: the pairwise merge, and outmatched marking
 
 Both live in the same branch of the q2h walk, reached when a member of the one other source is
 ALSO a member of the new element:
@@ -3358,7 +3379,7 @@ That last column is worth reading honestly. These two mechanisms do not improve 
 here; they make it match the vendored routine. mmd2 is fidelity, and the fill goes where the
 vendored algorithm puts it.
 
-### Pass 4: the filing convention
+### Pass 5: the filing convention
 
 `mmdupd` does not file a vertex under its degree. It files under `dg = dg - qsize[en] + 1`,
 floored at 1, where `dg` was the weighted reach INCLUDING en's own members. So the bucket index
@@ -3372,7 +3393,7 @@ vertices, which sit a bucket higher than an untouched vertex of the same reach. 
 degrees[] holds the FILED value, which is what the picker compares and what min_degree tracks;
 the nnz(L) accounting is unaffected, since it sums weights over the live members of C[pivot].
 
-### Pass 5: the counters
+### Pass 6: the counters
 
 Two small things in genmmd's main loop, and one of them cannot be checked.
 

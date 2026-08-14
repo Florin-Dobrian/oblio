@@ -538,11 +538,12 @@ def mmd1_minimum_degree(G, delta=0):
         min_degree = min([min_degree] + [degrees[u] for u in refreshed_vertices])
         num_iterations += 1
 
-        batch_text = ", ".join(str(u) for u in batch)
-        refreshed_vertices_text = ", ".join(str(u) for u in refreshed_vertices) if refreshed_vertices else "none"
-        # NOT PRODUCTION: display only. The trace is what makes these files teachable and
-        # is the whole reason they exist; nothing downstream reads it.
+        # NOT PRODUCTION: display only, and silent above the threshold. Built INSIDE
+        # the guard, as the per-elimination line above is, so a run above the
+        # threshold formats nothing.
         if n <= SHOW_THRESHOLD:
+            batch_text = ", ".join(str(u) for u in batch)
+            refreshed_vertices_text = ", ".join(str(u) for u in refreshed_vertices) if refreshed_vertices else "none"
             mmd1_show(A, I, C, degrees,
                       (f"iteration {num_iterations - 1} done: batch of {len(batch)}: {batch_text}, "
                        f"refreshed vertices: {refreshed_vertices_text}"),

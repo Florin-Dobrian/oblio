@@ -813,25 +813,26 @@ std::vector<std::int32_t> mmd1MinimumDegree(const AdjacencyGraph& G, std::int32_
         for (std::int32_t u : refreshedVertices) minDegree = std::min(minDegree, degrees[u]);
         ++numIterations;
 
-        std::ostringstream batchText;
-        for (std::uint32_t k = 0; k < batch.size(); ++k)
-            batchText << (k == 0 ? "" : ", ") << batch[k];
-        std::ostringstream refreshedVerticesText;
-        if (refreshedVertices.empty()) {
-            refreshedVerticesText << "none";
-        } else {
-            bool first = true;
-            for (std::int32_t u : refreshedVertices) {
-                refreshedVerticesText << (first ? "" : ", ") << u;
-                first = false;
-            }
-        }
-        std::ostringstream title;
-        title << "iteration " << (numIterations - 1) << " done: batch of " << batch.size() << ": "
-              << batchText.str() << ", refreshed vertices: " << refreshedVerticesText.str();
-        // NOT PRODUCTION: display only. The trace is what makes these files teachable and
-        // is the whole reason they exist; nothing downstream reads it.
+        // NOT PRODUCTION: display only, and silent above the threshold. Built INSIDE
+        // the guard, as the per-elimination line above is, so a run above the
+        // threshold formats nothing.
         if (n <= SHOW_THRESHOLD) {
+            std::ostringstream batchText;
+            for (std::uint32_t k = 0; k < batch.size(); ++k)
+                batchText << (k == 0 ? "" : ", ") << batch[k];
+            std::ostringstream refreshedVerticesText;
+            if (refreshedVertices.empty()) {
+                refreshedVerticesText << "none";
+            } else {
+                bool first = true;
+                for (std::int32_t u : refreshedVertices) {
+                    refreshedVerticesText << (first ? "" : ", ") << u;
+                    first = false;
+                }
+            }
+            std::ostringstream title;
+            title << "iteration " << (numIterations - 1) << " done: batch of " << batch.size() << ": "
+                  << batchText.str() << ", refreshed vertices: " << refreshedVerticesText.str();
             mmd1Show(A, I, C, degrees, title.str(), &eliminated);
             mmd1ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
         }

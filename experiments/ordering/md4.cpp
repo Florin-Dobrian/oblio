@@ -569,56 +569,57 @@ std::vector<std::int32_t> md4MinimumDegree(const AdjacencyGraph& G) {
         nnzL += static_cast<std::size_t>(superSize) * externalDegree
               + static_cast<std::size_t>(superSize) * (superSize - 1) / 2 + superSize;
 
-        std::ostringstream absorbedCliquesText;
-        if (absorbedCliques.empty()) {
-            absorbedCliquesText << "none";
-        } else {
-            bool first = true;
-            for (std::int32_t c : absorbedCliques) {
-                absorbedCliquesText << (first ? "" : ", ") << "c" << c;
-                first = false;
-            }
-        }
-        std::ostringstream prunedEdgesText;
-        if (prunedEdges.empty()) {
-            prunedEdgesText << "none";
-        } else {
-            bool first = true;
-            for (auto [u, v] : prunedEdges) {
-                prunedEdgesText << (first ? "" : ", ") << u << "-" << v;
-                first = false;
-            }
-        }
-        std::ostringstream mergedVerticesText;
-        if (mergedVertices.empty()) {
-            mergedVerticesText << "none";
-        } else {
-            bool first = true;
-            for (std::int32_t u : mergedVertices) {
-                mergedVerticesText << (first ? "" : ", ") << u;
-                first = false;
-            }
-        }
-        std::ostringstream refreshedVerticesText;
-        if (refreshedVertices.empty()) {
-            refreshedVerticesText << "none";
-        } else {
-            bool first = true;
-            for (std::int32_t u : refreshedVertices) {
-                refreshedVerticesText << (first ? "" : ", ") << u;
-                first = false;
-            }
-        }
-        std::ostringstream title;
-        title << "iteration " << iteration << ": eliminate " << pivot << " (degree " << degree
-              << ", size " << superSize << ", external degree " << externalDegree
-              << "), absorbed cliques: " << absorbedCliquesText.str()
-              << ", pruned edges: " << prunedEdgesText.str()
-              << ", merged vertices: " << mergedVerticesText.str()
-              << ", refreshed vertices: " << refreshedVerticesText.str();
-        // NOT PRODUCTION: display only. The trace is what makes these files teachable and
-        // is the whole reason they exist; nothing downstream reads it.
+        // NOT PRODUCTION: display only, and silent above the threshold. Built INSIDE
+        // the guard, so a run above the threshold formats nothing: these are per
+        // elimination, and on a grid that is work for a line nobody prints.
         if (n <= SHOW_THRESHOLD) {
+            std::ostringstream absorbedCliquesText;
+            if (absorbedCliques.empty()) {
+                absorbedCliquesText << "none";
+            } else {
+                bool first = true;
+                for (std::int32_t c : absorbedCliques) {
+                    absorbedCliquesText << (first ? "" : ", ") << "c" << c;
+                    first = false;
+                }
+            }
+            std::ostringstream prunedEdgesText;
+            if (prunedEdges.empty()) {
+                prunedEdgesText << "none";
+            } else {
+                bool first = true;
+                for (auto [u, v] : prunedEdges) {
+                    prunedEdgesText << (first ? "" : ", ") << u << "-" << v;
+                    first = false;
+                }
+            }
+            std::ostringstream mergedVerticesText;
+            if (mergedVertices.empty()) {
+                mergedVerticesText << "none";
+            } else {
+                bool first = true;
+                for (std::int32_t u : mergedVertices) {
+                    mergedVerticesText << (first ? "" : ", ") << u;
+                    first = false;
+                }
+            }
+            std::ostringstream refreshedVerticesText;
+            if (refreshedVertices.empty()) {
+                refreshedVerticesText << "none";
+            } else {
+                bool first = true;
+                for (std::int32_t u : refreshedVertices) {
+                    refreshedVerticesText << (first ? "" : ", ") << u;
+                    first = false;
+                }
+            }
+            std::ostringstream title;
+            title << "iteration " << iteration << ": eliminate " << pivot << " (degree " << degree
+                  << ", size " << superSize << ", external degree " << externalDegree
+                  << "), absorbed cliques: " << absorbedCliquesText.str()
+                  << ", pruned edges: " << prunedEdgesText.str()
+                  << ", merged vertices: " << mergedVerticesText.str()
+                  << ", refreshed vertices: " << refreshedVerticesText.str();
             md4Show(A, I, C, degrees, title.str(), &eliminated);
             md4ShowState(degrees, superMembers, eliminated, pivots);
         }

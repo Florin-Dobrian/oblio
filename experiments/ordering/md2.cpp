@@ -431,33 +431,34 @@ std::vector<std::int32_t> md2MinimumDegree(const AdjacencyGraph& G) {
         order.push_back(pivot);
         degreeSum += degree;
 
-        std::ostringstream absorbedCliquesText;
-        if (absorbedCliques.empty()) {
-            absorbedCliquesText << "none";
-        } else {
-            bool first = true;
-            for (std::int32_t c : absorbedCliques) {
-                absorbedCliquesText << (first ? "" : ", ") << "c" << c;
-                first = false;
-            }
-        }
-        std::ostringstream prunedEdgesText;
-        if (prunedEdges.empty()) {
-            prunedEdgesText << "none";
-        } else {
-            bool first = true;
-            for (auto [u, v] : prunedEdges) {
-                prunedEdgesText << (first ? "" : ", ") << u << "-" << v;
-                first = false;
-            }
-        }
-        std::ostringstream title;
-        title << "iteration " << iteration << ": eliminate " << pivot << " (degree " << degree
-              << "), absorbed cliques: " << absorbedCliquesText.str()
-              << ", pruned edges: " << prunedEdgesText.str();
-        // NOT PRODUCTION: display only. The trace is what makes these files teachable and
-        // is the whole reason they exist; nothing downstream reads it.
+        // NOT PRODUCTION: display only, and silent above the threshold. Built INSIDE
+        // the guard, so a run above the threshold formats nothing: these are per
+        // elimination, and on a grid that is work for a line nobody prints.
         if (n <= SHOW_THRESHOLD) {
+            std::ostringstream absorbedCliquesText;
+            if (absorbedCliques.empty()) {
+                absorbedCliquesText << "none";
+            } else {
+                bool first = true;
+                for (std::int32_t c : absorbedCliques) {
+                    absorbedCliquesText << (first ? "" : ", ") << "c" << c;
+                    first = false;
+                }
+            }
+            std::ostringstream prunedEdgesText;
+            if (prunedEdges.empty()) {
+                prunedEdgesText << "none";
+            } else {
+                bool first = true;
+                for (auto [u, v] : prunedEdges) {
+                    prunedEdgesText << (first ? "" : ", ") << u << "-" << v;
+                    first = false;
+                }
+            }
+            std::ostringstream title;
+            title << "iteration " << iteration << ": eliminate " << pivot << " (degree " << degree
+                  << "), absorbed cliques: " << absorbedCliquesText.str()
+                  << ", pruned edges: " << prunedEdgesText.str();
             md2Show(A, I, C, mark, tag, title.str(), &eliminated);
         }
     }

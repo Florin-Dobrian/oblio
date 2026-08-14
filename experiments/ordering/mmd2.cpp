@@ -680,7 +680,20 @@ std::vector<std::int32_t> mmd2MinimumDegree(const AdjacencyGraph& G, std::int32_
     // mmdint files a degree-0 vertex under degree 1, `if(dg==0)dg=1`, so the
     // bucket a vertex sits in is max(degree, 1) rather than its degree. From here
     // degrees[] holds that filed value, which is what MMD compares and files by.
-    Buckets buckets(n);
+    //
+    // THE FLOOR IS HERE TO MATCH THE VENDORED OUTPUT, not to find the prepass
+    // vertices. Taking bucket 0 and then bucket 1 finds the same vertices, and the
+    // fill comes out identical; what changes is the ORDER within the prepass, since
+    // the floor puts both degrees on ONE list where they interleave by insertion and
+    // separate buckets group them by degree. Measured: same prepass set and same
+    // nnz(L) on all 300 random graphs tried, different permutation on 212 of them.
+    // So this is a tie-break of the same kind as mmd3's four, and dropping it would
+    // be a fifth alignment defect that no fill check could see.
+    // max(n, 2) and not n: the floor above files a degree-0 vertex under 1, so index 1
+    // has to exist even when the whole graph is one vertex. Bucket 0 is never used from
+    // here on, the floor having taken it out of the range, and the largest index any of
+    // the three filing sites can produce is max(n - 1, 1).
+    Buckets buckets(std::max(n, 2u));
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) {
         degrees[u] = std::max<std::uint32_t>(degrees[u], 1);
         buckets.file(degrees[u], u);
@@ -1003,25 +1016,26 @@ std::vector<std::int32_t> mmd2MinimumDegree(const AdjacencyGraph& G, std::int32_
         for (std::int32_t u : refreshedVertices) minDegree = std::min(minDegree, degrees[u]);
         ++numIterations;
 
-        std::ostringstream batchText;
-        for (std::uint32_t k = 0; k < batch.size(); ++k)
-            batchText << (k == 0 ? "" : ", ") << batch[k];
-        std::ostringstream refreshedVerticesText;
-        if (refreshedVertices.empty()) {
-            refreshedVerticesText << "none";
-        } else {
-            bool first = true;
-            for (std::int32_t u : refreshedVertices) {
-                refreshedVerticesText << (first ? "" : ", ") << u;
-                first = false;
-            }
-        }
-        std::ostringstream title;
-        title << "iteration " << (numIterations - 1) << " done: batch of " << batch.size() << ": "
-              << batchText.str() << ", refreshed vertices: " << refreshedVerticesText.str();
-        // NOT PRODUCTION: display only. The trace is what makes these files teachable and
-        // is the whole reason they exist; nothing downstream reads it.
+        // NOT PRODUCTION: display only, and silent above the threshold. Built INSIDE
+        // the guard, as the per-elimination line above is, so a run above the
+        // threshold formats nothing.
         if (n <= SHOW_THRESHOLD) {
+            std::ostringstream batchText;
+            for (std::uint32_t k = 0; k < batch.size(); ++k)
+                batchText << (k == 0 ? "" : ", ") << batch[k];
+            std::ostringstream refreshedVerticesText;
+            if (refreshedVertices.empty()) {
+                refreshedVerticesText << "none";
+            } else {
+                bool first = true;
+                for (std::int32_t u : refreshedVertices) {
+                    refreshedVerticesText << (first ? "" : ", ") << u;
+                    first = false;
+                }
+            }
+            std::ostringstream title;
+            title << "iteration " << (numIterations - 1) << " done: batch of " << batch.size() << ": "
+                  << batchText.str() << ", refreshed vertices: " << refreshedVerticesText.str();
             mmd2Show(A, I, C, degrees, title.str(), &eliminated);
             mmd2ShowState(degrees, buckets, minDegree, superMembers, eliminated, pivots);
         }

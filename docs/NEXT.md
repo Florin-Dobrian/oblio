@@ -2,7 +2,10 @@
 
 A handover note between sessions, rewritten 2026-08-11 after three commits added a real-matrix
 benchmark, a scaling benchmark and the three reports drawn from them, and updated 2026-08-10 before
-that when three commits closed the constant factor on the amd branch. **It is meant to be deleted** once the items below are done or
+that when three commits closed the constant factor on the amd branch. Appended to on 2026-08-14
+with two rounds that touched no algorithm, an idiom sweep and a Makefile consolidation, both under
+"Closed since the last note" and neither changing a number in any report. **It is meant to be
+deleted** once the items below are done or
 abandoned.
 Everything in it that outlives the task is already somewhere durable and this file only points at
 those places:
@@ -153,6 +156,41 @@ solve, and it found that the branches change places for DIFFERENT reasons: in 2D
 14 percent less at level time, on cubes `AMD_2` orders twice as fast at equal fill. Two orderings
 can fill the same and factor 4 to 10 percent differently, which is supernode shape rather than
 fill.
+
+### Two rounds that touched no algorithm, 2026-08-13 and 2026-08-14
+
+Neither changed a permutation, a factor or a number in any report; both are recorded in full
+elsewhere, and are here only so a later session can tell they finished rather than stalled.
+
+**The idiom sweep.** Four non-conformant sites brought onto the 2026-08-12 initializer rule, plus
+two pre-C++11 idioms found while there: a zeroing default constructor in eight classes, and
+`std::vector<T>().swap(v)` in `UpdateMatrix::discard`. The multifrontal peak was measured identical
+to the byte before and after. `PORTING_LEDGER.md` now carries two sections, C++11 with every site
+named and C++17 as a menu with no sweep owed; the 2026-08-13 `DESIGN_DECISIONS` entry has the
+reasoning and the two defects the sweep exposed, one of which was in `CODING_RULES.md`'s own
+example, which read a moved-from parameter and would have set an nnz to zero silently.
+
+**One behavior change came out of it.** `Vector`'s two-argument constructor took a size and a
+vector and checked no agreement between them, so `Vector(10, std::vector<double>(3))` built an
+object reporting size 10 over three values. It is now `Vector(std::vector<Val> val)`, size derived,
+so the state is unrepresentable rather than merely detectable. Nothing called the old form.
+
+**The Makefile consolidation, and note it went the OTHER WAY from how the previous note framed
+it.** That note asked for `benchmarks/ordering` to build on a bare `make`. Instead all nine
+Makefiles now PRINT their target list on a bare `make`, with `.DEFAULT_GOAL := help` stated
+explicitly rather than falling out of target order, `all`, `clean` and `help` everywhere, and
+`test` only where something can fail, which is why the three benchmark directories do not have one.
+`CLAUDE.md`'s clone checklist says `make all` in the two benchmark directories, so it no longer
+passes vacuously. The convention is a rule in `CODING_RULES.md`. Two working targets turned up that
+no help block advertised, `profile` and `example`.
+
+**And the ordering ladder, 2026-08-14.** `degrees[pivot] = 0` moved before the refresh in md4 and
+mdm2, so the convention holds in all six layers with a degree cache; mdm2's counter moved after the
+loop it counts and its refresh set is named from `C[pivot]` as md4 and md5 name theirs. All four
+traces byte-identical to before the move. `experiments/ordering/README.md` gained a section on how
+the buckets differ from a bucket priority queue, and the external-degree section now gives the
+paper's exact relation and the plain reading: `d_i` is the update size per SUPERNODE, `t_i` the
+update size per COLUMN, with the front size as the other dimension.
 
 ### Earlier, 2026-08-09
 
@@ -912,8 +950,27 @@ routine's. `benchmarks/README.md` records how far an attempt to get them got and
   The three matrices are fetched and sit in `data/`, named by `benchmarks/matrices/extras.txt`;
   the caps keep them out of every run.
 
-- **`benchmarks/ordering` builds nothing on a bare `make`**, its first rule being `help`, so
-  `CLAUDE.md`'s pre-release clone checklist has been passing vacuously for it.
-  `benchmarks/matrices` and `benchmarks/pipeline` both set `.DEFAULT_GOAL := all` now and the three
-  are inconsistent. One
-  line each.
+- **Left open by the 2026-08-13 idiom sweep**, none of it blocking and all of it recorded in
+  `PORTING_LEDGER.md`'s two idiom sections or the 2026-08-13 `DESIGN_DECISIONS` entry.
+
+  - **Four stored lengths**, `SymFactor::mNumNodeIdx`, `NumFactorStatic::mNumNodeIdx` and
+    `mNumVal`, and `UpdateMatrix::mSize`, each a member holding a length its container already
+    knows. A DECISION NOT TAKEN rather than an oversight: the arguments run both ways, and two
+    were removed during the sweep and put back the same hour because nobody had asked. Taking it
+    would move the headers' own reasoning, `ARCHITECTURE.md`'s accessor table and
+    `test_pipeline`'s seventeen size assertions along with it.
+  - **Four small C++17 items**, each with its site named in the ledger. `[[nodiscard]]` is the
+    only one that would catch a bug rather than tidy a line, on the query accessors where a
+    discarded result is always a mistake. The others are a `_v` spelling, a `(void)` cast that
+    wants `[[maybe_unused]]`, and a `const char*` that wants `std::string_view`.
+  - **A `clang-tidy` run with the `modernize-*` checks** over `src/` and `include/`. The ledger
+    says nothing is KNOWN to remain, which is weaker than nothing remains: the sweep followed an
+    audit of four sites, not a systematic search. One command settles it either way.
+  - **Em-dashes in three headers**, `ElmForest.h`, `ElmForestEngine.h` and `Permutation.h`, which
+    `WRITING_RULES.md` calls a hard rule. `SparseMatrix.h`'s were cleared on 2026-08-13 because
+    that file was being edited anyway.
+- **Changing a matrix's VALUES while keeping its structure**, which is the refactorization case and
+  what lets one `analyze` serve many `factor` calls. Replacing a matrix wholesale already works and
+  needs no new code, assignment from a fresh one going through the constructor so the guards run;
+  the values-only path does not exist. `TODO.md` has the entry, with the reasons a `setValues` is
+  the right shape and a `setStructure` is not.

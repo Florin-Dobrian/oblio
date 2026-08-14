@@ -11,7 +11,7 @@
 #   1. the PREPASS over head[1], numbering degree 0 and 1 vertices before the main
 #      loop and leaving their neighbors' degrees stale                    [done]
 #   2. mmdupd's q2h path, split on mmdelm's fwd[rn] = nq + 1 stash        [done]
-#   3. the pairwise merge inside the q2h walk, which folds a vertex into a
+#   3. the pairwise merge inside the two-source walk, which folds a vertex into a
 #      LIVE one, so a candidate can stand for several vertices             [done]
 #   4. OUTMATCHED marking, bwd[nd] = -maxint                              [done]
 #   5. the filing convention, dg - qsize[en] + 1 floored at 1             [done]
@@ -31,30 +31,33 @@
 # loop drops them when it compacts, which is what mmdelm's `marker[nb] < tag` test
 # does.
 #
-# PASS 2, THE q2h SPLIT. mmdupd does not walk a flat list of reached vertices. It
+# PASS 2, THE TWO-SOURCE SPLIT. mmdupd does not walk a flat list of reached vertices. It
 # walks the ELEMENTS created this iteration, `el = list[el]`, and for each one it
 # computes dg0 once, the weighted size of that element, then visits the element's
 # members. A member is classified by what it has left BESIDES the new element:
 # mmdelm stashes fwd[rn] = nq + 1 where nq counts the survivors of the compaction,
-# which here is len(A[u]) + len(I[u]) - 1. nq == 1 puts the vertex on the q2h list,
-# anything else on qxh.
+# which here is len(A[u]) + len(I[u]) - 1. nq == 1 puts the vertex on
+# mmdupd's q2h chain, anything else on its qxh, `list[nb] = q2h; q2h = nb`. Ours are
+# two_source_queue and many_source_queue, named for the criterion rather than for the
+# vendored abbreviation, and vectors rather than chains threaded through list[].
 #
-# The q2h case is answered without a union. Everything the vertex reaches is
+# The two-source case is answered without a union. Everything the vertex reaches is
 # either inside the element, already counted in dg0, or comes from that one other
 # source, so the walk adds only what the other source contributes. The marker
 # stops the element's own members being counted twice, which is what mt does in
-# mmdupd. The qxh case does the full union, as before.
+# mmdupd. The many-source case does the full union, as before.
 #
 # The degrees come out identical either way, which is the check on this pass. What
 # does move is the ORDER of the filing, since the refresh is now element by element
-# with q2h before qxh, and filing order decides what a bucket holds.
+# with two_source_queue before many_source_queue, and filing order decides what a
+# bucket holds.
 #
 # A vertex reached by two pivots in the same iteration is refreshed once: mmdupd skips
 # it on the second visit with `if(bwd[en]!=0) goto n2200`, since a refiled vertex
 # has a bucket again. Here that is the `filed` flag.
 #
-# PASS 3, THE PAIRWISE MERGE AND OUTMATCHED MARKING. Both live in the same branch
-# of the q2h walk, reached when a member of the one other source is ALSO a member
+# PASSES 3 AND 4, THE PAIRWISE MERGE AND OUTMATCHED MARKING. Both live in one branch
+# of the two_source_queue walk, reached when a member of the one other source is ALSO a member
 # of the new element:
 #
 #   else if(bwd[nd]==0){
@@ -62,7 +65,7 @@
 #                      fwd[nd]=-en;bwd[nd]=-maxint;}
 #       else if(bwd[nd]==0)bwd[nd]=-maxint;}
 #
-# MERGE. If nd is q2h too, its only other source is that same element, so en and nd
+# MERGE. If nd is two-source too, its only other source is that same element, so en and nd
 # reach exactly the same vertices and are indistinguishable. en absorbs nd. This is
 # the first merge in the whole sequence that folds a vertex into a LIVE one, which
 # matters here: from here a candidate can stand for several original vertices, and
@@ -73,14 +76,14 @@
 # The count comes from len(super_members[v]), which is O(1), so there is still no
 # weight array. MMD keeps qsize because its members are a chain, not a list.
 #
-# OUTMATCHED. If nd is not q2h it has other sources besides these two, so its reach
+# OUTMATCHED. If nd is not two-source it has other sources besides these two, so its reach
 # contains en's. It can never be the minimum before en, and MMD withdraws it from
 # the degree lists rather than refiling it: bwd[nd] = -maxint. It is not merged and
 # not eliminated, just held out until something reaches it again, at which point
 # mmdelm restores it with bwd[rn] = 0. Here that is the `outmatched` flag, cleared
 # in mmd2_eliminate for every vertex the new clique reaches.
 #
-# PASS 4, THE FILING CONVENTION. mmdupd does not file a vertex under its degree.
+# PASS 5, THE FILING CONVENTION. mmdupd does not file a vertex under its degree.
 # It files under `dg = dg - qsize[en] + 1`, floored at 1, where dg was the weighted
 # reach INCLUDING en's own members. So the bucket index is the external degree plus
 # one, and the floor catches the case where a vertex reaches nothing outside itself.
@@ -95,7 +98,7 @@
 # what min_degree tracks. The nnz(L) accounting does not use it: that sums weights
 # over the live members of C[pivot] and is unaffected.
 #
-# PASS 5, THE COUNTERS. Two small things in genmmd's main loop.
+# PASS 6, THE COUNTERS. Two small things in genmmd's main loop.
 #
 # ncsub, `*ncsub += mdeg + qsize[mn] - 2`, accumulated per pivot. It is the
 # statistic genmmd returns alongside the permutation, an estimate of the subscript
@@ -416,6 +419,23 @@ def mmd2_minimum_degree(G, delta=0):
     pivot per iteration, which is md5's behavior reached through this code path.
     """
     n = len(G)
+
+    # An empty graph has no prepass to run and no bucket 1 to read, and production
+    # returns here too, `if (size == 0) return std::vector<std::int32_t>()`. The
+    # summary is written out rather than derived because at n = 0 every quantity in
+    # it is zero by inspection; the cost is that a new counter has to be added in two
+    # places, which is why there is exactly one line of it.
+    if n == 0:
+        print("n = 0, nnz(L) = 0 against nnz(tril A) = 0, fill = 0")
+        print("iterations: 0")
+        print("eliminations: 0")
+        print("sum of |C[p]|: 0")
+        print("degree computations: 0, degree updates: 0, bucket probes: 0, "
+              "prepass: 0, pair merges: 0, outmatched: 0, ncsub: 0")
+        print("tag sweeps: 0")
+        print("order: []")
+        return []
+
     nnz_tril_A = sum(len(G[u]) for u in range(n)) // 2 + n
     # The input is given as sets, so sort once here to match the C++ literals.
     # After this nothing is sorted: the order is whatever the structure produces.
@@ -464,11 +484,13 @@ def mmd2_minimum_degree(G, delta=0):
     # nnz(L) on all 300 random graphs tried, different permutation on 212 of them.
     # So this is a tie-break of the same kind as mmd3's four, and dropping it would
     # be a fifth alignment defect that no fill check could see.
-    # max(n, 2) and not n: the floor above files a degree-0 vertex under 1, so index 1
-    # has to exist even when the whole graph is one vertex. Bucket 0 is never used from
-    # here on, the floor having taken it out of the range, and the largest index any of
-    # the three filing sites can produce is max(n - 1, 1).
-    buckets = [[] for _ in range(max(n, 2))]   # buckets[d] holds the live degree-d
+    # n + 1 and not n, which is how production sizes it: `mHead(size + 1, NIL)` beside
+    # `mNext(size, NIL)`, because a head is indexed by a DEGREE and a link by a VERTEX.
+    # The two index spaces are not the same size, and the floor above is what makes the
+    # difference bite: it files a degree-0 vertex under 1, so at n = 1 index 1 has to
+    # exist and holds the only vertex there is. Bucket 0 goes unused from here on, the
+    # floor having taken it out of the range.
+    buckets = [[] for _ in range(n + 1)]       # buckets[d] holds the live degree-d
     filed = [False] * n                        # whether u is in a bucket at all
     for u in range(n):
         degrees[u] = max(degrees[u], 1)
@@ -476,7 +498,7 @@ def mmd2_minimum_degree(G, delta=0):
     min_degree = min(degrees) if n else 0
     num_bucket_probes = 0
     ncsub = 0                                  # genmmd's subscript estimate
-    pair_merges = 0                            # q2h merges, the coarser supervariables
+    pair_merges = 0                            # two-source merges, the coarser supervariables
     outmatched_count = 0                       # vertices withheld rather than refiled
 
     # NOT PRODUCTION: display only. The trace is what makes these files teachable and
@@ -603,8 +625,9 @@ def mmd2_minimum_degree(G, delta=0):
         # mmdupd walks the elements this iteration created, not the vertices it
         # reached, and computes dg0 once per element: the size of that element,
         # which every member of it reaches in full. A member with exactly one other
-        # source goes on the q2h list and is answered from dg0 plus that source;
-        # everything else goes on qxh and pays for the full union. Same degrees,
+        # source goes on the two_source_queue and is answered from dg0 plus that
+        # source; everything else goes on many_source_queue and pays for the full
+        # union. Same degrees,
         # different work, and a different filing order.
         #
         # This is also why no evicted list is carried. mmd1 accumulates one during
@@ -615,7 +638,7 @@ def mmd2_minimum_degree(G, delta=0):
         refreshed_vertices = []
         # The second site, before the refresh, and OUTSIDE the element loop rather
         # than inside it. element_tag is stamped once per element and read all the
-        # way through that element's q2h walk, where it decides both the pair merge
+        # way through that element's two-source walk, where it decides both the merge
         # and the outmatched case, with vertex_tag fresh per vertex nested inside
         # it. Two levels live at once, which is mmdupd's mt against its tag, so a
         # sweep within an element erases marks about to be read.
@@ -636,21 +659,21 @@ def mmd2_minimum_degree(G, delta=0):
             # reaches lies in this element plus ONE other source. That is the case
             # a union is not needed for: dg0 already counts the element, and the one
             # other source is walked directly.
-            q2h, qxh = [], []
+            two_source_queue, many_source_queue = [], []
             for u in element_members:
                 if filed[u] or outmatched[u]:   # already refreshed this iteration, or
                     continue                    # withheld as outmatched
                 other_sources = len(A[u]) + len(I[u]) - 1
-                (q2h if other_sources == 1 else qxh).append(u)
+                (two_source_queue if other_sources == 1 else many_source_queue).append(u)
 
-            for u in q2h:
+            for u in two_source_queue:
                 if eliminated[u] or outmatched[u]:   # merged or withheld by an
-                    continue                         # earlier q2h vertex
+                    continue                         # earlier two-source vertex
                 # Everything u reaches is in the element or comes from its one
                 # other source. dg0 counts the element, minus u itself. Two mark
                 # levels, as mmdupd has: element_tag says "already in dg0" and
                 # survives the whole element, while vertex_tag is fresh per vertex,
-                # so one q2h vertex cannot hide a neighbor from the next.
+                # so one two-source vertex cannot hide a neighbor from the next.
                 tag += 1
                 vertex_tag = tag
                 # dg0 is kept WHOLE and u's own weight subtracted at the end, which is
@@ -681,7 +704,7 @@ def mmd2_minimum_degree(G, delta=0):
                             if filed[v] or outmatched[v]:
                                 continue
                             if len(A[v]) + len(I[v]) - 1 == 1:
-                                # v is q2h too, so its only other source is this
+                                # v is two-source too, so its only other source is this
                                 # one: identical reach, and u absorbs it.
                                 # Set view: reach(u) | {u} == reach(v) | {v},
                                 # decided without forming either side, because both
@@ -706,7 +729,7 @@ def mmd2_minimum_degree(G, delta=0):
                 mmd2_file(buckets, filed, degrees[u], u)
                 refreshed_vertices.append(u)
 
-            for u in qxh:
+            for u in many_source_queue:
                 if eliminated[u] or outmatched[u]:
                     continue
                 degree, tag = mmd2_degree(A, I, C, eliminated, super_members, mark, tag, u)
@@ -739,6 +762,7 @@ def mmd2_minimum_degree(G, delta=0):
     print(f"degree computations: {num_degree_updates + n}, "
           f"degree updates: {num_degree_updates}, "
           f"bucket probes: {num_bucket_probes}, "
+          f"prepass: {len(prepass_vertices)}, "
           f"pair merges: {pair_merges}, outmatched: {outmatched_count}, "
           f"ncsub: {ncsub}")
     print(f"tag sweeps: {num_tag_sweeps}")

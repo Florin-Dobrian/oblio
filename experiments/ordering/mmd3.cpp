@@ -13,10 +13,10 @@
 //   #  what diverged                where here            genmmd                nature
 //   -  ---------------------------  --------------------  --------------------  ----------
 //   1  element expansion            mmd3Neighbors, I[u]   mmdelm, the el stack  convention
-//   2  q2h walk                     the refresh           mmdupd, q2h           convention
-//   3  qxh walk                     the refresh           mmdupd, qxh           convention
+//   2  two-source walk               the refresh           mmdupd, q2h           convention
+//   3  many-source walk              the refresh           mmdupd, qxh           convention
 //   4  batch element order          the driver            genmmd, ehead         convention
-//   5  merged weight in a           the refresh, q2h      mmdupd, dg -          DEFECT
+//   5  merged weight in a           the refresh, two-source  mmdupd, dg -          DEFECT
 //      supervariable's bucket                             qsize[en] + 1
 //   6  supervariable member order   the final expansion   mmdnum, the scan      cosmetic
 //
@@ -27,7 +27,7 @@
 // had earned, and the code did not do what its own comment said. It was FIXED IN mmd2 AND IN
 // PRODUCTION Mmd2 as well, where it had been costing fill since those were written; mmd2's
 // gap against genmmd fell from about 20 percent to about 7. mmd1 cannot have it, having no
-// q2h path and no live merges.
+// two-source path and no live merges.
 //
 // THE AMD LAYERS COULD, and this paragraph used to say they could not. It argued that AMD
 // files at an external degree, which excludes a vertex's own supervariable and so does not
@@ -52,7 +52,7 @@
 // supervariable, which are indistinguishable by construction, so the fill and the elimination
 // forest are identical either way.
 //
-// 5 is a different kind, and the first real defect rather than a convention. In the q2h
+// 5 is a different kind, and the first real defect rather than a convention. In the two-source
 // refresh we subtracted u's own weight from dg0 BEFORE the walk; genmmd keeps dg0 whole and
 // subtracts at the end. Those differ exactly when the walk MERGES a vertex into u, since
 // genmmd's merge does `qsize[en] += qsize[nd]` in the same walk and the weight it then
@@ -98,8 +98,8 @@
 // order, same cost.
 //
 //   mmd3Neighbors, the I[u] walk   mmdelm's element stack, list[nb] = el; el = nb
-//   the q2h walk                   mmdupd's, list[nb] = q2h; q2h = nb
-//   the qxh walk                   mmdupd's, list[nb] = qxh; qxh = nb
+//   the two-source walk              mmdupd's, list[nb] = q2h; q2h = nb
+//   the many-source walk             mmdupd's, list[nb] = qxh; qxh = nb
 //   the batch walk                 the driver's, list[mn] = ehead; ehead = mn
 //
 // The first is the deepest and the others cannot be judged without it: it fixes the order
@@ -138,31 +138,32 @@
 // loop drops them when it compacts, which is what mmdelm's `marker[nb] < tag` test
 // does.
 //
-// PASS 2, THE q2h SPLIT. mmdupd does not walk a flat list of reached vertices. It
+// PASS 2, THE TWO-SOURCE SPLIT. mmdupd does not walk a flat list of reached vertices. It
 // walks the ELEMENTS created this iteration, `el = list[el]`, and for each one it
 // computes dg0 once, the weighted size of that element, then visits the element's
 // members. A member is classified by what it has left BESIDES the new element:
 // mmdelm stashes fwd[rn] = nq + 1 where nq counts the survivors of the compaction,
-// which here is A[u].size() + I[u].size() - 1. nq == 1 puts the vertex on the q2h
-// list, anything else on qxh.
+// which here is A[u].size() + I[u].size() - 1. nq == 1 puts the vertex on mmdupd's q2h
+// chain, anything else on its qxh. Ours are twoSourceQueue and manySourceQueue.
 //
-// The q2h case is answered without a union. Everything the vertex reaches is
+// The two-source case is answered without a union. Everything the vertex reaches is
 // either inside the element, already counted in dg0, or comes from that one other
 // source, so the walk adds only what the other source contributes. Two mark levels
 // keep that straight, as mmdupd's mt and *tag do: elementTag says "already in
 // dg0" and survives the whole element, while vertexTag is fresh per vertex, so one
-// q2h vertex cannot hide a neighbor from the next.
+// two-source vertex cannot hide a neighbor from the next.
 //
 // The degrees come out identical either way, which is the check on this pass. What
 // does move is the ORDER of the filing, since the refresh is now element by element
-// with q2h before qxh, and filing order decides what a bucket holds.
+// with twoSourceQueue before manySourceQueue, and filing order decides what a bucket
+// holds.
 //
 // A vertex reached by two pivots in the same iteration is refreshed once: mmdupd skips
 // it on the second visit with `if(bwd[en]!=0) goto n2200`, since a refiled vertex
 // has a bucket again. Here that is the `filed` flag.
 //
-// PASS 3, THE PAIRWISE MERGE AND OUTMATCHED MARKING. Both live in the same branch
-// of the q2h walk, reached when a member of the one other source is ALSO a member
+// PASSES 3 AND 4, THE PAIRWISE MERGE AND OUTMATCHED MARKING. Both live in one branch
+// of the two-source walk, reached when a member of the one other source is ALSO a member
 // of the new element:
 //
 //   else if(bwd[nd]==0){
@@ -170,7 +171,7 @@
 //                      fwd[nd]=-en;bwd[nd]=-maxint;}
 //       else if(bwd[nd]==0)bwd[nd]=-maxint;}
 //
-// MERGE. If nd is q2h too, its only other source is that same element, so en and nd
+// MERGE. If nd is two-source too, its only other source is that same element, so en and nd
 // reach exactly the same vertices and are indistinguishable. en absorbs nd. This is
 // the first merge in the whole sequence that folds a vertex into a LIVE one, which
 // is why the weight array returns: from here a candidate can stand for several
@@ -178,14 +179,14 @@
 // It is also what makes MMD's supervariables coarser than md3's, whose test only
 // ever compares a vertex against the pivot.
 //
-// OUTMATCHED. If nd is not q2h it has other sources besides these two, so its reach
+// OUTMATCHED. If nd is not two-source it has other sources besides these two, so its reach
 // contains en's. It can never be the minimum before en, and MMD withdraws it from
 // the degree lists rather than refiling it: bwd[nd] = -maxint. It is not merged and
 // not eliminated, just held out until something reaches it again, at which point
 // mmdelm restores it with bwd[rn] = 0. Here that is the `outmatched` flag, cleared
 // in mmd3Eliminate for every vertex the new clique reaches.
 //
-// PASS 4, THE FILING CONVENTION. mmdupd does not file a vertex under its degree.
+// PASS 5, THE FILING CONVENTION. mmdupd does not file a vertex under its degree.
 // It files under `dg = dg - qsize[en] + 1`, floored at 1, where dg was the weighted
 // reach INCLUDING en's own members. So the bucket index is the external degree plus
 // one, and the floor catches the case where a vertex reaches nothing outside itself.
@@ -200,13 +201,14 @@
 // what minDegree tracks. The nnz(L) accounting does not use it: that sums weights
 // over the live members of C[pivot] and is unaffected.
 //
-// PASS 5, THE COUNTERS. Two small things in genmmd's main loop.
+// PASS 6, THE COUNTERS. Two small things in genmmd's main loop.
 //
 // ncsub, `*ncsub += mdeg + qsize[mn] - 2`, accumulated per pivot. It is the
 // statistic genmmd returns alongside the permutation, an estimate of the subscript
 // storage the factor will need, and it is computed from values the loop already
-// has. It cannot be checked against the vendored number here: mmd_order computes
-// it and drops it, and genmmd is static.
+// has. Not checked against the vendored number yet: mmd_order takes it as a local
+// and drops it, so one temporary line in the wrapper prints it, the same move
+// tools/hook_amd.py makes on the AMD side. Unchecked, not uncheckable.
 //
 // The early termination, `if((num+qsize[mn])>neqns)goto n1000`, checked after the
 // pivot is numbered and before it is eliminated. When the last supervariable is
@@ -755,6 +757,24 @@ mmd3Eliminate(AdjacencyGraph& A, IncidenceGraph& I, Cliques& C, std::vector<bool
 // Oblio's rule, a std::int32_t rather than a count.
 std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_t delta = 0) {
     const std::uint32_t n = G.size();
+
+    // An empty graph has no prepass to run and no bucket 1 to read, and production
+    // returns here too, `if (size == 0) return std::vector<std::int32_t>()`. The
+    // summary is written out rather than derived because at n = 0 every quantity in
+    // it is zero by inspection; the cost is that a new counter has to be added in two
+    // places, which is why there is exactly one line of it.
+    if (n == 0) {
+        std::cout << "n = 0, nnz(L) = 0 against nnz(tril A) = 0, fill = 0\n";
+        std::cout << "iterations: 0\n";
+        std::cout << "eliminations: 0\n";
+        std::cout << "sum of |C[p]|: 0\n";
+        std::cout << "degree computations: 0, degree updates: 0, bucket probes: 0, "
+                     "prepass: 0, pair merges: 0, outmatched: 0, ncsub: 0\n";
+        std::cout << "tag sweeps: 0\n";
+        std::cout << "order: []\n";
+        return std::vector<std::int32_t>();
+    }
+
     std::size_t nnzTrilA = 0;
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) nnzTrilA += G[u].size();
     nnzTrilA = nnzTrilA / 2 + n;
@@ -806,11 +826,18 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
     // nnz(L) on all 300 random graphs tried, different permutation on 212 of them.
     // So this is a tie-break of the same kind as mmd3's four, and dropping it would
     // be a fifth alignment defect that no fill check could see.
-    // max(n, 2) and not n: the floor above files a degree-0 vertex under 1, so index 1
-    // has to exist even when the whole graph is one vertex. Bucket 0 is never used from
-    // here on, the floor having taken it out of the range, and the largest index any of
-    // the three filing sites can produce is max(n - 1, 1).
-    Buckets buckets(std::max(n, 2u));
+    // n + 1 and not n, which is how production sizes it: `mHead(size + 1, NIL)` beside
+    // `mNext(size, NIL)`, because a head is indexed by a DEGREE and a link by a VERTEX.
+    // The two index spaces are not the same size, and the floor above is what makes the
+    // difference bite: it files a degree-0 vertex under 1, so at n = 1 index 1 has to
+    // exist and holds the only vertex there is. Bucket 0 goes unused from here on, the
+    // floor having taken it out of the range.
+    //
+    // This layer's Buckets sizes all four of its arrays from the one argument, so the
+    // three vertex-indexed ones come out a slot longer than they need. Production does
+    // not, and the honest repair is there rather than here; the cost of the slack is one
+    // int32 per array on a structure built once per ordering.
+    Buckets buckets(n + 1);
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) {
         degrees[u] = std::max<std::uint32_t>(degrees[u], 1);
         buckets.file(degrees[u], u);
@@ -818,7 +845,7 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
     std::uint32_t minDegree = n > 0 ? *std::min_element(degrees.begin(), degrees.end()) : 0;
     std::size_t numBucketProbes = 0;
     std::size_t ncsub = 0;                        // genmmd's subscript estimate
-    std::size_t pairMerges = 0;                   // q2h merges, the coarser supervariables
+    std::size_t pairMerges = 0;                   // two-source merges, coarser supervariables
     std::size_t outmatchedCount = 0;              // withheld rather than refiled
 
     // NOT PRODUCTION: display only. The trace is what makes these files teachable and
@@ -1009,8 +1036,8 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
         // mmdupd walks the elements this iteration created, not the vertices it
         // reached, and computes dg0 once per element: the size of that element,
         // which every member of it reaches in full. A member with exactly one other
-        // source goes on the q2h list and is answered from dg0 plus that source;
-        // everything else goes on qxh and pays for the full union. Same degrees,
+        // source goes on the twoSourceQueue and is answered from dg0 plus that source;
+        // everything else goes on manySourceQueue and pays for the full union. Same degrees,
         // different work, and a different filing order.
         //
         // This is also why no evicted list is carried. mmd1 accumulates one during
@@ -1019,10 +1046,10 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
         // second stamp array it needs both go. genmmd makes the same trade, chaining
         // its new elements in `list` and building no vertex set at all.
         std::vector<std::int32_t> refreshedVertices;
-        std::vector<std::int32_t> elementMembers, q2h, qxh;
+        std::vector<std::int32_t> elementMembers, twoSourceQueue, manySourceQueue;
         // The second site, before the refresh, and OUTSIDE the element loop rather
         // than inside it. elementTag is stamped once per element and read all the
-        // way through that element's q2h walk, where it decides both the pair merge
+        // way through that element's two-source walk, where it decides both the merge
         // and the outmatched case, with vertexTag fresh per vertex nested inside it.
         // Two levels live at once, which is mmdupd's mt against its tag, so a sweep
         // within an element erases marks about to be read.
@@ -1049,24 +1076,24 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
             // reaches lies in this element plus ONE other source. That is the case a
             // union is not needed for: dg0 already counts the element, and the one
             // other source is walked directly.
-            q2h.clear();
-            qxh.clear();
+            twoSourceQueue.clear();
+            manySourceQueue.clear();
             for (std::int32_t u : elementMembers) {
                 if (buckets.filed(u) || outmatched[u]) continue;  // done, or withheld
                 std::uint32_t otherSources = A[u].size() + I[u].size() - 1;
-                (otherSources == 1 ? q2h : qxh).push_back(u);
+                (otherSources == 1 ? twoSourceQueue : manySourceQueue).push_back(u);
             }
 
-            // mmdupd's q2h list, a head-pushed stack in genmmd. See mmd3Neighbors.
-            for (auto uu = q2h.rbegin(); uu != q2h.rend(); ++uu) {
+            // mmdupd's q2h chain, head-pushed there. See mmd3Neighbors.
+            for (auto uu = twoSourceQueue.rbegin(); uu != twoSourceQueue.rend(); ++uu) {
                 const std::int32_t u = *uu;
                 if (eliminated[u] || outmatched[u]) continue;   // merged or withheld
-                                                               // by an earlier q2h
+                                                               // by an earlier two-source
                 // Everything u reaches is in the element or comes from its one
                 // other source. dg0 counts the element, minus u itself. Two mark
                 // levels, as mmdupd has: elementTag says "already in dg0" and
                 // survives the whole element, while vertexTag is fresh per vertex,
-                // so one q2h vertex cannot hide a neighbor from the next.
+                // so one two-source vertex cannot hide a neighbor from the next.
                 ++tag;
                 const std::int32_t vertexTag = tag;
                 // dg0 is kept WHOLE here and u's own weight subtracted at the end, which is
@@ -1092,7 +1119,7 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
                             // source, so it sees at least what u sees.
                             if (buckets.filed(v) || outmatched[v]) continue;
                             if (A[v].size() + I[v].size() - 1 == 1) {
-                                // v is q2h too, so its only other source is this
+                                // v is two-source too, so its only other source is this
                                 // one: identical reach, and u absorbs it. Set view:
                                 // reach(u) | {u} == reach(v) | {v}, decided without
                                 // forming either side, because both sets are pinned
@@ -1125,8 +1152,8 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
                 refreshedVertices.push_back(u);
             }
 
-            // mmdupd's qxh list, the same stack. See mmd3Neighbors.
-            for (auto uu = qxh.rbegin(); uu != qxh.rend(); ++uu) {
+            // mmdupd's qxh chain, the same shape. See mmd3Neighbors.
+            for (auto uu = manySourceQueue.rbegin(); uu != manySourceQueue.rend(); ++uu) {
                 const std::int32_t u = *uu;
                 if (eliminated[u] || outmatched[u]) continue;
                 std::uint32_t degree = mmd3Degree(A, I, C, eliminated, superMembers, mark, tag, u);
@@ -1191,6 +1218,7 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
     std::cout << "degree computations: " << (numDegreeUpdates + n)
               << ", degree updates: " << numDegreeUpdates
               << ", bucket probes: " << numBucketProbes
+              << ", prepass: " << prepassVertices.size()
               << ", pair merges: " << pairMerges
               << ", outmatched: " << outmatchedCount
               << ", ncsub: " << ncsub << "\n";

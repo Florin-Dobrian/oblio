@@ -3297,25 +3297,50 @@ trace shows no prepass line at all.
 
 ### Pass 2: the q2h split
 
-`mmdupd` does not walk a flat list of reached vertices. It walks the ELEMENTS this iteration
-created, `el = list[el]`, and for each one computes `dg0` once, the size of that element, before
-visiting
-its members. A member is classified by what it has left BESIDES the new element: `mmdelm` stashes
-`fwd[rn] = nq + 1` where `nq` counts the survivors of the compaction, which in our split
-representation is `len(A[u]) + len(I[u]) - 1`. `nq == 1` puts the vertex on the `q2h` list,
-anything else on `qxh`.
+`mmdupd` does not walk a flat list of reached vertices. It walks the CLIQUES this iteration
+created, `el = list[el]`, and for each one computes `dg0` once, the weighted size of that clique,
+before visiting its members. A member is classified by what it has left BESIDES the new clique:
+`mmdelm` stashes `fwd[rn] = nq + 1` where `nq` counts the survivors of the compaction, which in
+our split representation is `len(A[u]) + len(I[u]) - 1`. `nq == 1` puts the vertex on the `q2h`
+list, anything else on `qxh`.
 
-**Why the split pays.** Everything a q2h vertex reaches is either inside the element, already
+**What the two names mean, and what is being counted.** They are `mmdupd`'s `q2h` and `qxh`,
+two chains threaded through `list[]`, `list[nb] = q2h; q2h = nb`, and the number is the vertex's
+TOTAL source count: q2 has exactly two, qx has more. Ours are vectors and are named
+`two_source_queue` and `many_source_queue`, for the criterion rather than for the abbreviation. Both lists are built from the members of ONE new clique, so every
+vertex on either already belongs to it; the split is on what else it has. Two things are easy to
+misread here. The count is not of vertices in a bucket and has nothing to do with bucket length:
+a vertex sitting in two enormous cliques is q2h, and a vertex in three tiny ones is qxh. And a
+source is not only a clique, since `nq` counts explicit adjacency entries too, the `- 1` removing
+the new clique from `I[u]`. A vertex in the new clique with one surviving explicit edge is q2h
+exactly as one in the new clique and one other clique is.
+
+**Why the split pays.** Everything a q2h vertex reaches is either inside the new clique, already
 counted in `dg0`, or comes from its one other source. So its degree is `dg0` plus what that
 source contributes, and the union is never built. The qxh case pays for the full union as
 before. Measured on grids, the q2h path takes 36 per cent of the degree updates at 10 by 10, 42 at
 16 by 16 and 44 at 22 by 22, so it is not a rare case.
 
+**The qxh loop IS mmd1's refresh, and reading it that way is the quickest route in.** It calls
+`mmd2_degree` for the true union and files, which is what mmd1 did for every reached vertex
+without exception. Two differences, both small and both consequences of the pass rather than
+changes to it. It files at `degree + 1` where the q2h site files at `degree - len(super_members[u])
++ 1`, because `mmd2_degree` returns the EXTERNAL weighted degree while the q2h walk starts from
+`dg0`, which carries `u`'s own members and has to take them back out; the two expressions produce
+the same quantity by different routes, and that asymmetry is where the entry-5 defect hid. And it
+opens with two guards mmd1 has no need of, `eliminated[u]` and `outmatched[u]`, because the q2h
+walk over the same clique ran a moment earlier and may have merged `u` away or withheld it.
+
+**`refreshed_vertices` is a byproduct here, not the work list.** In mmd1 it was the thing the
+refresh walked. In mmd2 the work happens inline as each vertex is classified and filed, and the
+list is accumulated only to count the degree updates, to lower `min_degree`, and to print. Nothing
+iterates it to do anything.
+
 **Two mark levels, and the bug that taught me why.** My first version marked the other source's
-members with the element's tag, which made a second q2h vertex in the same element skip them as
-already counted and report a degree too small. `mmdupd` avoids this with two levels: element
-members carry `mt`, above every tag used in the iteration, while each vertex gets a fresh `(*tag)++`
-for its own walk. Ours does the same with `element_tag` and `vertex_tag`, testing both.
+members with the clique's tag, which made a second q2h vertex in the same clique skip them as
+already counted and report a degree too small. `mmdupd` avoids this with two levels: members of
+the new clique carry `mt`, above every tag used in the iteration, while each vertex gets a fresh
+`(*tag)++` for its own walk. Ours does the same with `element_tag` and `vertex_tag`, testing both.
 
 **The check on this pass, and the check that was wrong.** Every degree the shortcut produces must
 equal the full union, and it does, on 307 graphs. My first attempt at that check called
@@ -3331,10 +3356,92 @@ identical: on the grids, nnz(L) goes 636 to 633, 2088 to 2101, and 4684 to 4684 
 A vertex reached by two pivots in the same iteration is still updated once, skipped on the second
 visit by the `filed` flag, which is `if (bwd[en] != 0) goto n2200` there.
 
+**graph1 end to end, which is small enough to hold in one view and still fires both mechanisms.**
+The 4-cycle `0-1 1-2 2-3 3-0`. Every degree is 2, so the prepass finds nothing. The batch takes 3
+and 1, opposite corners and so non-adjacent, and each forms a clique on `{0, 2}`:
+
+```
+0: A = {}  I = {c3, c1}          c3 = {0, 2}
+2: A = {}  I = {c3, c1}          c1 = {0, 2}
+```
+
+The refresh then walks the two new cliques rather than the reached vertices, and what each
+contributes is:
+
+```
+clique c3: members [0, 2]   dg0 = 2   q2h = [0, 2]   qxh = []
+clique c1: members [0, 2]   dg0 = 2   q2h = []       qxh = []
+```
+
+`dg0` is c3's weight, 2, computed once for the whole clique. Classifying its members,
+`len(A[u]) + len(I[u]) - 1` is `0 + 2 - 1 = 1` for both 0 and 2, so both have exactly one other
+source, c1, and both are q2h. Nothing reaches qxh at all.
+
+Take u = 0. The walk starts at `dg0 = 2`, which is already the whole of c3, and then looks only at
+c1. Its members are 0 itself, and 2, which is already marked as belonging to c3 and so already
+inside `dg0`. Nothing is added. **The union of c3 and c1 is never formed**, and that is the entire
+pass in one line.
+
+That same marked vertex is what triggers the merge of the next pass. 2 lies in both cliques, so it
+sees at least what 0 sees, and it is q2h too, so its one other source is c3: identical reach, and
+0 absorbs it. So `pair merges: 1`, and 2 leaves without ever being refreshed. c1's own walk then
+finds nothing left to do, which is why the whole iteration reports `degree updates: 1`. Vertex 0
+files at `dg0 - len(super_members[0]) + 1 = 2 - 2 + 1 = 1`, the weight being 2 AFTER the merge,
+which is the subtraction order that was wrong here until 2026-08-07.
+
+**The two grid tables from the mmd1 section, with mmd2 alongside.** Those fix delta at its two
+ends and sweep the size; this adds a third column for mmd2 with all six passes in, so the three
+groups read as md5, then batching, then the vendored extras. The mmd2 figures elsewhere in this
+section are snapshots taken as each pass landed and do not match these, which are the finished
+layer. Grids have no vertex of degree 0 or 1, so the prepass numbers nothing here and every
+difference in the third group comes from passes 2 to 6.
+
+```
+            md5 (delta = -1)         mmd1 (delta = 0)       mmd2, all six passes
+           nnz(L)  iters  degupd    nnz(L)  iters  degupd    nnz(L)  iters  degupd
+10x10         657     78     376       636     19     290       618     20     192
+16x16        2195    197    1116      2088     31     751      2052     31     474
+22x22        4773    367    2206      4684     36    1375      4553     39     795
+30x30       10436    679    4327     10757     40    2533     10059     44    1398
+40x40       22495   1207    8132     21614     56    4498     20536     58    2421
+```
+
+```
+             md5 (delta = -1)            mmd1 (delta = 0)          mmd2, all six passes
+         elims  sum|C|   fill probes   elims  sum|C|   fill probes   elims  sum|C|   fill probes
+10x10       78     376    377     89      82     395    356     31      81     359    338     29
+16x16      197    1116   1459    217     201    1108   1352     55     204    1034   1316     46
+22x22      367    2206   3365    399     373    2198   3276     68     376    2028   3145     61
+30x30      679    4327   7796    723     687    4358   8117     90     692    3924   7419     74
+40x40     1207    8132  17775   1273    1215    8010  16894    121    1224    7131  15816    104
+```
+
+**Degree updates fall again, and by more than batching bought.** mmd1 took 8132 to 4498 at 40 a
+side; mmd2 takes 4498 to 2421, another 46 per cent, on top. Two mechanisms do it and the split is
+only one: the q2h path answers most updates without a union, and outmatched marking withholds
+vertices from both lists so they are not refreshed at all. `sum |C|` falls with them, 8010 to
+7131, which is the merges making the cliques smaller.
+
+**The fill improves on all five grids**, 636 to 618, 2088 to 2052, 4684 to 4553, 10757 to 10059,
+21614 to 20536. That is worth reading carefully rather than as a win: mmd2's job is fidelity, and
+the fill goes where the vendored algorithm puts it. On the 307-graph set the same passes came out
+better on 2, same on 289 and worse on 16, so five grids agreeing is a property of grids and not a
+general improvement.
+
+**Iterations go slightly UP**, 19 to 20 and 56 to 58, against every other column falling. The
+batch is drained by degree, and outmatched vertices are held out of the buckets, so a bucket
+empties sooner and the batch ends sooner. Fewer candidates per pass, more passes, and still far
+fewer degree updates in total.
+
+**Nothing about this pass is genmmd's.** It lands in mmd2 because that is the layer where the
+vendored extras arrive, but the shortcut needs only cliques, weights and a source count, all of
+which exist from md5 on. The same is true of the other five, and the closing subsection sets them
+out together with what each would cost at md5.
+
 ### Passes 3 and 4: the pairwise merge, and outmatched marking
 
-Both live in the same branch of the q2h walk, reached when a member of the one other source is
-ALSO a member of the new element:
+Both live in the same branch of the two-source walk, reached when a member of the one other
+source is ALSO a member of the new clique:
 
 ```c
     else if(bwd[nd]==0){
@@ -3343,8 +3450,8 @@ ALSO a member of the new element:
         else if(bwd[nd]==0)bwd[nd]=-maxint;}
 ```
 
-**The merge.** If nd is q2h too, its only other source is that same element, so en and nd reach
-exactly the same vertices: indistinguishable, and en absorbs nd. This is the first merge in the
+**The merge.** If nd is two-source too, its only other source is that same clique, so en and nd
+reach exactly the same vertices: indistinguishable, and en absorbs nd. This is the first merge in the
 whole sequence that folds a vertex into a LIVE one. Every earlier merge went into the pivot,
 which died in the same call, so a supervariable never survived in the buckets. Now one does, and
 a degree has to count original vertices rather than entries. It is also, concretely, what makes
@@ -3357,17 +3464,70 @@ removed again. The rule has not changed since md3: an array is kept when it stop
 derivable, not when the quantity it holds starts varying. MMD keeps qsize because its members are
 a chain rather than a list, and that is the condition under which ours will need one too.
 
-**Outmatched.** If nd is not q2h it has sources besides these two, so its reach contains en's and
-it can never be the minimum before en. MMD withdraws it from the degree lists rather than
-refiling it, `bwd[nd] = -maxint`. It is not merged and not eliminated, just held out until
-something reaches it again, at which point `mmdelm` restores it with `bwd[rn] = 0`. Ours is an
-`outmatched` flag, cleared in mmd2_eliminate for every vertex the new clique reaches. Both are
-withheld from the q2h and qxh lists while the flag is set.
+**Outmatched, and which of the two the word is about.** If nd is not two-source it has sources
+besides these two, so its reach CONTAINS en's and it can never be the minimum before en. The word
+is the competitive one, outclassed: en outmatches nd, and the flag lands on nd, the loser. The
+AMD paper states the general form, a variable being outmatched when another's adjacency is
+contained in its own, and files it under incomplete degree update rather than under pruning,
+because the saving is the degree update nd never pays for. The direction reads backwards at
+first, since the flag marks the vertex with MORE reach; under minimum degree more is worse.
 
-**Weights everywhere.** dg0 becomes a weighted sum, the q2h walk starts at
+Note that our test is not the general containment predicate. en and nd already share the new
+clique, and nd being many-source implies the containment here, so the split hands it over for
+free rather than making us compare two adjacency sets.
+
+MMD withdraws it from the degree lists rather than refiling it, `bwd[nd] = -maxint`. It is not
+merged and not eliminated, just held out until something reaches it again, at which point
+`mmdelm` restores it with `bwd[rn] = 0`. Ours is an `outmatched` flag, cleared in mmd2_eliminate
+for every vertex the new clique reaches. Both are withheld from the two-source and many-source
+queues while the flag is set.
+
+**Weights everywhere.** dg0 becomes a weighted sum, the two-source walk starts at
 `dg0 - len(super_members[u])` rather than `dg0 - 1`, every count adds `len(super_members[v])`,
-the qxh path goes through mmd2_degree, and the nnz(L) accounting sums the same over the live
-members of C[pivot].
+the many-source path goes through mmd2_degree, and the nnz(L) accounting sums the same over the
+live members of C[pivot].
+
+**graph1 again, where only one of the two fires.** The same run as in the previous subsection.
+Vertex 0 is being refreshed from clique c3, `dg0 = 2`, and the walk over its one other source c1
+reaches vertex 2, which is marked as belonging to c3 as well. That is the branch. Vertex 2's own
+count is `len(A[2]) + len(I[2]) - 1 = 0 + 2 - 1 = 1`, so it is two-source, so this is the equality
+case and 0 absorbs it:
+
+```
+[probe] MERGE: u=0 absorbs v=2
+pair merges: 1, outmatched: 0
+```
+
+**Nothing is outmatched on graph1, and the reason is structural rather than luck.** Outmatching
+needs a vertex reached by the walk with THREE or more sources, and the 4-cycle after two
+eliminations has only two cliques in it, both on `{0, 2}`, so no vertex can have a third. It is
+the smallest graph that fills, and it is too small for a containment that is strict. The
+`outmatched: 0` in its summary is a fact about the graph, not about the pass being dormant.
+
+**graph3 has one of each, which is the contrast worth seeing.** By iteration 3 the live vertices
+are 1, 5, 6 and 8 over three cliques:
+
+```
+ 1: {6} {c3}          c3: {5, 1, 8}
+ 5: {}  {c3 c9}       c7: {6, 8}
+ 6: {1} {c7 c9}       c9: {5, 8, 6}
+ 8: {}  {c7 c3 c9}
+```
+
+Vertex 5 has two sources, c3 and c9; vertex 8 has three, c7, c3 and c9. Refreshing 5 from c9, the
+walk over its other source c3 reaches 8, which is in c9 too. So 8 sees at least what 5 sees, but
+it is many-source, so the containment is strict:
+
+```
+[probe] OUTMATCH: u=5 outmatches v=8; v other sources = 2
+[probe] MERGE: u=1 absorbs v=5
+[probe] MERGE: u=1 absorbs v=8
+pair merges: 2, outmatched: 1
+```
+
+The two merges after it are worth noting: 8 is withheld, not discarded, and it comes back as soon
+as a clique reaches it, at which point 1 absorbs both. Withholding delays a degree update; it
+does not decide the ordering by itself.
 
 **What it does.** On the same 307 graphs: 245 pair merges and 126 outmatched markings, all
 permutations valid, all reported nnz(L) correct against an independent symbolic factorization,
@@ -3393,20 +3553,67 @@ vertices, which sit a bucket higher than an untouched vertex of the same reach. 
 degrees[] holds the FILED value, which is what the picker compares and what min_degree tracks;
 the nnz(L) accounting is unaffected, since it sums weights over the live members of C[pivot].
 
+**Three places write a bucket index, and only the last two are this pass.**
+
+```
+initial       degrees[u] = max(degrees[u], 1)                          pass 1's floor
+two-source    degrees[u] = max(degree - len(super_members[u]) + 1, 1)
+many-source   degrees[u] = max(degree + 1, 1)
+```
+
+The two refresh sites look different and produce the same quantity. `mmd2_degree` already returns
+the EXTERNAL weighted degree, so the many-source site adds one and is done; the two-source walk
+starts from `dg0`, which carries u's own members, so it has to take them back out first. Same
+`dg - qsize[en] + 1` by two routes, and the asymmetry is a consequence of where each path gets
+its degree rather than a difference in the convention.
+
+**The two-source site is where the one fill-visible defect lived.** The subtraction has to use
+the weight AFTER the walk, because that walk can merge a vertex into u and genmmd does
+`qsize[en] += qsize[nd]` inside it. Subtracting first files a supervariable one bucket too high
+per merged vertex, so it is never picked as early as its size has earned. That was wrong here
+until 2026-08-07 and was found only by aligning mmd3 against genmmd; it is entry 5 in that file's
+ledger, and the comment above the line carries the full account.
+
+**Two things this pass does not touch**, worth knowing so they are not searched for. The nnz(L)
+accounting reads weights over the live members of C[pivot] and never a bucket index. And
+min_degree tracks filed values on both sides, at the initial build and after each refresh, so it
+stays consistent without an adjustment for the two scales.
+
 ### Pass 6: the counters
 
-Two small things in genmmd's main loop, and one of them cannot be checked.
+Two small things in genmmd's main loop, no mechanism between them: one accumulator and one guard,
+neither touching a degree or a permutation.
 
-`ncsub`, accumulated per pivot as `mdeg + qsize[mn] - 2`, is the statistic genmmd returns
-alongside the permutation, an estimate of the subscript storage the factor will need. Ours prints
-it with the other counters. It cannot be compared against the vendored number: `mmd_order`
-computes it and drops it, and `genmmd` is static, so the only way to see it would be to edit a
-file we do not edit.
+`ncsub`, accumulated per pivot as `*ncsub += mdeg + qsize[mn] - 2`, is the statistic genmmd
+returns alongside the permutation, an estimate of the subscript storage the factor will need.
+Ours accumulates the same and prints it with the other counters:
+
+```
+ncsub += degree + len(super_members[pivot]) - 2
+```
+
+one line in the elimination block, just after the eviction loop.
 
 The early termination, `if((num+qsize[mn])>neqns)goto n1000`, is checked after the pivot is
 numbered and before it is eliminated. When the last supervariable is reached there is nothing
-left to update, so genmmd skips the elimination entirely and goes to the numbering. Ours is the
-same test on num_eliminated.
+left to update, so genmmd skips the elimination entirely and goes to the numbering. Ours is:
+
+```
+if num_eliminated_vertices >= n:
+    break
+```
+
+at the foot of the batch loop, immediately above the `delta < 0` break. The shape differs from
+genmmd's and the effect does not: it tests BEFORE eliminating, using `num + qsize[mn]` because
+its counter has not yet taken the pivot in, while ours breaks AFTER, its counter already updated.
+Worth checking rather than taking on trust, since that is the shape an off-by-one hides in.
+
+**`ncsub` is the one item on the checklist with no oracle behind it, and that is a gap rather
+than an impossibility.** It has not been compared against the vendored number, because
+`mmd_order` declares it as a local, passes `&ncsub` to `genmmd`, and then drops it. One temporary
+line in the wrapper prints it, which is the same move `tools/hook_amd.py` makes on the AMD side,
+and the vendored sources are ours to instrument whenever a check needs it. So the honest status
+is unchecked, not uncheckable, and it stays on the list until someone runs it.
 
 ### Where mmd2 got to, and what is still unchecked
 
@@ -3448,6 +3655,34 @@ markings on the largest.
 
 What is still unchecked about mmd2 is listed with everything else, in the section on open items
 near the end.
+
+**Where these six could have gone instead, which is not where they went.** They land in mmd2
+because it is the layer that starts matching a vendored routine, not because anything in them
+needs mmd1 underneath. Taken one at a time against what each requires:
+
+```
+prepass              buckets                                available from md5
+two-source split     cliques, and dg0 per clique            available from md5
+pairwise merge       weights, since a live vertex absorbs   available from md5
+outmatched marking   a way to withhold from a bucket        available from md5
+filing convention    nothing, it is a convention            available anywhere
+counters             nothing                                available anywhere
+```
+
+So the whole of mmd2 could sit at md5, and the split in particular, which is the one with a real
+saving behind it: 36 to 44 per cent of degree updates answered by an addition rather than a union,
+and nothing in that argument mentions batching.
+
+Two things keep it from being a free observation. Each pass changes md5's output, and md5 is the
+reference the layers above are read against, so folding six mechanisms into it would move the
+ground everything else stands on; the ladder's one-mechanism-per-layer rule would give each its
+own layer in any case. And the split is not quite as cheap below mmd1: its classifier comes from
+`mmdelm`'s compaction, which counts survivors while it is already rewriting the list, so at md5
+the count would be computed on demand as `len(A[u]) + len(I[u]) - 1`. Still cheap, but the pass
+whose whole case is that it costs one test would be paying for the test.
+
+We are not moving any of it. The point is that the position of these six in the ladder records
+when we started matching genmmd, not when the ideas became available.
 
 ## amd1: the approximate degree
 
@@ -4639,9 +4874,11 @@ so the behavior at real problem sizes is extrapolation from a short line.
 That belongs to machinery we excluded, so the omission is consistent, but it is the one place our
 reading of delta is narrower than theirs and it has not been shown to be harmless.
 
-**ncsub against the vendored value.** It cannot be compared through the public interface, since
-mmd_order drops it and genmmd is static. Ours comes from the same expression, which is a reading
-rather than a check.
+**ncsub against the vendored value.** Not compared, and the reason is that mmd_order takes it as
+a local and drops it rather than that it is out of reach: one temporary line in the wrapper
+prints it, as `tools/hook_amd.py` does on the AMD side. Ours comes from the same expression, so
+today it is a reading rather than a check, and the check is a few minutes' work whenever it is
+wanted.
 
 **Aggressive absorption measures at zero benefit.** Identical fill with it on and off across all
 207 small graphs, and on grids it fires once per run and changes nothing. That is a real result on

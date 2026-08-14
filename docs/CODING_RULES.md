@@ -437,10 +437,40 @@ softer layer: conventions for consistency, not correctness.
       start from. `mNnz = 0` plus a loop that sums n inner vectors.
 
     A derived value is not a caller value, which is the distinction that makes the third category
-    worth naming: nobody passes an nnz, they pass a `rowIdx` it is computed from. And the seed at
-    the declaration is not the member's value pretending to be a type property. `= 0` says "the
-    count starts at zero before any column is counted", which is true of every object of the type,
-    always. The caller's contribution arrives afterwards, through the loop.
+    worth naming: nobody passes an nnz, they pass a `rowIdx` it is computed from.
+
+    **The seed's PLACEMENT is a convention, and worth marking as one.** `mNnz(0)` in the
+    initializer list and `mNnz = 0` at the declaration are equivalent for
+    `experiments/storage-options`'s dynamic matrix as it stands: same generated code, same
+    behavior, no window between them, and nothing to choose on correctness. What the seed cannot be
+    is absent, since the loop reads it. We put it at the declaration for two reasons, neither of
+    them a mechanism:
+
+    - **It reads as one idea.** The seed and the accumulation are two halves of a count, and
+      neither is complete alone. At the declaration a reader meets the starting value beside the
+      type; in the list they have to find it.
+    - **It is robust to an edit that has not happened**, which is a CONDITIONAL benefit and is
+      stated as one. If a second constructor ever arrives and forgets the list entry, the body
+      accumulates onto an indeterminate value, which is undefined behavior rather than a wrong
+      number. Measured 2026-08-13: `-Wall -Wextra -Wuninitialized` gives no diagnostic for the
+      omission and `-fsanitize=address,undefined` runs clean, so nothing in this tree's toolchain
+      would catch it. Today that buys nothing, because there is one constructor and it seeds.
+
+    A uniform rule is worth the marginal freedom here: "seeded at the declaration, produced in the
+    body" is checkable by reading one line, where "seeded wherever it happens to be equivalent
+    today" asks for the same analysis at every site and gets it wrong the one time it matters.
+
+  **When the declaration MUST carry a value, and it is not a matter of constructor count.** The
+  test is whether the declaration's value is ever READ:
+
+  - **Some constructor leaves the member unset** -> mandatory. `SparseMatrix::mSize = 0` because
+    `SparseMatrix() = default` sets nothing, so `size()` reads the declaration's value. Two
+    constructors that BOTH set the member leave the declaration dead all the same, so counting
+    constructors is a proxy and not the rule.
+  - **Every constructor sets it** -> omit. `experiments/storage-options`'s
+    `SparseMatrixDynamic::mSize` has one constructor which sets it from the caller, so a `= 0`
+    there would claim a size no constructed object exhibits, and nothing could observe the claim.
+    `UpdateBlock` was the same case and the initializers were removed.
 
   **The test, for a member set in the body: does the body READ it, or only OVERWRITE it?** This is
   what separates a seed from a mistake, and it is checkable by reading one line rather than by
@@ -455,8 +485,9 @@ softer layer: conventions for consistency, not correctness.
 
   **Never both for one member.** A member-initializer list entry makes the default member
   initializer dead: the declaration then claims an initial value nothing can observe. Add the
-  default back only when a second constructor appears that does not set the member. A seed is not
-  an instance of "both": the member has no list entry, and the body reads what the declaration set.
+  default back only when a constructor appears that does not set the member, which is the read test
+  above and not a count. A seed is not an instance of "both": the member has no list entry, and the
+  body reads what the declaration set.
 
   **`std::vector` and other class-type members need neither.** They default-construct empty, so
   there is no indeterminate state to guard. The hazard the default initializer removes is specific

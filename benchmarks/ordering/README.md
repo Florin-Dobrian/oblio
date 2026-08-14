@@ -667,6 +667,12 @@ AMD1            1.19x  ->  1.76x           1.22x  ->  1.55x        base,   FLAT
 AMD3            1.96x  ->  2.54x           3.42x  ->  3.23x        extras, WORSE
 ```
 
+**The AMD3 row is superseded twice below and is kept because it is what produced the finding.**
+The hash defect was found by taking the count this table asked for; the section after next gives
+1.44x on cubes once it was fixed, "What both families look like now, 2026-08-10" gives 0.98 to
+1.33 after the two fusions, and 2026-08-14 gives 1.09 to 1.25. Read the row as the evidence that
+sent us looking, not as a current figure. The MMD rows have held.
+
 **`AMD1` costs the same on both families**, about 1.2 to 1.8x, and if anything slightly less in 3D
 at comparable n. So the whole of the amd branch's degradation on cubic grids is in the EXTRAS,
 aggressive absorption and hash supervariable detection, which take the branch from 1.5x to 3.0x in
@@ -1281,6 +1287,55 @@ a constant factor and the constant factor is nearly spent. Nothing measured so f
 that scales, and the knee says memory rather than instructions. `MMD3` over the same quotient graph
 shows no growth on either family, which is the control that makes this an amd-branch property
 rather than a shared-infrastructure one.
+
+## MMD3's remaining gap is a CONSTANT, not growth, 2026-08-14
+
+`make scale2d` and `make scale3d` on alpamayo, the first full pair since the 2026-08-10 fusions.
+Ratios against the vendored routine of the same lineage:
+
+```
+            MMD1    MMD3            AMD1    AMD3
+32x32       1.53    1.17            1.13    1.25
+64x64       2.29    1.43            1.22    1.60
+100x100     2.43    1.39            1.50    1.83
+140x140     2.33    1.35            1.44    1.73
+200x200     2.52    1.37            1.54    2.01
+280x280     2.60    1.39            1.63    1.86
+400x400     2.72    1.42            1.66    2.03
+
+6^3         1.49    1.19            1.16    1.25
+12^3        3.05    1.02            1.33    1.14
+16^3        2.72    1.02            1.20    1.09
+20^3        2.94    0.94            1.20    1.11
+26^3        3.93    0.88            1.38    1.20
+32^3        4.80    0.89            1.37    1.17
+```
+
+**MMD3 in 2D is flat at 1.35 to 1.43 from 64 a side to 400**, a forty-fold range in n. The 1.17 at
+32 is 0.06 ms against 0.07 and sits under this benchmark's noise floor, so the apparent rise from
+it is not a trend. That settles the shape of the question: a constant factor, not a term that
+scales, so the profile is looking for something we do per vertex or per bucket operation that
+genmmd does more cheaply, and not for an extra pass or a worse complexity. In absolute terms at
+400 a side it is 12.87 ms against 9.07, so 3.8 ms spread over 160000 vertices.
+
+**In 3D it crosses below 1 at 20 a side** and holds there, 0.94, 0.88, 0.89. That is consistent
+with the clique-size account above: as cliques grow, the per-clique work the two-source split does
+faster comes to dominate the per-vertex overhead we carry, and the sign of the difference flips.
+The same account then says the 2D residual is whatever we pay per vertex or per bucket operation,
+since that is the term a smaller clique cannot amortize.
+
+**MMD2 and MMD3 are the same speed everywhere**, 0.83 against 0.77, 3.24 against 3.26, 13.73
+against 12.87. The four tie-break reversals cost nothing measurable, so a profile of either
+answers for both, and the question is about the extras rather than about mmd3.
+
+**MMD1 at 2.3 to 2.7x against MMD3's 1.4x says the extras are already paying for themselves in
+2D.** The residual is not the extras being slow; it is what remains after they have done their
+work.
+
+**AMD3 on cubes is 1.09 to 1.25**, against 1.44x recorded after the hash fix and 3.0x before it,
+so the two fusions took another quarter out of it. 2D is 1.60 to 2.03 above 64 a side, still the
+larger of the two, and still the growth term that "What both families look like now" identified
+and nothing has yet addressed.
 
 ## Results
 

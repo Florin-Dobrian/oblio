@@ -3,8 +3,9 @@
 A handover note between sessions, rewritten 2026-08-11 after three commits added a real-matrix
 benchmark, a scaling benchmark and the three reports drawn from them, and updated 2026-08-10 before
 that when three commits closed the constant factor on the amd branch. Appended to on 2026-08-14
-with two rounds that touched no algorithm, an idiom sweep and a Makefile consolidation, both under
-"Closed since the last note" and neither changing a number in any report. **It is meant to be
+with two rounds that touched no algorithm, an idiom sweep and a Makefile consolidation, and again
+later that day with three commits on the ordering experiments, all under "Closed since the last
+note" and none of them changing a permutation or a fill figure. **It is meant to be
 deleted** once the items below are done or
 abandoned.
 Everything in it that outlives the task is already somewhere durable and this file only points at
@@ -88,6 +89,16 @@ said about the orderings, in order of how much it should affect the plan:
    `HB/bcsstk08`, 29922 against 31153. **Ours fills less where they differ**, so it is not urgent,
    but it is a divergence the acceptance tests cannot see and the widening that would see it is the
    41 pattern files already sitting in `data/`.
+7. **The dead-code finding generalizes, and nothing detects it.** NEW on 2026-08-14. Three
+   inherited-and-redundant constructs turned up in `mmd2` and `mmd3` in one afternoon: `refile`,
+   defined and never called in all three mmd layers; the evicted list and its stamp array, built
+   and never read, because the element-walked refresh replaced the need for them; and an inert
+   ternary whose branches were identical. None is a compiler warning, none moves a trace, and the
+   twins agreed throughout because the dead thing was dead in both. All three arrived the same way,
+   a layer copied from the one below and then given a pass that made part of the copy redundant.
+   `mda2`, `mdam2`, `mdm2` and `amd1` through `amd4` were built that way and have not been looked
+   at, nor has whether their display blocks build text outside the `SHOW_THRESHOLD` guard, which
+   was wrong in six of the eight layers checked.
 
 **Three things not to retry without reading why**, each of which cost a day or a wrong claim:
 
@@ -191,6 +202,33 @@ traces byte-identical to before the move. `experiments/ordering/README.md` gaine
 the buckets differ from a bucket priority queue, and the external-degree section now gives the
 paper's exact relation and the plain reading: `d_i` is the update size per SUPERNODE, `t_i` the
 update size per COLUMN, with the front size as the other dimension.
+
+**And three commits on the ordering experiments, 2026-08-14**, `aa7de25`, `49a673` and `20d6480`.
+No permutation and no fill figure moved; the ONE output change is a `prepass:` field added to
+mmd2's and mmd3's summary line, counting the vertices the prepass numbered, which until now was
+visible only in the trace and so invisible on every grid. `experiments/ordering/README.md` carries
+the substance and its mmd2 section roughly tripled; what a later session needs from here is:
+
+- **A real bug, and it predated the day.** `mmd2` and `mmd3` failed at n = 1 in both twins, an
+  `IndexError` in Python and an ASan report in C++, and at n = 0 a line later. Pass 1's floor files
+  a degree-0 vertex under bucket 1 and the buckets were sized n. Now `n + 1`, matching production's
+  `mHead(size + 1)` beside `mNext(size)`, plus an n = 0 early return matching `orderMmd2`'s. The
+  prototypes' `Buckets` still sizes one degree-indexed array and three vertex-indexed ones from a
+  single argument, which is where the fix belongs and is not where it was made.
+- **Display work moved inside the `SHOW_THRESHOLD` guard** in md1 through md5 and the three mmd
+  layers. It was being built and thrown away on every grid run; md1's Python was already guarded
+  and its C++ was not, so the twins disagreed in a way no trace could show. Roughly a third of a
+  C++ `grid 200` run in md5.
+- **mmd1 aligned to md5** in four ways: the counter beside `num_clique_entries`, the pivot's unfile
+  moved from the pick down beside the merged vertices, that block unfused into md5's two loops, and
+  `degree` now `len(neighbors)` inside the display guard as md5 has it. mmd2 and mmd3 have had
+  neither of the middle two.
+- **`q2h` and `qxh` renamed** `two_source_queue` and `many_source_queue`. The vendored spellings
+  are `q2h` and `qxh` exactly, `private/Mmd.cpp` line 118, and they are kept wherever genmmd is
+  being cited.
+- **`ncsub` was documented as impossible to check and is merely unchecked.** `mmd_order` takes it
+  as a local and drops it; one temporary line in the wrapper prints it, as `tools/hook_amd.py`
+  already does on the AMD side. Corrected in the README and both C++ twins.
 
 ### Earlier, 2026-08-09
 

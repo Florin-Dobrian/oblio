@@ -2893,13 +2893,21 @@ what Liu's paper treats as the default. On grids, with fill and degree update co
 
 ```
 grid 22x22, n=484
-   delta   -1: nnz(L) 4773   degree computations 2690   iterations 367
-   delta    0: nnz(L) 4684   degree computations 1859   iterations  36
-   delta    1: nnz(L) 4754   degree computations 1733   iterations  22
-   delta    2: nnz(L) 4706   degree computations 1756   iterations  21
-   delta    4: nnz(L) 4747   degree computations 1601   iterations  14
-   delta    n: nnz(L) 5964   degree computations 1514   iterations   9
+   delta   -1: nnz(L) 4773   degree computations 2690   degree updates 2206   iterations 367
+   delta    0: nnz(L) 4684   degree computations 1859   degree updates 1375   iterations  36
+   delta    1: nnz(L) 4754   degree computations 1733   degree updates 1249   iterations  22
+   delta    2: nnz(L) 4706   degree computations 1756   degree updates 1272   iterations  21
+   delta    4: nnz(L) 4747   degree computations 1601   degree updates 1117   iterations  14
+   delta    n: nnz(L) 5964   degree computations 1514   degree updates 1030   iterations   9
 ```
+
+**Both middle columns are here because they differ by exactly n, on every row, and n is 484.** The
+initial build is one degree computation per vertex and no vertex has been updated yet, so degree
+computations is degree updates plus n forever after. Degree updates is therefore the column to
+compare, carrying only work the layer can change, and degree computations is the column to quote,
+being what the closing line prints and what every figure in `REPORT.md` and
+`benchmarks/ordering/README.md` already reports. Neither is wrong and they are not the same
+number; a comparison drawn from the wrong one understates every saving by a constant.
 
 Two things in that table are worth more than the recommendation they support.
 
@@ -2914,6 +2922,56 @@ the evicted set, and those are exactly the vertices whose degrees typically FELL
 candidates that should be picked next. With delta = 0 the iteration ends as soon as the minimum
 bucket drains and they come back at once. With delta = n the iteration keeps climbing through the
 degrees, taking vertices of degree 4, 5, 6 while better candidates wait until the end.
+
+**The same comparison across five sizes, which is the other axis.** The table above fixes the grid
+and sweeps delta; these fix delta at its two ends and sweep the grid, so the 22x22 rows are the
+same two runs seen from the other direction. delta = -1 is md5 reached through this code path, so
+the left half is the layer below and the right half is this one.
+
+```
+                delta = -1 (md5)          delta = 0
+             nnz(L)  iters  degupd     nnz(L)  iters  degupd
+10x10           657     78     376        636     19     290    -3.20%
+16x16          2195    197    1116       2088     31     751    -4.87%
+22x22          4773    367    2206       4684     36    1375    -1.86%
+30x30         10436    679    4327      10757     40    2533    +3.08%
+40x40         22495   1207    8132      21614     56    4498    -3.92%
+```
+
+**The fill is two-sided, and that is the finding rather than the size of it.** Four of the five
+grids come out ahead and 30x30 comes out 3 per cent behind, with no trend in n, which is what an
+arbitrary choice looks like when it is measured. So delta = 0 is not spending fill to buy degree
+updates. The wager is real and it is what delta > 0 spends, as the previous table shows at
+delta = n.
+
+The second half of the same runs, counting the work rather than the saving:
+
+```
+                 delta = -1 (md5)                    delta = 0
+              elims   sum|C|    fill  probes      elims   sum|C|    fill  probes
+10x10            78      376     377      89         82      395     356      31
+16x16           197     1116    1459     217        201     1108    1352      55
+22x22           367     2206    3365     399        373     2198    3276      68
+30x30           679     4327    7796     723        687     4358    8117      90
+40x40          1207     8132   17775    1273       1215     8010   16894     121
+```
+
+**Eliminations rise about half a per cent on every grid, and the mechanism is worth knowing
+because it is the two batchings competing.** A vertex the batch takes as a pivot is sometimes one
+a later pivot would have absorbed for free by mass elimination, and a merge costs a compaction
+where a pivot costs a whole elimination, so where the two overlap the batch takes the more
+expensive route. graph1 is the case small enough to read: md5 eliminates 3, refreshes, and then 2
+absorbs both 1 and 0 as a supervariable of size 3, where mmd1's batch takes 3 and 1 together, 1
+being the opposite corner of the 4-cycle and so not evicted, leaving 2 only 0 to absorb. Two
+eliminations against three, `sum |C[p]|` 2 against 4, and identical fill, iterations and degree
+updates. So graph1 is not merely a graph where batching buys nothing; it is one where batching
+costs and buys nothing. At 1600 vertices the same effect is still there and is half a per cent.
+
+`sum |C[p]|` is a wash, up on two grids and down on three, so those extra pivots are cheap ones.
+**Bucket probes are the column that moves most, a factor of ten at 40 a side**, and that is
+structural rather than a saving of the same kind: md5 re-enters the walk-up once per pivot, so it
+pays a probe per elimination plus the climbs, while the batch enters once per iteration and then
+walks inside the drained bucket, so the count tracks iterations rather than pivots.
 
 **delta is total, and the top end is clamped.** Any negative value means one pivot per iteration; 0
 through n - 1 widen the window; anything larger saturates at n - 1, since a live vertex's degree

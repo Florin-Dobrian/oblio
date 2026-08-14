@@ -351,6 +351,15 @@ private:
 // which an ordered container cannot give. MMD spells these fwd/bwd and AMD
 // Next/Last. The Python twin mirrors the same sequence with a list whose position
 // 0 is the head, so both pick the same pivot.
+//
+// Set view: buckets[d] is the set of live vertices whose current degree is d, and
+// the two operations here are add and discard. md5 has a third, refile, which is
+// the two together with the degree written between them; from this layer up the
+// eviction splits them, so there is nothing left for it to do and it is gone. A
+// linked list gives both in O(1) and gives the head in O(1) too, which is
+// everything the picker asks of it. What it does not give is a minimum, which is
+// why minDegree walks. A sorted container would hand over the minimum directly and
+// charge a log on every file, and files outnumber picks.
 class Buckets {
 public:
     explicit Buckets(std::uint32_t size)
@@ -735,22 +744,6 @@ mmd3Eliminate(AdjacencyGraph& A, IncidenceGraph& I, Cliques& C, std::vector<bool
     return {neighbors, absorbedCliques, prunedEdges, mergedVertices};
 }
 
-// Move u from the bucket for its old degree to the one for newDegree. Filing
-// pushes at the head, which is the O(1) end of the list.
-//
-// Set view: buckets[d] is the set of live vertices whose current degree is d, and
-// filing, unfiling and refiling are add, discard and move between two of them. A
-// linked list gives all three in O(1) and gives the head in O(1) too, which is
-// everything the picker asks of it. What it does not give is a minimum, which is
-// why minDegree walks. A sorted container would hand over the minimum directly and
-// charge a log on every file, and files outnumber picks.
-void mmd3Refile(Buckets& buckets, std::vector<std::uint32_t>& degrees,
-               std::int32_t u, std::uint32_t newDegree) {
-    buckets.unfile(degrees[u], u);
-    degrees[u] = newDegree;
-    buckets.file(newDegree, u);
-}
-
 // Multiple elimination: a batch of independent pivots per degree refresh.
 //
 // delta widens the batch to vertices within delta of the minimum degree, which
@@ -781,6 +774,7 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
     // update count comes out below this, and the gap is what the batching saved.
     // In md2 it is nnz(L) - n, there being no mass elimination to shrink a clique.
     std::size_t numCliqueEntries = 0;
+    std::uint32_t numIterations = 0;                    // batches, the metric this layer adds
     std::vector<std::vector<std::int32_t>> superMembers(n);   // for the expansion
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u)
         superMembers[u].push_back(u);
@@ -810,11 +804,9 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
     }
     std::uint32_t minDegree = n > 0 ? *std::min_element(degrees.begin(), degrees.end()) : 0;
     std::size_t numBucketProbes = 0;
-    std::uint32_t numIterations = 0;                    // batches, the metric this layer adds
     std::size_t ncsub = 0;                        // genmmd's subscript estimate
     std::size_t pairMerges = 0;                   // q2h merges, the coarser supervariables
     std::size_t outmatchedCount = 0;              // withheld rather than refiled
-    std::vector<std::int32_t> touchedIteration(n, NIL);  // the iteration u was last evicted in
 
     // NOT PRODUCTION: display only. The trace is what makes these files teachable and
     // is the whole reason they exist; nothing downstream reads it.
@@ -875,16 +867,14 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
         //     filed = live - reached,  so  batch & reached == {}
         //
         // No set is built for either side. Membership in filed is the filed flag,
-        // and touchedIteration is the same idea one level up: it stamps the iteration a
-        // vertex was evicted in, so the refresh set is accumulated without a set
-        // and without a sort.
+        // and nothing else is needed: unlike mmd1 this layer carries no evicted
+        // list, the refresh below re-deriving its vertices from the elements.
         // Clamped: a degree is at most n - 1, so a wider window would walk the
         // bucket array off its end.
         std::size_t batchLimit = minDegree;      // delta > 0 here, so no narrowing
         if (delta > 0)
             batchLimit = std::min(minDegree + delta, static_cast<std::uint32_t>(n) - 1);
         std::vector<std::int32_t> batch;
-        std::vector<std::int32_t> touched;    // first-touch order, no set and no sort
         while (true) {
             if (buckets.empty(minDegree)) {     // this degree is drained
                 if (minDegree >= batchLimit) break;
@@ -901,7 +891,7 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
             // in mark is live. This one is INSIDE the batch loop rather than before
             // it, since a batch takes several pivots and each calls the eliminator.
             // Safe between eliminations because the eviction that follows stamps
-            // touchedIteration and filed, which are separate arrays. Not inside
+            // filed, which is a separate array. Not inside
             // mmd3Eliminate, which holds three stamps live in turn: pivotCliqueTag and
             // absorbedCliquesTag across the prune loop, then the merged set across the
             // C[pivot] compaction. Never observed to fire.
@@ -928,10 +918,6 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
 
             for (std::int32_t u : C[pivot]) {   // EVICT, with a stale degree
                 buckets.unfile(degrees[u], u);
-                if (touchedIteration[u] != static_cast<std::int32_t>(numIterations)) {
-                    touchedIteration[u] = static_cast<std::int32_t>(numIterations);
-                    touched.push_back(u);       // a marker, so O(1) per eviction
-                }
             }
 
             // A supervariable of size w is w consecutive columns of L. Its
@@ -946,11 +932,11 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
             for (std::int32_t v : C[pivot])
                 if (!eliminated[v]) externalDegree += superMembers[v].size();
             // ONE FACTOR WIDENED: a product of two one-dimensional quantities is TWO dimensional, so
-        // it is formed in std::size_t. Widening cannot be done after the multiply the way
-        // narrowing is done after a subtraction; one operand is enough, the other promoting to
-        // meet it. Both factors are bounded by n, so the product reaches n^2.
-        nnzL += static_cast<std::size_t>(superSize) * externalDegree
-              + static_cast<std::size_t>(superSize) * (superSize - 1) / 2 + superSize;
+            // it is formed in std::size_t. Widening cannot be done after the multiply the way
+            // narrowing is done after a subtraction; one operand is enough, the other promoting to
+            // meet it. Both factors are bounded by n, so the product reaches n^2.
+            nnzL += static_cast<std::size_t>(superSize) * externalDegree
+                  + static_cast<std::size_t>(superSize) * (superSize - 1) / 2 + superSize;
 
             // NOT PRODUCTION: display only, and silent above the threshold.
             if (n <= SHOW_THRESHOLD) {
@@ -1013,6 +999,12 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
         // source goes on the q2h list and is answered from dg0 plus that source;
         // everything else goes on qxh and pays for the full union. Same degrees,
         // different work, and a different filing order.
+        //
+        // This is also why no evicted list is carried. mmd1 accumulates one during
+        // the batch and walks it here; walking elements re-derives the same vertices
+        // from C[element], deduplicating with the filed flag, so the list and the
+        // second stamp array it needs both go. genmmd makes the same trade, chaining
+        // its new elements in `list` and building no vertex set at all.
         std::vector<std::int32_t> refreshedVertices;
         std::vector<std::int32_t> elementMembers, q2h, qxh;
         // The second site, before the refresh, and OUTSIDE the element loop rather

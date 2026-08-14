@@ -508,8 +508,10 @@ def mmd3_file(buckets, filed, d, u):
     linked list.
 
     Set view: buckets[d] is the set of live vertices whose current degree is d, and
-    the three functions here are add, discard and move between two of them. A
-    linked list gives all three in O(1) and gives the head in O(1) too, which is
+    the two functions here are add and discard. md5 has a third, refile, which is
+    the two together with the degree written between them; from this layer up the
+    eviction splits them, so there is nothing left for it to do and it is gone. A
+    linked list gives both in O(1) and gives the head in O(1) too, which is
     everything the picker asks of it. What it does not give is a minimum, which is
     why min_degree walks. A sorted container would hand over the minimum directly
     and charge a log on every file, and files outnumber picks."""
@@ -523,13 +525,6 @@ def mmd3_unfile(buckets, filed, d, u):
         return
     buckets[d].remove(u)
     filed[u] = False
-
-def mmd3_refile(buckets, filed, degrees, u, new_degree):
-    """Move u from the bucket for its old degree to the one for new_degree. Set
-    view: buckets[old].discard(u) then buckets[new].add(u)."""
-    mmd3_unfile(buckets, filed, degrees[u], u)
-    degrees[u] = new_degree
-    mmd3_file(buckets, filed, new_degree, u)
 
 def mmd3_minimum_degree(G, delta=0):
     """Multiple elimination: a batch of independent pivots per degree refresh.
@@ -563,6 +558,7 @@ def mmd3_minimum_degree(G, delta=0):
     # update count comes out below this, and the gap is what the batching saved.
     # In md2 it is nnz(L) - n, there being no mass elimination to shrink a clique.
     num_clique_entries = 0
+    num_iterations = 0                             # batches, the metric this layer adds
     super_members = [[u] for u in range(n)]    # the vertices each pivot stands for
     eliminated = [False] * n
     outmatched = [False] * n                   # withheld from the buckets, not merged
@@ -589,11 +585,9 @@ def mmd3_minimum_degree(G, delta=0):
         mmd3_file(buckets, filed, degrees[u], u)
     min_degree = min(degrees) if n else 0
     num_bucket_probes = 0
-    num_iterations = 0                             # batches, the metric this layer adds
     ncsub = 0                                  # genmmd's subscript estimate
     pair_merges = 0                            # q2h merges, the coarser supervariables
     outmatched_count = 0                       # vertices withheld rather than refiled
-    touched_iteration = [-1] * n                   # the iteration in which u was last evicted
 
     # NOT PRODUCTION: display only. The trace is what makes these files teachable and
     # is the whole reason they exist; nothing downstream reads it.
@@ -645,14 +639,12 @@ def mmd3_minimum_degree(G, delta=0):
         #     filed = live - reached,  so  batch & reached == {}
         #
         # No set is built for either side. Membership in filed is the filed[] flag,
-        # and touched_iteration[] is the same idea one level up: it stamps the iteration a
-        # vertex was evicted in, so the refresh set is accumulated without a set
-        # and without a sort.
+        # and nothing else is needed: unlike mmd1 this layer carries no evicted
+        # list, the refresh below re-deriving its vertices from the elements.
         # Clamped: a degree is at most n - 1, so a wider window would walk the
         # bucket array off its end.
         batch_limit = min(min_degree + delta, n - 1) if delta >= 0 else min_degree
         batch = []
-        touched = []                           # first-touch order, no set and no sort
         while True:
             if not buckets[min_degree]:        # this degree is drained
                 if min_degree >= batch_limit:
@@ -669,7 +661,7 @@ def mmd3_minimum_degree(G, delta=0):
             # in mark is live. This one is INSIDE the batch loop rather than before
             # it, since a batch takes several pivots and each calls the eliminator.
             # Safe between eliminations because the eviction that follows stamps
-            # touched_iteration and filed, which are separate arrays. Not inside
+            # filed, which is a separate array. Not inside
             # mmd3_eliminate, which holds three stamps live in turn: pivot_clique_tag and
             # absorbed_cliques_tag across the prune loop, then the merged set across the
             # C[pivot] compaction. Never observed to fire.
@@ -693,9 +685,6 @@ def mmd3_minimum_degree(G, delta=0):
 
             for u in C[pivot]:                 # EVICT, with a stale degree
                 mmd3_unfile(buckets, filed, degrees[u], u)
-                if touched_iteration[u] != num_iterations:   # a marker, so O(1) per eviction
-                    touched_iteration[u] = num_iterations
-                    touched.append(u)
 
             ncsub += degree + len(super_members[pivot]) - 2   # genmmd's *ncsub
             super_size = len(super_members[pivot])
@@ -727,6 +716,12 @@ def mmd3_minimum_degree(G, delta=0):
         # source goes on the q2h list and is answered from dg0 plus that source;
         # everything else goes on qxh and pays for the full union. Same degrees,
         # different work, and a different filing order.
+        #
+        # This is also why no evicted list is carried. mmd1 accumulates one during
+        # the batch and walks it here; walking elements re-derives the same
+        # vertices from C[element], deduplicating with the filed flag, so the list
+        # and the second stamp array it needs both go. genmmd makes the same trade,
+        # chaining its new elements in `list` and building no vertex set at all.
         refreshed_vertices = []
         # The second site, before the refresh, and OUTSIDE the element loop rather
         # than inside it. element_tag is stamped once per element and read all the

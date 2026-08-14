@@ -60,7 +60,7 @@
 #
 # The tag/marker machinery with its maxint overflow reset is not modeled at all.
 # It exists because the marks live in reusable integer arrays; the C++ twin's mark
-# and touched_iteration arrays do the same job with an explicit tag, and the Python
+# and evicted_mark arrays do the same job with an explicit tag, and the Python
 # uses sets where the trace does not depend on the order.
 
 #
@@ -343,8 +343,10 @@ def mmd1_file(buckets, filed, d, u):
     linked list.
 
     Set view: buckets[d] is the set of live vertices whose current degree is d, and
-    the three functions here are add, discard and move between two of them. A
-    linked list gives all three in O(1) and gives the head in O(1) too, which is
+    the two functions here are add and discard. md5 has a third, refile, which is
+    the two together with the degree written between them; from this layer up the
+    eviction splits them, so there is nothing left for it to do and it is gone. A
+    linked list gives both in O(1) and gives the head in O(1) too, which is
     everything the picker asks of it. What it does not give is a minimum, which is
     why min_degree walks. A sorted container would hand over the minimum directly
     and charge a log on every file, and files outnumber picks."""
@@ -358,13 +360,6 @@ def mmd1_unfile(buckets, filed, d, u):
         return
     buckets[d].remove(u)
     filed[u] = False
-
-def mmd1_refile(buckets, filed, degrees, u, new_degree):
-    """Move u from the bucket for its old degree to the one for new_degree. Set
-    view: buckets[old].discard(u) then buckets[new].add(u)."""
-    mmd1_unfile(buckets, filed, degrees[u], u)
-    degrees[u] = new_degree
-    mmd1_file(buckets, filed, new_degree, u)
 
 def mmd1_minimum_degree(G, delta=0):
     """Multiple elimination: a batch of independent pivots per degree refresh.
@@ -398,6 +393,7 @@ def mmd1_minimum_degree(G, delta=0):
     # update count comes out below this, and the gap is what the batching saved.
     # In md2 it is nnz(L) - n, there being no mass elimination to shrink a clique.
     num_clique_entries = 0
+    num_iterations = 0                             # batches, the metric this layer adds
     super_members = [[u] for u in range(n)]    # the vertices each pivot stands for
     eliminated = [False] * n
     pivots = []                                # the order over supervariables
@@ -419,8 +415,7 @@ def mmd1_minimum_degree(G, delta=0):
         mmd1_file(buckets, filed, degrees[u], u)
     min_degree = min(degrees) if n else 0
     num_bucket_probes = 0
-    num_iterations = 0                             # batches, the metric this layer adds
-    touched_iteration = [-1] * n                   # the iteration in which u was last evicted
+    evicted_mark = [-1] * n                        # the iteration in which u was last evicted
 
     # NOT PRODUCTION: display only. The trace is what makes these files teachable and
     # is the whole reason they exist; nothing downstream reads it.
@@ -446,14 +441,16 @@ def mmd1_minimum_degree(G, delta=0):
         #     filed = live - reached,  so  batch & reached == {}
         #
         # No set is built for either side. Membership in filed is the filed[] flag,
-        # and touched_iteration[] is the same idea one level up: it stamps the iteration a
+        # and evicted_mark[] is the same idea one level up: it stamps the iteration a
         # vertex was evicted in, so the refresh set is accumulated without a set
-        # and without a sort.
+        # and without a sort. The stamp is num_iterations, which is monotone and
+        # already maintained, so there is no separate tag to bump and the array
+        # never needs clearing.
         # Clamped: a degree is at most n - 1, so a wider window would walk the
         # bucket array off its end.
         batch_limit = min(min_degree + delta, n - 1) if delta >= 0 else min_degree
         batch = []
-        touched = []                           # first-touch order, no set and no sort
+        evicted = []                           # first-eviction order, no set and no sort
         while True:
             if not buckets[min_degree]:        # this degree is drained
                 if min_degree >= batch_limit:
@@ -462,15 +459,13 @@ def mmd1_minimum_degree(G, delta=0):
                 num_bucket_probes += 1
                 continue
             pivot = buckets[min_degree][0]     # the head, whatever was filed last
-            degree = degrees[pivot]
-            mmd1_unfile(buckets, filed, degree, pivot)
 
             # Sweep the tag back before it can wrap. Two sites in this layer, one
             # before each region that advances the tag, and each placed where nothing
             # in mark is live. This one is INSIDE the batch loop rather than before
             # it, since a batch takes several pivots and each calls the eliminator.
             # Safe between eliminations because the eviction that follows stamps
-            # touched_iteration and filed, which are separate arrays. Not inside
+            # evicted_mark and filed, which are separate arrays. Not inside
             # mmd1_eliminate, which holds three stamps live in turn: pivot_clique_tag and
             # absorbed_cliques_tag across the prune loop, then the merged set across the
             # C[pivot] compaction. Never observed to fire.
@@ -485,18 +480,21 @@ def mmd1_minimum_degree(G, delta=0):
             batch.append(pivot)
             pivots.append(pivot)
             num_eliminated_vertices += 1 + len(merged_vertices)
-            for u in merged_vertices:          # the pivot now stands for them too
+            for u in merged_vertices:           # the pivot now stands for them too
                 super_members[pivot] += super_members[u]
                 super_members[u] = []
+
+            mmd1_unfile(buckets, filed, degrees[pivot], pivot)   # the pivot has left
+            degrees[pivot] = 0
+            for u in merged_vertices:           # and so have the merged vertices
                 mmd1_unfile(buckets, filed, degrees[u], u)
                 degrees[u] = 0
-            degrees[pivot] = 0
 
             for u in C[pivot]:                 # EVICT, with a stale degree
                 mmd1_unfile(buckets, filed, degrees[u], u)
-                if touched_iteration[u] != num_iterations:   # a marker, so O(1) per eviction
-                    touched_iteration[u] = num_iterations
-                    touched.append(u)
+                if evicted_mark[u] != num_iterations:   # a marker, so O(1) per eviction
+                    evicted_mark[u] = num_iterations
+                    evicted.append(u)
 
             super_size = len(super_members[pivot])
             external_degree = len(C[pivot])
@@ -504,8 +502,14 @@ def mmd1_minimum_degree(G, delta=0):
                       + super_size * (super_size - 1) // 2
                       + super_size)
 
-            # NOT PRODUCTION: display only, and silent above the threshold.
+            # NOT PRODUCTION: display only, and silent above the threshold. Everything
+            # the line needs is built inside the guard, so a run above it formats
+            # nothing. The degree printed is len(neighbors), the reach the eliminator
+            # found, which for a PIVOT equals the cached degrees[pivot] it was picked
+            # at: a pivot comes off a bucket, so it was not evicted this iteration, so
+            # nothing since its last refresh changed a source of its reach.
             if n <= SHOW_THRESHOLD:
+                degree = len(neighbors)
                 absorbed_cliques_text = ", ".join(f"c{c}" for c in absorbed_cliques) if absorbed_cliques else "none"
                 pruned_edges_text = ", ".join(f"{u}-{v}" for u, v in pruned_edges) if pruned_edges else "none"
                 merged_vertices_text = ", ".join(str(u) for u in merged_vertices) if merged_vertices else "none"
@@ -518,7 +522,7 @@ def mmd1_minimum_degree(G, delta=0):
                 break
 
         # ---- one REFRESH, for everything the batch reached -----------------
-        refreshed_vertices = [u for u in touched if not eliminated[u]]
+        refreshed_vertices = [u for u in evicted if not eliminated[u]]
         # The second site, before the degree update pass. Safe here because the
         # batch's stamps are all spent, and because every mmd1_neighbors call stamps
         # what it reads in the same call.

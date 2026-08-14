@@ -328,12 +328,13 @@ def mdm2_minimum_degree(G):
         degree = len(neighbors)
         order.append(pivot)
         degree_sum += degree
+        degrees[pivot] = 0                     # the pivot has left
 
         # The refresh, and the whole of what maintenance changes: a union for each
         # member of the new clique and for nobody else. Every other live vertex has
         # the same A, the same cliques and the same live neighbors as before, so its
         # cached degree is still correct.
-        num_degree_updates += len(neighbors)
+        refreshed_vertices = list(C[pivot])
         # The second site, before the refresh. Safe here because mdm2_eliminate's
         # stamps are spent, and because every mdm2_neighbors call stamps what it
         # reads in the same call.
@@ -341,10 +342,10 @@ def mdm2_minimum_degree(G):
             mark = [-1] * n
             tag = 0
             num_tag_sweeps += 1
-        for u in neighbors:
+        for u in refreshed_vertices:
             neighbors_u, tag = mdm2_neighbors(A, I, C, mark, tag, u)
             degrees[u] = len(neighbors_u)
-        degrees[pivot] = 0
+        num_degree_updates += len(refreshed_vertices)
 
         absorbed_cliques_text = ", ".join(f"c{c}" for c in absorbed_cliques) if absorbed_cliques else "none"
         pruned_edges_text = ", ".join(f"{u}-{v}" for u, v in pruned_edges) if pruned_edges else "none"

@@ -2304,7 +2304,30 @@ then hold one entry and zero entries below their diagonals, and the closed form 
 2 * 0 + 2 * 1 / 2 + 2 = 3, which matches.
 
 The term comes from the AMD literature, where the contrast is with the TRUE degree, which
-does count the internal members. Minimum degree with supervariables uses the external one,
+does count the internal members. The paper's relation is exact, `d_i = t_i - |i| + 1` for a
+supervariable `i` of size `|i|`, so `t_i = d_i + |i| - 1`, and the two coincide when `|i| = 1`.
+
+**Both names are worse than the quantities deserve, and the plain reading is worth having beside
+them.** "True" suggests correctness and "external" suggests a contrast with an internal degree
+that does not exist. What the pair actually encodes is a granularity:
+
+- `d_i`, the external degree, is the reach outside the supervariable, so it is the BORDER of the
+  supernode's front, and the update matrix is `d_i` by `d_i`. It is the update size per SUPERNODE.
+- `t_i` is that border plus the `|i| - 1` other members sitting below the first column, so it is
+  the count below the diagonal in the supernode's FIRST COLUMN. It is the update size per COLUMN.
+
+Both are therefore update sizes at two granularities, and the other dimension is the front size
+`|i|`, which is 1 for a plain column. That is the same pair the numeric phase already names,
+front and update, so the ordering vocabulary and the factorization vocabulary can describe one
+thing rather than two.
+
+We keep "external degree" only because the papers and the vendored routines use it and the amd
+layers are read line by line against both; renaming would cut that thread for no gain. But `t_i`
+is never computed here, so the qualifier distinguishes nothing INSIDE this codebase, and where
+the exact quantity has to be contrasted with AMD's approximation the phrase is EXACT DEGREE and
+never "true degree", which in the paper names something else and larger.
+
+Minimum degree with supervariables uses the external one,
 and the choice is not cosmetic: it changes which pivot is selected, not merely what number is
 printed beside it. Where the weighting first has that effect is amd2, whose hash detection
 folds a vertex into a LIVE supervariable, `weight[i] += weight[j]` with i still a candidate.
@@ -2679,6 +2702,80 @@ the choice among equals moves. bound(u) gives that up: an overcount can hide the
 the head of the first non-empty bucket may simply not be minimal. That concession belongs to the
 estimate and not to any layer, it becomes payable at md4 where the estimate becomes usable, and
 amd1 is where it is actually paid.
+
+## The buckets look like a bucket priority queue and are not one
+
+The structure invites a comparison it does not survive, and the difference is worth stating
+because it decides the implementation.
+
+A textbook bucket priority queue needs two operations, insert and extract-min, and extract-min
+only ever touches the HEAD of the lowest non-empty bucket. If the pivot were the only departure
+each iteration, a stack per bucket would be enough, since the pivot already sits at a head:
+`buckets[min_degree][0]`.
+
+**Three things here need removal from the MIDDLE, which is what rules a stack out.**
+
+- The merged vertices, dead but not the pivot, sitting wherever their old degrees put them.
+- Every refreshed vertex, which has to leave the bucket for its old degree and enter the one for
+  its new degree. That is the whole of `md5_refile`, and it is the dominant operation of the
+  algorithm, running once per degree change rather than once per pivot.
+- The pivot, which happens to be at a head but is not treated specially.
+
+So a bucket is a DOUBLY linked list and the links are indexed BY VERTEX rather than by slot: a
+vertex is its own node, so `unfile` unlinks through `prev` and `next` in O(1) with no search. A
+singly linked list would give O(1) at the head and O(bucket) in the middle, which is exactly what
+the Python mirror pays and why its own note calls that the one place it is asymptotically behind
+the C++.
+
+**`degrees[u]` does double duty, and that is what makes the ordering of two statements matter.**
+It is both the value and the index saying which bucket holds `u`, so the two are consistent only
+while both are current. Hence
+
+```python
+md5_unfile(buckets, filed, degrees[u], u)   # reads degrees[u] to know WHICH bucket
+degrees[u] = 0                              # so this must come second
+```
+
+Zero first and the unfile searches `buckets[0]`, where `u` is not. In md4 the same assignment is a
+lone cache write with nothing reading the old value, which is why md4 can order those two lines
+freely and md5 cannot.
+
+### What `min_degree` actually is, and why it is not the minimum
+
+```python
+min_degree = min([min_degree] + [degrees[u] for u in refreshed_vertices])
+```
+
+The seeded list is not a trick to avoid `min([])`, though it does that too when the clique
+emptied entirely. **The seed is a stand-in for every live vertex the iteration did not touch**,
+and it is a lower bound on them rather than their minimum, because nothing re-examines them.
+Three ways an iteration can end:
+
+- **The new minimum is at a refreshed vertex.** The expression saw it. Exact.
+- **The old bucket still has an occupant** after the pivot and the merged vertices left. The
+  minimum is unchanged and the seed returns it. Exact, and for free.
+- **The old bucket emptied and nothing refreshed that low.** Now it is a strict lower bound, and
+  the next walk-up climbs to the truth.
+
+The second case is the common one on any graph of size, which is why the looseness is rare.
+Measured on md5's own examples by comparing `min_degree` against a full scan of the live
+vertices: three iterations out of the run are strictly low, by 1, 1 and 2.
+
+The asymmetry is the entire correctness argument. **Too low costs iterations of a `while` loop;
+too high would skip a non-empty bucket and return a non-minimal pivot**, silently producing a
+worse ordering with nothing to detect it. So the bound is relaxed only by the refreshed vertices,
+the ones known to have moved, and never by anything more thorough.
+
+Stated as one loop invariant: `min_degree` is a lower bound on the degree of every live filed
+vertex, carried across iterations, tightened upward by the walk at the top and relaxed downward by
+the `min` at the bottom. Neither end needs it to be exact. The first bound is the one exception,
+`min(degrees)` at construction, which costs one O(n) scan and is exact, since starting at 0 would
+only make the first walk climb a distance the degrees were already sitting there to tell us.
+
+The economy is that total walking over the run is bounded by the total distance the bound ever
+travels UPWARD, not by iterations times range. And the tension is that every downward correction
+is distance that will be re-walked later, which is the reason the relaxation is kept as narrow as
+it is.
 
 ## mmd1: multiple elimination
 

@@ -344,6 +344,10 @@ def md4_minimum_degree(G):
             super_members[pivot] += super_members[u]
             super_members[u] = []
 
+        degrees[pivot] = 0                     # the pivot has left
+        for u in merged_vertices:              # and so have the merged vertices
+            degrees[u] = 0
+
         # Only the new clique's surviving members can have a different degree.
         # Everything else has the same A, the same cliques and the same live
         # neighbors as before, so its cached value is still correct.
@@ -362,9 +366,6 @@ def md4_minimum_degree(G):
             neighbors_u, tag = md4_neighbors(A, I, C, mark, tag, u)
             degrees[u] = len(neighbors_u)
         num_degree_updates += len(refreshed_vertices)
-        degrees[pivot] = 0
-        for u in merged_vertices:
-            degrees[u] = 0
 
         # A supervariable of size w is w consecutive columns of L. Its external
         # degree is what remains of the clique after the merges, since a merged

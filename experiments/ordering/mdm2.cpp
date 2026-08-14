@@ -462,10 +462,11 @@ std::vector<std::int32_t> mdm2MinimumDegree(const AdjacencyGraph& G) {
         std::uint32_t degree = neighbors.size();
         order.push_back(pivot);
         degreeSum += degree;
+        degrees[pivot] = 0;                    // the pivot has left
 
         // The refresh, and the whole of what maintenance changes: a union for each
         // member of the new clique and for nobody else.
-        numDegreeUpdates += neighbors.size();
+        const std::vector<std::int32_t> refreshedVertices = C[pivot];
         // The second site, before the refresh. Safe here because mdm2Eliminate's
         // stamps are spent, and because every mdm2Neighbors call stamps what it
         // reads in the same call.
@@ -474,8 +475,8 @@ std::vector<std::int32_t> mdm2MinimumDegree(const AdjacencyGraph& G) {
             tag = 0;
             ++numTagSweeps;
         }
-        for (std::int32_t u : neighbors) degrees[u] = mdm2Neighbors(A, I, C, mark, tag, u).size();
-        degrees[pivot] = 0;
+        for (std::int32_t u : refreshedVertices) degrees[u] = mdm2Neighbors(A, I, C, mark, tag, u).size();
+        numDegreeUpdates += refreshedVertices.size();
 
         std::ostringstream absorbedCliquesText;
         if (absorbedCliques.empty()) {

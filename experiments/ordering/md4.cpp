@@ -532,6 +532,9 @@ std::vector<std::int32_t> md4MinimumDegree(const AdjacencyGraph& G) {
             superMembers[u].clear();
         }
 
+        degrees[pivot] = 0;                       // the pivot has left
+        for (std::int32_t u : mergedVertices) degrees[u] = 0;   // and so have the merged
+
         // Only the new clique's surviving members can have a different degree.
         // Everything else has the same A, the same cliques and the same live
         // neighbors as before, so its cached value is still correct.
@@ -550,8 +553,6 @@ std::vector<std::int32_t> md4MinimumDegree(const AdjacencyGraph& G) {
         for (std::int32_t u : refreshedVertices)
             degrees[u] = md4Neighbors(A, I, C, mark, tag, u).size();
         numDegreeUpdates += refreshedVertices.size();
-        degrees[pivot] = 0;
-        for (std::int32_t u : mergedVertices) degrees[u] = 0;
 
         // A supervariable of size w is w consecutive columns of L. Its external
         // degree is what remains of the clique after the merges, since a merged

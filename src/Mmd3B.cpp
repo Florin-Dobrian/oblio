@@ -112,10 +112,20 @@ public:
 
     // Withhold u from the buckets without filing it anywhere, genmmd's `bwd[nd] = -maxint`. It
     // stays live and reachable; it simply cannot be the minimum before the vertex that outmatched
-    // it. An eviction puts it back, which is `restore` below.
+    // it. An eviction puts it back, which is `evict` below.
     void outmatch(std::int32_t u)      { unfile(u); mPrev[u] = OUTMATCHED; }
-    void restore(std::int32_t u)       { if (mPrev[u] == OUTMATCHED) mPrev[u] = UNFILED; }
     bool outmatched(std::int32_t u) const { return mPrev[u] == OUTMATCHED; }
+
+    // WHAT AN ELIMINATION DOES TO A VERTEX IT REACHED, in one call, because genmmd does it in one
+    // STORE. `bwd[rn] = 0` at the end of mmdelm's n1100 both takes rn out of its degree list and
+    // clears any withholding, those two states being the same value there. Ours were two calls,
+    // `unfile` then `restore`, only because `unfile` returns early on OUTMATCHED to avoid splicing
+    // a list the vertex is not in. Splice when filed, then write UNFILED unconditionally, and the
+    // pair collapses. This runs once per member of C[pivot], the hottest loop the driver has.
+    void evict(std::int32_t u) {
+        unfile(u);                                     // a no-op when withheld or already out
+        mPrev[u] = UNFILED;                            // and now it is neither
+    }
 
     // Move u to the bucket for newDegree, carrying the cached degree with it. The three steps go
     // together, which is why this is one call: the bucket a vertex sits in is read from its
@@ -771,7 +781,6 @@ void QuotientGraphB::beginElimination(std::int32_t pivot,
 
     std::size_t   rl    = base;                        // write cursor
     std::size_t   rm    = mRun[pivot + 1].sourcePtr - 1;   // last entry of the segment being filled
-    std::uint32_t count = 0;
 
     // One member written, following a link first if the segment is full. The link can only be
     // there to be followed: it is written before the walk that can reach it.
@@ -782,7 +791,6 @@ void QuotientGraphB::beginElimination(std::int32_t pivot,
             rm = mRun[-l].sourcePtr - 1;
         }
         mSource[rl++] = v;
-        ++count;
     };
     // THE LIVE NEIGHBORS FIRST, AND WITHOUT THE BOUND CHECK. They are a subset of A[pivot], which
     // was read from this same segment, so the cursor cannot pass the reader and cannot leave the
@@ -795,7 +803,6 @@ void QuotientGraphB::beginElimination(std::int32_t pivot,
         if (mMark[v] < mTag) {
             mMark[v] = mTag;
             mSource[rl++] = v;
-            ++count;
         }
     }
 
@@ -811,30 +818,31 @@ void QuotientGraphB::beginElimination(std::int32_t pivot,
     // THE TERMINATOR, where genmmd writes `if (rl <= rm) adjncy[rl] = 0`. The cursor stops one
     // short of the segment end whenever a link was needed there, so there is room; the one case
     // with no room is a clique whose members fill its last segment exactly, and the walk's second
-    // stop condition covers that. `count` is kept only for the weighted size below.
+    // stop condition covers that.
     // Against `rm`, the CURRENT segment's last entry, not the pivot's: the cursor has followed
     // every link the emit needed and is wherever that left it. genmmd writes `if (rl <= rm)` for
     // exactly this reason. Comparing against the pivot's own segment end instead leaves a chain
     // unterminated and the walk runs off into whatever the next segment holds, which on a 2x2
     // grid is an immediate hang.
     if (rl <= rm) mSource[rl] = TERMINATOR;
-    (void)count;
 
     // The absorbed cliques die only now: they were being READ until the loop above finished, and
     // their segments now hold part of the new clique, so nothing can be written into them to say
     // so. The stamp below is what says it.
 
-    // Stamp the new clique in the VERTEX half, and the absorbed ones in the CLIQUE half. The two
-    // halves are what make this safe: an absorbed clique's id is a dead pivot's vertex id, whose
-    // vertex slot holds GONE and must keep holding it. See mMark.
-    ++mTag;
+    // NO STAMPING PASS. `inClique` IS the tag the emit above already wrote on every member as it
+    // placed it, so a second walk of C[pivot] would re-mark a set that is already marked. genmmd
+    // has no such pass either: its `marker[nb] = tag` happens inside the loop that builds the
+    // reach, which is what this now matches.
+    //
+    // What kept the pass alive was the weighted clique size accumulated beside it. That value has
+    // NO READER in this file: `cliqueWeight()` exists for the amd drivers on the shared class, and
+    // this one carries the mmd driver alone, whose refresh computes `dg0` itself from the element
+    // members. So the accumulation goes with the walk rather than moving into the emit.
+    //
+    // The pivot carries the tag too, from `mMark[pivot] = mTag` above, so it reads as a member of
+    // its own clique. The prune tests `v == pivot` before it tests `inClique`, so nothing sees it.
     inClique = mTag;
-    std::uint32_t cliqueWeight = 0;
-    forEachMember(pivot, [&](std::int32_t v) {
-        mMark[v] = inClique;
-        cliqueWeight += mWeight[v];
-    });
-    mCliqueWeight = cliqueWeight;
     ++mTag;
     absorbed = mTag;
     const std::size_t cliqueBase = mRun.size() - 1;
@@ -978,8 +986,12 @@ const std::vector<std::int32_t>& QuotientGraphB::massEliminate(std::int32_t pivo
         }
     });
     if (!merged.empty()) {                             // C[pivot] - merged, one compaction pass
-        ++mTag;
-        for (std::int32_t u : merged) mMark[u] = mTag;
+        // ON GONE, not on a fresh stamp. The test above wrote GONE into each merged vertex and
+        // GONE is permanent, so the tag and the store per merged vertex this used to spend were
+        // writing a live tag over it. That was unobservable, since a merged vertex has A[u] empty
+        // and I[u] == {pivot} by the test and membership is symmetric, so nothing names it; but
+        // unobservable is a weaker property than never written, and this tree has been wrong
+        // about exactly that shape before. The shared QuotientGraph already compacts this way.
         // The compaction follows the chain on BOTH cursors. Only removals happen, so the write
         // cursor trails the read one within a segment; when either meets a link it follows it,
         // and a link is structural and stays where it is. The two can be in different segments,
@@ -995,7 +1007,7 @@ const std::vector<std::int32_t>& QuotientGraphB::massEliminate(std::int32_t pivo
                 continue;
             }
             ++rp;
-            if (mMark[v] == mTag) continue;             // merged away, drop it
+            if (mMark[v] == GONE) continue;             // merged away, drop it
             while (wp != rp && mSource[wp] < 0 && mSource[wp] != TERMINATOR) {
                 const std::int32_t d = -mSource[wp] - 1;
                 wp = mRun[d].sourcePtr; we = mRun[d + 1].sourcePtr;
@@ -1179,8 +1191,7 @@ std::vector<std::int32_t> orderMmd3B(const std::vector<std::size_t>&  colPtr,
             for (std::int32_t u : merged) buckets.unfile(u);
 
             qg.forEachMember(pivot, [&](std::int32_t u) {
-                buckets.unfile(u);                  // evict; mmdelm's bwd[rn] = 0 does both
-                buckets.restore(u);                 // and puts a withheld vertex back in the running
+                buckets.evict(u);                   // mmdelm's bwd[rn] = 0; see BucketsB
             });
 
             if (numEliminated >= size) break;       // genmmd: nothing left to update
@@ -1228,27 +1239,39 @@ std::vector<std::int32_t> orderMmd3B(const std::vector<std::size_t>&  colPtr,
                 // See experiments/ordering/mmd3.py, ledger entry 5.
                 std::uint32_t degree = dg0;
 
-                // Not hoisted, deliberately. A q2h vertex has adjacencySize + incidenceSize == 2
-                // by the test that put it on this list, so these two loops run over at most two
-                // elements between them and a length loaded up front is overhead rather than a
-                // saving. Hoist where a loop is long; leave it where the loop is short or exits
-                // early. Measured both ways.
-                const std::int32_t* adjacency = qg.adjacency(u);
-                for (std::uint32_t a = 0; a < qg.adjacencySize(u); ++a) {
-                    const std::int32_t v = adjacency[a];
+                // NO LOOPS. A q2h vertex has exactly TWO sources and one of them is the new
+                // element, by the test that put it on this list, so the other one is unique and
+                // can be indexed. genmmd does the same and does it in three lines: it reads the
+                // first entry of the segment, steps past it if that is the element, and branches
+                // once on whether what remains is a variable or a clique,
+                //
+                //     is=xadj[en]; nb=adjncy[is]; if(nb==el) nb=adjncy[is+1]; lk=nb;
+                //     if(fwd[nb]>=0){ dg+=qsize[nb]; goto n2100; }
+                //
+                // What stood here was two loops, each re-reading its bound through an accessor on
+                // every iteration and one of them testing `c == element` per entry, to find a
+                // single entry already known to be there. The comment defending that said the
+                // loops were short enough not to be worth hoisting, which was true and beside the
+                // point: the loops themselves are what genmmd does not have. This pass measured
+                // 869993 instructions against its 341996.
+                //
+                // Our lists are split where genmmd's interleave, so the case analysis reads off
+                // the two lengths rather than off a sign: `incidenceSize` is at least 1, the prune
+                // having appended the pivot, so the two sources are either one variable and the
+                // element, or two cliques of which one is the element.
+                if (qg.adjacencySize(u) == 1) {                    // a variable, genmmd's fwd >= 0
+                    const std::int32_t v = qg.adjacency(u)[0];
                     // ONE LOAD FOR BOTH QUESTIONS. `vertexTag` is the newest tag drawn, so
                     // anything at or above it is either this pass's own stamp or GONE, and both
-                    // mean skip. This was `qg.eliminated(v) || mark[v] == vertexTag`, two arrays.
+                    // mean skip.
                     const std::int32_t m = qg.mark(v);
-                    if (m >= vertexTag) continue;                  // seen this pass, or dead
-                    if (m == elementTag) continue;                 // already counted in dg0
-                    qg.setMark(v, vertexTag);
-                    degree += qg.weight(v);
-                }
-                const std::int32_t* incidence = qg.incidence(u);
-                for (std::uint32_t i = 0; i < qg.incidenceSize(u); ++i) {
-                    const std::int32_t c = incidence[i];
-                    if (c == element) continue;
+                    if (m < vertexTag && m != elementTag) {        // not seen, not dead, not dg0's
+                        qg.setMark(v, vertexTag);
+                        degree += qg.weight(v);
+                    }
+                } else {                                           // two cliques; take the other
+                    const std::int32_t* incidence = qg.incidence(u);
+                    const std::int32_t  c = (incidence[0] == element) ? incidence[1] : incidence[0];
                     qg.forEachMember(c, [&](std::int32_t v) {
                         const std::int32_t m = qg.mark(v);
                         if (v == u || m >= vertexTag) return;      // seen this pass, or dead

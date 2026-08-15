@@ -306,6 +306,19 @@ void QuotientGraph::beginElimination(std::int32_t pivot, std::int32_t& inClique)
     // "dead", since a dead pivot can still sit as a member of an older clique that is still
     // alive, and a walk of that clique would read the borrowed tag and take it for a live vertex.
     // Neither genmmd nor AMD_2 shares one stamp array between the two kinds.
+    //
+    // THE STAMPING PASS STAYS, and this is a measured decision rather than an oversight. It looks
+    // redundant: reachableSet has just written `mMark[v] = mTag` on every member as it emitted
+    // it, so `inClique` could BE that tag and this walk could go, which is what genmmd does and
+    // what Mmd3B does. Built on 2026-08-15, with the weighted size accumulated in reachableSet's
+    // four emit sites so that nothing was lost, and it measured WORSE: 74000 more instructions
+    // and 142000 more data reads on a 100x100 grid.
+    //
+    // The reason is worth keeping, because it is not obvious and it applies to any fold of this
+    // shape. This walk runs over the members ACTUALLY EMITTED; the emit sites run over every
+    // candidate EXAMINED, which is more, since a vertex reached through two sources is examined
+    // twice and emitted once, and dead ones are examined and never emitted. So moving a per
+    // member cost into the emit moves it onto the busier loop. Reverted.
     ++mTag;
     inClique = mTag;
     // The weighted size of the new clique is accumulated HERE rather than in a pass of its own in

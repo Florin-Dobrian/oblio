@@ -65,6 +65,95 @@ be real, which requires Hermitian. Once that is on the table, the design collaps
 **Cholesky is `CC^H`, always, and in real that *is* `CC^T`.** No option, no flag, no forbidden
 combination to reject. The answer was not hard. Asking the right question was.
 
+## 2026-08-15, later: what the container layer costs, and four attempts that did not reduce it
+
+The entry below closed the ordering-speed question by folding arrays away. This is the second half
+of that day, and it is mostly negative results, recorded because each one is a thing a later
+reader would otherwise try.
+
+### Where the branch finished
+
+`MMD3` runs at 1.05 to 1.17x genmmd on square grids and 0.77 to 1.12x on cubes, and `MMD2` reads
+the same to within the noise. That the two coincide is worth noticing rather than passing over:
+they are different orderings with different mechanisms, and what they share is the quotient graph
+and its clique arena, so the arena is what both are now bounded by.
+
+**The trade the library makes, stated plainly.** Our code carries a `std::vector` layer genmmd
+does not: raw `int` arrays arrive as its parameters and live in registers for a whole run, while
+ours are members reached through accessors. That costs a few percent and it is not recoverable,
+for the reasons below. What pays for it is the SECOND ARENA. genmmd keeps every clique in the dead
+segment of the pivot that formed it, one array of nnz(A) and nothing more; we spend a separate
+arena growing toward nnz(L). `Mmd3B` exists to price exactly that, and with every encoding fold now
+present in both files so that storage is the only difference left, it reads 1.12 to 1.23x genmmd in
+2D where `Mmd3` reads 1.05 to 1.17x, on 15.89M instructions against 14.22M. **Spending storage on
+the arena more than covers what the containers cost**, which is the opposite of the premise the
+storage investigation began from.
+
+### What `Mmd3B` gained, and it was the same kind of thing as the morning
+
+Four alignments, all of them genmmd's own shape, worth 4 to 11 percent on alpamayo with every sign
+negative across seven sizes:
+
+- **The stamping pass deleted.** The reach build already writes `mMark[v] = mTag` on every member,
+  so `inClique` is that tag and the second walk of C[pivot] goes. `cliqueWeight` went with it,
+  having no reader in that file.
+- **Mass elimination compacts on `GONE`** rather than stamping a fresh tag over it.
+- **`evict` in place of `unfile` then `restore`**, which is `mmdelm`'s single `bwd[rn] = 0`.
+- **`mCliqueSize` retired for a value terminator**, `INT32_MIN`, since a link is `-(c+1)` and lies
+  in `[-n, -1]`. That one needed the mark split to 2n first, vertices at `[v]` and cliques at
+  `[size + c]`, because the dead-clique test had been the size.
+
+`Mmd3B` is now genmmd's data structure essentially exactly, which is what makes it a fair
+instrument rather than an approximation.
+
+### Four things that did not work, and why each failed differently
+
+**The stamping fold ported to `Mmd3`: +74000 instructions, +142000 reads.** The shared class cannot
+delete the pass outright, `cliqueWeight` having five amd readers, so the accumulation moved into
+`reachableSet`'s emit sites. That is the wrong loop: the emit runs over every candidate EXAMINED
+and the stamp walk ran only over members EMITTED, which is fewer, since a vertex reached through
+two sources is examined twice and emitted once.
+
+**An arena cursor in place of `push_back`: +109000 instructions.** The capacity test can never fire,
+`beginElimination` having reserved room for a whole reach, so it looks like free removal. It is not:
+the vector's own length can then no longer be the arena's length, and `reserve` does not touch
+memory while `resize` value-initializes, so the constructor zeroes nnz(A) entries and every growth
+zeroes its new region.
+
+**Raw bases in place of the accessors: +371000 instructions, and FLAT on the clock.** Hoisting
+`mMark.data()` and `mWeight.data()` once per refresh round is what genmmd gets for free. GCC was
+already keeping them where they belonged and two more live values cost more in the register
+allocator than the reloads. Timed on alpamayo with `MMD1` and `MMD2` as controls: three sizes down,
+three up, nothing. **The accessors are therefore both the cleaner and the cheaper form**, which is
+a rare way for that argument to end.
+
+**And q2h indexed instead of looped: a wash.** genmmd finds the single other source of a q2h vertex
+by indexing, since the vertex has two sources and one is the new element; we ran two loops to find
+an entry already known to be there. Removing them bought 103000 instructions of an 870000 pass and
+nothing on the clock. Kept as the faithful shape, labelled a null. The comment defending the loops
+was closer to right than the reasoning that overrode it: they were short, and the 2.5x in that pass
+is not there.
+
+### Two findings about the instruments, which outlast the changes
+
+**A two to three percent movement in instruction count is invisible on alpamayo.** Confirmed in
+both directions with controls in the same run. So a counter movement of that size is not on its own
+a reason to keep a change or to drop one, and three of the four negatives above were judged that
+way before the fourth was actually timed.
+
+**Cachegrind's simulated cache misses are not comparable across shell invocations.** The same
+binary reported 119331 and then 139608 three times running, the difference being heap placement,
+which moves with the environment. Instruction and data-reference counts are exact. **Miss figures
+quoted in the entry below were gathered that way and should be read as indicative only**; the
+conclusions there do not rest on them, every one having moved instructions and reads as well.
+
+**And a revert is verified by a diff, not by a counter.** Two leftovers survived a revert that the
+instruction count and the acceptance suite both passed: a private declaration with no definition,
+and two locals moved to a different position. Neither instrument can see either. The check that
+finds them is a diff against the committed state.
+
+---
+
 ## 2026-08-15: the gap was never the algorithm, it was how many arrays a vertex lives in
 
 **`MMD3` runs at 1.02 to 1.19x genmmd on square grids and 0.81 to 1.11x on cubes.** That morning

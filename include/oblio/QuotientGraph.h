@@ -570,6 +570,13 @@ private:
     // the arena, which grows toward nnz(L), so it is two dimensional; `mCliqueSize` is a member
     // count bounded by n. The one crossing is in `beginElimination`, where the arena's new length
     // less the block's start is written as a count.
+    // APPENDED BY push_back, NOT written through a cursor, and that was measured. A cursor with
+    // an explicit used count removes a capacity test and a size update per clique member, about
+    // 46000 of each per ordering, which is what genmmd's `adjncy[rl] = nb; rl++` costs nothing
+    // for. Built on 2026-08-15 and it came out 109085 instructions and 52880 reads WORSE, because
+    // the vector's own length can then no longer be the arena's length: `reserve` does not touch
+    // memory while `resize` value-initializes, so the constructor zeroes nnz(A) entries and every
+    // growth zeroes its new region, which costs more than the tests it removes.
     std::vector<std::int32_t>  mCliqueArena;  // every C[c] ever formed, end to end
     std::vector<std::size_t>   mCliquePtr;    // where c's block starts, fixed once written
     std::vector<std::uint32_t> mCliqueSize;   // how much of it is still live

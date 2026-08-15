@@ -35,9 +35,18 @@ belonged elsewhere.
 ## Read this first, and the rest only if you are picking up that item
 
 **ITEM 0 IS CLOSED, 2026-08-15, and the answer was not what this file spent a day predicting.**
-`MMD3` now runs at 1.02 to 1.19x genmmd on square grids and 0.81 to 1.11x on cubes, against 1.35
-to 1.48x that morning. `MMD2` tracks it. Nothing about what is computed changed: every permutation
-and every nnz(L) is identical, on all 137 acceptance cases across nine orderings.
+`MMD3` runs at 1.05 to 1.17x genmmd on square grids and 0.77 to 1.12x on cubes, against 1.35 to
+1.48x that morning, and `MMD2` reads the same to within the noise. Nothing about what is computed
+changed: every permutation and every nnz(L) is identical, on all 137 acceptance cases across nine
+orderings.
+
+**That MMD2 and MMD3 coincide is the useful shape of the result.** They are different orderings
+with different mechanisms; what they share is the quotient graph and its clique arena, so both are
+now bounded by it rather than by anything of their own. And the trade the library makes is worth
+stating in one line: our `std::vector` layer costs a few percent that genmmd does not pay, having
+raw arrays in registers for a whole run, and the SECOND ARENA more than covers it. `Mmd3B`, which
+is `Mmd3` on genmmd's single nnz(A) storage with every encoding fold present in both, reads 1.12 to
+1.23x where `Mmd3` reads 1.05 to 1.17x.
 
 **The cause was the number of ARRAYS a vertex's state lives in**, not placement, not chaining, not
 the number of passes, and not the algorithm. genmmd indexes five arrays by a vertex and we indexed
@@ -60,11 +69,24 @@ difference left, and ours wins on every axis: 1.02 to 1.19x genmmd in 2D against
 on a second arena buys speed.** `Mmd3B` therefore STAYS, as the standing equal-encoding comparison
 against the vendored storage scheme, which is a change to the stop condition its own header states.
 
-**What is open on the mmd branch**, and it is short. `Mmd3B` is still 1.15 to 1.38x where `Mmd3` is
-at parity, and the three things that separate them are named in the 2026-08-15 design entry:
-`mCliqueSize`, which genmmd does not need because a zero terminates a clique; `mAbsorbed`, a copy
-of `I[pivot]` taken because the scheme is about to overwrite the segment holding it; and
-`forEachMember`'s counted walk with a sign test per entry against genmmd's zero-terminated one.
+**What is open on the mmd branch, and it is one item.** The TAG SCHEME. genmmd's refresh puts the
+element tag ABOVE the per-vertex tags, `mt = tag + md0`, so an element member fails
+`marker[nd] < *tag` automatically and needs no second comparison; ours draws both from one counter,
+so `elementTag` is below `vertexTag` and every entry in the q2h and qxh paths pays an explicit
+`m == elementTag` test. It is a change to what is computed rather than to how it is stored, which
+is the category that actually paid, and the refresh is about a third of the run. Untried.
+
+**Everything else on this branch was tried and did not pay.** Four attempts at the container layer,
+each failing for its own reason, all in the "2026-08-15, later" design entry: the stamping fold
+ported to `Mmd3`, an arena cursor in place of `push_back`, raw bases in place of the accessors, and
+q2h indexed rather than looped. Read that entry before reaching for any of them.
+
+**And `Mmd3B` has finished answering its question.** It is now genmmd's data structure essentially
+exactly: one array of nnz(A), cliques in their pivot's dead segment, negative links, a value
+terminator, no clique length array, no liveness array, the degree list in one link array. Its
+obligation from here is to stay ENCODING-IDENTICAL to `Mmd3`, so that the only difference between
+them is storage; a fold that lands in `QuotientGraph` lands there too, or the comparison quietly
+stops being about storage.
 
 **And the amd branch has had NONE of this.** Its five drivers still carry `degrees`, `outside`,
 `cliqueDegree`, `explicitPart`, `hashHead` and `hashNext`, plus a 2n `mark`, and `AMD_2` allocates
@@ -78,6 +100,14 @@ costs amd, whose aggressive absorption makes that loop heavy and which has no co
 yet. Splitting `mMark` to 2n, vertices at `[v]` and cliques at `[c + n]`, would let the stamp come
 back hot and is what both references effectively have, neither of them sharing one stamp array
 between the two kinds. Costs n extra int32, and footprint has killed three changes in this tree.
+
+**TWO THINGS ABOUT THE INSTRUMENTS, and they outlast the changes.** A two to three percent movement
+in instruction count is INVISIBLE on alpamayo, confirmed in both directions with controls in the
+same run, so a counter movement of that size decides nothing by itself. And cachegrind's simulated
+cache misses are not comparable across shell invocations, shifting about 17 percent with heap
+placement; instructions and data references are exact. Compare builds back to back inside one
+invocation, and verify a revert with a DIFF rather than with a counter, which is how two leftovers
+survived one that day.
 
 **EVERY TIMING FIGURE IN THIS TREE PREDATES 2026-08-15 AND UNDERSTATES US BY 20 TO 30 PERCENT.**
 `benchmarks/ordering/README.md`, `benchmarks/pipeline/README.md`,

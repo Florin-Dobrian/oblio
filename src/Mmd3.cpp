@@ -106,6 +106,20 @@ std::vector<std::int32_t> orderMmd3(const std::vector<std::size_t>&  colPtr,
         }
 
         // ---- one refresh, walked element by element -----------------------------
+        // THE ACCESSORS STAY. `qg.mark(v)` and `qg.weight(v)` are `mArray[v]`, a base load plus
+        // the element, and the obvious idea is to hoist both bases once per round and index them
+        // directly, which is what genmmd gets for free by taking its arrays as parameters. Built
+        // and measured 2026-08-15, BOTH WAYS. Cachegrind on a 100x100 grid: 371403 more
+        // instructions and 161414 more data reads, the two extra live values costing more in the
+        // register allocator than the reloads they remove. Then timed on alpamayo across seven
+        // square grids and six cubic ones, with MMD1 and MMD2 as controls carrying the same class
+        // and not the change: FLAT, three sizes down and three up, inside the noise everywhere.
+        //
+        // So it was reverted for costing something and buying nothing. The wider lesson is worth
+        // more than the change: a two to three percent movement in instruction count is not
+        // visible on this machine at all, in either direction, so it is not on its own a reason
+        // to keep a change OR to drop one. Two other candidates were reverted on counters alone
+        // that day, the stamping fold and the arena cursor, and neither was ever timed.
         // The driver's element list, genmmd's `list[mn] = ehead; ehead = mn`, so the LAST pivot of
         // a batch is the FIRST element refreshed.
         for (auto ee = batch.rbegin(); ee != batch.rend(); ++ee) {

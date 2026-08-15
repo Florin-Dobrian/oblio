@@ -1,5 +1,10 @@
 # Ordering Experiment
 
+> **SUPERSEDED IN PART, 2026-08-15.** Every ordering TIME and every ratio against a vendored
+> routine in this document predates the encoding work of that date and understates our orderings
+> by roughly 20 to 30 percent. **Fill figures are unaffected**, every permutation and every nnz(L)
+> being identical. `docs/DESIGN_DECISIONS.md` (2026-08-15) has the account.
+
 `OrderEngine` calls a vendored AMD and a vendored MMD, and until now nothing in the port had
 looked inside either. Both are hard to read: MMD is translated Fortran with `goto` labels and
 1-based arithmetic, AMD is 1800 lines in one function over eleven parallel `int` arrays. This
@@ -1670,6 +1675,25 @@ the fork at the top into mmd, which stays exact, and amd, which goes approximate
 batch, is a real division rather than a filing convention.
 
 ## The vendored storage scheme, and what it is worth
+
+> **ANSWERED 2026-08-15, AND THE ANSWER IS NO.** This section was written while the measurements
+> attributed most of our 2D time difference to clique PLACEMENT. That attribution is dead twice
+> over. `Mmd3B` implements genmmd's scheme in full and the time did not move; and the renumbering
+> experiment the placement claim rested on was CONFOUNDED, since shuffling a grid's numbering adds
+> a large cost to both routines and a large common term compresses any ratio toward 1.
+>
+> What the difference actually was is the number of ARRAYS a vertex's state lives in, five for
+> genmmd against eleven for us, each of its arrays answering several questions at once. With every
+> one of those encodings now folded into BOTH files, so that storage is the only difference left,
+> **our two-arena scheme beats genmmd's single nnz(A) array on every axis**: 1.02 to 1.19x genmmd
+> in 2D against `Mmd3B`'s 1.15 to 1.38x, 14.22M instructions against 16.61M, 1.66M data writes
+> against 2.14M, 119331 D1 read misses against 123510. Spending nnz(L) on a second arena buys
+> speed.
+>
+> `Mmd3B` therefore stays, as the standing equal-encoding comparison against the vendored storage.
+> Everything below about the MECHANISM stands and is worth reading: the chaining, the worked 5x5
+> example, the entry counts, the peak-live table and the two failed experiments. Only the
+> attribution of time to placement is withdrawn. `docs/DESIGN_DECISIONS.md` (2026-08-15).
 
 Both vendored routines keep their whole quotient graph in ONE array the size of the input pattern,
 and neither allocates anything for cliques. We keep two arenas and allocate a second pattern's

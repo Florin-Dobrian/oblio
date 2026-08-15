@@ -17,22 +17,24 @@ std::vector<std::int32_t> orderMmd1(const std::vector<std::size_t>&  colPtr,
     pivots.reserve(size);
     std::uint32_t numEliminated = 0;               // a counter, not a scan of the flags
 
-    // The degree cache, exact throughout: this branch keeps the honest set union and pays for it
-    // by refreshing rarely. No weight array, because mass elimination merges only into the
-    // pivot, which is eliminated in the same call, so no live vertex ever stands for more than
-    // one original vertex.
-    std::vector<std::uint32_t> degrees(size);
-    for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u)
-        degrees[u] = qg.adjacencySize(u);
-
+    // No degree cache, and no weight array either. The weights are absent because mass
+    // elimination merges only into the pivot, which is eliminated in the same call, so no live
+    // vertex ever stands for more than one original. The degrees are absent because the only
+    // reader that needed them kept was `unfile`, which now recovers the bucket from the link
+    // itself; genmmd carries no degree array for the same reason. See Buckets.
+    //
     // minDegree is a LOWER BOUND on the current minimum, not the minimum itself. It is allowed
     // to lag and the walk corrects it; what it must never do is overshoot, since a vertex filed
     // below it would never be seen. So the walk raises it and a refresh lowers it, and nothing
-    // else touches it.
+    // else touches it. It is maintained where a degree is produced, which is genmmd's
+    // `if(dg<*mdeg)*mdeg=dg`.
     Buckets buckets(size);
-    for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u)
-        buckets.file(degrees[u], u);
-    std::uint32_t minDegree = *std::min_element(degrees.begin(), degrees.end());
+    std::uint32_t minDegree = static_cast<std::uint32_t>(size);
+    for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u) {
+        const std::uint32_t degree = qg.adjacencySize(u);
+        buckets.file(degree, u);
+        minDegree = std::min(minDegree, degree);
+    }
 
     // The round a vertex was last evicted in, which accumulates the refresh set without a set
     // and without a sort: a vertex reached by two pivots in the same round is listed once.
@@ -62,16 +64,12 @@ std::vector<std::int32_t> orderMmd1(const std::vector<std::size_t>&  colPtr,
             // non-empty, so the first pass always takes a pivot whatever the limit says; only
             // then does delta decide whether the round continues.
             const std::int32_t pivot = buckets.head(minDegree);
-            buckets.unfile(degrees[pivot], pivot);
+            buckets.unfile(pivot);
 
             const std::vector<std::int32_t>& merged = qg.eliminate(pivot);
             pivots.push_back(pivot);
             numEliminated += 1 + static_cast<std::uint32_t>(merged.size());
-            for (std::int32_t u : merged) {
-                buckets.unfile(degrees[u], u);          // unfile before zeroing: the bucket
-                degrees[u] = 0;                         //   index is read from the degree
-            }
-            degrees[pivot] = 0;
+            for (std::int32_t u : merged) buckets.unfile(u);
 
             // Evict everything the pivot reached, with a stale degree. This is what keeps the
             // batch independent, and it is also what makes the deferred refresh safe: a vertex
@@ -81,7 +79,7 @@ std::vector<std::int32_t> orderMmd1(const std::vector<std::size_t>&  colPtr,
             const std::uint32_t pivotCliqueSize = qg.cliqueSize(pivot);
             for (std::uint32_t k = 0; k < pivotCliqueSize; ++k) {
                 const std::int32_t u = pivotClique[k];
-                buckets.unfile(degrees[u], u);
+                buckets.unfile(u);
                 if (touchedRound[u] != numRounds) {
                     touchedRound[u] = numRounds;
                     touched.push_back(u);
@@ -97,9 +95,9 @@ std::vector<std::int32_t> orderMmd1(const std::vector<std::size_t>&  colPtr,
         // vertex evicted early in the round can be merged away by a later pivot in the same one.
         for (std::int32_t u : touched) {
             if (qg.eliminated(u)) continue;
-            degrees[u] = qg.reachableSize(u);       // the size, without materializing the set
-            buckets.file(degrees[u], u);
-            minDegree = std::min(minDegree, degrees[u]);
+            const std::uint32_t degree = qg.reachableSize(u);  // the size, no set materialized
+            buckets.file(degree, u);
+            minDegree = std::min(minDegree, degree);
         }
         ++numRounds;
     }

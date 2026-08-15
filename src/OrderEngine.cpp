@@ -3,10 +3,8 @@
 #include "oblio/Mmd2.h"
 #include "oblio/Mmd3.h"
 #include "oblio/Amd1.h"
-#include "oblio/Amd1B.h"
 #include "oblio/Amd2.h"
 #include "oblio/Amd3.h"
-#include "oblio/Amd2B.h"
 
 #include <vector>
 
@@ -60,8 +58,6 @@ bool OrderEngine::compute(const std::vector<std::size_t>&  colPtr,
         case Ordering::AMD1:    return orderAMD1(size, colPtr, rowIdx, P);
         case Ordering::AMD2:    return orderAMD2(size, colPtr, rowIdx, P);
         case Ordering::AMD3:    return orderAMD3(size, colPtr, rowIdx, P);
-        case Ordering::AMD1B:   return orderAMD1B(size, colPtr, rowIdx, P);
-        case Ordering::AMD2B:   return orderAMD2B(size, colPtr, rowIdx, P);
     }
     return false;   // unreachable: every enumerator is named above, which is what -Wall checks
 }
@@ -266,41 +262,7 @@ bool OrderEngine::orderAMD2(std::size_t size,
     return true;
 }
 
-bool OrderEngine::orderAMD1B(std::size_t size,
-                            const std::vector<std::size_t>&  colPtr,
-                            const std::vector<std::int32_t>& rowIdx,
-                            Permutation& P) const {
-    P.mOldToNew.assign(size, 0);
-    P.mNewToOld.assign(size, 0);
-    if (size == 0) return true;
 
-    const std::vector<std::int32_t> order = orderAmd1B(colPtr, rowIdx);
-    if (order.size() != size) return false;
-
-    for (std::size_t k = 0; k < size; ++k) {
-        P.mNewToOld[k]        = order[k];
-        P.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
-    }
-    return true;
-}
-
-bool OrderEngine::orderAMD2B(std::size_t size,
-                            const std::vector<std::size_t>&  colPtr,
-                            const std::vector<std::int32_t>& rowIdx,
-                            Permutation& P) const {
-    P.mOldToNew.assign(size, 0);
-    P.mNewToOld.assign(size, 0);
-    if (size == 0) return true;
-
-    const std::vector<std::int32_t> order = orderAmd2B(colPtr, rowIdx);
-    if (order.size() != size) return false;
-
-    for (std::size_t k = 0; k < size; ++k) {
-        P.mNewToOld[k]        = order[k];
-        P.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
-    }
-    return true;
-}
 
 template bool OrderEngine::compute(const SparseMatrix<double>&, Permutation&) const;
 template bool OrderEngine::compute(const SparseMatrix<std::complex<double>>&, Permutation&) const;

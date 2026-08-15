@@ -73,7 +73,30 @@ public:
     // degree and the links by vertex, which are not the same range: a true degree is at most
     // n - 1, but MMD files a vertex under its degree PLUS ONE, so the key reaches n and the heads
     // need one slot more than there are vertices.
-    static constexpr std::int32_t UNFILED = -2;
+    // GENMMD'S `bwd` ENCODING. `mPrev[u]` carries four facts at once, told apart by sign, which
+    // is what lets three arrays be one. `private/Mmd.cpp` lines 81 to 84 and 98 are the original.
+    //
+    //     mPrev[u] >  0            filed; the vertex before it is mPrev[u] - 1
+    //     mPrev[u] <  0            filed AT THE HEAD of bucket -mPrev[u] - 1
+    //     mPrev[u] == UNFILED      not in any list
+    //     mPrev[u] == OUTMATCHED   withheld from the buckets; see outmatch()
+    //
+    //
+    // THE HEAD CASE IS WHAT DELETES THE DEGREE ARRAY. `unfile` used to be given the degree,
+    // because a vertex at the head of its list left no record of which list that was; it now
+    // reads -mPrev[u] and takes no degree at all. That is exactly why genmmd carries no degree
+    // array: the mmd drivers here kept one solely to answer that question, and the amd drivers
+    // keep theirs because they READ the value in the bound, which is a different use.
+    //
+    // BOTH SIDES ARE SHIFTED BY ONE AND BOTH SHIFTS ARE LOAD BEARING. A predecessor is stored as
+    // `u + 1` because vertex 0 would otherwise read as UNFILED, and a head as `-(degree + 1)`
+    // because DEGREE 0 IS REACHABLE and `-0` would read as UNFILED too. genmmd needs neither: its
+    // ids are 1-based, and `mmdint` files a degree-0 vertex under 1, `if(dg==0)dg=1`, so no key
+    // of zero ever reaches its buckets. Ours do: Mmd1 and all five amd drivers file
+    // `adjacencySize(u)` raw, which is 0 for an isolated vertex. Dropping the second shift builds
+    // and passes every 2D case, then corrupts a bucket list on a 3D grid at 6 a side.
+    static constexpr std::int32_t UNFILED    = 0;
+    static constexpr std::int32_t OUTMATCHED = -2147483647 - 1;   // INT32_MIN; no degree reaches it
 
     explicit Buckets(std::size_t size)
         : mHead(size + 1, NIL), mNext(size, NIL), mPrev(size, UNFILED) {}
@@ -84,29 +107,39 @@ public:
     // scan's in its ties.
     void file(std::uint32_t degree, std::int32_t u) {
         mNext[u] = mHead[degree];
-        mPrev[u] = NIL;                                // filed, and at the head
-        if (mHead[degree] != NIL) mPrev[mHead[degree]] = u;
+        mPrev[u] = -static_cast<std::int32_t>(degree) - 1;   // head of `degree`; see the encoding  // at the head, and this is its bucket
+        if (mHead[degree] != NIL) mPrev[mHead[degree]] = u + 1;
         mHead[degree] = u;
     }
 
     // buckets[degree].discard(u). Idempotent, which matters during a batch: a vertex evicted
     // early can be merged away by a later pivot in the same round, and unfiling it twice must
     // not splice a list it is no longer in.
-    void unfile(std::uint32_t degree, std::int32_t u) {
-        if (mPrev[u] == UNFILED) return;               // already gone; see the sentinel's note
-        if (mPrev[u] != NIL) mNext[mPrev[u]] = mNext[u];
-        else                 mHead[degree]   = mNext[u];
-        if (mNext[u] != NIL) mPrev[mNext[u]] = mPrev[u];
+    void unfile(std::int32_t u) {
+        const std::int32_t prev = mPrev[u];
+        if (prev == UNFILED || prev == OUTMATCHED) return;   // not in a list; see the encoding
+        if (prev > 0) mNext[prev - 1]   = mNext[u];
+        else          mHead[-prev - 1] = mNext[u];           // u headed bucket -prev - 1
+        if (mNext[u] != NIL) mPrev[mNext[u]] = prev;
         mNext[u] = NIL;
         mPrev[u] = UNFILED;
     }
+
+    // Withhold u from the buckets without filing it anywhere, which is genmmd's
+    // `bwd[nd] = -maxint`. It stays live and reachable; it simply cannot be the minimum before
+    // the vertex that outmatched it, so it is not a candidate until an elimination reaches it and
+    // `restore` puts it back. mmdelm spells that restore `bwd[rn] = 0`, the same store that
+    // unfiles, which is why the two sit together at every call site here.
+    void outmatch(std::int32_t u)         { unfile(u); mPrev[u] = OUTMATCHED; }
+    void restore(std::int32_t u)          { if (mPrev[u] == OUTMATCHED) mPrev[u] = UNFILED; }
+    bool outmatched(std::int32_t u) const { return mPrev[u] == OUTMATCHED; }
 
     // Move u to the bucket for newDegree, carrying the cached degree with it. The three steps go
     // together, which is why this is one call: the bucket a vertex sits in is read from its
     // degree, so writing the degree first would erase it from the wrong list. A vertex whose
     // degree did not change is removed and reinserted into the same list, which is harmless.
     void refile(std::vector<std::uint32_t>& degrees, std::int32_t u, std::uint32_t newDegree) {
-        unfile(degrees[u], u);
+        unfile(u);
         degrees[u] = newDegree;
         file(newDegree, u);
     }
@@ -115,7 +148,8 @@ public:
     // walks a whole bucket in the prepass, and its refresh asks whether a vertex it reached has
     // already been dealt with this round.
     std::int32_t next(std::int32_t u) const      { return mNext[u]; }
-    bool         filed(std::int32_t u) const     { return mPrev[u] != UNFILED; }
+    bool         filed(std::int32_t u) const     { return mPrev[u] != UNFILED
+                                                          && mPrev[u] != OUTMATCHED; }
 
     std::int32_t head(std::uint32_t degree) const  { return mHead[degree]; }
     bool         empty(std::uint32_t degree) const { return mHead[degree] == NIL; }
@@ -127,7 +161,7 @@ private:
     // A byte per vertex, not std::vector<bool>. That specialization packs one bit per element, and
     // what it costs here is CONSTRUCTION rather than access: a vector of n false is built through
     // the bit-reference machinery word by word, where a vector of n zero bytes is a memset. Both
-    // this flag and QuotientGraph::mEliminated are built once per ordering, so a workload that
+    // this flag and the graph's own arrays are built once per ordering, so a workload that
     // orders repeatedly pays it repeatedly.
     //
     // Measured on alpamayo, MMD2 at 140x140 over 3000 orderings: the graph constructor fell from
@@ -209,8 +243,31 @@ public:
     QuotientGraph(const std::vector<std::size_t>&  colPtr,
                   const std::vector<std::int32_t>& rowIdx);
 
-    std::size_t size() const           { return mAdjacencySize.size(); }
-    bool eliminated(std::int32_t u) const { return mEliminated[u] != 0; }
+    std::size_t size() const           { return mRun.size(); }
+    // GONE, which is genmmd's `marker[v] = maxint` exactly: one value reserved above every tag
+    // makes the stamp array answer "is v dead" on the load it was making anyway, so no array is
+    // spent on liveness at any walk site. AMD_2 does the same with `W[e] = 0` for a dead clique.
+    //
+    // NOT the weight. `mWeight[v] != 0` is a PARTIAL flag on both sides: `number()` leaves a
+    // prepass vertex at weight one deliberately, so its neighbors' degrees still count it, and
+    // genmmd's prepass leaves `qsize` at one for the same reason. genmmd uses `qsize[nd] != 0`
+    // only inside element walks, where a prepass vertex cannot appear because the mark has
+    // already kept it out of every clique. Used as the universal test it lets a numbered vertex
+    // back into a reachable set: 201 entries for 200 vertices on a random mmd2 pattern, tried and
+    // reverted on 2026-08-08.
+    //
+    // Safe only because clique ids no longer share this array; see beginElimination.
+    static constexpr std::int32_t GONE = 2147483647;   // INT32_MAX, above every reachable tag
+
+    bool eliminated(std::int32_t u) const { return mMark[u] == GONE; }
+
+    // A driver may stamp into this same array rather than allocating one of its own, which is
+    // what genmmd's `marker` is: `mmdelm` stamps it at level `tag` and `mmdupd` at level
+    // `mt = tag + md0`, one array and one counter serving both. One counter is what makes it
+    // safe, since two tags drawn from it can never be equal.
+    std::int32_t advanceTag()                    { return ++mTag; }
+    std::int32_t mark(std::int32_t v) const      { return mMark[v]; }
+    void setMark(std::int32_t v, std::int32_t t) { mMark[v] = t; }
 
     // The members of clique c, which after eliminate(p) is the pattern of p's column of L: the
     // vertices the pivot reached, less those it absorbed. A pointer and a length, as the
@@ -258,14 +315,14 @@ public:
     // immediately behind it, which is why the incidence lookup reads the adjacency's length. See
     // the note on the members below.
     const std::int32_t* adjacency(std::int32_t u) const {
-        return mSource.data() + mSourcePtr[u];
+        return mSource.data() + mRun[u].sourcePtr;
     }
-    std::uint32_t adjacencySize(std::int32_t u) const { return mAdjacencySize[u]; }
+    std::uint32_t adjacencySize(std::int32_t u) const { return mRun[u].adjacencySize; }
 
     const std::int32_t* incidence(std::int32_t u) const {
-        return mSource.data() + mSourcePtr[u] + mAdjacencySize[u];
+        return mSource.data() + mRun[u].sourcePtr + mRun[u].adjacencySize;
     }
-    std::uint32_t incidenceSize(std::int32_t u) const { return mIncidenceSize[u]; }
+    std::uint32_t incidenceSize(std::int32_t u) const { return mRun[u].incidenceSize; }
 
     // How many original vertices u stands for. One until mass elimination merges into it, so a
     // degree that counts vertices has to count this rather than entries.
@@ -441,7 +498,7 @@ private:
     // between them the graph is half eliminated: the clique is written and stamped but the reached
     // vertices still name the pivot as a variable. Nothing outside may observe that state, which is
     // why the seam is two private calls rather than a public begin and end.
-    void beginElimination(std::int32_t pivot, std::int32_t& inClique, std::int32_t& absorbed);
+    void beginElimination(std::int32_t pivot, std::int32_t& inClique);
 
     const std::vector<std::int32_t>& finishElimination(std::int32_t pivot);
 
@@ -475,9 +532,28 @@ private:
     // A for the whole run, so neither can reach n on its own where the other is nonzero, and
     // `adjacencySize(u) + incidenceSize(u)` cannot overflow either.
     std::vector<std::int32_t>  mSource;         // every A[u] then I[u], run after run
-    std::vector<std::size_t>   mSourcePtr;      // where u's run starts, fixed at construction
-    std::vector<std::uint32_t> mAdjacencySize;  // A[u]'s length, from the run's start
-    std::vector<std::uint32_t> mIncidenceSize;  // I[u]'s length, immediately behind A[u]
+    // ONE OBJECT PER VERTEX, NOT THREE ARRAYS. These three numbers are never useful apart: any
+    // walk of u needs where its run starts and at least one of the two lengths, and the prune
+    // needs all three. Held as three arrays they sit at three unrelated addresses, so a walk of
+    // C[pivot], whose members are scattered vertex ids, pulls in three cache lines per member and
+    // uses 4 or 8 bytes of each. Held together they are one line.
+    //
+    // Measured before the change, on a 100x100 grid: 9148 + 5611 + 5687 = 20446 D1 read misses on
+    // the prune's three preamble lines, 15.8 per cent of the ordering's total, against genmmd's
+    // 4070 for the same three facts. It gets them from `xadj[rn]` and `xadj[rn+1]`, ADJACENT
+    // entries of one array, plus a field of `fwd[rn]` that the same loop reads anyway to unfile
+    // the vertex. So this is not a scheme it lacks; it is a scheme we had split apart.
+    //
+    // EXACTLY 16 BYTES, four to a 64-byte line, and the layout only pays while that holds. The
+    // position is `std::size_t` because it offsets into an arena bounded by nnz(A); the two
+    // lengths are `std::uint32_t` because they are one dimensional and bounded by n. That is the
+    // integer rule producing 8 + 4 + 4 with no padding, rather than a size chosen to fit.
+    struct VertexRun {
+        std::size_t   sourcePtr;       // where u's run starts in mSource, fixed at construction
+        std::uint32_t adjacencySize;   // A[u]'s length, from the run's start
+        std::uint32_t incidenceSize;   // I[u]'s length, immediately behind A[u]
+    };
+    std::vector<VertexRun> mRun;
 
     // C[c] is flat too, and for a second property rather than the adjacency's. Its members are
     // not known in advance, so its block cannot be placed at construction; but they are known
@@ -514,15 +590,8 @@ private:
     std::vector<std::int32_t>  mSuperLast;
     std::vector<std::uint32_t> mWeight;
     std::uint32_t              mCliqueWeight = 0;  // see cliqueWeight(); per-pivot, not per-vertex
-    std::vector<std::uint8_t> mEliminated;   // a byte per vertex; see reachableSet on why the flag stays
 
     std::vector<std::int32_t> mMerged;   // scratch for the vertices an elimination merges away
-    // Whether any live merge has happened yet, which decides whether the reachable set has to
-    // check for dead vertices at all. Mass elimination cannot leave one in a clique, so a branch
-    // that only mass-eliminates never pays the test: the flag is false, the condition
-    // short-circuits, and the load of the eliminated flag never happens. Measured at about a
-    // quarter of the exact refresh, which is MMD1's hot loop, so it is worth the member.
-    bool mLiveMerges = false;
 
     // Which end of I[u] reachableSet() walks from. genmmd threads its element list through an
     // integer array and pushes at the head, `list[nb] = el; el = nb`, then reads from the head, so

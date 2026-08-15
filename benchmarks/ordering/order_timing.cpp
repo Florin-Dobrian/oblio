@@ -36,6 +36,8 @@
 #include "oblio/SparseMatrix.h"
 #include "oblio/Permutation.h"
 #include "oblio/Mmd3B.h"
+#include "oblio/Amd1B.h"
+#include "oblio/Amd2B.h"
 #include "oblio/OrderEngine.h"
 
 // ASK FOR A PERFORMANCE CORE, on the one platform where cores differ. Apple Silicon runs a
@@ -186,11 +188,20 @@ static constexpr double targetMs = 300.0;
 // file when the question closes. See src/Mmd3B.cpp for the stop condition, and the section "The
 // vendored storage scheme, and what it is worth" in experiments/ordering/README.md for what is
 // being measured.
+using OrderFn = std::vector<std::int32_t>(*)(const std::vector<std::size_t>&,
+                                             const std::vector<std::int32_t>&);
+
 struct Method {
     std::string name;
     Ordering    ordering;
     bool        raw = false;
-    bool        mmd3b = false;   // see below; local for the same reason `raw` is
+    // Three columns are not orderings and so are not in `Ordering`: `AMDraw` is the vendored
+    // routine through a hook, and `MMD3B`, `AMD1B` and `AMD2B` are B layers, the same ordering on
+    // a different schedule. Each is reached as a free function and flagged here, locally, for the
+    // reason the header gives: an enumerator would put a benchmark's oracle into the library's
+    // public enum and into every switch over it.
+    bool        mmd3b = false;
+    OrderFn     fn = nullptr;    // a B layer reached directly; see below
 };
 
 // The permutation the hooked routine produces. It takes the off-diagonal pattern as `int`, where
@@ -225,6 +236,32 @@ static Permutation rawPermutation(const SparseMatrix<double>& A) {
 // reached one way times differently from a column reached another, so what differs between this
 // path and MMD3's is the enum switch OrderEngine does before dispatching, one branch per call and
 // not per vertex.
+// The same shape as mmd3bPermutation below, for any B layer taken as a free function.
+static Permutation fnPermutation(const SparseMatrix<double>& A, OrderFn f) {
+    Permutation P;
+    P.setNewToOld(f(A.colPtr(), A.rowIdx()));
+    return P;
+}
+
+static double orderTimeFnB(const SparseMatrix<double>& A, OrderFn f) {
+    { Permutation warm = fnPermutation(A, f); (void) warm; }   // warm-up, discarded
+
+    const auto p0 = std::chrono::steady_clock::now();
+    { Permutation P = fnPermutation(A, f); (void) P; }
+    const auto p1 = std::chrono::steady_clock::now();
+    const double one = std::chrono::duration<double, std::milli>(p1 - p0).count();
+    const int repeats = std::min(std::max(static_cast<int>(targetMs / std::max(one, 1e-3)), 3), 20000);
+
+    double best = 1e30;
+    for (int trial = 0; trial < repeats; ++trial) {
+        const auto t0 = std::chrono::steady_clock::now();
+        { Permutation P = fnPermutation(A, f); (void) P; }
+        const auto t1 = std::chrono::steady_clock::now();
+        best = std::min(best, std::chrono::duration<double, std::milli>(t1 - t0).count());
+    }
+    return best;
+}
+
 static Permutation mmd3bPermutation(const SparseMatrix<double>& A) {
     Permutation P;
     P.setNewToOld(orderMmd3B(A.colPtr(), A.rowIdx()));
@@ -282,6 +319,8 @@ static std::size_t fill(const SparseMatrix<double>& A, const Method& method) {
         P = rawPermutation(A);
     } else if (method.mmd3b) {
         P = mmd3bPermutation(A);
+    } else if (method.fn) {
+        P = fnPermutation(A, method.fn);
     } else {
         const OrderEngine oe(method.ordering);
         if (!oe.compute(A, P)) return 0;
@@ -364,8 +403,8 @@ int main(int argc, char** argv) {
         {"AMD1", Ordering::AMD1},
         {"AMD2", Ordering::AMD2},
         {"AMD3", Ordering::AMD3},
-        {"AMD1B", Ordering::AMD1B},
-        {"AMD2B", Ordering::AMD2B},
+        {"AMD1B", Ordering::AMD1, false, false, orderAmd1B},
+        {"AMD2B", Ordering::AMD2, false, false, orderAmd2B},
     };
     const std::vector<Method> mmdMethods = {
         {"MMD",  Ordering::MMD},  {"MMD1", Ordering::MMD1},
@@ -417,7 +456,10 @@ int main(int argc, char** argv) {
         std::vector<double> times;
         std::vector<std::size_t> fills;
         for (const auto& m : methods)
-            times.push_back(m.raw ? 0.0 : (m.mmd3b ? orderTimeMmd3B(A) : orderTime(A, m.ordering)));
+            times.push_back(m.raw ? 0.0
+                                  : m.mmd3b ? orderTimeMmd3B(A)
+                                  : m.fn    ? orderTimeFnB(A, m.fn)
+                                            : orderTime(A, m.ordering));
         for (const auto& m : methods) fills.push_back(fill(A, m));
         for (std::size_t k = 0; k < methods.size(); ++k)
             if (!methods[k].raw) std::printf(" %10.2f", times[k]);

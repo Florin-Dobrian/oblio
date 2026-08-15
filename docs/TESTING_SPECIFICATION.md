@@ -36,8 +36,9 @@ consistent and the suite passes either way.
 assertions in `test_order` check those two routines and compile only when they are there, so that
 suite reports 91 or 77. Nothing else varies: every other suite asserts the same thing either way,
 everything they use being ours. The one place the difference shows outside `test_order` is the
-nine-ordering sweep in `test_pipeline`, which expects every ordering the build has rather than a
-fixed nine.
+ordering sweep in `test_pipeline`, which expects every ordering the build has rather than a fixed
+number. That sweep covers seven orderings without `private/` and nine with it, having dropped
+AMD1B and AMD2B on 2026-08-15 when they left the enum.
 
 | suite | assertions | what it establishes |
 |---|---|---|
@@ -161,13 +162,18 @@ composition against direct application and the inverse against the identity.
 ### test_order, 91 assertions (14 of them the vendored pair's, and optional)
 
 Seven matrices, each checked for structural symmetry and then ordered by all ten non-trivial
-methods, AMD, AMD1, AMD1B, AMD2, AMD2B, AMD3, MMD, MMD1, MMD2 and MMD3, with the
-result checked for validity as a permutation. Matrices: a 6x6 arrow, tridiagonals at n = 1, 2, 10 and 100, a 5x5 diagonal, and a
+methods and checked for validity as a permutation. **Eight of the ten come from the `Ordering`
+enum**, AMD, AMD1, AMD2, AMD3, MMD, MMD1, MMD2 and MMD3; **the other two, AMD1B and AMD2B, are
+reached as free functions**, having left the enum on 2026-08-15 because a B is not an ordering a
+caller should choose but the same ordering on a different schedule. What is asserted about them
+did not change, only how they are called. See `include/oblio/OrderEngine.h`. Matrices: a 6x6 arrow, tridiagonals at n = 1, 2, 10 and 100, a 5x5 diagonal, and a
 complex arrow.
 
 **Fourteen further assertions compare each B variant against its original entry for entry**, seven
 for AMD1B against AMD1 and seven for AMD2B against AMD2, and they are the strongest oracle in this
-suite. Every other pair of orderings here can only be checked for validity, because each is a
+suite. They matter more since the two left the enum, because leaving it also took them out of
+`test_pipeline`'s ordering sweep: this is now the only thing in the suite that checks them at all,
+and they have no prototype in `experiments/ordering` either. Every other pair of orderings here can only be checked for validity, because each is a
 different ordering and their permutations legitimately differ. A B variant is its original on a
 different schedule, so an identical permutation is a requirement rather than a coincidence, and a
 difference is a defect in one of the two. Both maps are compared, `oldToNew` and `newToOld`.

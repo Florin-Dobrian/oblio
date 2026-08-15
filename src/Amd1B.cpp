@@ -74,10 +74,10 @@ std::vector<std::int32_t> orderAmd1B(const std::vector<std::size_t>&  colPtr,
         pivots.push_back(pivot);
         numEliminated += 1 + static_cast<std::uint32_t>(merged.size());
 
-        buckets.unfile(degrees[pivot], pivot);      // unfile before zeroing: the bucket index is
+        buckets.unfile(pivot);      // unfile before zeroing: the bucket index is
         degrees[pivot] = 0;                         //   read from the degree
         for (std::int32_t u : merged) {
-            buckets.unfile(degrees[u], u);
+            buckets.unfile(u);
             degrees[u] = 0;
         }
 

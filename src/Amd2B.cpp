@@ -117,10 +117,10 @@ std::vector<std::int32_t> orderAmd2B(const std::vector<std::size_t>&  colPtr,
         numEliminated += 1 + static_cast<std::uint32_t>(merged.size());
         numLive -= qg.weight(pivot);                // every original the pivot stands for
 
-        buckets.unfile(degrees[pivot], pivot);      // unfile before zeroing: the bucket index is
+        buckets.unfile(pivot);      // unfile before zeroing: the bucket index is
         degrees[pivot] = 0;                         //   read from the degree
         for (std::int32_t u : merged) {
-            buckets.unfile(degrees[u], u);
+            buckets.unfile(u);
             degrees[u] = 0;
         }
 
@@ -360,7 +360,7 @@ std::vector<std::int32_t> orderAmd2B(const std::vector<std::size_t>&  colPtr,
                     // the true external degree drops by exactly weight(v) as v stops being
                     // outside u's supervariable and becomes part of it.
                     const std::uint32_t weightV = qg.weight(v);
-                    buckets.unfile(degrees[v], v);
+                    buckets.unfile(v);
                     qg.merge(u, v);                 // v folded into u, left where it lies
                     const std::uint32_t merged = degrees[u] - weightV;
                     buckets.refile(degrees, u, merged);

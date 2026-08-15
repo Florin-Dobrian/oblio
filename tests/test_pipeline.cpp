@@ -765,8 +765,7 @@ int main() {
         for (Ordering om : {Ordering::Natural, Ordering::MMD, Ordering::MMD1,
                                Ordering::MMD2, Ordering::MMD3,
                                Ordering::AMD, Ordering::AMD1,
-                               Ordering::AMD2, Ordering::AMD3, Ordering::AMD1B,
-                               Ordering::AMD2B}) {
+                               Ordering::AMD2, Ordering::AMD3}) {
             DirectSolver<double> solver(om, Factorization::Cholesky, Traversal::LeftLooking);
             if (!solver.analyze(A) || !solver.factor(A) || !solver.solve(b, x))
                 continue;
@@ -774,15 +773,20 @@ int main() {
             worstOrder = std::max(worstOrder, solver.relativeResidual(A, b, x));
         }
 
-        // Two of the ten are the vendored routines, which are optional: without private/ they
+        // Two of the nine are the vendored routines, which are optional: without private/ they
         // refuse and the sweep skips them, so what is expected is every ordering the build has.
         // The count is written out rather than taken from the list's size, deliberately: adding an
         // enumerator should make this fail until someone has decided the new ordering belongs in
         // the sweep, which is exactly what happened when MMD3 was added.
+        //
+        // It was eleven and nine until AMD1B and AMD2B left the enum on 2026-08-15. They are still
+        // built and still checked, in test_order, against their originals entry for entry, which
+        // is a stronger statement than a residual; what they stopped being is orderings a caller
+        // can ask for. See OrderEngine.h.
 #ifdef OBLIO_VENDORED_ORDERINGS
-        const int expectedOrderings = 11;
-#else
         const int expectedOrderings = 9;
+#else
+        const int expectedOrderings = 7;
 #endif
         ck(reachedOrder == expectedOrderings, "Ordering       : every ordering built was reached");
         ck(reachedOrder == expectedOrderings && worstOrder < tol,

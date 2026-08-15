@@ -1,5 +1,13 @@
 # Ordering Benchmark
 
+> **SUPERSEDED IN PART, 2026-08-15.** Every ordering TIME and every ratio against a vendored
+> routine in this document was measured before the encoding work of that date, and understates
+> our orderings by roughly 20 to 30 percent. `MMD3` moved from 1.35 to 1.48x genmmd on square
+> grids to 1.02 to 1.19x, and to 0.81 at 32 cubed; `MMD2`, `AMD2` and `AMD3` all moved with it.
+> **Fill figures are unaffected**, nothing about what is computed having changed: every
+> permutation and every nnz(L) is identical. The tables are left as they stand because a dated
+> measurement is a record of a run. `docs/DESIGN_DECISIONS.md` (2026-08-15) has the account.
+
 What each ordering method costs: wall time to produce the permutation, and nnz(L) under it. Six
 methods, two lineages: the vendored MMD and AMD against Oblio's own MMD1, MMD2, AMD1 and AMD2.
 

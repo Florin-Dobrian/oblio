@@ -34,11 +34,57 @@ belonged elsewhere.
 
 ## Read this first, and the rest only if you are picking up that item
 
-**ITEM 0, AND THE ONE TO PICK UP: why MMD3 is 1.4x genmmd on 2D grids.** NEW on 2026-08-15, and
-the only item with uncommitted code behind it. A day of measurement narrowed it a long way and
-then eliminated the answer I had reached; the live lead is in "The MMD3 storage investigation"
-below and is one experiment away from a result. Read that section before anything else, because
-five hypotheses are already dead and re-testing any of them is a wasted day.
+**ITEM 0 IS CLOSED, 2026-08-15, and the answer was not what this file spent a day predicting.**
+`MMD3` now runs at 1.02 to 1.19x genmmd on square grids and 0.81 to 1.11x on cubes, against 1.35
+to 1.48x that morning. `MMD2` tracks it. Nothing about what is computed changed: every permutation
+and every nnz(L) is identical, on all 137 acceptance cases across nine orderings.
+
+**The cause was the number of ARRAYS a vertex's state lives in**, not placement, not chaining, not
+the number of passes, and not the algorithm. genmmd indexes five arrays by a vertex and we indexed
+eleven, because each of its arrays answers several questions at once, told apart by sign or by a
+reserved value. Four folds and one packing closed it, each of them genmmd's own encoding. The full
+account, the pass-by-pass differential that located it, and the three lessons are in
+`docs/DESIGN_DECISIONS.md` (2026-08-15). **Read that entry rather than the section this replaced.**
+
+**Two things this file said are now known wrong, and both misdirected the search.** It opened with
+"we touch 30 per cent fewer arena entries and take about 50 per cent longer", concluding "so it is
+not more work"; counting every loop rather than the source arena alone, we made 1.18x genmmd's
+visits in 2D. And it recorded the 2D penalty as stalls rather than work, which was right about the
+symptom and wrong about the remedy: our own code was 1.13x its instructions all along.
+
+**And the storage question is answered in the opposite direction from the one it was asked in.**
+`Mmd3B` carries `Mmd3`'s algorithm on genmmd's storage, cliques in the dead segment of their own
+pivot with no second arena. Every encoding fold is now in both files, so storage is the only
+difference left, and ours wins on every axis: 1.02 to 1.19x genmmd in 2D against `Mmd3B`'s 1.15 to
+1.38x, 14.22M instructions against 16.61M, 119331 D1 read misses against 123510. **Spending nnz(L)
+on a second arena buys speed.** `Mmd3B` therefore STAYS, as the standing equal-encoding comparison
+against the vendored storage scheme, which is a change to the stop condition its own header states.
+
+**What is open on the mmd branch**, and it is short. `Mmd3B` is still 1.15 to 1.38x where `Mmd3` is
+at parity, and the three things that separate them are named in the 2026-08-15 design entry:
+`mCliqueSize`, which genmmd does not need because a zero terminates a clique; `mAbsorbed`, a copy
+of `I[pivot]` taken because the scheme is about to overwrite the segment holding it; and
+`forEachMember`'s counted walk with a sign test per entry against genmmd's zero-terminated one.
+
+**And the amd branch has had NONE of this.** Its five drivers still carry `degrees`, `outside`,
+`cliqueDegree`, `explicitPart`, `hashHead` and `hashNext`, plus a 2n `mark`, and `AMD_2` allocates
+none of them: it overlays its hash buckets on the degree heads and keeps the running key in a link.
+`AMD3` gained from the shared-class folds alone, reading 1.28 to 1.87x in 2D and 0.97 to 1.26x on
+cubes, but nothing driver-side has been touched. That is where the remaining headroom is.
+
+**One item to watch there.** The absorbed-clique stamp was deleted from the shared class, replaced
+by `mCliqueSize[c] != 0`. It helps mmd, which the two folds it enabled more than pay for, and it
+costs amd, whose aggressive absorption makes that loop heavy and which has no compensating fold
+yet. Splitting `mMark` to 2n, vertices at `[v]` and cliques at `[c + n]`, would let the stamp come
+back hot and is what both references effectively have, neither of them sharing one stamp array
+between the two kinds. Costs n extra int32, and footprint has killed three changes in this tree.
+
+**EVERY TIMING FIGURE IN THIS TREE PREDATES 2026-08-15 AND UNDERSTATES US BY 20 TO 30 PERCENT.**
+`benchmarks/ordering/README.md`, `benchmarks/pipeline/README.md`,
+`experiments/ordering/README.md`, `experiments/ordering/REPORT.md`, `AMD3.md`, `MMD3.md` and
+`docs/TODO.md` all carry ratios measured before it. Fill figures are unaffected, nothing having
+moved. Each file carries a dated superseding note rather than being rewritten, since a dated
+measurement is a record of a run.
 
 **Where the amd branch stands.** `Amd3` returns `AMD_2`'s raw elimination order exactly on all 38
 acceptance cases and now runs close to it: 0.83 to 0.89 ms at 16 cubed over eight runs where the
@@ -119,189 +165,19 @@ said about the orderings, in order of how much it should affect the plan:
 
 ---
 
-## The MMD3 storage investigation, 2026-08-15
+## The MMD3 storage investigation, 2026-08-15: CLOSED
 
-**The question.** `MMD3` is flat at 1.35 to 1.48x genmmd across 2D grids from 64 to 400 a side, a
-forty-fold range in n, and BELOW 1 on cubes from 20 a side up. Flat means a constant factor, not a
-complexity term, so the target is something per vertex or per entry and not a missing pass.
+Everything this section held is superseded by `docs/DESIGN_DECISIONS.md` (2026-08-15), which
+carries the result, the differential that found it, and the five hypotheses that failed on the way.
+Two facts from it are worth having here because they are what a later reader would otherwise
+re-derive:
 
-**The one fact everything rests on, and it is a count, so it transfers off any machine.** Over a
-whole ordering we touch 30 per cent FEWER arena entries than genmmd and take about 50 per cent
-longer:
-
-```
-                vendored elim   refresh    TOTAL      ours QG   refresh    TOTAL    ratio
-64x64                  126485    117128    243613       89862     89962    179824   0.74x
-140x140                618587    526131   1144718      406662    408269    814931   0.71x
-200x200               1271621   1054314   2325935      818496    820571   1639067   0.70x
-```
-
-So it is not more work. It is about 2.1x cost per entry visited.
-
-**Five hypotheses are dead, each by direct experiment. Do not re-test them.**
-
-- **Construction.** 3 to 5 per cent of the ordering at every size, measured inside one binary.
-- **The liveness array in the clique walks.** Built a variant with `mEliminated` dropped from both
-  clique walks, unsafe and purely to price it: inside the noise. The 2026-08-08 note reads as
-  though that array were expensive. It is not.
-- **The four-pass refresh preamble.** We walk a clique's members four times where genmmd's `n400`
-  loop does one. Fusing to one pass: nothing, under paired timing.
-- **Index widths.** `mSourcePtr` and `mCliquePtr` from `size_t` to `uint32_t`, together and
-  separately: narrowing ONE was worse than base and narrowing both slightly better, which is code
-  layout, not memory.
-- **CLIQUE PLACEMENT, and this is the important one.** See below.
-
-**Placement is refuted, and the refutation cost the most to get.** genmmd stores `C[p]` in the dead
-segment of its own pivot, so blocks sit in vertex-id order; ours were appended in elimination
-order, and consecutive blocks read were 2.5x further apart. `src/Mmd3B.cpp` now implements
-genmmd's scheme in full -- one arena, chaining, links -- and the spread duly improved, 2073 entries
-to 1215 at 200 a side against genmmd's 844. **The time did not move**: 1.42, 1.41, 1.43, 1.44, 1.54
-against MMD3's 1.43, 1.36, 1.38, 1.41, 1.48 on alpamayo.
-
-**And the renumbering experiment that had pointed at placement was CONFOUNDED.** Shuffling a grid's
-numbering took the ratio from 1.57 to 1.16, which I read as genmmd losing an advantage that came
-from the caller's locality. But shuffling slowed genmmd 4.8x and us 3.7x: it adds a large cost to
-both, and adding a large common term to a ratio compresses it toward 1 whatever the mechanism. The
-conclusion did not survive `Mmd3B`. If that test is repeated it needs a control.
-
-**What the two placement experiments together do say** is that the effect is one-sided. Making
-placement worse cost 2 to 4 per cent (spread 2073 to 4980); making it better bought nothing (2073
-to 1215). That is a threshold: at 130 cache lines apart every access already misses, and 4980
-entries is about five pages, so the loss is probably TLB. Distance is not the cost.
-
-### The live lead: three walks of C[pivot] against genmmd's one
-
-A gprof profile at 200 a side, and then per-phase timers in the driver, put the time somewhere I
-had never counted:
-
-```
-per call, 200x200          ms      share        driver phases, one run    200x200   400x400
-mmd_order (vendored)      5.00                  pick                         0.76      3.41
-orderMmd3 SELF            4.50      40%         eliminate                    4.91     31.48
-eliminate                 2.75      24%         evict                        1.51      9.46
-reachableSet              1.25      11%         element prep                 1.93      9.26
-reachableWeight           1.00       9%         two-source walk              2.34     13.87
-massEliminate             0.75       7%
-beginElimination          0.50       4%
-```
-
-`QuotientGraph::eliminate` is 45 per cent, the largest single item, and it walks `C[pivot]` THREE
-times: `beginElimination` builds it and then stamps it with the clique tag, the prune walks it to
-rewrite each member's lists, and `massEliminate` walks it again to test each member. `mmdelm` walks
-it ONCE -- its `n1100` loop does the prune and the mass-elimination test on the same member in the
-same pass.
-
-That fits every fact above. It is per MEMBER of `C[pivot]`, so per entry, which is where the 2.1x
-lives. It is invisible to an arena-entry count, since all three passes read the same clique block.
-And it explains why placement did nothing: the cost is passes over data already resident, not
-distance to it.
-
-**The experiment: fold the `massEliminate` test into the prune walk**, where genmmd has it. One
-pass removed of three, in the heaviest phase. `Mmd3B` is the place to try it and the 213-case
-oracle checks it.
-
-### What is uncommitted, and what it is for
-
-- `src/Mmd3B.cpp` (1250 lines) and `include/oblio/Mmd3B.h`. `Mmd3` on genmmd's storage, with a
-  file-local `QuotientGraphB` so the shared class six drivers use is untouched. It is CORRECT:
-  identical permutations to `Mmd3` on 213 cases (grids to 34x34, 200 random graphs, every delta),
-  clean under ASan and UBSan. Its header carries the stop condition -- it exists until the scheme
-  is decided, then the scheme is adopted or the file goes.
-- `benchmarks/ordering/order_timing.cpp`. `MMD3B` as a column beside `MMD3`, reached as a free
-  function through a local `mmd3b` flag exactly as `AMDraw` is, so it is NOT in `Ordering`, not in
-  either build system's source list and not in the examples. `benchmarks/ordering/Makefile` picks
-  the source up by wildcard. Nothing outside that directory compiles it.
-- `experiments/ordering/README.md`, a 314-line section, "The vendored storage scheme, and what it
-  is worth". **IT NEEDS CORRECTING BEFORE IT IS COMMITTED.** It presents placement as the measured
-  cause and quotes 0.41 of the ratio for it; `Mmd3B` refutes that and the renumbering figure it
-  rests on is confounded. Everything else in it stands: the mechanism, the worked 5x5 chaining
-  example, the entry counts, the peak-live table, the two failed experiments.
-
-### Things established that are worth keeping whatever happens next
-
-- **genmmd's storage in full**, written up in that README section: one array of nnz(A) for A, I and
-  C together; a clique lives in its own pivot's dead segment and is addressed by that pivot; links
-  are negative entries in the last entry of a segment, pointing at the clique ABOUT TO BE WALKED,
-  which is what makes the write cursor safe; a zero terminates. Chains are followed on 0.84 per
-  cent of entries at 400 a side and the rate falls with n, so the machinery is nearly free.
-- **A clique never loses a member.** Membership is symmetric, `v` in `C[c]` implies `c` in `I[v]`,
-  and eliminating `v` absorbs all of `I[v]`, so a clique dies whole. Measured: 0.1 per cent of
-  entries read are dead, and those are the prepass's, which is the one case that numbers a vertex
-  without absorbing anything.
-- **Our clique arena is 0.40 nnz(A) live and 2.4 to 3.5x that in total**, because dead blocks are
-  left behind. Reclaiming is a real storage win independent of any timing question.
-- **`-(c+1)` and not `-c`.** Ids start at 0 here, so a bare negation cannot distinguish clique 0
-  from member 0. The encoding maps [0, 2^31-1] onto [-2^31, -1] exactly. genmmd's zero terminator
-  does not port for the same reason; `mCliqueSize` does that job, as `AMD_2`'s `Len` does.
-- **`AMD_2` places elements differently from genmmd**, and this was got wrong once: it builds in
-  the pivot's own space only when `elenme == 0` and APPENDS otherwise, and its compaction preserves
-  address order. So it restores density, never placement.
-
-### Method notes, paid for the hard way
-
-- **Paired interleaved sampling or nothing.** This sandbox spreads 18 per cent run to run. Two
-  claims were made and retracted in one session from min-of-15 on consecutive passes. Alternate the
-  two binaries and compare medians over 30 pairs.
-- **A ratio compresses toward 1 when a large common cost is added to both sides.** That is what the
-  renumbering test did, and it is the shape to watch for in any before-and-after of this kind.
-
----
-
-## Closed since the last note
-
-**Real matrices arrived, 2026-08-11, and item 4 of the previous list is done.**
-`benchmarks/matrices/` fetches from the SuiteSparse Matrix Collection by an automated filter over
-its published index, reads Matrix Market, screens for structural singularity with a maximum
-matching, and runs two drivers: accuracy over 106 matrices in 28 problem kinds, and performance
-over 107 positive definite ones across four orderings and three traversals. Two reports came out of
-it, `ACCURACY.md` and `PERFORMANCE.md`, both written for readers outside this tree.
-
-**What it settled, beyond the two ordering items above.** Every solution was backward stable at
-machine precision, and no row had a poor answer whose reason was ours. Multifrontal is the fastest
-traversal by roughly a third, 1.028 against 1.364 and 1.388, which is the clearest result either
-benchmark folder has produced. And Cholesky agreed with the inertia on every matrix of four
-independent samples, at 35, 58, 88 and 106, which is the only place two parts of the library check
-each other.
-
-**And a scaling ladder followed it the same day.** `benchmarks/pipeline/pipeline_scaling.cpp` runs
-six square grids to n = 360000 and six cubic ones to n = 110592, over four orderings, three
-traversals and **every factorization Oblio has across all three value types**, which is eight arms.
-Every matrix is diagonally dominant by 25 percent, so nothing perturbs and nothing delays, and the
-run checks that rather than assuming it. `SCALING.md` is the report.
-
-**What it settled.** Factorization time tracks fill almost exactly for Cholesky and static LDL, at
-an exponent of 0.94 to 1.04 against nnz(L) in both families across a factor of 173 in fill: the
-cost is the arithmetic and not the bookkeeping. Multifrontal wins by 2.11x in 2D and 1.13x in 3D,
-so the 1.33x on real matrices sits between them and neither grid figure would have predicted it.
-Complex costs 2.74x real in 2D and 4.50x in 3D, straddling the 4x the flop count predicts.
-
-**And it sharpened the pivoting question considerably**, which is the item below. Dynamic LDL
-grows as nnz(L)^1.31 where static grows as nnz(L)^1.01, reaching **6.98x at the 48 cube with zero
-columns delayed**. That is the pivot search alone, on matrices constructed to need none of it, and
-it is the only place in any of the three reports where cost outruns fill. The mechanism is that
-the search is charged per front-column against a front that grows, where the factorization is
-charged per entry, and 3D grids have far larger fronts than 2D ones at comparable fill.
-
-**Two fusions landed and the constant factor on cubes is largely gone, 2026-08-10.** The hash key
-is accumulated in the bound's walks and the first scan is folded into the prune through
-`QuotientGraph`'s `TaggedScan` overload, so the driver makes `AMD_2`'s walk counts exactly. Neither
-carries an array of its own: the values crossing from the prune to the bound live in `partial` and
-`hashNext`, which are dead at that point, and a version with two fresh vectors of size n was 12
-percent slower in 2D. `AMD3.md` iterations 25 and 26.
-
-**And the instrument was the constraint four times in one week**, which is the part most likely to
-be forgotten. The noise floor is plus or minus 3 percent, measured by leaving an idle vehicle
-column in the benchmark. A `pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)` in both
-benchmark drivers turned a scattered null into a clean result, and without it the scheduler parks
-the thread on an efficiency core for whole runs. Our half of the pass inventory was doubled on six
-of fifteen columns. And the two timing paths differ by up to 2.4 percent.
-
-**The pipeline benchmark measures cubic grids too, 2026-08-10.** `make run2d` and `make run3d`, on
-the same ladders as `../ordering`. It prices the ordering phase at 10 to 18 percent of a one-shot
-solve, and it found that the branches change places for DIFFERENT reasons: in 2D genmmd fills 6 to
-14 percent less at level time, on cubes `AMD_2` orders twice as fast at equal fill. Two orderings
-can fill the same and factor 4 to 10 percent differently, which is supernode shape rather than
-fill.
+- **The five dead hypotheses stay dead**: construction cost, the liveness array in the clique walks,
+  the four-pass refresh preamble, index widths, and clique placement. `Mmd3B` implements genmmd's
+  placement in full and the time did not move.
+- **The renumbering experiment that pointed at placement was CONFOUNDED**, since shuffling adds a
+  large cost to both routines and a large common term compresses any ratio toward 1. If that test
+  is ever repeated it needs a control.
 
 ### Two rounds that touched no algorithm, 2026-08-13 and 2026-08-14
 
@@ -701,6 +577,27 @@ and `usedKeys`, which is the machinery item 2a-hash is about, so the sweep and t
 same lines.
 
 ---
+
+**2b. Taking `AMD1B` and `AMD2B` out of the public enum: DONE, 2026-08-15.** `Ordering` is nine
+enumerators, `Natural, MMD, MMD1, MMD2, MMD3, AMD, AMD1, AMD2, AMD3`, and the two B layers are
+reached as free functions exactly as item 2c specified and as `AMDraw` and `MMD3B` already were.
+`Mmd1` and `Amd1` stay in the enum: they are ladder rungs, but they are also complete, correct
+orderings a caller may legitimately choose.
+
+**What moved with it**, since the surface is wider than the enum: `OrderEngine`'s dispatch and its
+two private methods; the ordering switch and the sweep list in three files under `examples/`, which
+is the site item 2c warns about; `test_pipeline`'s sweep, from nine orderings to seven, with its
+written-out expectation corrected; `benchmarks/ordering/order_timing.cpp`, which grew a general
+free-function column beside the `mmd3b` one; `benchmarks/pipeline/pipeline_timing.cpp`;
+`README.md`'s Structure block and ordering paragraph; and `docs/TESTING_SPECIFICATION.md`, which
+moves with the suite by invariant.
+
+**And `test_order` keeps all fourteen B assertions**, calling the free functions instead. That was
+the one thing that had to survive: the pair have no prototype, are not in `experiments/ordering`'s
+`PORTED` list, and dropping out of `test_pipeline`'s sweep leaves this as the ONLY check on them
+anywhere.
+
+**The original entry follows, since it is what specified the shape.**
 
 **2b. Taking `AMD1B` and `AMD2B` out of the public enum: DEFERRED 2026-08-10, deliberately.** The
 reasoning below still holds and the work is still worth doing eventually. It is not being done now

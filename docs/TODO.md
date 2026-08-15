@@ -1329,6 +1329,31 @@ matrix whose factor fits no machine we have; or let it go when the vendored pair
 Capability section already contemplates. The sentence in DESIGN_DECISIONS should be corrected either
 way, and that is the only part with any urgency.
 
+**3. Whether to reduce the number of arrays the inner loops touch. DONE, 2026-08-15, and it was
+the answer to the whole ordering-speed question rather than the marginal item below.**
+
+The version this item proposed, packing `mSourcePtr`, `mAdjacencySize` and `mIncidenceSize` into
+one struct, is built. It is `QuotientGraph::VertexRun`, and the prediction here was exact: 16
+bytes, four to a cache line, and it reads as a named descriptor rather than three parallel arrays
+kept in step by hand. Measured before the change on a 100x100 grid, its three lines carried 20446
+of 129143 D1 read misses, 15.8 percent, against genmmd's 4070 for the same three facts; after it,
+reads fell 10518 and WRITES ROSE 3508, since the prune stores both lengths per member and now
+dirties a line four vertices share.
+
+**But the struct was the smaller half, and the ceiling stated below was wrong.** This item priced
+the whole direction at "roughly 7 percent of a one-shot solve" on the basis that closing AMD1's
+1.46x was all there was. What the day found is that the array COUNT, not the layout, was most of
+the gap: genmmd indexes five arrays by a vertex where we indexed eleven, each of its arrays
+answering several questions at once. Four folds on that basis took `MMD3` from 1.35 to 1.48x
+genmmd in 2D to 1.02 to 1.19x, and to 0.81 at 32 cubed. `docs/DESIGN_DECISIONS.md` (2026-08-15)
+carries the account.
+
+**What remains of this item is the amd branch**, which has had none of it: `degrees`, `outside`,
+`cliqueDegree`, `explicitPart`, `hashHead`, `hashNext` and a 2n `mark` across five drivers, and
+`AMD_2` allocates not one of them.
+
+**The original text follows, since its reasoning is what produced the struct.**
+
 **3. Whether to reduce the number of arrays the inner loops touch, and what it could possibly be
 worth.** The comparative profile of 2026-08-01 put AMD1 at 1.87 times the vendored routine's D1
 misses for the same work, and the natural story is that `amd_2` walks one array where we walk about

@@ -263,10 +263,8 @@ int main(int argc, char** argv) {
         {"Natural", Ordering::Natural}, {"MMD", Ordering::MMD},
         {"MMD1", Ordering::MMD1},       {"MMD2", Ordering::MMD2},
         {"MMD3", Ordering::MMD3},
-        {"AMD", Ordering::AMD},         {"AMD1", Ordering::AMD1},
-        {"AMD1B", Ordering::AMD1B},     {"AMD2", Ordering::AMD2},
+        {"AMD", Ordering::AMD},         {"AMD1", Ordering::AMD1},     {"AMD2", Ordering::AMD2},
         {"AMD3", Ordering::AMD3},
-        {"AMD2B", Ordering::AMD2B},
     };
 
     for (int side : sides) {

@@ -10,13 +10,18 @@
 //   AMD1,    Approximate Minimum Degree, Oblio's own, the bound alone (src/Amd1.cpp)
 //   AMD2,    AMD1 plus aggressive absorption and hash detection (src/Amd2.cpp)
 //   AMD3,    AMD2 with the vendored routine's list order, to match its permutation (src/Amd3.cpp)
-//   AMD1B,   AMD1's ordering with the eliminator and the first scan fused (src/Amd1B.cpp)
-//   AMD2B,   the same fusion applied to AMD2 (src/Amd2B.cpp)
+// A trailing digit means a different ordering: AMD2 has mechanisms AMD1 lacks, so their
+// permutations and their fill differ and both are correct. Every one of the nine above is a
+// supported ordering a caller may ask for.
 //
-// The trailing B is a different axis from the trailing digit. A digit means a different
-// ordering: AMD2 has mechanisms AMD1 lacks, so their permutations and their fill differ and
-// both are correct. A B means the same ordering computed on a different schedule, so AMD1B
-// must return exactly AMD1's permutation and a difference is a defect in one of them.
+// THE B LAYERS ARE NOT IN THIS ENUM, DELIBERATELY, and there are three of them: `orderAmd1B`,
+// `orderAmd2B` and `orderMmd3B`, declared in their own headers and reached as free functions. A
+// B is not an ordering but the SAME ordering computed differently, so it must return exactly its
+// original's permutation and a difference is a defect in one of them. That makes it a measuring
+// instrument, and an enumerator would put a benchmark's oracle into the library's public enum
+// and into every switch over it, which is a cost paid by every reader of every switch for
+// something no caller should choose. They are built, tested and benchmarked; they are simply not
+// offered. See docs/NEXT.md, item 2c.
 //
 // Two lineages sit behind those names. MMD and AMD are vendored, self-contained codes
 // operating on raw int CSC arrays (src/Mmd.cpp, src/Amd.cpp). MMD1 and AMD1 are ours,
@@ -36,7 +41,7 @@
 namespace Oblio {
 
 
-enum class Ordering { Natural, MMD, MMD1, MMD2, MMD3, AMD, AMD1, AMD2, AMD3, AMD1B, AMD2B };
+enum class Ordering { Natural, MMD, MMD1, MMD2, MMD3, AMD, AMD1, AMD2, AMD3 };
 
 class OrderEngine {
 public:
@@ -109,14 +114,6 @@ private:
                    const std::vector<std::size_t>&  colPtr,
                    const std::vector<std::int32_t>& rowIdx,
                    Permutation& P) const;
-    bool orderAMD1B(std::size_t size,
-                    const std::vector<std::size_t>&  colPtr,
-                    const std::vector<std::int32_t>& rowIdx,
-                    Permutation& P) const;
-    bool orderAMD2B(std::size_t size,
-                    const std::vector<std::size_t>&  colPtr,
-                    const std::vector<std::int32_t>& rowIdx,
-                    Permutation& P) const;
 };
 
 extern template bool OrderEngine::compute(const SparseMatrix<double>&, Permutation&) const;

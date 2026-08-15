@@ -65,8 +65,152 @@ be real, which requires Hermitian. Once that is on the table, the design collaps
 **Cholesky is `CC^H`, always, and in real that *is* `CC^T`.** No option, no flag, no forbidden
 combination to reject. The answer was not hard. Asking the right question was.
 
----
+## 2026-08-15: the gap was never the algorithm, it was how many arrays a vertex lives in
 
+**`MMD3` runs at 1.02 to 1.19x genmmd on square grids and 0.81 to 1.11x on cubes.** That morning
+it read 1.35 to 1.48x in 2D, flat across a forty-fold range in n, and the flatness had been read
+as a constant factor to hunt. It was, and the constant was not in the algorithm.
+
+Nothing about what is computed changed. Every permutation, every nnz(L) and every pass count is
+identical to the start of the day, on all 137 acceptance cases across nine orderings.
+
+### What was tried first, and why five things measured nothing
+
+Clique placement, chain following, the number of passes over C[pivot], and a liveness flag were
+each built and measured, and each came out inside the noise. They have one thing in common: they
+are all changes to the ALGORITHM or to its schedule. A pass-by-pass differential against genmmd,
+every loop of both routines matched by line range, says why none of them could have paid:
+
+```
+pass                                genmmd Ir     ours Ir
+A[pivot] split                         618512      214640   0.35x
+reach build over absorbed cliques     1167345      682181   0.58x
+prune + evict + mass-elim test        4218682     4913397   1.16x
+begin/finish elimination                    0     1205663   no counterpart
+refresh preamble                      1252656     1440344   1.15x
+q2h path                               341996      969466   2.83x
+qxh path                              2001095     1367166   0.68x
+file into degree bucket                336490      662589   1.97x
+pivot selection                        404251      101108   0.25x
+TOTAL, our own source                10795906    12205393   1.13x
+```
+
+**Our own code was 1.13x its instructions while the clock read 1.36x**, and we won four of the
+nine passes outright. Instructions did not explain the gap. Cache misses did: 198483 D1 read misses
+against 104933, 1.89x, for the same graph, the same entries walked and the same answer.
+
+### The finding
+
+**genmmd allocates five arrays indexed by a vertex; we allocated eleven.** It is not more frugal
+by being clever with memory. Each of its arrays answers several questions, told apart by sign or by
+a reserved value:
+
+- `bwd[v]` is the backward link in a degree list, AND `-degree` when v heads one, AND 0 when v is
+  unfiled, AND `-maxint` when v is withheld. We spent `mPrev`, `degrees` and `outmatched` on that.
+- `marker[v]` is the reach stamp at two tag levels at once, `tag` per vertex in `mmdelm` and
+  `mt = tag + md0` per element in `mmdupd`, AND `maxint` for dead. We spent `mMark`, a driver
+  `mark` and `mEliminated`.
+- `fwd[v]` is the forward link, AND the surviving source count after a prune, AND `-md` once v is
+  merged away.
+- `qsize[v]` is the weight AND the merged flag.
+
+Four folds followed, in the order the miss counts ranked them, each one genmmd's own encoding
+rather than an invention:
+
+1. **`degrees` and `outmatched` into `Buckets::mPrev`**, on `bwd`'s scheme. This is what makes
+   `unfile` take no degree argument: a vertex at a list head records its own bucket, so the array
+   that existed to answer that question is not needed. `refreshed` went with them, the running
+   minimum being maintained where a degree is produced, `if(dg<*mdeg)*mdeg=dg`.
+2. **`touched` and `touchedRound` deleted outright from `Mmd2` and `Mmd3`.** Not folded: dead.
+   `Mmd1` READS that list, its refresh walking the touched vertices; the two layers above it
+   refresh element by element and walk `batch`, so the list was filled once per clique member per
+   pivot and never read. The fourth instance of inherited-and-redundant, after `refile`, the
+   evicted list and the inert ternary.
+3. **`mEliminated` into `mMark` as `GONE`**, which is `marker[v] = maxint`. It had been tried
+   alone on 2026-08-08 as `mWeight[v] != 0` and reverted, and the reason is worth keeping: the
+   WEIGHT is a partial flag on both sides, since `number()` leaves a prepass vertex at weight one
+   deliberately and genmmd's prepass leaves `qsize` at one likewise. genmmd uses `qsize != 0` only
+   inside element walks, where a prepass vertex cannot appear. The idea was right and the carrier
+   was wrong.
+4. **The driver's `mark` into `mMark`**, two tag levels in one array and one counter.
+
+### The change that made the others possible, and it was not a fold
+
+`beginElimination` stamped every absorbed clique into `mMark` so the prune could recognize it.
+Clique ids and vertex ids share that space, so the stamp wrote a live tag over the slot of the
+VERTEX that formed the clique, which is dead. Harmless while the mark carried only "seen this
+step"; fatal the moment it also carries "dead", because a dead pivot can still be a member of an
+older clique that is still alive, and a walk of that clique would read the borrowed tag and take
+it for a live vertex.
+
+The first attempt at `GONE` did not see this and paid a restore loop for it, which measured zero
+on the mmd side and cost AMD3 five to ten percent. The repair deleted the stamp instead: the same
+function sets `mCliqueSize[c] = 0` for exactly those cliques, so a dead clique is one of size zero
+and the test needs no tag at all. **Neither genmmd nor `AMD_2` shares one stamp array between
+vertices and cliques**, which is the fact that should have been read off the references first.
+
+### And one packing, which is the only item here that deletes nothing
+
+`mSourcePtr`, `mAdjacencySize` and `mIncidenceSize` are never useful apart and sat in three
+arrays, so a walk of C[pivot] pulled three cache lines per member to use 4 or 8 bytes of each.
+Merged into a 16-byte `VertexRun`, four to a line. genmmd needs no such struct because `xadj[rn]`
+and `xadj[rn+1]` are adjacent entries of one array and the third fact rides in `fwd`.
+
+This is `docs/TODO.md` question 3, which predicted exactly 16 bytes and four to a line in
+August and was never measured. Measured: 20446 of 129143 D1 read misses on its three lines,
+against genmmd's 4070 for the same three facts.
+
+**It is a real trade rather than a free win**, and the counters say so: reads fell 10518 and WRITES
+ROSE 3508, because the prune stores both lengths per member and now dirties a line four vertices
+share. Net favourable, and worth knowing before the same shape is applied elsewhere.
+
+### What it cost in the counters
+
+`Mmd3`, 100x100 grid, ordering symbols only:
+
+```
+                    HEAD        after     genmmd
+instructions    15871381     14221169   13052123
+data reads       5326829      4093914    2922195
+data writes      2094505      1659516    1195977
+D1 read misses    198483       119331     104933
+```
+
+### Three lessons, and the third is the one that generalizes
+
+**A count locates work; it does not price a stream.** The pass inventory this tree built in August
+counts element visits and is silent about how many size-n arrays a loop touches. Every null in
+this investigation was a change the inventory could see, and the thing that paid was one it could
+not.
+
+**Attribution by reading is not attribution.** An early version of this account claimed 734583 data
+reads for `mEliminated`, from summing the traffic of every line that MENTIONS it; nearly all of
+that was the `mMark` load on the same line. The true figure was 150045, and the only method that
+gets it right is to remove the candidate and diff the counters. This is the same failure the
+2026-08-09 entry warns about, made while quoting it.
+
+**Reinvention concentrates where outputs cannot see the difference**, which is now the third
+recorded instance after the hash key and the stale clique degree. An encoding is invisible to every
+oracle this tree has: permutations match, fill matches, the twins agree, the sanitizers are clean.
+We had written the readable version of a data structure whose whole point is that it is not the
+readable version, and no test could ever have said so.
+
+### One claim reversed, and it was the premise of the whole investigation
+
+`NEXT.md` opened with "we touch 30 per cent fewer arena entries than genmmd and take about 50 per
+cent longer", concluding "so it is not more work". Counting every loop rather than the source arena
+alone, we made 1.18x its visits in 2D. The premise was a coverage error, and it sent five
+experiments at placement and passes.
+
+**And the storage question it was really about is answered, in the opposite direction.** `Mmd3B`
+exists to run `Mmd3`'s algorithm on genmmd's storage, cliques in the dead segment of their own
+pivot, one array of nnz(A) and no second arena. With every encoding fold now in both files, so that
+storage is the only difference left, our arena wins on every axis: 14.22M instructions against
+16.61M, 1.66M writes against 2.14M, 119331 misses against 123510, and 1.02 to 1.19x genmmd on
+square grids against 1.15 to 1.38x. **Spending nnz(L) on a second arena buys speed**, and the file
+that was built to condemn it is what proves it.
+
+---
 ## 2026-08-13: two things the initializer rule was hiding, and both were found by applying it
 
 The 2026-08-12 entry below settled where a member's value goes. Sweeping the tree for conformance

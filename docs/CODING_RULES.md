@@ -274,6 +274,32 @@ softer layer: conventions for consistency, not correctness.
   See the index-type rules below for why `j`, `k`, `jj`, `kk` are `std::int32_t` and are used
   to subscript without a cast.
 
+- **A hot per-entity array earns its keep, and the count is the thing to watch.** Where a
+  structure is walked at random over a large index space, as the quotient graph is, the cost is not
+  how much state a vertex has but **how many separate arrays it is spread across**: each one is a
+  cache line fetched to use four or eight bytes of it. Two devices, both taken from the vendored
+  orderings and both measured on 2026-08-15:
+
+  - **Overload one array where the values cannot collide.** genmmd's `bwd[v]` is a list link when
+    positive, the vertex's bucket when negative, unfiled at zero and withheld at `-maxint`, which
+    is three of our arrays in one. `marker[v]` is a stamp at two tag levels and a permanent dead
+    flag. The rule for doing this safely is that the encodings must be **disjoint by construction
+    and stated at the declaration**, not inferred: write out which value means what, and say which
+    caller depends on each, because the compiler checks none of it.
+  - **Pack what is always read together.** `QuotientGraph::VertexRun` holds a run's position and
+    its two lengths in 16 bytes, four to a cache line, where three arrays cost three lines per
+    vertex.
+
+  **Neither is free and both were measured, not assumed.** The packing traded 10518 fewer reads
+  for 3508 more writes, since a store now dirties a line four vertices share. And an array with no
+  hot random reader should be left alone: this is a rule about the inner loops, not a licence to
+  compress state everywhere.
+
+  **The counterweight, and it is why this is a convention rather than an invariant.** Separate
+  arrays with honest names read better, which is why the tree had them, and a prototype in
+  `experiments/ordering` should keep them. The reasoning, the four folds and what each cost are in
+  `docs/DESIGN_DECISIONS.md` (2026-08-15).
+
 - **Modern spellings, pin one per historical variation** (check this list before
   reintroducing an old form):
   - source files: **`.cpp`**, not `.cc` (headers `.h`)

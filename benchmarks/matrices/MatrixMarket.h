@@ -23,9 +23,15 @@
 // not because Oblio cannot factor them: it can, and complex Hermitian dynamic LDL is the one
 // part of the numeric code with no 0.9 reference behind it, so real complex input is evidence
 // nothing else can give it. That is a later step, and it is a second instantiation rather than
-// a parse change. `pattern` files carry no values at all, two indices per line, and are useless
-// for a residual; they are exactly what a future ordering-only check would want. `general` is
-// refused because a matrix stored in full may still be unsymmetric, and nothing here checks.
+// a parse change. `general` is refused because a matrix stored in full may still be unsymmetric,
+// and nothing here checks.
+//
+// `pattern` FILES ARE ACCEPTED ONLY ON REQUEST, through `acceptPattern`. They carry no values at
+// all, two indices per line, so every entry becomes 1.0 and the diagonal stays the 0.0 the
+// conversion inserts. That is useless for a residual and exactly right for a caller that reads
+// only the structure, which is what an ordering does: `mmdmatrices.cpp` in experiments/ordering
+// compares two orderings of the same pattern and never looks at a value. The default is false so
+// that a caller who needs numbers cannot get a matrix of ones by accident.
 //
 // THIS READER MIRRORS. A `symmetric` file holds the lower triangle and Oblio stores both, so an
 // off-diagonal entry is emitted twice, once each way. The diagonal is emitted once: fromTriplets
@@ -155,7 +161,8 @@ inline ReadResult refuse(const std::string& reason) {
 } // namespace detail
 
 // Read one file. Never throws for a file we decline to take; a refusal comes back in the result.
-inline ReadResult readMatrixMarket(const std::string& path) {
+// `acceptPattern` takes files that carry structure and no values; see the banner note above.
+inline ReadResult readMatrixMarket(const std::string& path, bool acceptPattern = false) {
     std::ifstream file(path);
     if (!file)
         return detail::refuse("cannot open");
@@ -177,7 +184,8 @@ inline ReadResult readMatrixMarket(const std::string& path) {
         return detail::refuse("object is " + object);
     if (format != "coordinate")
         return detail::refuse("format is " + format);
-    if (field != "real" && field != "integer")
+    const bool pattern = (field == "pattern");
+    if (field != "real" && field != "integer" && !(pattern && acceptPattern))
         return detail::refuse("field is " + field);
     if (symmetry != "symmetric")
         return detail::refuse("symmetry is " + symmetry);
@@ -225,10 +233,13 @@ inline ReadResult readMatrixMarket(const std::string& path) {
         const long long col = std::strtoll(afterRow, &end, 10);
         if (end == afterRow)
             return detail::refuse("malformed entry at line " + std::to_string(lineNumber));
-        const char* afterCol = end;
-        const double val = std::strtod(afterCol, &end);
-        if (end == afterCol)
-            return detail::refuse("no value at line " + std::to_string(lineNumber));
+        double val = 1.0;                     // a pattern file's every entry; see the banner note
+        if (!pattern) {
+            const char* afterCol = end;
+            val = std::strtod(afterCol, &end);
+            if (end == afterCol)
+                return detail::refuse("no value at line " + std::to_string(lineNumber));
+        }
 
         if (row < 1 || row > rows || col < 1 || col > cols)
             return detail::refuse("index out of range at line " + std::to_string(lineNumber));

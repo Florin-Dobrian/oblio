@@ -134,6 +134,34 @@ nothing on the clock. Kept as the faithful shape, labelled a null. The comment d
 was closer to right than the reasoning that overrode it: they were short, and the 2.5x in that pass
 is not there.
 
+### The one optimization that did work, and it came from a matrix with nothing to order
+
+The 246-matrix timing run of the same day, `benchmarks/matrices`, `make ordering`, put the shape of
+the remaining gap in plain view: where there is elimination work we run at 0.40 to 0.86x genmmd,
+and where there is none we run at 2.5 to 2.8x. The worst five rows are matrices with NO OFF-DIAGONAL
+ENTRIES, `nnz(A) = n` and `nnz(L) = n`. A higher per-vertex constant and a lower per-unit-of-work
+cost, and on a pure diagonal the constant is the whole run.
+
+**The prepass was one term of it.** It collected the degree-1 bucket into a vector and then walked
+the vector, the list existing only because unfiling a vertex while walking the bucket destroys the
+link the walk stands on. Reading the successor BEFORE the unfile removes the need, which is what
+genmmd's numbering loop does. Worth **8.6 percent of a pure-diagonal ordering and 0.2 percent of a
+grid**, and it moved those five rows to 2.0 to 2.3x. Applied to all three layers that have a
+prepass, `Mmd2`, `Mmd3` and `Mmd3B`, measuring 8.8, 8.6 and 7.8 percent.
+
+**What remains of the constant is CONSTRUCTION**, and this is the part worth carrying forward. With
+no elimination work at all, an `Mmd3` ordering is roughly a third `QuotientGraph` construction and a
+sixth `orderAscending`. Construction allocates and initializes about ten size-n arrays where genmmd
+allocates five plus its 1-based copies. **That is the array-count finding of the same morning,
+moved from the loops into the constructor**, and the reason nobody saw it is that a grid amortizes
+it against real work while a diagonal has none to amortize against.
+
+It is recorded as an experiment rather than an optimization, `docs/NEXT.md` item 8, and the numbers
+say why: those matrices order in tenths of a millisecond and need no ordering at all. What the case
+is good for is isolating a question a grid conflates, what a container costs per ACCESS in a hot
+loop against what it costs per ARRAY at setup. The three failed attacks above were all aimed at the
+first.
+
 ### Two findings about the instruments, which outlast the changes
 
 **A two to three percent movement in instruction count is invisible on alpamayo.** Confirmed in

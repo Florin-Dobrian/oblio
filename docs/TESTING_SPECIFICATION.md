@@ -73,7 +73,17 @@ experiments/ordering:  make test          63 checks, twins against each other an
                        make amdorder      production Amd3 against the vendored AMD's raw
                                           elimination order
                        make mmdorder      production Mmd3 against genmmd's elimination order
+                       make mmdmatrices   the same mmd check on REAL matrices, over data/*.mtx
 ```
+
+**`make mmdmatrices` is the wider half of the mmd check, added 2026-08-15**, and it reported 243
+matched, 0 differed, 3 skipped on its first run over the SuiteSparse matrices already fetched for
+the two benchmark reports. It asserts exactly what `make mmdorder` asserts, the permutation entry
+for entry against genmmd, on input nothing in `graphs.h` can generate: dense rows, pure diagonals
+with every vertex isolated, social and nearest-neighbor graphs, near-identical siblings that test
+tie-breaking, and sizes two orders past the grid check. It is not part of `make aligned`, since its
+result depends on what has been downloaded into a gitignored directory, and it exits clean when
+nothing has been. `experiments/ordering/README.md` carries the account.
 
 **The two are named for the branch and not for the mechanism**, and the mechanisms differ: genmmd
 emits the order DIRECTLY, while AMD gets it through a HOOK. `make amdorder` generates a hooked copy

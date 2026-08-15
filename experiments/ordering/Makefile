@@ -16,6 +16,14 @@
 #:   make mmdorder     production Mmd3 against genmmd's elimination order, the same four shapes.
 #:                     The mmd counterpart, and it needs no hook: genmmd emits that order and
 #:                     does no postorder. Needs private/.
+#:   make mmdmatrices  the same check on REAL matrices from the SuiteSparse collection, over
+#:                     ../../data/*/*.mtx. Generated shapes exercise scale; real ones bring
+#:                     disconnected components, isolated vertices, dense rows and duplicate
+#:                     entries, which is structure no grid produces. Reports and exits clean when
+#:                     data/ is empty, that being the ordinary state. Any subset can be given
+#:                     directly: ./mmdmatrices_cpp ../../data/HB/*.mtx. Reports nnz(A) and
+#:                     nnz(L), the latter for BOTH orderings so a divergence shows whether it
+#:                     costs anything. Needs private/.
 #:   make vendored     the vendored MMD and AMD on the same graphs, for reference. This is the
 #:                 only target here that needs private/, and it reports rather than fails without
 #:                 it; OBLIO_PUBLIC=1 makes it behave as though private/ were absent
@@ -164,7 +172,7 @@ else
   VENDOR_SRCS = $(wildcard ../../private/Amd.cpp ../../private/Mmd.cpp)
 endif
 
-.PHONY: all test production vendored width amdorder mmdorder aligned clean help
+.PHONY: all test production vendored width amdorder mmdorder mmdmatrices aligned clean help
 
 # Bare `make` prints the target list rather than building. Stated explicitly because the default
 # goal is otherwise the FIRST target in the file, so moving a rule would silently change it and the
@@ -283,6 +291,8 @@ amdorder:
 	@echo "amdorder: skipped, private/ is not present"
 mmdorder:
 	@echo "mmdorder: skipped, private/ is not present"
+mmdmatrices:
+	@echo "mmdmatrices: skipped, private/ is not present"
 aligned:
 	@echo "aligned: skipped, private/ is not present"
 else
@@ -391,6 +401,24 @@ mmdorder_cpp: mmdorder.cpp graphs.h $(VENDOR_SRCS) ../../src/Mmd3.cpp ../../src/
 mmdorder: mmdorder_cpp
 	./mmdorder_cpp
 
+# THE SAME ASSERTION ON REAL MATRICES. It reads Matrix Market through the benchmark's own reader,
+# which is an #include and so a compile-time dependency: if that header moves this stops building,
+# loudly, which is what makes the reference safe. The MATRICES are not referenced at all here, they
+# arrive as arguments, because a rule naming another directory's data files is the case
+# docs/WRITING_RULES.md warns about, nothing binding them and the path dying silently.
+#
+# `data/` is gitignored and usually empty, so the wildcard usually expands to nothing and the
+# driver says so and exits clean. That is deliberate: a check that fails because nobody has
+# downloaded 300 MB of matrices would be turned off within a week.
+mmdmatrices_cpp: mmdmatrices.cpp ../../benchmarks/matrices/MatrixMarket.h $(VENDOR_SRCS) \
+                 ../../src/Mmd3.cpp ../../src/QuotientGraph.cpp ../../src/Types.cpp \
+                 ../../src/SparseMatrix.cpp ../../src/Permutation.cpp \
+                 ../../src/ElmForestEngine.cpp
+	$(CXX) -std=c++17 -O3 -DNDEBUG -w -I../../include $(filter-out %.h,$^) -o $@
+
+mmdmatrices: mmdmatrices_cpp
+	@./mmdmatrices_cpp $(wildcard ../../data/*/*.mtx)
+
 # One word for "is either ordering still aligned", which is the question a reader has. The same
 # shape as `make scale2d` over `scale-mmd-2d` and `scale-amd-2d` in benchmarks/ordering.
 aligned: amdorder mmdorder
@@ -408,5 +436,6 @@ endif
 # in this directory CAN produce.
 clean:
 	rm -f $(BINS) vendored_cpp production_cpp width_cpp amdorder_cpp mmdorder_cpp \
+	      mmdmatrices_cpp \
 	      amd_int64.cpp mmd_int64.cpp amd_raw.cpp Amd.o Mmd.o
 	rm -rf *.dSYM

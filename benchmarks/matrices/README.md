@@ -628,10 +628,24 @@ correctly rather than a case we handle badly.
 invisible singularity, which the `zero` column catches. This is invisible conditioning, which
 nothing marks and nothing should: the answer is correct and the question was ill-posed.
 
-## The three programs
+## The four programs
 
 **`mmread_cpp`** reads and reports, and does not factor anything. It is the inventory: what each
 file is, what it converted to, and what was refused. Run it first on a new set.
+
+**`matrix_ordering_cpp`** answers what the ORDERING STEP ALONE costs, genmmd against `Mmd3`, and
+is the newest of the four, 2026-08-15. `make ordering`, over all of `data/` rather than a
+candidates file: an ordering needs neither values nor definiteness, so what it wants is everything
+on disk, which is 246 files against the performance report's 107.
+
+It is a different question from the ordering column in `matrix_performance_cpp`'s table, which
+prices ordering AGAINST the rest of a solve. This one prices two implementations of the same
+ordering against each other, and the comparison is unusually clean: `make mmdmatrices` in
+`experiments/ordering` shows the two return the SAME permutation on every one of these matrices, so
+there is no fill to trade against time. One `nnz(L)` column serves both, and time is the only thing
+that differs. Both routines go through the same timing helper with the same warm-up and the same
+repeat count, which is not fussiness: a column timed by one path against a column timed by another
+differed 2.4 percent on 2026-08-10 and the difference was read as a result.
 
 **`matrix_accuracy_cpp`** answers how good the answers are. One ordering, MMD3, and the
 left-looking traversal, both held fixed on purpose: the question is whether we compute correctly on
@@ -665,6 +679,12 @@ refuse and the other two still run. It is the only thing in this folder that doe
 object      matrix          the format also covers dense arrays under `array`
 format      coordinate      the sparse spelling
 field       real, integer   both become double
+            pattern         ON REQUEST ONLY, and only `matrix_ordering_cpp` asks. A pattern file
+                            carries structure and no values, two indices per line, which is useless
+                            for a residual and exactly an ordering's input. The default refuses
+                            them so a caller who needs numbers cannot get a matrix of ones by
+                            accident. Added 2026-08-15; it is most of why the ordering set is twice
+                            the size of the other two.
 symmetry    symmetric       and the file then stores ONE TRIANGLE, which we mirror
 ```
 
@@ -1015,6 +1035,42 @@ matrices. **AMD and AMD3 did not**, differing on a minority of rows, once substa
 `experiments/ordering` have AMD3 reproducing the vendored raw order exactly on all 38 cases, but
 those are grids and random patterns. This is the first evidence from real structure and it is
 unexplained; it is recorded here rather than chased.
+
+## What the ordering run showed, 2026-08-15
+
+The first `make ordering`, all 246 matrices, `Mmd3` against genmmd on the ordering step alone.
+
+**Where there is work to do, we win, and the margin grows with the work.** 0.83 to 0.85x on the two
+PARSEC giants, 0.81x on `Schenk/nlpkkt80`, 0.60x and 0.40x on the `FlowIPM22/uni_chimera` pair,
+0.45x on `AG-Monien/se`, 0.53x on `Mulvey/finan512`, 0.57x on `Lourakis/bundle1`. The largest of
+these is `uni_chimera_i5`, 6.3 seconds against 15.6.
+
+**Where there is nothing to do, we lose, and the pattern is sharp.** The worst five rows are all
+matrices with NO OFF-DIAGONAL ENTRIES, `nnz(A) = n` and `nnz(L) = n`: `Boeing/bcsstm39`,
+`Cunningham/m3plates`, `HB/bcsstm25`, `Oberwolfach/t3dl_e` and `Oberwolfach/t2dal_e`, reading 2.03
+to 2.28x. The tier below, 1.5 to 1.9x, is the same thing weaker: `Bai/mhd3200b` at 3.4 entries of L
+per column, `Oberwolfach/LFAT5000` at 3.4, `GHS_indef/linverse` at 4.5.
+
+**So the shape is a higher per-vertex constant and a lower per-unit-of-work cost**, and on a pure
+diagonal the constant is the entire run. One term of it was found and removed the same day: the
+prepass collected the degree-1 bucket into a vector and then walked it, where genmmd reads each
+successor before unfiling and needs no list. That was worth 8.6 percent of a pure-diagonal ordering
+and 0.2 percent of a grid, and it moved those five rows from 2.5 to 2.8x down to 2.0 to 2.3x.
+
+**What remains of that constant is CONSTRUCTION**, and it is measured: with no elimination work at
+all, an `Mmd3` ordering is roughly a third `QuotientGraph` construction and a sixth
+`orderAscending`. Construction allocates and initializes about ten size-n arrays where genmmd
+allocates five plus its 1-based copies, which is the array-count finding of that morning moved into
+the constructor, invisible on a grid because real work amortizes it. `docs/NEXT.md` item 8 carries
+it as an experiment rather than as an optimization, and the reason is in these numbers: the
+matrices in question order in tenths of a millisecond and need no ordering at all.
+
+**Two figures worth keeping from the fill column.** `PARSEC/Si87H76` produces 5,679,875,732 entries
+of fill under MMD3, confirming to three digits a prediction this tree had only extrapolated from
+grids. And there is a worse case nothing had recorded: `FlowIPM22/uni_chimera_i1`, n = 100000 and
+nnz(A) = 1100592, produces 1,179,373,506, which is 1072x nnz(A) from a matrix an eighth of
+`Si87H76`'s size. Both are arguments for nested dissection, and `uni_chimera_i1` is the cheaper one
+to experiment on.
 
 ## What this folder still needs
 

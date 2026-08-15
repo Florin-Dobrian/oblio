@@ -2,9 +2,16 @@
 # SuiteSparse Matrix Collection. One driver per report, sharing the reader.
 #
 #:   make             print this list (the default goal; `make help` is the same thing)
-#:   make all         build the three programs
+#:   make all         build the four programs
 #:   make accuracy    the accuracy pass over accuracy_candidates.txt
 #:   make performance the timing pass over performance_candidates.txt
+#:   make ordering    the ORDERING STEP ALONE, genmmd against Mmd3, over all of data/. A
+#:                    different question from the performance table's ordering column and so a
+#:                    different set: every matrix whose PATTERN can be read, values or not,
+#:                    positive definite or not, which is roughly twice as many. The two return
+#:                    the same permutation on every matrix experiments/ordering's `make
+#:                    mmdmatrices` checks, so the fill column is both of theirs and time is the
+#:                    only difference between them.
 #:   make read        the reader alone over data/, an inventory of what is usable
 #:   make clean
 #:   make help        print this list
@@ -110,7 +117,7 @@ MATRICES = ../../data/*/*.mtx
 help:
 	@grep '^#:' $(firstword $(MAKEFILE_LIST)) | cut -c3-
 
-all: mmread_cpp matrix_accuracy_cpp matrix_performance_cpp
+all: mmread_cpp matrix_accuracy_cpp matrix_performance_cpp matrix_ordering_cpp
 
 mmread_cpp: mmread.cpp MatrixMarket.h $(OBLIO_SRCS) $(OBLIO_HDRS)
 	$(CXX) $(CXXFLAGS) $< $(OBLIO_SRCS) $(BLAS_LIBS) -o $@
@@ -125,10 +132,22 @@ matrix_performance_cpp: matrix_performance.cpp MatrixMarket.h $(OBLIO_SRCS) $(VE
 	$(if $(VENDOR_SRCS),$(CXX) $(CXXFLAGS) -w -c $(VENDOR_SRCS))
 	$(CXX) $(CXXFLAGS) $(VENDOR_DEFS) $< $(OBLIO_SRCS) $(VENDOR_OBJS) $(BLAS_LIBS) -o $@
 
+matrix_ordering_cpp: matrix_ordering.cpp MatrixMarket.h $(OBLIO_SRCS) $(VENDOR_SRCS) \
+                     $(OBLIO_HDRS) .build-mode
+	$(if $(VENDOR_SRCS),$(CXX) $(CXXFLAGS) -w -c $(VENDOR_SRCS))
+	$(CXX) $(CXXFLAGS) $(VENDOR_DEFS) $< $(OBLIO_SRCS) $(VENDOR_OBJS) $(BLAS_LIBS) -o $@
+
 # Both run targets take the whole of data/ through the shell rather than through the program, so
 # any subset is a matter of typing a different glob and needs no option here.
 read: mmread_cpp
 	@./mmread_cpp $(MATRICES)
+
+# Over ALL of data/ rather than a candidates file, and that is the difference from the two report
+# targets below. They each read their own list because the pool holds the union of two sets and
+# neither report wants the other's matrices; an ordering has no such constraint, needing neither
+# values nor definiteness, so what it wants is everything on disk.
+ordering: matrix_ordering_cpp
+	@./matrix_ordering_cpp $(MATRICES)
 
 # The two report targets read their own candidates file rather than globbing data/, because the
 # pool holds the union of both sets and neither report wants the other's matrices. A candidates
@@ -154,5 +173,6 @@ performance: matrix_performance_cpp
 # is overridable, `make CXXFLAGS="... -g"` produces one on macOS, and clean removes what a build
 # in this directory CAN produce.
 clean:
-	rm -f mmread_cpp matrix_accuracy_cpp matrix_performance_cpp Amd.o Mmd.o .build-mode
+	rm -f mmread_cpp matrix_accuracy_cpp matrix_performance_cpp matrix_ordering_cpp \
+	      Amd.o Mmd.o .build-mode
 	rm -rf *.dSYM

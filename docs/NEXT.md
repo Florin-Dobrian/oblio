@@ -166,7 +166,13 @@ said about the orderings, in order of how much it should affect the plan:
 4. **The descriptor struct**, `docs/TODO.md` question 3, if that profile says stalls. Item 2d.
 5. **Narrow the one-dimensional sizes. THE ORDERING IS COMPLETE, 2026-08-11**; the symbolic and
    numeric phases remain and are the larger half. Item 2e.
-6. **Why `Amd3` and the vendored `AMD` disagree on fill on real matrices.** NEW on 2026-08-11.
+6. **Why `Amd3` and the vendored `AMD` disagree on fill on real matrices.** NEW on 2026-08-11, and
+   **the instrument for it now exists on the other branch, 2026-08-15**. `make mmdmatrices` runs
+   the mmd alignment over `data/*/*.mtx` and reported 243 matched, 0 differed, 3 skipped on its
+   first run, so `Mmd3` reproduces genmmd on real structure and not merely on grids. An
+   `amdmatrices` is the same driver with the hooked oracle and the dense-row knob, and unlike the
+   mmd one it should be EXPECTED to find something, which is what this item is about.
+   `HB/bcsstk08`, the 4 percent case named below, is in that run and matches on the mmd side.
    `make amdorder` shows exact agreement on all 38 acceptance cases, which are grids and random
    patterns; on the 107-matrix performance set they differ on a minority, once by 4 percent on
    `HB/bcsstk08`, 29922 against 31153. **Ours fills less where they differ**, so it is not urgent,
@@ -182,6 +188,47 @@ said about the orderings, in order of how much it should affect the plan:
    `mda2`, `mdam2`, `mdm2` and `amd1` through `amd4` were built that way and have not been looked
    at, nor has whether their display blocks build text outside the `SHOW_THRESHOLD` guard, which
    was wrong in six of the eight layers checked.
+
+8. **What a `std::vector` actually costs us, measured on purpose rather than inferred.** NEW on
+   2026-08-15. Our code carries a container layer genmmd does not: its arrays arrive as parameters
+   and live in registers for a whole run, ours are members reached through accessors. On a 100x100
+   grid that layer is 2.78M of `Mmd3B`'s 15.89M instructions, and roughly half of it, the
+   `operator[]` half, is the element access genmmd also performs and merely has credited to its own
+   source. The other half is `push_back` capacity tests, `size()` and growth arithmetic, which
+   genmmd does not execute at all.
+
+   **THREE ATTACKS ON IT ALL FAILED, each for its own reason**, and they are in
+   `docs/DESIGN_DECISIONS.md` (2026-08-15, later): the stamping fold, an arena cursor in place of
+   `push_back`, and raw bases in place of the accessors. The last was also TIMED on alpamayo and
+   came out flat while costing 371403 instructions, which is what makes the question worth asking
+   properly rather than probing at again.
+
+   **THE EXPERIMENT.** The same small computation written twice, once over `std::vector` members
+   reached through accessors and once over raw arrays passed as parameters, and timed against each
+   other. It belongs in `experiments/`, being a study rather than a benchmark, and it wants two
+   axes rather than one, because a grid conflates them:
+
+   - **Per ACCESS**, in a hot loop: the case the three failed attacks were all aimed at, and where
+     the compiler appears to be doing the work already.
+   - **Per ARRAY, at setup**, which is the axis nothing has isolated. A pure diagonal is the case
+     that shows it: with no elimination work at all, an `Mmd3` ordering is roughly a third
+     `QuotientGraph` CONSTRUCTION and a sixth `orderAscending`, and construction allocates and
+     initializes about ten size-n arrays where genmmd allocates five plus its 1-based copies. That
+     is the array-count finding of the same day, moved from the loops into the constructor, and it
+     is invisible on a grid because real work amortizes it.
+
+   **Why it matters and where.** `benchmarks/matrices`, `make ordering`, has the evidence: the five
+   pure-diagonal matrices, `Boeing/bcsstm39`, `Cunningham/m3plates`, `HB/bcsstm25`,
+   `Oberwolfach/t3dl_e` and `Oberwolfach/t2dal_e`, read 2.03 to 2.28x genmmd after the prepass fold,
+   where matrices with real work read 0.40 to 0.86x. Absolute times there are tenths of a
+   millisecond, so this is not a performance item; it is the cleanest available measurement of what
+   the abstraction costs, which is a thing worth KNOWING before the numeric side is tuned.
+
+   **Two conditions on doing it at all**, both learned the same day. It must be timed on alpamayo,
+   since a two to three percent instruction movement is invisible there in either direction and
+   three of the four attempts were judged on counters alone. And builds must be compared back to
+   back inside one invocation, cachegrind's simulated cache misses shifting about 17 percent with
+   heap placement while instruction and data-reference counts are exact.
 
 **Three things not to retry without reading why**, each of which cost a day or a wrong claim:
 

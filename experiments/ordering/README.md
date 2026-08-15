@@ -767,6 +767,67 @@ the seven examples, 2D grids from 4 a side to 140, 3D grids from 2 to 24, and ni
 at n = 2000. 38 cases. `make aligned` runs this and the amd one together, which is the one word for
 "is either ordering still what the vendored routine computes".
 
+### And the same check on real matrices, 2026-08-15
+
+```
+make mmdmatrices
+```
+
+`mmdmatrices.cpp` makes the identical assertion on matrices from the SuiteSparse Matrix
+Collection, read through `benchmarks/matrices/MatrixMarket.h`. **246 matched, 0 differed, 0
+skipped**, over `data/*/*.mtx` as fetched for the accuracy and performance sets.
+
+The first run read 243 with 3 skipped, the three largest sitting past caps carried over from
+`benchmarks/matrices`, which excludes them because a FACTORIZATION of them does not fit. That
+reason does not reach an ordering: `PARSEC/Ga41As41H72`, `PARSEC/Si87H76` and `Schenk/nlpkkt80`
+order in 10 to 14 seconds each and match like the rest, so the caps were raised to cover the
+collection as fetched. They remain as `--max-n` and `--max-nnz` for bounding a run.
+
+**Why it was worth building when the 38 cases were already green.** Every one of those 38 is
+generated, and a generated matrix has the structure somebody chose to give it; widening a grid
+exercises SCALE and never MECHANISM. That is not a hypothetical objection here, the 2D-only version
+of the amd check having been green while production `Amd3` carried a stale clique degree that a 3D
+grid at 16 a side finds. Real matrices bring what nothing in `graphs.h` produces, and the run swept
+through all of it without a divergence:
+
+- **The dense-row pathology.** `GHS_indef/bloweybq`, one column of degree 10000 among 9992 of
+  degree 5, the matrix that takes MMD from 0.83 ms to 70.7.
+- **Pure diagonals**, every vertex isolated: `Boeing/bcsstm39` at n = 46772 and nnz = 46772,
+  `Cunningham/m3plates`, `JGD_BIBD/bibd_81_2`, five of the `HB/bcsstm*`, `Oberwolfach/t3dl_e`.
+- **Graphs rather than meshes**, with degree distributions no grid has: `SNAP/email-Enron`,
+  `Arenas/PGPgiantcompo`, `Pajek/Reuters911`, the `Gset` family, the `ML_Graph` nearest-neighbor
+  graphs.
+- **Near-identical siblings**, which is a test of TIE-BREAKING specifically: `Nemeth/nemeth02`
+  through `nemeth09`, eight matrices of nearly the same structure.
+- **Sizes two orders past the grid check**, to n = 100000 and nnz = 1.8 million.
+
+**And the fill column settled a standing estimate.** `PARSEC/Si87H76` was on record as predicting
+5.68 billion entries under MMD3, extrapolated from grids; measured, it is **5,679,875,732**. The
+same run turned up a case nothing had recorded, `FlowIPM22/uni_chimera_i1` at **1,179,373,506**
+from n = 100000 and nnz(A) = 1100592, which is 1072x nnz(A) from a matrix an eighth of `Si87H76`'s
+size and a cheaper subject for the nested-dissection argument.
+
+**Where the matrices come from, and what crosses the boundary.** They are not in the repository and
+they are not named in any rule here: the driver takes them as ARGUMENTS, exactly as
+`matrix_accuracy_cpp` does, because a Makefile naming another directory's data files is the case
+`docs/WRITING_RULES.md` warns about, nothing binding them and the path dying silently. With `data/`
+empty, which is the ordinary state, it says so and exits clean. The one thing that does cross is an
+`#include` of the benchmark's reader, which is a compile-time dependency: if that header moves this
+stops building, loudly.
+
+**The reader gained one thing for this**, and its banner had already predicted the use: it takes
+`pattern` files on request. They carry structure and no values, which is useless for a residual and
+exactly an ordering's input. The default is still to refuse them.
+
+**And it is deliberately NOT part of `make aligned`.** That target answers "is either ordering
+still what the vendored routine computes" and passes on any machine; a target whose result depends
+on what somebody has downloaded into a gitignored directory would make it mean something else.
+
+**The amd side is the one to build next**, and unlike this one it should be expected to find
+something: `docs/NEXT.md` item 6 records `Amd3` and the vendored AMD differing on fill on a minority
+of the 107-matrix performance set, once by 4 percent on `HB/bcsstk08`, and calls it a divergence the
+acceptance tests cannot see. `HB/bcsstk08` is in this run and matches on the mmd side.
+
 **It needs no hook, and the asymmetry with amd is genmmd's rather than ours.** `mmd_order` returns
 `perm`, the order genmmd eliminates in, and there is no postorder anywhere in the routine, so the
 vendored output vector IS the object to compare. `AMD_2` hides its raw order behind

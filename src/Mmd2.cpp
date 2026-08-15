@@ -35,13 +35,11 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
     // NO `outmatched` ARRAY either: withholding is a value in the same link, Buckets::outmatch,
     // which is genmmd's bwd[nd] = -maxint.
 
-    // `prepassVertices` is the prepass's own list and nothing else. A `touched` list with a
-    // `touchedRound` stamp beside it used to collect every member of every C[pivot] in a round.
-    // Mmd1 READS that list, its refresh walking the touched vertices; this layer refreshes element
-    // by element and walks `batch`, so it was filled once per clique member per pivot and never
-    // read again. Inherited from the layer below and made redundant by the pass that replaced it,
-    // which is the shape `refile`, the evicted list and the inert ternary all had.
-    std::vector<std::int32_t> prepassVertices, batch, elementMembers, q2h, qxh;
+    // NO `prepassVertices` LIST. It held the degree-1 bucket so the prepass could walk it after
+    // emptying it; the prepass now reads each successor before unfiling and needs no list at all.
+    // A `touched` list with a `touchedRound` stamp beside it went the same way on 2026-08-15,
+    // having been filled once per clique member per pivot and never read on this layer.
+    std::vector<std::int32_t> batch, elementMembers, q2h, qxh;
 
     // NO DRIVER MARK ARRAY. The two levels this refresh needs, one surviving a whole element and
     // one fresh per vertex, are two tags rather than two arrays, and they go into the graph's own
@@ -52,13 +50,25 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
     // ---- the prepass ------------------------------------------------------------
     // Bucket 1 holds the isolated and the degree-1 vertices together, by the convention above.
     // Number them and leave the bucket empty. Nothing is eliminated in the quotient-graph sense.
-    for (std::int32_t u = buckets.head(1); u != NIL; u = buckets.next(u))
-        prepassVertices.push_back(u);
-    for (std::int32_t u : prepassVertices) {
+    //
+    // ONE PASS AND NO LIST. This was a collect loop into `prepassVertices` followed by a walk of
+    // it, and the list existed only because unfiling a vertex while walking the bucket destroys
+    // the link the walk is standing on. Reading the successor BEFORE the unfile removes the need,
+    // which is what genmmd does at `private/Mmd.cpp`:
+    //
+    //     while(nextmd>0){int mn=nextmd; nextmd=invp[mn]; marker[mn]=maxint; invp[mn]=-num; num++;}
+    //
+    // It matters most where it looks least worth doing. On a matrix with no off-diagonal entries
+    // every vertex goes through here and nothing else runs, so this loop IS the ordering. Measured
+    // on Mmd3: 8.6 percent of a pure-diagonal ordering at n = 46772, and 0.2 percent of a 100x100
+    // grid. See benchmarks/matrices, `make ordering`.
+    for (std::int32_t u = buckets.head(1); u != NIL; ) {
+        const std::int32_t next = buckets.next(u);   // before the unfile invalidates it
         buckets.unfile(u);
         qg.number(u);
         pivots.push_back(u);
         ++numEliminated;
+        u = next;
     }
     if (size > 2) minDegree = 2;                // head[1] is empty now, and mdeg starts at 2
 

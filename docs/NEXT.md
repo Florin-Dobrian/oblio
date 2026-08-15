@@ -5,7 +5,8 @@ benchmark, a scaling benchmark and the three reports drawn from them, and update
 that when three commits closed the constant factor on the amd branch. Appended to on 2026-08-14
 with two rounds that touched no algorithm, an idiom sweep and a Makefile consolidation, and again
 later that day with three commits on the ordering experiments, all under "Closed since the last
-note" and none of them changing a permutation or a fill figure. **It is meant to be
+note" and none of them changing a permutation or a fill figure. Appended to again on 2026-08-15
+with the MMD3 storage investigation, which is uncommitted work and is item 0 below. **It is meant to be
 deleted** once the items below are done or
 abandoned.
 Everything in it that outlives the task is already somewhere durable and this file only points at
@@ -32,6 +33,12 @@ belonged elsewhere.
 ---
 
 ## Read this first, and the rest only if you are picking up that item
+
+**ITEM 0, AND THE ONE TO PICK UP: why MMD3 is 1.4x genmmd on 2D grids.** NEW on 2026-08-15, and
+the only item with uncommitted code behind it. A day of measurement narrowed it a long way and
+then eliminated the answer I had reached; the live lead is in "The MMD3 storage investigation"
+below and is one experiment away from a result. Read that section before anything else, because
+five hypotheses are already dead and re-testing any of them is a wasted day.
 
 **Where the amd branch stands.** `Amd3` returns `AMD_2`'s raw elimination order exactly on all 38
 acceptance cases and now runs close to it: 0.83 to 0.89 ms at 16 cubed over eight runs where the
@@ -109,6 +116,134 @@ said about the orderings, in order of how much it should affect the plan:
   where ours moves 7. Quote absolute times with the vendored range beside them.
 - A benchmark column reached as a free function is timed differently from one reached through the
   enum, by up to 2.4 percent. Two columns compared must go down the same path.
+
+---
+
+## The MMD3 storage investigation, 2026-08-15
+
+**The question.** `MMD3` is flat at 1.35 to 1.48x genmmd across 2D grids from 64 to 400 a side, a
+forty-fold range in n, and BELOW 1 on cubes from 20 a side up. Flat means a constant factor, not a
+complexity term, so the target is something per vertex or per entry and not a missing pass.
+
+**The one fact everything rests on, and it is a count, so it transfers off any machine.** Over a
+whole ordering we touch 30 per cent FEWER arena entries than genmmd and take about 50 per cent
+longer:
+
+```
+                vendored elim   refresh    TOTAL      ours QG   refresh    TOTAL    ratio
+64x64                  126485    117128    243613       89862     89962    179824   0.74x
+140x140                618587    526131   1144718      406662    408269    814931   0.71x
+200x200               1271621   1054314   2325935      818496    820571   1639067   0.70x
+```
+
+So it is not more work. It is about 2.1x cost per entry visited.
+
+**Five hypotheses are dead, each by direct experiment. Do not re-test them.**
+
+- **Construction.** 3 to 5 per cent of the ordering at every size, measured inside one binary.
+- **The liveness array in the clique walks.** Built a variant with `mEliminated` dropped from both
+  clique walks, unsafe and purely to price it: inside the noise. The 2026-08-08 note reads as
+  though that array were expensive. It is not.
+- **The four-pass refresh preamble.** We walk a clique's members four times where genmmd's `n400`
+  loop does one. Fusing to one pass: nothing, under paired timing.
+- **Index widths.** `mSourcePtr` and `mCliquePtr` from `size_t` to `uint32_t`, together and
+  separately: narrowing ONE was worse than base and narrowing both slightly better, which is code
+  layout, not memory.
+- **CLIQUE PLACEMENT, and this is the important one.** See below.
+
+**Placement is refuted, and the refutation cost the most to get.** genmmd stores `C[p]` in the dead
+segment of its own pivot, so blocks sit in vertex-id order; ours were appended in elimination
+order, and consecutive blocks read were 2.5x further apart. `src/Mmd3B.cpp` now implements
+genmmd's scheme in full -- one arena, chaining, links -- and the spread duly improved, 2073 entries
+to 1215 at 200 a side against genmmd's 844. **The time did not move**: 1.42, 1.41, 1.43, 1.44, 1.54
+against MMD3's 1.43, 1.36, 1.38, 1.41, 1.48 on alpamayo.
+
+**And the renumbering experiment that had pointed at placement was CONFOUNDED.** Shuffling a grid's
+numbering took the ratio from 1.57 to 1.16, which I read as genmmd losing an advantage that came
+from the caller's locality. But shuffling slowed genmmd 4.8x and us 3.7x: it adds a large cost to
+both, and adding a large common term to a ratio compresses it toward 1 whatever the mechanism. The
+conclusion did not survive `Mmd3B`. If that test is repeated it needs a control.
+
+**What the two placement experiments together do say** is that the effect is one-sided. Making
+placement worse cost 2 to 4 per cent (spread 2073 to 4980); making it better bought nothing (2073
+to 1215). That is a threshold: at 130 cache lines apart every access already misses, and 4980
+entries is about five pages, so the loss is probably TLB. Distance is not the cost.
+
+### The live lead: three walks of C[pivot] against genmmd's one
+
+A gprof profile at 200 a side, and then per-phase timers in the driver, put the time somewhere I
+had never counted:
+
+```
+per call, 200x200          ms      share        driver phases, one run    200x200   400x400
+mmd_order (vendored)      5.00                  pick                         0.76      3.41
+orderMmd3 SELF            4.50      40%         eliminate                    4.91     31.48
+eliminate                 2.75      24%         evict                        1.51      9.46
+reachableSet              1.25      11%         element prep                 1.93      9.26
+reachableWeight           1.00       9%         two-source walk              2.34     13.87
+massEliminate             0.75       7%
+beginElimination          0.50       4%
+```
+
+`QuotientGraph::eliminate` is 45 per cent, the largest single item, and it walks `C[pivot]` THREE
+times: `beginElimination` builds it and then stamps it with the clique tag, the prune walks it to
+rewrite each member's lists, and `massEliminate` walks it again to test each member. `mmdelm` walks
+it ONCE -- its `n1100` loop does the prune and the mass-elimination test on the same member in the
+same pass.
+
+That fits every fact above. It is per MEMBER of `C[pivot]`, so per entry, which is where the 2.1x
+lives. It is invisible to an arena-entry count, since all three passes read the same clique block.
+And it explains why placement did nothing: the cost is passes over data already resident, not
+distance to it.
+
+**The experiment: fold the `massEliminate` test into the prune walk**, where genmmd has it. One
+pass removed of three, in the heaviest phase. `Mmd3B` is the place to try it and the 213-case
+oracle checks it.
+
+### What is uncommitted, and what it is for
+
+- `src/Mmd3B.cpp` (1250 lines) and `include/oblio/Mmd3B.h`. `Mmd3` on genmmd's storage, with a
+  file-local `QuotientGraphB` so the shared class six drivers use is untouched. It is CORRECT:
+  identical permutations to `Mmd3` on 213 cases (grids to 34x34, 200 random graphs, every delta),
+  clean under ASan and UBSan. Its header carries the stop condition -- it exists until the scheme
+  is decided, then the scheme is adopted or the file goes.
+- `benchmarks/ordering/order_timing.cpp`. `MMD3B` as a column beside `MMD3`, reached as a free
+  function through a local `mmd3b` flag exactly as `AMDraw` is, so it is NOT in `Ordering`, not in
+  either build system's source list and not in the examples. `benchmarks/ordering/Makefile` picks
+  the source up by wildcard. Nothing outside that directory compiles it.
+- `experiments/ordering/README.md`, a 314-line section, "The vendored storage scheme, and what it
+  is worth". **IT NEEDS CORRECTING BEFORE IT IS COMMITTED.** It presents placement as the measured
+  cause and quotes 0.41 of the ratio for it; `Mmd3B` refutes that and the renumbering figure it
+  rests on is confounded. Everything else in it stands: the mechanism, the worked 5x5 chaining
+  example, the entry counts, the peak-live table, the two failed experiments.
+
+### Things established that are worth keeping whatever happens next
+
+- **genmmd's storage in full**, written up in that README section: one array of nnz(A) for A, I and
+  C together; a clique lives in its own pivot's dead segment and is addressed by that pivot; links
+  are negative entries in the last entry of a segment, pointing at the clique ABOUT TO BE WALKED,
+  which is what makes the write cursor safe; a zero terminates. Chains are followed on 0.84 per
+  cent of entries at 400 a side and the rate falls with n, so the machinery is nearly free.
+- **A clique never loses a member.** Membership is symmetric, `v` in `C[c]` implies `c` in `I[v]`,
+  and eliminating `v` absorbs all of `I[v]`, so a clique dies whole. Measured: 0.1 per cent of
+  entries read are dead, and those are the prepass's, which is the one case that numbers a vertex
+  without absorbing anything.
+- **Our clique arena is 0.40 nnz(A) live and 2.4 to 3.5x that in total**, because dead blocks are
+  left behind. Reclaiming is a real storage win independent of any timing question.
+- **`-(c+1)` and not `-c`.** Ids start at 0 here, so a bare negation cannot distinguish clique 0
+  from member 0. The encoding maps [0, 2^31-1] onto [-2^31, -1] exactly. genmmd's zero terminator
+  does not port for the same reason; `mCliqueSize` does that job, as `AMD_2`'s `Len` does.
+- **`AMD_2` places elements differently from genmmd**, and this was got wrong once: it builds in
+  the pivot's own space only when `elenme == 0` and APPENDS otherwise, and its compaction preserves
+  address order. So it restores density, never placement.
+
+### Method notes, paid for the hard way
+
+- **Paired interleaved sampling or nothing.** This sandbox spreads 18 per cent run to run. Two
+  claims were made and retracted in one session from min-of-15 on consecutive passes. Alternate the
+  two binaries and compare medians over 30 pairs.
+- **A ratio compresses toward 1 when a large common cost is added to both sides.** That is what the
+  renumbering test did, and it is the shape to watch for in any before-and-after of this kind.
 
 ---
 

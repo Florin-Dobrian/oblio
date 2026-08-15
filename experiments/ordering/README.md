@@ -1669,7 +1669,322 @@ than assumed, and the measurement is in the delta section. So md1 through md5 is
 the fork at the top into mmd, which stays exact, and amd, which goes approximate and does not
 batch, is a real division rather than a filing convention.
 
+## The vendored storage scheme, and what it is worth
+
+Both vendored routines keep their whole quotient graph in ONE array the size of the input pattern,
+and neither allocates anything for cliques. We keep two arenas and allocate a second pattern's
+worth. That difference was measured in August 2026 and is the largest single thing between our
+time and theirs on 2D grids, so it is written up here rather than in a layer section: it belongs
+to neither branch and improves both.
+
+**They agree on the arena and differ on two axes**, and the second one is easy to miss:
+
+```
+             placement                        density                  cost per read
+genmmd   the pivot's own segment, ALWAYS   reuse, exactly nnz(A)   a sign test on every entry
+AMD_2    the pivot's own space when the    compaction, 1.2 nnz(A)  none
+         pivot is in no element yet;
+         APPENDED otherwise
+```
+
+Both keep one arena and both stay nnz(A)-scale, so on storage they are close. On PLACEMENT they
+are not. `AMD_2` has two branches, `if (elenme == 0)` builds the new element in place at `Pe[me]`
+and the else builds it at `pfree`; only the first is vertex-id placement, and it applies to a pivot
+that belongs to no element yet, which is an early-run case. Everything after that is appended, in
+creation order, exactly as ours is. Its compaction preserves address order, so it restores DENSITY
+and never restores placement.
+
+That matters because the measurements below attribute most of the time difference to placement,
+not to density. Both schemes beat what we do now; only genmmd's targets the part that was measured
+to cost time. The sections describe genmmd's first, then AMD's, then what each would cost to port.
+
+**Nothing about either is Fortran.** The negative entries and the zero terminator are 1985
+packaging. Underneath is an allocation argument that would be worth making in any language, and
+the sections below separate the two deliberately.
+
+### One array, and why cliques are free
+
+`genmmd` allocates `adjncy` at nnz(A) and nothing else structural. A **segment** is the space
+between `xadj[v]` and `xadj[v+1]-1`, one per vertex, fixed at construction, and it is in one of
+two states: while `v` is live it holds `A[v]` then `I[v]`; once `v` is eliminated it holds clique
+members instead. So a clique is stored in its own pivot's dead segment, and is IDENTIFIED BY THAT
+PIVOT: `xadj[p]` and `xadj[p+1]` delimit `C[p]` exactly as they delimited `p`'s own list. There is
+no clique arena, no clique offset array, and no clique id space.
+
+The transition happens inside `mmdelm`, which is why the compaction of the pivot's list and the
+construction of its clique are the same pass. The write cursor starts at `xadj[md]` and overwrites
+the pivot's own entries as it goes; it is safe because the cursor never overtakes the read index,
+every entry written having been read first.
+
+**Two conservation arguments make it fit, and they are the whole scheme.**
+
+For a vertex: an elimination that reaches `u` removes at least one entry from `u`'s run and adds
+exactly one. Either the pivot was a direct neighbour, so it leaves `A[u]` and its id enters
+`I[u]`; or `u` was reached through a clique `c`, and then `p` is a member of `c`, so every member
+of `c` is reachable from `p`, so `c` is absorbed and leaves `I[u]`. `|A[u]| + |I[u]|` never grows.
+Ours conserves the same way, and this half is not the difference between us.
+
+For a clique: `C[p]` is contained in the pivot's live neighbours together with the members of the
+cliques it absorbs, and every one of those contributed a whole segment. Capacity is a sum over a
+multiset, content is its union, so capacity is at least content BY CONSTRUCTION. No bound is
+checked and no allocation can fail.
+
+### The chain, and how the next segment is chosen
+
+A clique frequently does not fit in its own segment: measured on grids, 65 to 69 per cent do, so
+about a third overflow. `mmdelm` handles that by continuing the list in another segment and
+linking the two.
+
+The first loop over the pivot's segment sorts its entries. Live neighbours are compacted in place
+at the write cursor. Eliminated entries -- the cliques the pivot belongs to, all of which are
+about to be absorbed -- are pushed onto a stack, `list[nb] = el; el = nb`. The second loop walks
+that stack, and before absorbing each one it writes
+
+```
+adjncy[rm] = -el;          rm is the LAST entry of the segment being filled
+```
+
+so **the continuation is the next clique to be absorbed**, taken in LIFO order. Nothing is
+searched for and no free list is kept: the pivot's own incidence list IS the list of available
+segments, because it is exactly the set that is dying. When the cursor reaches that entry it reads
+the value back and jumps:
+
+```
+while (rl >= rm) { lk = -adjncy[rm]; rl = xadj[lk]; rm = xadj[lk+1]-1; }
+```
+
+The link costs one entry of a segment that is being superseded anyway. A reader then has three
+cases per entry, and every walk in the file has this shape:
+
+```
+positive   a member
+negative   a link; jump to xadj[-value] and continue
+zero       the clique ends
+```
+
+**A real example, from a 5 by 5 grid, 1-based as genmmd is.** Vertex 4 is on the boundary with
+three neighbours, so its segment is entries 9 to 11. Its neighbours 3, 5 and 9 have already been
+eliminated, so by this point the segment holds the three cliques it belongs to:
+
+```
+entry     9   10   11
+value     5    3    9        clique ids, not vertices
+```
+
+Eliminating 4: there are no live neighbours to compact, so nothing is written yet. Clique 9 is
+absorbed first, `-9` goes into entry 11, and vertex 9's segment -- entries 25 to 28, four entries
+since 9 is interior -- becomes the continuation. Two live members of `C[9]` are written at entries
+9 and 10; the cursor reaches 11, follows the link, and continues at 25. The result:
+
+```
+[C4] segment of vertex 4, entries  9..11:   8  10  -9
+[C4] segment of vertex 9, entries 25..28:  14   2   0   <- zero terminates
+```
+
+`C[4] = {8, 10, 14, 2}`. Note entry 28 holds a stale link written by a later absorption that the
+walk never reaches, because the zero at entry 27 always comes first on a correct walk.
+
+**Chains can exceed two segments.** Later in the same run pivot 10 fills its own segment, follows
+`-24` into vertex 24's, fills that, and follows `-4` into vertex 4's. That is why the negative test
+sits in the inner loop rather than at a boundary check.
+
+**And the chain is almost never followed.** Measured hops as a fraction of entries read: 2.79 per
+cent at 100 a side, 1.59 at 200, 0.84 at 400 -- one hop per thirty clique walks at the largest
+size, and the rate FALLS with n. A clique overflows only when the reach exceeds the pivot's
+original degree; later in a run pivots are supervariables that have absorbed many vertices and
+inherit long chains of absorbed segments, so capacity outruns content. So the branch is
+predicted-not-taken essentially always. The machinery is not a price paid for the layout; it is a
+price that turns out not to be charged.
+
+### AMD's answer: one pool, compacted in place
+
+`AMD_2` reaches the same place without a single link. Its arena is `Iw`, sized
+
+```
+slen  = nzaat + nzaat/5 + 7n
+iwlen = slen - 6n  =  1.2 nnz(A) + n
+```
+
+so one pool with 20 per cent slack. `Pe[i]` is the offset of object `i` and `Len[i]` its length,
+for rows and elements alike -- the same identified-by-its-pivot trick, since an element takes over
+the supervariable's entry in `Pe`. Note that `Len` is exactly our `mCliqueSize`: AMD keeps a length
+array and does NOT use a terminator.
+
+**Placement, and the branch that is easy to miss.** `AMD_2` builds a new element in one of two
+places:
+
+```
+if (elenme == 0)   pme1 = Pe[me];    in the pivot's OWN space
+else               pme1 = pfree;     appended at the tail
+```
+
+The first is vertex-id placement, and it applies when the pivot belongs to no element yet, which
+is an early-run condition. Everything after is appended in creation order, the same as ours. So
+AMD does not have genmmd's placement property, and its compaction does not restore it: the sweep
+copies live blocks toward the front preserving their address order, which is creation order.
+
+When `pfree` reaches `iwlen`, it garbage-collects rather than chaining:
+
+```
+for (j = 0 ; j < n ; j++)                 mark every live object by FLIPping its first
+    if (Pe[j] >= 0) { Pe[j] = Iw[pn] ; Iw[pn] = FLIP(j) ; }
+
+while (psrc <= pend)                      sweep, copying live blocks toward the front
+    j = FLIP (Iw[psrc++]) ;
+    if (j >= 0) { Iw[pdst] = Pe[j] ; Pe[j] = pdst++ ; ... copy Len[j] entries ... }
+```
+
+One O(n + nnz) pass: mark, sweep, rewrite `Pe`. Dead blocks vanish, live ones come out contiguous
+and still in ascending address order, and the partially built element is moved last so the
+elimination can continue where it left off. `Info[AMD_NCMPA]` counts them, and the figure recorded
+elsewhere in this tree is ONE for a whole 140 by 140 run: the 20 per cent slack absorbs nearly
+everything, so the sweep is a rare event rather than a per-step cost.
+
+**The two schemes trade the same way as a linked list against a vector.** genmmd never copies and
+never over-allocates, and pays a branch on every entry read forever. AMD reads a flat block with no
+test at all, and pays a full sweep on the rare occasion it fills. The measured hop rate on genmmd's
+side, 0.84 to 2.8 per cent, and the compaction count on AMD's, one per run, say both prices are
+small; they are small in different places. What they do NOT trade evenly is placement, which only
+genmmd keeps, and which is the axis the timings below turn on.
+
+### What it is worth, measured
+
+Same graph, same permutation, `orderMmd3` against `mmd_order`, on square grids.
+
+**We do LESS work and take MORE time.** Arena entries touched over the whole ordering:
+
+```
+                vendored elim   refresh    TOTAL      ours QG   refresh    TOTAL    ratio
+64x64                  126485    117128    243613       89862     89962    179824   0.74x
+140x140                618587    526131   1144718      406662    408269    814931   0.71x
+200x200               1271621   1054314   2325935      818496    820571   1639067   0.70x
+```
+
+Thirty per cent fewer entries, about fifty per cent more time: roughly 2.1x cost per entry. That
+closes the question of whether the gap is work or memory.
+
+**The mechanism is placement.** Their offsets are vertex ids, so the cliques a vertex names --
+pivots that were near it in the graph -- land near it in `adjncy` under natural numbering. Ours
+are append positions in elimination order, and minimum degree eliminates a vertex's neighbours at
+unrelated times. Mean gap between consecutive clique blocks read:
+
+```
+                        ours              genmmd         ratio
+2D 100          1001 entries (63 lines)   438  (27)      2.3x
+2D 200          2073 entries (130 lines)  844  (53)      2.5x
+2D 400          4197 entries (262 lines) 1648 (103)      2.5x
+```
+
+**The decisive test is renumbering.** If the advantage is placement inheriting the caller's
+locality, shuffling the input should destroy it. It does:
+
+```
+                        vendored    Mmd3     ratio
+2D 200, natural            6.15     9.69     1.57x
+2D 200, RANDOM            31.15    36.03     1.16x
+```
+
+Stable over repeats, permutations identical throughout. Most of their advantage is the input
+numbering, not their code. **1.16x is the honest size of everything else** -- two arenas, index
+widths, extra arrays, extra passes -- and 0.41 of the ratio is placement.
+
+**Which is also why 2D is behind and 3D is not.** The placement penalty is per BLOCK; 3D reads far
+more members per block, so the same penalty is diluted:
+
+```
+              members per clique lookup      locality's share of the ratio
+2D 200                  11.67                      0.36   (1.50 -> 1.14)
+3D 34                   33.88                      0.05   (0.97 -> 0.92)
+```
+
+Two independent quantities moving together in both families, including the crossing where MMD3
+overtakes genmmd on cubes.
+
+### What we do instead, and what it costs
+
+`mSource` conserves as `adjncy` does: nnz(A) reserved once, nnz(A) - n used, never grown, offsets
+written at construction and never moved. That half is settled.
+
+`mCliqueArena` is the difference. It is append-only in elimination order and NOTHING IS EVER
+RECLAIMED -- `mCliqueSize[absorbed] = 0` with the comment "dead, its block left behind". So it
+holds every clique ever formed rather than the live ones:
+
+```
+            nnz(A)     cumulative        PEAK LIVE        held but dead
+2D 200      199200    186730 (0.94x)    78812 (0.396x)      2.4x
+2D 400      798400    752920 (0.94x)   317612 (0.398x)      2.4x
+3D 26       118976    163671 (1.38x)    48573 (0.408x)      3.4x
+3D 32       223232    322820 (1.45x)    92043 (0.412x)      3.5x
+```
+
+Live clique storage is 0.40 nnz(A), flat across both families and a sixteenfold range in n. We
+hold 2.4 to 3.5 times that. 2D landing just under nnz(A) is a coincidence; 3D crosses because
+bigger cliques abandon more per step.
+
+### Two experiments that failed, and why they are worth recording
+
+**One arena, cliques appended to `mSource`.** Removes an allocation and a stream, keeps append
+order. Paired interleaved timing, which is the only method that resolves effects this small:
+0.867 of base at 140, 0.955 at 200, 0.961 at 280. Real, consistently signed, and far short of the
+gap. It does not move the placement, which is what the gap turned out to be about.
+
+**Vertex-ordered arena, blocks at the pivot's own offset, overflow appended.** This was meant to
+be the cheap way to buy the placement without chaining. It made things WORSE: 1.022 at 200, 1.044
+at 400. The measurement says why -- the mean gap went from 2073 entries to 4980, more than double,
+in the direction of the append arena it replaced.
+
+**The lesson is that vertex ORDER is not vertex-order DENSITY.** `adjncy` is dense because a dying
+vertex hands over its WHOLE segment, so consecutive ids are consecutive data. An arena of n
+segments in which only the fitting two thirds hold anything, each block smaller than its segment,
+is correctly ordered and further apart than appending. **Reclaiming is not a second, optional step
+after placement; it is the precondition that makes placement worth anything.**
+
+### If this is ported
+
+Three notes for whoever builds it.
+
+**The zero terminator does not survive the move to 0-based.** genmmd can use 0 because vertex ids
+start at 1; ours start at 0. We already keep `mCliqueSize`, and with chaining a size and the links
+do different jobs: the size says when to stop counting members, the links say where the members
+continue. Walk while counted is below size, treating a negative as a jump that does not count. No
+terminator needed and no second sentinel introduced.
+
+**The sign bit earns a second use.** Indices are signed `int32_t` in this tree because `NIL` has to
+share a type with the values it stands in for. A link is a second reason for the same choice, and
+the two do not collide: `NIL` never appears in an arena and a link never appears in a field that
+could hold `NIL`.
+
+**It is shared-class work, so it lands on both branches.** `QuotientGraph` serves `Mmd1` through
+`Mmd3` and `Amd1` through `Amd3`, and the placement result was measured on mmd only. The amd
+branch's own gap is 1.60 to 2.03 in 2D, larger than mmd's, and nothing has tested whether the same
+cause is behind it.
+
+**Either vendored scheme beats what we do now, so the choice is which to build first and not
+whether to.** Today's arena is appended AND never reclaimed, so it loses to genmmd on placement and
+to AMD on density, and to both on total storage. That is the state to leave, and the comparison
+between the two vendored answers is empirical: each has to be built and measured, and the second
+one is then measured against the first rather than against today.
+
+**On effort, AMD's is the smaller change.** It appends as we already do, keeps blocks contiguous as
+we already do, and its `Len` is our `mCliqueSize`. What it adds is one mark-and-sweep pass and a
+rewrite of `mCliquePtr`, in one place, called rarely -- `Info[AMD_NCMPA]` records a single
+compaction for a whole 140 by 140 run.
+
+**On effect, genmmd's is the one that targets what was measured.** Placement is worth 0.41 of the
+time ratio in 2D and vanishes under random renumbering; density is worth the 2.4 to 3.5x of dead
+blocks and no measured time. AMD's compaction fixes the second and leaves the first alone, because
+its elements are appended in creation order except for the early `elenme == 0` case.
+
+**The cost of chaining is call sites, not novelty.** The scheme is fully described above and
+porting it is translation, which is what this tree does. What it touches is the reader: a clique
+walk is a flat pointer-and-length loop at about ten sites today, and each becomes a walk that can
+resume in another segment, with a sign test in the inner loop. The terminator question does not
+arise -- keep `mCliqueSize`, walk while the count is below it, and treat a negative as a jump that
+does not count. The sign bit is free because indices are already signed for `NIL`, and the two
+cannot collide: `NIL` never appears in an arena and a link never appears where `NIL` could.
+
 ## md1: the elimination game
+
 
 Minimum degree is a greedy heuristic on one observation: eliminating a vertex makes its
 neighbors pairwise adjacent, so the cheapest vertex to eliminate now is the one with fewest

@@ -35,6 +35,7 @@
 
 #include "oblio/SparseMatrix.h"
 #include "oblio/Permutation.h"
+#include "oblio/Mmd3B.h"
 #include "oblio/OrderEngine.h"
 
 // ASK FOR A PERFORMANCE CORE, on the one platform where cores differ. Apple Silicon runs a
@@ -175,10 +176,21 @@ static constexpr double targetMs = 300.0;
 // A column. Almost all of them are one of the library's orderings; `AMDraw` is not one, and giving
 // it an enumerator in `Ordering` would put a benchmark's oracle into the library's public enum and
 // into every switch over it. So the identity is local to this file.
+//
+// `MMD3B` is local for the same reason and is TEMPORARY. It is MMD3 on a different clique storage
+// scheme, carried in src/Mmd3B.cpp with its own private copy of QuotientGraph so that the scheme
+// can be measured before the class six drivers share is touched. It returns MMD3's permutation by
+// construction, so its fill column carries nothing and its TIME column is the whole question. It
+// is not in `Ordering`, not in the library's source list and not in the examples: it is reached
+// here as a free function, so nothing outside this directory builds it. It comes out with the
+// file when the question closes. See src/Mmd3B.cpp for the stop condition, and the section "The
+// vendored storage scheme, and what it is worth" in experiments/ordering/README.md for what is
+// being measured.
 struct Method {
     std::string name;
     Ordering    ordering;
     bool        raw = false;
+    bool        mmd3b = false;   // see below; local for the same reason `raw` is
 };
 
 // The permutation the hooked routine produces. It takes the off-diagonal pattern as `int`, where
@@ -205,6 +217,37 @@ static Permutation rawPermutation(const SparseMatrix<double>& A) {
     P.setNewToOld(std::vector<std::int32_t>(gRaw.begin(), gRaw.end()));
     return P;
 #endif
+}
+
+// MMD3B's permutation, reached as a free function since it is not in `Ordering`. The body is
+// `rawPermutation`'s, with the ordering call swapped: `setNewToOld` completes the other direction
+// exactly as OrderEngine's loop does. This file's own note on measurement warns that a column
+// reached one way times differently from a column reached another, so what differs between this
+// path and MMD3's is the enum switch OrderEngine does before dispatching, one branch per call and
+// not per vertex.
+static Permutation mmd3bPermutation(const SparseMatrix<double>& A) {
+    Permutation P;
+    P.setNewToOld(orderMmd3B(A.colPtr(), A.rowIdx()));
+    return P;
+}
+
+static double orderTimeMmd3B(const SparseMatrix<double>& A) {
+    { Permutation warm = mmd3bPermutation(A); (void) warm; }   // warm-up, discarded
+
+    const auto p0 = std::chrono::steady_clock::now();
+    { Permutation P = mmd3bPermutation(A); (void) P; }
+    const auto p1 = std::chrono::steady_clock::now();
+    const double one = std::chrono::duration<double, std::milli>(p1 - p0).count();
+    const int repeats = std::min(std::max(static_cast<int>(targetMs / std::max(one, 1e-3)), 3), 20000);
+
+    double best = 1e30;
+    for (int trial = 0; trial < repeats; ++trial) {
+        const auto t0 = std::chrono::steady_clock::now();
+        { Permutation P = mmd3bPermutation(A); (void) P; }
+        const auto t1 = std::chrono::steady_clock::now();
+        best = std::min(best, std::chrono::duration<double, std::milli>(t1 - t0).count());
+    }
+    return best;
 }
 
 static double orderTime(const SparseMatrix<double>& A, Ordering method) {
@@ -237,6 +280,8 @@ static std::size_t fill(const SparseMatrix<double>& A, const Method& method) {
     Permutation P;
     if (method.raw) {
         P = rawPermutation(A);
+    } else if (method.mmd3b) {
+        P = mmd3bPermutation(A);
     } else {
         const OrderEngine oe(method.ordering);
         if (!oe.compute(A, P)) return 0;
@@ -311,6 +356,7 @@ int main(int argc, char** argv) {
     const std::vector<Method> allMethods = {
         {"MMD",  Ordering::MMD},  {"MMD1", Ordering::MMD1},
         {"MMD2", Ordering::MMD2}, {"MMD3", Ordering::MMD3},
+        {"MMD3B", Ordering::MMD3, false, true},
         {"AMD",  Ordering::AMD},
 #ifdef OBLIO_AMD_RAW
         {"AMDraw", Ordering::AMD, true},
@@ -324,11 +370,18 @@ int main(int argc, char** argv) {
     const std::vector<Method> mmdMethods = {
         {"MMD",  Ordering::MMD},  {"MMD1", Ordering::MMD1},
         {"MMD2", Ordering::MMD2}, {"MMD3", Ordering::MMD3},
+        {"MMD3B", Ordering::MMD3, false, true},
     };
     // The vendored routine first, since the gap columns below take the first entry as the baseline.
-    // The B variants are left out: they are their originals' permutations on a different schedule,
-    // so their fill column carries no information and their time column belongs to the question
-    // about the seam rather than to the question about the branch.
+    // The B variants are left out of the AMD list: they are their originals' permutations on a
+    // different schedule, so their fill column carries no information and their time column
+    // belongs to the question about the seam rather than to the question about the branch.
+    //
+    // MMD3B IS AN EXCEPTION AND A TEMPORARY ONE. Its fill column is MMD3's by construction and
+    // carries nothing, exactly as the rule says; its TIME column is the open question, because it
+    // is MMD3 on a different clique storage scheme and the scheme is being measured against the
+    // vendored routine's. It comes out of these lists when that question closes, with the file.
+    // See src/Mmd3B.cpp for the stop condition.
     const std::vector<Method> amdMethods = {
         {"AMD",  Ordering::AMD},
 #ifdef OBLIO_AMD_RAW
@@ -363,7 +416,8 @@ int main(int argc, char** argv) {
         // different measurement wearing the same name.
         std::vector<double> times;
         std::vector<std::size_t> fills;
-        for (const auto& m : methods) times.push_back(m.raw ? 0.0 : orderTime(A, m.ordering));
+        for (const auto& m : methods)
+            times.push_back(m.raw ? 0.0 : (m.mmd3b ? orderTimeMmd3B(A) : orderTime(A, m.ordering)));
         for (const auto& m : methods) fills.push_back(fill(A, m));
         for (std::size_t k = 0; k < methods.size(); ++k)
             if (!methods[k].raw) std::printf(" %10.2f", times[k]);

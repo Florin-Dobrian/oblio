@@ -628,6 +628,18 @@ private:
     // the vector's own length can then no longer be the arena's length: `reserve` does not touch
     // memory while `resize` value-initializes, so the constructor zeroes nnz(A) entries and every
     // growth zeroes its new region, which costs more than the tests it removes.
+    // SEPARATE ALLOCATIONS ARE LOAD BEARING, 2026-08-16, and that was found by accident. `AMD_1`
+    // carves Pe, Nv, Head, Elen, Degree and W out of ONE block at offsets that are exact multiples
+    // of n. On a square grid n is m^2, so a power-of-two side gives a power-of-two n and those six
+    // arrays land in the same cache sets at every index. Cachegrind on the vendored routine: the
+    // instruction count and the data-read count per vertex are FLAT across 400, 512 and 800 a side
+    // to a tenth of a percent, while D1 read misses per vertex go 15.3, 40.3, 17.0. Padding the six
+    // apart by one cache line removes 56 percent of the misses at 512 and none at 400, with
+    // byte-identical permutations.
+    //
+    // Every array in this class is its own vector, so nothing here has that property. Which is
+    // worth stating where a later reader might be tempted to consolidate them for locality: the
+    // consolidation is what creates the hazard. See docs/DESIGN_DECISIONS.md (2026-08-16, later).
     std::vector<std::int32_t>  mCliqueArena;  // every C[c] ever formed, end to end
 
     // The supervariable a vertex stands for, as a chain rather than a list per vertex. A list

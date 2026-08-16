@@ -1,4 +1,4 @@
-# NEXT: the amd branch's growth is gone, and where the differential goes next
+# NEXT: the amd branch is past the vendored routine, and the port to mmd is the next piece
 
 **REWRITTEN AT THE TOP ON 2026-08-16.** The section immediately below is the current state;
 everything under "Priority" and after is older and several of its items are now closed, marked
@@ -8,44 +8,60 @@ them.
 
 ## Where the amd branch stands, 2026-08-16
 
-**The 2D growth is gone.** `AMD3` read 1.25x the vendored routine at 32 a side and 1.82x at 400,
-rising monotonically; it now reads about 1.13 to 1.43x with no trend from 100 a side up. Seven
-folds did it, and ONE of them removed the slope: the clique descriptor moved into the dead pivot's
-own `mRun` entry, retiring `mCliquePtr` and `mCliqueSize`. The other six moved the column down by a
-constant. Seventeen entity-indexed streams became eleven, against `AMD_2`'s nine.
+**`AMD3B` is faster than the vendored routine at the top of the square ladder**, 0.93x at 1024 and
+0.97x at 1600, and its slope is below `AMD_2`'s: `time ~ nnz(A)^1.056` against 1.080 on the
+unaligned series, where `AMD3` is 1.088. The excess growth this file has been chasing is now
+negative. `AMD3` itself still reads 1.24 to 1.73 and has none of the work below.
 
-**Nothing computed changed.** Every permutation from all ten drivers is identical to the
-`be589f2` baseline, checked as a digest over 73 grid sizes per driver at each step.
+**What did it was five folds of ONE shape**, and the shape is the finding: not many arrays against
+one, but a second array consulted in a conditional where the vendored code answers from a load it is
+already making. `AMD_2`'s `Nv[j]` is positive-is-the-weight, negative-is-in-the-new-element,
+zero-is-absorbed; we read `mMark[v]` for the tests and `mWeight[v]` for the value. Full account in
+`docs/DESIGN_DECISIONS.md` (2026-08-16, later still).
 
-**What the differential established, and it killed three of my hypotheses in a row.** Both codes do
-the same visits per pivot, 1.011 in 2D and 1.010 on cubes, in every pass. So the growth was never
-work. Not the clique arena either, whose excess misses FALL with n. Not the hash. Not `clear_flag`,
-which never fires. And not single-level cache locality, an L1 model putting the excess at a constant
-0.09 misses per visit. Read `experiments/ordering/README.md`, the 2026-08-16 section, before
-forming a new hypothesis: it also records where the first version of that counter was blind.
+**The storage change in the same file is a wash** and should not port: 2.6 percent fewer reads, 6
+to 8 percent more misses, both constant, and it drags a garbage collector behind it.
 
-### The four things to pick up
+### The port, which is the next piece of work
 
-**1. `AMD1` AND `AMD2` STILL CLIMB IN 2D**, 1.05 to 1.22x and 1.36 to 1.47x, where `AMD3` is flat.
-The descriptor fold is in the shared class and reached them for free, so what remains is
-driver-side. This is the open front and the differential is the instrument for it.
+Three of the five are in the SHARED class and so reach mmd; two are `Amd3` driver code.
 
-**2. FOLD THE B LAYERS IN AND RETIRE THEM.** `AMD1B` and `AMD2B` now satisfy the stop condition in
-`Amd1B.h` for the first time: permutation-identical AND faster, 4 to 16 percent on cubes and even
-or better in 2D. Their 2D penalty was never the fused schedule, it was `ApproximateScan` crossing
-three arrays from the prune; with the tagged `W` the crossing is one. So `Amd1` and `Amd2` take the
-fused `TaggedScan` eliminate, the four B files go, and `ApproximateScan` and its overload go with
-them, having no users left. `Amd3B` and the `AMD3f` control retire in the same sweep, `Amd3` now
-being identical to `Amd3B`.
+| | lives in | mmd sees it |
+|---|---|---|
+| weight sign as the membership mark | `reachableSet`, `eliminate` | yes, and in mmd's hottest loop |
+| `eliminated()` from a zero weight | `QuotientGraph` | yes |
+| massEliminate merges before compacting | `QuotientGraph` | yes |
+| restore inside the bound pass | `Amd3` | no |
+| detection stamp into `w` | `Amd3` | no |
 
-**3. A DENSER LADDER.** The flatness claim rests on seven sides, geometric but sparse in the middle.
-The driver takes explicit sides, so `./order_timing_cpp amd 2d 32 45 64 90 128 181 256 362 400`
-needs no code. Worth doing before the claim is quoted anywhere outside this tree.
+**It could make mmd faster.** `Mmd3`'s degree refresh is the same walk, `mMark[v] < mTag` then
+`mWeight[v]`, and that is `mmdupd`, where genmmd spends most of its time. `MMD3` carries a constant
+of 1.04 to 1.20 against genmmd and no growth term at all, so the fold would attack the constant.
 
-**4. THE TEN-DRIVER DIGEST WANTS A HOME.** It is a throwaway in `/tmp` that hashes every driver's
-permutation over 73 grids and compares against a recorded baseline. It caught nothing this session,
-but it is what made a shared-class change safe to attempt at all, and it is strictly stronger than
-the `Amd1B == Amd1` pair check it is about to replace.
+**THE LIFETIME IS WHAT MAKES IT HARDER, NOT THE ENCODING.** Amd calls `reachableSet` once per pivot
+and restores in a pass it already makes. Mmd calls `reachableSize` and `reachableWeight` PER VERTEX
+in the refresh, so each call must clean up after itself. The plan is an `Mmd3C`, on the precedent of
+`AMD3C`, which existed once to carry a re-schedule until it was proved and then went.
+
+**Two quotient graphs would be the failure, not the fallback.** The amd folds were cheap precisely
+because the shared class had already paid for the encodings; split it and the next fold has to be
+discovered twice.
+
+Order: the three shared changes one at a time, each verified by the eight-driver digest and measured
+on mmd after each, starting with `eliminated()` since it is smallest and tests the liveness argument
+before anything depends on it. Then `Amd3` takes its two.
+
+### Other things open
+
+**`AMD_2`'s aliasing is in the cubic ladder too**, and the earlier note that it would be rarer there
+is WRONG: `m^3 = 2^3k` when `m = 2^k`, so n is a power of two at every starred cubic size as well.
+At 64 cubed the vendored routine costs 536 ns per vertex against 314 at 80 cubed, which has half
+again as many vertices. That is the largest instance of the artifact the benchmark has produced and
+it has not been confirmed with the padded copy, which is the cheap check.
+
+**The 80-cubed amd row is worth a re-run** before it is read as a trend: `AMD` barely slows from 64
+to 80 despite twice the vertices and nearly three times the fill, which reverses a pattern that held
+over five sizes.
 
 ### Two things worth carrying into any next fold
 
@@ -223,7 +239,16 @@ said about the orderings, in order of how much it should affect the plan:
    are trying to match.
 2. **A profile that compares `amd3` against itself at two sizes**, 140 and 400 a side. It decides
    the next item and takes ten minutes. Item 2d.
-2b. **THE PER-ARRAY-AT-SETUP CONTAINER EXPERIMENT IS ANSWERED, 2026-08-16, and not in the form it
+2b. **THE PER-ARRAY-AT-SETUP CONTAINER EXPERIMENT NOW HAS EVIDENCE AGAINST IT, 2026-08-16.** It
+   asked whether one allocation carved into arrays would beat separate vectors, on the model of
+   `AMD_2`'s `S`. That is exactly the shape that makes the vendored routine alias against itself at
+   power-of-two grid sides: six arrays at offsets that are exact multiples of n, landing in the same
+   cache sets whenever n is a power of two, costing it 56 percent of its D1 read misses at 512
+   squared. Grid benchmarks are where sizes cooperate to produce that, and grids are most of what
+   this tree measures. If the experiment is ever run, it needs padding between the arrays from the
+   start, and a ladder that can detect the artifact if the padding is wrong.
+
+2c. **AND THE EARLIER FORM OF THE SAME QUESTION IS ANSWERED, 2026-08-16, not in the form it
    was posed.** It asked whether one allocation carved into arrays would beat separate vectors,
    `AMD_2` carving Pe, Nv, Head, Elen, Degree, W and Iw out of one `S`. That was the leading
    hypothesis for the 2D growth for one session and it was WRONG: `MMD3` has ten separate

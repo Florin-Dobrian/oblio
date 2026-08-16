@@ -65,6 +65,250 @@ be real, which requires Hermitian. Once that is on the table, the design collaps
 **Cholesky is `CC^H`, always, and in real that *is* `CC^T`.** No option, no flag, no forbidden
 combination to reject. The answer was not hard. Asking the right question was.
 
+## 2026-08-16, later still: five folds of one shape, and the amd slope goes below the vendored one
+
+The seven folds below removed arrays. These five remove ARRAY READS FROM CONDITIONALS, which turns
+out to be a different and much larger thing. The distinction was Florin's: it was never many arrays
+against one, it was consulting a second array in a test where the vendored code answers from a load
+it is already making.
+
+### The pattern, in one example
+
+Per adjacency element, `AMD_2` reads one array:
+
+```c
+nvj = Nv [j] ;
+if (nvj > 0) { deg += nvj ; Iw [pn++] = j ; hval += j ; }
+```
+
+`Nv[j]` carries three facts: positive is the weight, negative means already taken into the new
+element, zero means absorbed. One load answers "is it dead", "is it inside the new clique" and
+"what does it weigh". We read `mMark[v]` for the two tests and `mWeight[v]` for the value, and
+`mMark` is an array `AMD_2` DOES NOT HAVE, consulted in the innermost loop of the ordering.
+
+### The five, all in src/Amd3B.cpp
+
+1. **The sign of the weight is the membership mark**, `AMD_2`'s `Nv [i] = -nvi`. Removes `mMark`
+   from the reachable-set walk and from the prune.
+2. **The restore rides in the bound pass** rather than being a pass of its own. The first version
+   negated and restored in two extra traversals per pivot and lost on x86 for that reason alone;
+   `AMD_2` pays neither, its restore being inside RESTORE DEGREE LISTS.
+3. **`eliminated()` answers from a zero weight**, `AMD_2`'s `Nv [i] == 0`. Removes `mMark` from the
+   hash detection loops. It rests on an argument that has to be re-derived per branch: no list can
+   retain an eliminated PIVOT, since if w is in A[u] then u was in C[w] and A[u] was pruned when w
+   went.
+4. **Mass elimination merges before it compacts**, so the compaction reads the zero weight the
+   merge had to write anyway instead of stamping a tag of its own.
+5. **Supervariable detection stamps into `w`**, which is `AMD_2`'s `W [Iw [p]] = wflg` over the
+   whole list, variables and elements alike. This RETIRES mMark outright, 2n int32. The stamps must
+   interleave with the tag protocol rather than clobber it: they start above `wflg + lemax` and
+   `wflg` ends the step past all of them, so next step they read as alive-and-unseen.
+
+### What they are worth
+
+Cachegrind at 400 a side, exact and machine independent:
+
+```
+                 instructions   data reads   D1 read misses
+AMD3  / AMD             1.024        1.179            1.016
+AMD3B / AMD             1.018        1.081            0.968
+```
+
+The read excess falls from 17.9 percent to 8.1, and we now take FEWER D1 misses than the vendored
+routine. On alpamayo, `AMD3B / AMD3` runs 0.95 to 0.81 across the square ladder with the advantage
+growing in n.
+
+**And the slope goes under.** Fitted as `time ~ nnz(A)^alpha` over twelve square sizes, on the
+unaligned series where the vendored routine does not alias against itself:
+
+```
+AMD 1.080     AMD3 1.088     AMD3B 1.056
+```
+
+So the excess growth that this file spent a day chasing, quoted first at 0.032 and then at 0.016,
+is now NEGATIVE. `AMD3B` is 0.93x the vendored routine at 1024 squared and 0.97x at 1600, the first
+square sizes where anything of ours has beaten it.
+
+### The storage change, which was the point of the file and is not the answer
+
+`Amd3B` also carries `AMD_2`'s clique storage: one pool with elbow room, a free cursor, absorbed
+space left dead, and its garbage collection ported with its own FLIP trick so the compaction is one
+linear scan. Two compactions at every size from 50 to 1600, constant, which is what the complexity
+bound assumes.
+
+**Measured alone it is a wash**: 2.6 percent fewer data reads, 6 to 8 percent more D1 misses, both
+constant across the range. So the arena is not the growth and never was, which is what Florin said
+before it was built. It should NOT port; it drags a garbage collector behind it for nothing.
+
+### The instrument finding, which is the one with the widest reach
+
+**The sandbox's wall clock is not alpamayo's for any change that trades one counter against
+another.** The first version of fold 1, +1.4 percent instructions for -6.3 percent reads, measured
+SLOWER on x86 at every size and 3 to 12 percent FASTER on alpamayo. Cachegrind's counts are
+machine-independent and remain trustworthy; the sandbox's timings are not, and a fold judged there
+would have been discarded.
+
+**And the container layer is 17 percent of instructions, not the 1.5 percent the totals suggest.**
+A per-function profile puts 65.8 M instructions in `stl_vector.h` inlined accessors, against 236 M
+of algorithm; the vendored routine runs 337 M of algorithm and no accessors. Two effects were
+cancelling: we execute substantially less algorithm and pay it back in the container layer. The
+misses are not there, `stl_vector.h` holding 0.3 percent of D1 read misses against `eliminate`'s
+42.5.
+
+### Where this leaves the port
+
+Three of the five are in the SHARED class, so mmd sees them: the weight sign, `eliminated()`, and
+the mass-elimination reordering. The other two are `Amd3` driver code. The shared three are also
+the interesting ones for mmd, because `Mmd3`'s degree refresh is the same walk in mmd's hottest
+loop, and mmd's constant against genmmd is 1.04 to 1.20.
+
+**The lifetime is what makes it harder there, not the encoding.** Amd calls `reachableSet` once per
+pivot and restores in a pass it already makes; mmd calls `reachableSize` and `reachableWeight` PER
+VERTEX in the refresh, so each call must clean up after itself. Two quotient graphs would be the
+failure rather than the fallback: the amd folds were cheap precisely because the shared class had
+already paid for the encodings.
+
+---
+
+## 2026-08-16, later: the vendored AMD aliases against itself, and our excess growth is smaller than any ratio said
+
+A wider scaling ladder went in after the folds below: ten square sides and six cubic, each built as
+TWO INTERLEAVED SERIES rather than one geometric run. Square is `32 64 128 256 512` against
+`50 100 200 400 800`, cubic `16 32 64` against `10 20 40`. Each series quadruples n; the two are
+offset by about 2.4x and 2x.
+
+**Why interleave.** A power-of-two side makes every array length and every grid stride a power of
+two, which is the family that hits cache set conflicts, so a trend measured on such a ladder alone
+cannot be told apart from an addressing artifact that grows with n. A second series that quadruples
+n identically while never aligning gives the discrimination for free. It paid for itself on the
+first run.
+
+### The finding
+
+**`AMD_2` carves six arrays of exactly n ints out of one block, and at a power-of-two side they
+alias each other.** `AMD_1` does this:
+
+```c
+    s = S ;
+    Pe = s ;  s += n ;   Nv = s ;     s += n ;   Head = s ; s += n ;
+    Elen = s ; s += n ;  Degree = s ; s += n ;   W = s ;    s += n ;
+    Iw = s ;  s += iwlen ;
+```
+
+so the six live at offsets that are exact multiples of n. `n = m^2`, so a power-of-two side gives a
+power-of-two n, and the six then land in the SAME CACHE SETS at every index while the main loop
+touches several of them per vertex.
+
+**Measured with cachegrind, one vendored `amd_order` per run, three sizes back to back:**
+
+```
+side       n      I/vertex   Drd/vertex   D1 read misses/vertex
+400   160 000       2285.1       603.4          15.32
+512*  262 144       2279.0       598.1          40.27
+800   640 000       2277.1       594.1          17.04
+```
+
+Instructions per vertex are flat to a TENTH OF A PERCENT and data reads are flat too: the routine
+does identically the same work at 512 squared as at 400 and 800. Only the misses move, 2.6x at the
+aligned size.
+
+**And confirmed by intervention rather than by inference.** Inserting sixteen ints of padding
+between the six arrays, changing addresses and nothing else, gives byte-identical permutations and:
+
+```
+D1 read misses per vertex     400      512*      800
+as shipped                  15.32    40.27    17.04
+padded                      15.27    17.56    15.64
+change                      -0.4%   -56.4%    -8.2%
+```
+
+**56 percent of the read misses at 512 squared are the routine colliding with itself**, and the
+padding changes nothing at 400.
+
+### What this corrects, and how the wrong account was reached
+
+An earlier version of this entry said the artifact was stride aliasing in a single array indexed by
+vertex id, a 2D grid's vertical neighbour sitting at stride m, and drew from it that our clique
+arena's elimination order buys immunity. **Both halves were wrong**, and the first was refuted by
+this tree's own data before any measurement: genmmd is also one array indexed by vertex id and does
+NOT zigzag, because its arrays are separate allocations rather than a carve. The class of cause was
+right and the attribution was not.
+
+Two other accounts died on the way, both quickly and both by measurement. The hash modulus is `n`
+and so a power of two at those sides, which should have collided more: counted, and `AMD_2`'s pairs
+per pivot are 0.33 at every size in both series. And the phase table localised the artifact to
+`core`, `AMD_2`'s main loop, with `valid`, `aat`, `build` and `post` flat to three digits across
+both series, which disposed of the workspace-sizing idea since the allocation happens in `build`.
+
+### What the corrected picture is
+
+**Per vertex, and the aligned rows are now known to be an artifact of the baseline:**
+
+```
+side       32    50    64   100   128   200   256   400   512   800
+AMD      58.6  56.0  63.5  59.0  72.0  64.0  75.2  64.0  96.7  77.1
+AMD3     68.4  76.0  78.1  82.0  84.2  87.2  89.3  94.2 108.1 127.2
+genmmd   48.8  52.0  51.3  55.0  55.5  58.0  62.9  57.1  61.5  66.2
+MMD3     58.6  60.0  61.0  60.0  59.8  61.5  61.3  61.6  64.0  72.1
+```
+
+`AMD3`, genmmd and `MMD3` are all smooth; only `AMD` zigzags. So the honest baseline for growth is
+`AMD`'s unaligned series.
+
+**The container overhead, measured twice independently.** At 32 a side `AMD3` is 1.17x `AMD` per
+vertex and `MMD3` is 1.20x genmmd. That is the `std::vector` layer: raw arrays live in the vendored
+routines' registers for a whole run where ours are members behind accessors. The mmd entry below
+puts it at "a few percent" in prose; two measurements now put it near 20.
+
+**And the excess growth that is genuinely ours is SMALLER than any ratio column suggested.** Fitted
+as `time ~ nnz(A)^alpha` on the ten square sizes, least squares on log-log, R2 at or above 0.998
+throughout:
+
+```
+MMD  (genmmd)   1.039        AMD  powers of two   1.080     AMD3  powers of two   1.071
+MMD3            1.018        AMD  other sides     1.049     AMD3  other sides     1.081
+```
+
+**`AMD3` has ONE slope and `AMD` has two.** Ours is 1.071 and 1.081, indistinguishable between the
+series; theirs is 1.080 aligned and 1.049 unaligned. So the self-aliasing above costs the vendored
+routine about **0.03 in the exponent**, and at power-of-two sides it grows at our rate.
+
+**Our excess over the honest baseline is 1.081 against 1.049**, about 0.032 in the exponent, or
+1.23x over the 625-fold range. Not the 1.35x an earlier reading gave, and not the 1.5x the raw ratio
+implied.
+
+**And `MMD3`'s slope is BELOW genmmd's**, 1.018 against 1.039: on that branch we grow more slowly
+than the reference, and the container constant is being eroded rather than compounded. `MMD3` reads
+1.20x genmmd at 32 a side and 1.09x at 800. So the growth term is amd-specific and small, and it is
+the only one either branch has.
+
+**These are slopes to compare, not complexity claims.** The published bounds are worst-case and
+dense and do not bind on grids; see `experiments/ordering/README.md`, "What the literature proves
+about these algorithms". The fits are wall-clock and so include the memory effects; an
+instruction-count fit would separate algorithmic growth from growth in cost per instruction.
+
+### What follows for us
+
+**Our separate allocations are why we never had this**, which is a second and unlooked-for argument
+for the shape the folds below already favoured. It is also a caution: `NEXT.md` item 2b asks whether
+one allocation carved into arrays would beat separate vectors, on the model of `AMD_2`'s `S`. This
+is what that costs when the sizes cooperate, and grid benchmarks are exactly where they do.
+
+### Three lessons, and the middle one is the expensive one
+
+**A ratio hides which side is moving.** This pattern survived a full differential and seven folds
+while being read as a property of our code.
+
+**An account that fits the column it was written for can still be refuted by a column beside it.**
+The stride account was consistent with everything in the amd table and contradicted by the mmd table
+on the same page. Check an explanation against every code in the same run before writing it down.
+
+**Prefer intervention to inference.** Correlation put the cause in the right class and the wrong
+place three times. One padded copy settled it in a single run, and cost less than any of the
+arguments did.
+
+---
+
 ## 2026-08-16: the amd branch, seven folds, and what actually made the 2D curve flat
 
 The two entries below did this to the mmd branch. This is the same work on the amd branch, and it

@@ -37,6 +37,7 @@
 #include "oblio/Permutation.h"
 #include "oblio/Mmd3B.h"
 #include "oblio/Amd3.h"
+#include "oblio/Amd3B.h"
 #include "oblio/OrderEngine.h"
 
 // ASK FOR A PERFORMANCE CORE, on the one platform where cores differ. Apple Silicon runs a
@@ -510,10 +511,63 @@ int main(int argc, char** argv) {
     }
     const bool branchOnly = mmdOnly || amdOnly;
 
-    // THE 3D LADDER STOPS SHORTER, and that is arithmetic rather than caution. Fill grows far
-    // faster here: a 26 cube is n = 17576 against a 140 square's 19600, and its factor is several
-    // times larger. The sides below put the two families in the same range of WORK rather than the
-    // same range of n, which is what makes the two tables readable beside each other.
+    // THE SQUARE SCALING LADDER IS TWO INTERLEAVED SERIES, 2026-08-16, and the interleaving is the
+    // point rather than the extra rows. `32 64 128 256 512` quadruples n and so does `50 100 200
+    // 400 800`, offset from it by about 2.4x, giving ten points evenly spaced in log n over a
+    // 625-FOLD RANGE where the previous seven covered 156-fold.
+    //
+    // WHY NOT POWERS OF TWO ALONE, which is the obvious ladder. A power-of-two side makes every
+    // array length a power of two, and that is exactly the family that hits cache set conflicts and
+    // page-alignment artifacts: a trend measured on such a ladder alone cannot be told apart from
+    // an aliasing effect that happens to grow with n. The 50 series breaks the alignment while
+    // tracking the same growth, so if both series show a trend it is the code, and if only one
+    // does it is the addressing. That distinction is what this ladder exists to support, the amd
+    // branch's growth having turned out to be a memory-behaviour question; see
+    // docs/DESIGN_DECISIONS.md (2026-08-16).
+    //
+    // 1024 AND 1600 EXTEND BOTH SERIES BY ONE, 2026-08-16, and they were added for a specific
+    // reason rather than for range: at 800 a side our working set crosses the last level and the
+    // vendored routine's does not, so the top row was the only one where the two codes were on
+    // opposite sides of a threshold. Two more rows put both codes over it, which is what a slope
+    // fitted through them needs. n reaches 1048576 and 2560000, nnz(A) 5238784 and 12793600.
+    //
+    // THE TOP ROW IS NOT FREE. At 800 a side n is 640000 and the clique arena approaches nnz(L),
+    // tens of millions of entries, and every method's fill column builds a symbolic factor of that
+    // size. `MMD1` is the row that costs: it reads about 2.5x genmmd, so expect seconds per repeat
+    // there rather than milliseconds. The run targets take about the same wall time per row by
+    // construction, `targetMs` sizing the repeat count, but a row whose single ordering already
+    // exceeds it runs the floor of three repeats and no fewer.
+    //
+    // The DEFAULT `run2d` list is unchanged at four sides. It exists to be quick; this ladder
+    // exists to be read for a trend, and they are different jobs.
+
+    // THE CUBIC SCALING LADDER IS TWO INTERLEAVED SERIES TOO, 2026-08-16, `10 20 40 80` and
+    // `8 16 32 64`, each quadrupling n and offset from the other by about 2x, for the reason the
+    // square ladder above gives: a power-of-two side aligns every array length, and only a second
+    // series that does not can tell an addressing effect apart from a real trend. On the square
+    // ladder that distinction immediately earned itself, the amd branch's growth turning out to
+    // live in ONE of the two series.
+    //
+    // IT NO LONGER STOPS SHORTER THAN THE SQUARE ONE, and the old reason it did is worth keeping
+    // because it still governs how the two tables are read. Fill grows far faster here: a 26 cube
+    // is n = 17576 against a 140 square's 19600 and its factor is several times larger, so equal
+    // sides are not equal work and a column read across the two families is meaningless. What
+    // changed is only that the machine can now afford the top rows.
+    //
+    // FOUR POINTS EACH AFTER 8 AND 80 WENT IN, which is what a per-series slope needs; three was
+    // thin. 8 cubed is n = 512, small enough that the row measures startup as much as ordering, and
+    // it is there to anchor the low end of the power-of-two series rather than to be read on its
+    // own. 80 cubed is n = 512000 and nnz(A) 3545600, which is within 11 percent of the 800 square's
+    // 3196800: the two ladders now meet at the top on input size, which is the more meaningful
+    // axis than n.
+    //
+    // WHAT THE TOP ROW COSTS, measured rather than guessed. At 64 a side n is 262144 and nnz(L) is
+    // 247 million for AMD1 and 283 million for MMD1, which are the largest objects either table has
+    // ever built; the clique arena is of the same order. It fits in 4 GB. The amd branch's whole
+    // ladder runs in seconds. THE MMD BRANCH DOES NOT: `MMD1` reads about 4.6x genmmd and takes
+    // seconds per ordering at that row, so `scale-mmd-3d` is minutes rather than seconds and almost
+    // all of it is that one column. That is a property of MMD1, the batch idea without any of the
+    // mechanisms genmmd puts around it, and it is what the column is there to show.
     // THE 6 CUBE IS IN THE DEFAULT LIST FOR ONE REASON, and it is not scale. It is the largest size
     // at which `AMD` and `AMDraw` disagree, 3265 against 3266, so it is the only row that OBSERVES
     // the postorder's effect on fill rather than merely being able to. Everything above 6 a side
@@ -521,9 +575,10 @@ int main(int argc, char** argv) {
     // when the cubic builder went in, which is exactly the way a standing check should not have to
     // be discovered. n = 216, so it costs nothing.
     std::vector<int> sides;
-    if (cubic) sides = branchOnly ? std::vector<int>{6, 12, 16, 20, 26, 32}
+    if (cubic) sides = branchOnly ? std::vector<int>{8, 10, 16, 20, 32, 40, 64, 80}
                                   : std::vector<int>{6, 12, 16, 20, 26};
-    else       sides = branchOnly ? std::vector<int>{32, 64, 100, 140, 200, 280, 400}
+    else       sides = branchOnly ? std::vector<int>{32, 50, 64, 100, 128, 200, 256, 400, 512, 800,
+                                                    1024, 1600}
                                   : std::vector<int>{32, 64, 100, 140};
     if (argc > firstSide) {
         sides.clear();
@@ -555,7 +610,7 @@ int main(int argc, char** argv) {
             const SparseMatrix<double> A = cubic ? grid3D(side) : grid2D(side);
             char label[16];
             if (cubic) std::snprintf(label, sizeof label, "%d^3", side);
-            else       std::snprintf(label, sizeof label, "%dx%d", side, side);
+            else       std::snprintf(label, sizeof label, "%d^2", side);
             std::printf("%-12s %8zu", label, A.size());
 
             // Checked before it is read, and the row REFUSES rather than printing figures from a
@@ -607,7 +662,7 @@ int main(int argc, char** argv) {
         {"AMD3", Ordering::AMD3},
     };
     const std::vector<Method> mmdMethods = {
-        {"MMD",  Ordering::MMD},  {"MMD1", Ordering::MMD1},
+        {"MMD",  Ordering::MMD},
         {"MMD2", Ordering::MMD2}, {"MMD3", Ordering::MMD3},
         {"MMD3B", Ordering::MMD3, false, true},
     };
@@ -621,14 +676,32 @@ int main(int argc, char** argv) {
     // is MMD3 on a different clique storage scheme and the scheme is being measured against the
     // vendored routine's. It comes out of these lists when that question closes, with the file.
     // See src/Mmd3B.cpp for the stop condition.
+    // MMD1 AND AMD1 ARE OUT OF THE BRANCH LISTS, 2026-08-16, and symmetrically so the two tables
+    // keep the same shape. They are still in `allMethods`, so `run2d` and `run3d` show them and
+    // nothing is lost; what they are out of is the SCALING targets.
+    //
+    // WHY. `MMD1` costs about 40 seconds per ordering at 80 cubed and `make scale-mmd-3d` runs
+    // five of them per row plus a fill, which is minutes of wall time for one cell. Its growth is
+    // measured and is the point of the column, `time ~ nnz(A)^1.169` against genmmd's 1.062 on the
+    // square ladder, but that is established at 40 cubed as well as at 80. `AMD1` is not expensive
+    // and comes out only so that the amd and mmd tables stay comparable row for row.
+    //
+    // PUTTING THEM BACK IS ONE LINE EACH. They are the layers with no supervariables and no
+    // aggressive absorption, so they are what says how much those two mechanisms are worth; when
+    // that question comes up again, restore them.
     const std::vector<Method> amdMethods = {
         {"AMD",  Ordering::AMD},
 #ifdef OBLIO_AMD_RAW
         {"AMDraw", Ordering::AMD, true},
 #endif
-        {"AMD1", Ordering::AMD1},
         {"AMD2", Ordering::AMD2},
         {"AMD3", Ordering::AMD3},
+        // AMD3B IS TEMPORARY, exactly as MMD3B is on the mmd list. It is AMD3 on AMD_2's clique
+        // storage, one pool with a free cursor and a garbage collection rather than our separate
+        // append-only arena, so its fill column is AMD3's by construction and carries nothing and
+        // its TIME column is the whole question. It comes out with the file when the storage
+        // question closes. See src/Amd3B.cpp for the stop condition.
+        {"AMD3B", Ordering::AMD3, false, false, orderAmd3B},
     };
     const auto& methods = mmdOnly ? mmdMethods : (amdOnly ? amdMethods : allMethods);
 
@@ -645,11 +718,12 @@ int main(int argc, char** argv) {
 
     for (int side : sides) {
         const SparseMatrix<double> A = cubic ? grid3D(side) : grid2D(side);
-        // A square is `32x32` and a cube `20^3`, so a row says which family it belongs to and the
-        // two tables cannot be misread as one.
+        // A square is `32^2` and a cube `20^3`, so a row says which family it belongs to and the
+        // two tables cannot be misread as one. It read `32x32` until 2026-08-16; one notation for
+        // both is easier to compare across the two ladders, which is what a reader does with them.
         char label[16];
         if (cubic) std::snprintf(label, sizeof label, "%d^3", side);
-        else       std::snprintf(label, sizeof label, "%dx%d", side, side);
+        else       std::snprintf(label, sizeof label, "%d^2", side);
         std::printf("%-12s %8zu", label, A.size());
         // Held rather than printed straight through, since the gap columns need them again. The
         // baseline is MMD in THIS row: a ratio against another machine's number would be a

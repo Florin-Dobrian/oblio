@@ -1301,6 +1301,155 @@ that scales, and the knee says memory rather than instructions. `MMD3` over the 
 shows no growth on either family, which is the control that makes this an amd-branch property
 rather than a shared-infrastructure one.
 
+## The ladders as they now stand, and how to read the tables, 2026-08-16
+
+**Square**: `32 50 64 100 128 200 256 400 512 800 1024 1600`, twelve points over a 2560-fold range
+in n. **Cubic**: `8 10 16 20 32 40 64 80`, eight points. Each ladder is TWO INTERLEAVED SERIES,
+`32 64 128 256 512 1024` against `50 100 200 400 800 1600`, and `8 16 32 64` against `10 20 40 80`,
+each quadrupling n and offset from the other.
+
+**Why interleaved.** A power-of-two side aligns every array length, so a trend measured on such a
+ladder alone cannot be told apart from an addressing artifact. The second series separates them,
+and it earned itself on the first run. Note that a power-of-two SIDE gives a power-of-two n in both
+families: `m^3 = 2^3k` when `m = 2^k`, so the cubic ladder aliases exactly as the square one does.
+
+**80 cubed is nnz(A) 3545600 against the 800 square's 3196800**, so the two ladders meet at the top
+on input size, which is a more meaningful axis than n. **8 cubed is n = 512** and measures startup
+as much as ordering; it anchors the low end of its series rather than being read alone.
+
+**MMD1 and AMD1 are out of the scaling lists**, symmetrically so the tables keep their shape, and
+still in `allMethods` so `run2d` and `run3d` show them. `MMD1` costs about 40 seconds per ordering
+at 80 cubed, five per row plus a fill; the mmd cubic ladder went from minutes to 46 seconds without
+it. `AMD1` is not expensive and left only for symmetry. One line each to restore, and they are what
+says how much supervariables and aggressive absorption are worth.
+
+### The rule for reading any ratio column here
+
+**Convert to time per vertex before believing a trend**, and treat the STARRED rows as suspect:
+only the vendored AMD zigzags, and it does so because `AMD_1` carves six arrays of exactly n ints
+out of one block. At 64 cubed it costs 536 ns per vertex against 314 at 80 cubed, which has half
+again as many vertices. The unstarred rows are the honest baseline.
+
+### Slopes, twelve square sizes, `time ~ nnz(A)^alpha`
+
+```
+                 all 12    powers of two    other sides
+MMD (genmmd)      1.062          1.071          1.056
+MMD2              1.052          1.051          1.055
+MMD3              1.052          1.047          1.058
+MMD3B             1.054          1.054          1.056
+MMD1              1.169          1.214          1.138
+
+AMD (vendored)    1.084          1.106          1.080
+AMD2              n/a            n/a            n/a
+AMD3              1.095          1.107          1.088
+AMD3B             1.066          1.081          1.056
+```
+
+**The mmd branch has no growth term**: every layer but `MMD1` sits at 1.05 against genmmd's 1.06,
+with no series split, and what `MMD3` carries is a constant of 1.04 to 1.20 that erodes with n.
+**`MMD1` is the one genuinely different slope in either family**, 1.169, and its ratio to genmmd
+climbs from 1.60 at 32 a side to 2.89 at 800.
+
+**On the amd branch `AMD3B` is now BELOW the vendored routine on both series.** It reads 0.93x at
+1024 squared and 0.97x at 1600, the first square sizes where anything of ours has beaten it. See
+`docs/DESIGN_DECISIONS.md` (2026-08-16, later still) for what did it.
+
+## The wider ladders, and the one column that zigzags, 2026-08-16
+
+**The ladders are two interleaved series each.** Square is `32 50 64 100 128 200 256 400 512 800`,
+cubic `10 16 20 32 40 64`. Within each, `32 64 128 256 512` and `16 32 64` quadruple n, and so do
+`50 100 200 400 800` and `10 20 40`. Ten square points over a 625-fold range in n where there were
+seven over 156-fold.
+
+**The interleaving is the point, not the extra rows.** A power-of-two side aligns every array length
+and every grid stride, so a trend measured on such a ladder alone cannot be told apart from an
+addressing artifact that grows with n. A second series that quadruples n identically while never
+aligning separates them.
+
+### Read these tables per vertex, not as a ratio
+
+```
+side       32    50    64   100   128   200   256   400   512   800
+AMD      58.6  56.0  63.5  59.0  72.0  64.0  75.2  64.0  96.7  77.1     ns/vertex, zigzags
+AMD3     68.4  76.0  78.1  82.0  84.2  87.2  89.3  94.2 108.1 127.2     smooth
+genmmd   48.8  52.0  51.3  55.0  55.5  58.0  62.9  57.1  61.5  66.2     smooth
+MMD3     58.6  60.0  61.0  60.0  59.8  61.5  61.3  61.6  64.0  72.1     smooth
+```
+
+**Only `AMD` zigzags**, costing more per vertex at every power-of-two side than at the larger
+50-series side beside it. So the two-series pattern in the RATIO columns is a denominator effect,
+and the ratio falling at 32, 64, 128, 256 and 512 means `AMD` got worse, not that we got better.
+
+**A ratio hides which side is moving.** This survived a full differential and seven folds while
+being read as a property of our code. If a column here looks like a trend, convert it to time per
+vertex before believing it.
+
+### The slopes, which is what the ladder was built to support
+
+Fitted least squares on log-log against nnz(A), all ten square sizes, R2 at or above 0.998
+everywhere. `time ~ nnz(A)^alpha`:
+
+```
+MMD  (genmmd)   1.039        AMD  (vendored)  1.054   confounded, two series
+MMD3            1.018        AMD3             1.077
+
+AMD  powers of two   1.080   AMD3  powers of two   1.071
+AMD  other sides     1.049   AMD3  other sides     1.081
+```
+
+**Everything is superlinear, and the exponents are small.** Read these as slopes to compare, not as
+complexity claims: the published bounds are worst-case and dense, and an exponent near 1 is what
+theory expects on a grid. `experiments/ordering/README.md`, "What the literature proves about these
+algorithms", has the bounds and why they do not bind here.
+
+**`AMD3` has ONE slope**, 1.071 and 1.081, indistinguishable between the series. **`AMD` has two**,
+1.080 aligned and 1.049 unaligned. So at power-of-two sides the vendored routine grows at our
+exponent and elsewhere at a lower one: the self-aliasing described below costs it about **0.03 in
+the exponent**, which is the same finding stated as a slope rather than as a ratio.
+
+**Our amd excess is 1.081 against 1.049**, about 0.032 in the exponent, or 1.23x over the full
+range. Real, small, and the sharpest form the open question has taken.
+
+**And `MMD3`'s slope is BELOW genmmd's**, 1.018 against 1.039. We grow more slowly than the
+reference on that branch. The container overhead is a constant paid at every size and it is being
+eroded: `MMD3` reads 1.20x genmmd at 32 a side and 1.09x at 800.
+
+**Two caveats on the fits.** The smallest rows are quantised, 0.05 to 0.07 ms printed to two
+decimals being plus or minus ten percent; refitting from 100 a side up moves every alpha by at most
+0.02 and preserves every ordering. And these are wall-clock, so they include the memory effects. An
+instruction-count fit under cachegrind would separate algorithmic growth from growth in cost per
+instruction, and cachegrind now runs in the sandbox, so that is cheap.
+
+### The cause, established by intervention
+
+`AMD_1` carves `Pe`, `Nv`, `Head`, `Elen`, `Degree` and `W` out of one block at offsets that are
+exact multiples of n. `n = m^2`, so a power-of-two side gives a power-of-two n and the six alias
+each other in the cache. Cachegrind, one `amd_order` per run: instructions and data reads per vertex
+are FLAT across 400, 512 and 800 to a tenth of a percent, while D1 read misses per vertex read 15.3,
+40.3 and 17.0. Padding the six arrays apart by one cache line, which changes addresses and nothing
+else, removes 56 percent of the misses at 512 and none at 400, with byte-identical permutations.
+See `docs/DESIGN_DECISIONS.md` (2026-08-16, later).
+
+**The honest baseline for growth is therefore `AMD`'s UNALIGNED series**, and the aligned rows
+should not be read as our columns improving.
+
+### What the two ends measure
+
+At 32 a side `AMD3` is 1.17x `AMD` per vertex and `MMD3` is 1.20x genmmd. That is the
+`std::vector` layer, measured twice independently.
+
+Over a 256-fold range within a series, `AMD3` grows 1.55 to 1.58x and `AMD`'s unaligned series grows
+1.38x, so about **1.13x of growth is genuinely ours** and is not yet explained. `MMD3` grows 1.09
+and 1.20x against genmmd's 1.26 and 1.27x, so the mmd branch has no such term.
+
+### What the top rows cost
+
+At 64 cubed, n = 262144, nnz(L) reaches 247 million for `AMD1` and 283 million for `MMD1`; the
+factor is never materialized, only summed, so peak memory stays modest. `scale-amd-3d` runs in
+seconds. **`scale-mmd-3d` does not**: `MMD1` reads 49x genmmd there with 45 percent worse fill and
+seconds per ordering, which is most of that target's run time.
+
 ## The amd branch's 2D growth, and the one change that removed it, 2026-08-16
 
 **The symptom this file recorded for two weeks.** `AMD3` read 1.25x the vendored routine at 32 a

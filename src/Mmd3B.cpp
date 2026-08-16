@@ -17,6 +17,15 @@
 // reads 1.02 to 1.19x, on 16.61M instructions against 14.22M and 123510 D1 read misses against
 // 119331, so the answer is that spending nnz(L) on a second arena buys speed.
 //
+// WHAT THIS FILE CANNOT ANSWER, stated because it was briefly assumed to, 2026-08-16. It prices our
+// arena against GENMMD's dead-segment scheme. It says nothing about `AMD_2`'s, which is a different
+// thing again: one workspace that is compacted and reused, with an element taking over the slots of
+// the variable that formed it. The amd branch has no equivalent of this file, so the arena has
+// never been compared against that storage at all. When the vendored AMD turned out to zigzag on a
+// power-of-two scaling ladder while three other codes did not, storage was the first suspect and
+// this file was cited in support; it does not support it. See docs/DESIGN_DECISIONS.md
+// (2026-08-16, later).
+//
 // What it is NOT is a second implementation to be maintained for its own sake. Its obligation is
 // to stay encoding-identical to Mmd3: a fold that lands in QuotientGraph lands here too, or the
 // comparison silently stops being about storage. See docs/DESIGN_DECISIONS.md (2026-08-15).

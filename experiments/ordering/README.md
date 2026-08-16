@@ -1737,6 +1737,18 @@ batch, is a real division rather than a filing convention.
 
 ## The vendored storage scheme, and what it is worth
 
+**WHAT THIS SECTION DOES NOT COVER, 2026-08-16.** It prices our clique arena against GENMMD's
+dead-segment scheme, both being candidates for the mmd branch. It says nothing about `AMD_2`'s
+storage, which is a different design again: one workspace, compacted and reused, with an element
+taking over the slots of the variable that formed it. The amd branch has no equivalent of `Mmd3B`,
+so our arena has never been compared against that.
+
+That distinction mattered on 2026-08-16, when the vendored AMD turned out to cost more per vertex at
+power-of-two grid sides while genmmd, `MMD3` and `AMD3` did not. Storage was the first suspect and
+this section was cited in support of an explanation it cannot support. See
+`docs/DESIGN_DECISIONS.md` (2026-08-16, later).
+
+
 > **ANSWERED 2026-08-15, AND THE ANSWER IS NO.** This section was written while the measurements
 > attributed most of our 2D time difference to clique PLACEMENT. That attribution is dead twice
 > over. `Mmd3B` implements genmmd's scheme in full and the time did not move; and the renumbering
@@ -4886,6 +4898,76 @@ with the deferred vertex separated from its group by several unrelated eliminati
 md2 reaches it. Until one or the other lands, this belongs here as a question and not in the
 claims above.
 
+## What the literature proves about these algorithms, 2026-08-16
+
+Looked up rather than recalled, because a claim that "MMD has no published complexity" was made in
+this project and is false.
+
+**Heggernes, Eisenstat, Kumfert and Pothen, "The Computational Complexity of the Minimum Degree
+Algorithm", NIK 2001 and ICASE 2001-42.** Bounds for quotient-graph implementations under the
+`O(n + m)` space constraint every practical code obeys. **`n` is vertices and `m` is EDGES**,
+`m = |E|`, so for a `SparseMatrix` holding both triangles with the diagonal, `m = (nnz(A) - n)/2`.
+On our 800 square that is 1278400 against nnz(A) of 3196800: `m` is about 2n in 2D and 3n in 3D.
+
+| algorithm | bound | |
+|---|---|---|
+| MD | `O(n^2 m)` | tight |
+| MMD | `O(n^2 m)` | tight |
+| AMD | `O(n m)` | tight |
+
+**Where the asymmetry comes from, and it is exactly what our differential measures.** In MD and
+MMD the degree update may examine one enode's s-adjacency once for EVERY snode in the reachable
+set, since "in the worst case, the same enode e can belong to the e-adjacency of every snode r in
+the reachable set". That inner term is `O(nm)`, over n steps. In AMD "each edge in this local graph
+is examined at most twice, once from each of its endpoints", so the whole thing is `O(nm)`.
+
+**MMD gets no better bound than MD**, which is worth knowing before optimizing it: multiple
+elimination reduces how OFTEN a degree update runs, not what one costs. That is consistent with
+what this tree measures, `MMD3` beating `MMD1` by about 2.5x through doing fewer updates on
+identical asymptotics.
+
+**All three bounds are tight**, met by one graph family in the paper: a hub, 2k outer and 2k inner
+vertices, edges between `x_i` and `y_j` where `|i - j| < k`. MMD needs a clique added to it.
+
+### The three qualifications, which are the ones that matter for us
+
+- "These bounds are for nearly dense graphs. Fortunately, these bounds are not often observed for
+  problems that are solved in practice."
+- For AMD on BOUNDED DEGREE graphs, Amestoy, Davis and Duff prove a tighter bound. Their own
+  statement is that when the nonzeros per row of A are constant and independent of n, AMD takes
+  `O(|L|)` time. **That is the bound that applies to our grids**, at 4.9 and 6.9 nonzeros per row,
+  and it is the only published bound our benchmark can be read against.
+- The paper's closing line is an open problem: "A further development of this work is to identify
+  graph classes with provably better MD time complexities."
+
+### The AMD paper's own bound, and its assumptions
+
+`O( sum over k of |L_k*| . |(PAP')_k*| )`, which reduces to `O(|L|)` for bounded row counts. It
+holds under two assumptions the paper states explicitly and warns about: **"no (or few)
+supervariable hash collisions"** and **"a constant number of garbage collections"**, each collection
+costing `Theta(|A|)`. "In practice these assumptions seem to hold, but the asymptotic time would be
+higher if they did not." Both are now measured in this tree: `AMD_2` tests 0.33 pairs per pivot at
+every size on both grid families, and `Info[AMD_NCMPA]` reads zero on every case run.
+
+One discrepancy between the paper and the shipped code, since we aligned to the code: the paper's
+hash is `(sum of j in A_i + sum of e in E_i) mod (n - 1)` plus 1, and `Amd.cpp` computes
+`hval % n`.
+
+### Newer theory, for completeness
+
+Cummings, Fahrbach and Fatehpuria, SODA 2021, give an EXACT minimum degree ordering in `O(nm)` with
+a matching lower bound, noting that before it no exact algorithm better than `O(n^3)` had been
+proven. Fahrbach et al. compute a `(1 + eps)`-approximate greedy minimum degree ordering in
+`O(m log^5(n) eps^-2)`, which is a theoretical milestone rather than a practical one.
+
+### What this means for the measurements in benchmarks/ordering
+
+**None of the worst-case bounds bind on grids**, so the exponents fitted there, 1.02 to 1.08 against
+nnz(A), are not to be compared with `O(nm)` or `O(n^2 m)`. They are constant-factor behaviour plus
+whatever log lives inside `|L|`. What the literature does supply is the STRUCTURAL reason AMD is
+cheaper, every edge twice against once per reaching snode, which is the same fact the per-pass
+differential shows as identical visit counts between our code and the vendored one.
+
 ## Complexity: matching the vendored cost without the vendored style
 
 The goal is the same asymptotic cost as `Mmd.cpp` and `Amd.cpp`, reached in our own style
@@ -5937,6 +6019,68 @@ tie-break decides almost every pick.
 Section 5.5 of `archive/sparse_factorization.md` states the same fork in one place, since a reader
 meeting supervariables there would otherwise take hashing to be the definition rather than one of
 two routes.
+
+## What the sandbox can and cannot answer, 2026-08-16
+
+Established the hard way, by nearly discarding a fold that turned out to be worth 30 percent.
+
+**Cachegrind's counts travel. The sandbox's wall clock does not.** Instructions, data references,
+branch counts and simulated misses are machine-independent and were right every time. Wall clock on
+the x86 sandbox disagreed with alpamayo in DIRECTION, not merely in magnitude, for any change that
+traded one counter against another:
+
+```
+first version of the weight-sign fold, +1.4% instructions for -6.3% reads
+  x86 sandbox    1.18  1.34  1.27  1.22  1.31    slower at every size
+  alpamayo       0.95  0.94  0.97  0.92  0.91    faster at every size
+```
+
+x86 charged for the instructions; the M-series paid for the reads. **So a fold that trades counters
+must be timed on alpamayo, and a sandbox timing that contradicts a counter improvement is not
+evidence against it.** What the sandbox is good for is the counts themselves, and for anything that
+improves every counter at once.
+
+**A second use, cheap and often decisive: profile per function and per line.** `cg_annotate` on a
+clean harness put 17.3 percent of our instructions in inlined `stl_vector.h` accessors, 65.8 M
+against 236 M of algorithm, where the vendored routine runs 337 M of algorithm and no accessors.
+That is the container layer measured directly, and it is much larger than the 1.5 percent the
+totals suggest, two effects having been cancelling. The same annotation ranked source lines by D1
+read misses and put the prune's `incidence[i]` at 12.5 percent of the whole run, which is how the
+next fold was chosen.
+
+**One harness warning, since it cost a reading.** Build the test graph without allocating per
+vertex. The first version used a `std::vector` per vertex and put 17 percent of the profile in
+`malloc`, larger than most of what the profile was being asked about.
+
+## The padded copy, and why intervention beat three inferences, 2026-08-16
+
+The scaling ladder showed the vendored AMD costing more per vertex at power-of-two grid sides while
+genmmd, `MMD3` and `AMD3` were all smooth. Three accounts of that were reasoned out and written
+down; all three were wrong, and the fourth attempt was not an account at all but a change.
+
+**What failed.** Stride aliasing in a single array indexed by vertex id, refuted by genmmd having
+the same storage shape and not zigzagging. Our clique arena buying immunity, withdrawn with it, and
+unsupported anyway since nothing compares our arena against `AMD_2`'s storage. The hash modulus
+being a power of two, refuted by counting: `AMD_2` tests 0.33 pairs per pivot at every size in both
+series.
+
+**What worked, in one run.** Cachegrind on the vendored routine alone, three sizes back to back in
+one invocation, showed instructions and data reads per vertex FLAT to a tenth of a percent while D1
+read misses jumped 2.6x at the aligned size. That said the cause was addressing rather than work but
+not WHICH addresses. So: a copy of `private/Amd.cpp` with sixteen ints of padding inserted between
+the six arrays `AMD_1` carves out of `S`, generated by a `sed` and nothing else, changing addresses
+and nothing about the algorithm. Same permutations. **56 percent of the read misses at 512 squared
+gone, and nothing changed at 400.**
+
+**The technique generalises and is cheap.** A hypothesis about layout can usually be tested by
+perturbing the layout rather than by explaining it, and a perturbation that leaves the output
+identical is self-checking: if the permutation moves, the probe is wrong and the reading is void.
+This one took one command and settled a question three careful arguments had got wrong.
+
+**And cachegrind now runs in the sandbox**, installed 2026-08-16. Instruction counts and data
+references are exact and machine-independent, so this whole class of question no longer needs
+alpamayo. Only wall-clock confirmation does. The standing caution about simulated MISS counts
+shifting between invocations still applies: compare builds back to back inside one run.
 
 ## The differential against AMD_2, and what counting settled, 2026-08-16
 

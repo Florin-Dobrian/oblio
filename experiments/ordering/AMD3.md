@@ -1623,3 +1623,38 @@ the shared class is the `TaggedScan` overload, which `Amd3` now uses.
 
 **What is left.** Deleting `amd4`, once nothing further is wanted from it, lifting its postorder
 block first if a permutation-level check is ever wanted.
+
+---
+
+## Iteration 27: seven folds, and the one that was not a constant, 2026-08-16
+
+The ladder in this file ends with `Amd3` aligned to `AMD_2` and about 1.8x its speed on a 400
+square, rising with n. That rise is now gone. The work was done in `src/Amd3B.cpp`, a private copy
+carried for the purpose and since folded into `Amd3`, and the full account is in
+`docs/DESIGN_DECISIONS.md` (2026-08-16). What belongs here is what the ladder's own method
+contributed and where it misled.
+
+**The method held.** Every fold was landed against a control, `AMD3f`, which is `Amd3` reached down
+the same harness path as `Amd3B` so that the comparison is the change and not the seam. That
+control also retired a figure this tree had been quoting: `Amd3.h` recorded the harness seam at up
+to 2.4 percent, and measured directly it is ZERO across the whole ladder in both families. It was a
+real reading on a different driver on a different day.
+
+**Where reasoning failed and counting did not.** Three hypotheses were argued for in writing and
+each was killed: that the clique arena's elimination-order placement was the growth, that the hash
+was, and that single-level cache locality was. The differential in the README settled it by showing
+both codes doing the SAME visits per pivot at every size in both families, which left cost per
+visit and nothing else.
+
+**Where the counting failed too, which is the more useful half.** The first differential counted
+the passes already under suspicion. It did not count the pass that builds `C[pivot]` at all, nor
+`absorb`, nor `clear_flag`, and it counted the hash outer loop on the two sides with different
+denominators so that a 0.95 ratio read as agreement by coincidence. A flat table is only evidence
+about the counters in it.
+
+**And the ladder's own shape was confirmed once more.** Two folds measured nothing on their own,
+the dead-clique test and the tagged `W` in `Amd2`, and the tagged `W` is what then made the fused
+scan viable in both B layers. `AMD1B` went from 7 to 9 percent slower than `AMD1` in 2D to even or
+better, and `AMD2B` from 3 to 9 percent slower to even, with the cubic advantage roughly doubling
+in both. The fused schedule was never the problem; `ApproximateScan` crossing three arrays from the
+prune was.

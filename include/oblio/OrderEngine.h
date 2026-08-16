@@ -14,8 +14,9 @@
 // permutations and their fill differ and both are correct. Every one of the nine above is a
 // supported ordering a caller may ask for.
 //
-// THE B LAYERS ARE NOT IN THIS ENUM, DELIBERATELY, and there are three of them: `orderAmd1B`,
-// `orderAmd2B` and `orderMmd3B`, declared in their own headers and reached as free functions. A
+// THE B LAYERS ARE NOT IN THIS ENUM, DELIBERATELY. One remains, `orderMmd3B`, declared in its own
+// header and reached as a free function; `orderAmd1B` and `orderAmd2B` were retired on 2026-08-16
+// when their schedule won and moved into their originals. A
 // B is not an ordering but the SAME ordering computed differently, so it must return exactly its
 // original's permutation and a difference is a defect in one of them. That makes it a measuring
 // instrument, and an enumerator would put a benchmark's oracle into the library's public enum

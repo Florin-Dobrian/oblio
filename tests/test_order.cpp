@@ -1,8 +1,7 @@
 #include "oblio/SparseMatrix.h"
 #include "oblio/Permutation.h"
 #include "oblio/OrderEngine.h"
-#include "oblio/Amd1B.h"
-#include "oblio/Amd2B.h"
+#include "oblio/Mmd3B.h"
 #include "test_util.h"
 #include <cstdint>
 #include <iostream>
@@ -25,6 +24,14 @@ template<class Val> static void checkOrder(const SparseMatrix<Val>& A, Ordering 
 // its PORTED list, so this is the only thing checking them at all.
 using OrderFn = std::vector<std::int32_t>(*)(const std::vector<std::size_t>&,
                                              const std::vector<std::int32_t>&);
+// `orderMmd3B` takes a third argument, `delta`, with a default, so its type is not OrderFn and it
+// cannot be named directly where one is wanted. Forwarded rather than widening OrderFn: the helpers
+// exist to compare a free function against an enum member, and delta is Mmd3B's business.
+static std::vector<std::int32_t> mmd3bDefault(const std::vector<std::size_t>&  colPtr,
+                                              const std::vector<std::int32_t>& rowIdx) {
+    return orderMmd3B(colPtr, rowIdx);
+}
+
 template<class Val> static void checkOrderFn(const SparseMatrix<Val>& A, OrderFn f,
                                              const std::string& lbl){
     const std::vector<std::int32_t> order = f(A.colPtr(), A.rowIdx());
@@ -67,10 +74,12 @@ int main(){
       checkOrder(A,Ordering::AMD1,"arrow 6x6      : AMD1 valid");
       checkOrder(A,Ordering::AMD2,"arrow 6x6      : AMD2 valid");
       checkOrder(A,Ordering::AMD3,"arrow 6x6      : AMD3 valid");
-      checkOrderFn(A,orderAmd1B,"arrow 6x6      : AMD1B valid");
-      checkOrderFn(A,orderAmd2B,"arrow 6x6      : AMD2B valid");
-      checkSameOrderFn(A,Ordering::AMD1,orderAmd1B,"arrow 6x6      : AMD1B == AMD1");
-      checkSameOrderFn(A,Ordering::AMD2,orderAmd2B,"arrow 6x6      : AMD2B == AMD2"); }
+      // THE ONE REMAINING B LAYER. Mmd3B is Mmd3 on the vendored clique storage scheme and must
+      // reproduce its permutation entry for entry, which is the whole of what makes it a
+      // measurement rather than a second ordering. The two AMD B layers that used to be checked
+      // here were retired on 2026-08-16 when their schedule moved into their originals.
+      checkOrderFn(A,mmd3bDefault,"arrow 6x6      : MMD3B valid");
+      checkSameOrderFn(A,Ordering::MMD3,mmd3bDefault,"arrow 6x6      : MMD3B == MMD3"); }
     for(std::size_t size : {1u,2u,10u,100u}){ auto A=tridiagFull(size);
       reqSym(A,"tridiag n="+std::to_string(size)+" : symmetric");
 #ifdef OBLIO_VENDORED_ORDERINGS
@@ -83,12 +92,8 @@ int main(){
       checkOrder(A,Ordering::AMD1,"tridiag n="+std::to_string(size)+" : AMD1 valid");
       checkOrder(A,Ordering::AMD2,"tridiag n="+std::to_string(size)+" : AMD2 valid");
       checkOrder(A,Ordering::AMD3,"tridiag n="+std::to_string(size)+" : AMD3 valid");
-      checkOrderFn(A,orderAmd1B,"tridiag n="+std::to_string(size)+" : AMD1B valid");
-      checkOrderFn(A,orderAmd2B,"tridiag n="+std::to_string(size)+" : AMD2B valid");
-      checkSameOrderFn(A,Ordering::AMD1,orderAmd1B,
-                     "tridiag n="+std::to_string(size)+" : AMD1B == AMD1");
-      checkSameOrderFn(A,Ordering::AMD2,orderAmd2B,
-                     "tridiag n="+std::to_string(size)+" : AMD2B == AMD2"); }
+      checkSameOrderFn(A,Ordering::MMD3,mmd3bDefault,
+                       "tridiag n="+std::to_string(size)+" : MMD3B == MMD3"); }
     { std::size_t size=5; std::vector<std::size_t> cp(size+1); std::vector<std::int32_t> ri(size); std::vector<double> v(size,1.0);
       for(std::size_t j=0;j<size;++j){cp[j]=j; ri[j]=static_cast<std::int32_t>(j);} cp[size]=size;
       SparseMatrix<double> A(size,cp,ri,v);
@@ -102,11 +107,7 @@ int main(){
       checkOrder(A,Ordering::MMD3,"diagonal 5x5   : MMD3 valid");
       checkOrder(A,Ordering::AMD1,"diagonal 5x5   : AMD1 valid");
       checkOrder(A,Ordering::AMD2,"diagonal 5x5   : AMD2 valid");
-      checkOrder(A,Ordering::AMD3,"diagonal 5x5   : AMD3 valid");
-      checkOrderFn(A,orderAmd1B,"diagonal 5x5   : AMD1B valid");
-      checkOrderFn(A,orderAmd2B,"diagonal 5x5   : AMD2B valid");
-      checkSameOrderFn(A,Ordering::AMD1,orderAmd1B,"diagonal 5x5   : AMD1B == AMD1");
-      checkSameOrderFn(A,Ordering::AMD2,orderAmd2B,"diagonal 5x5   : AMD2B == AMD2"); }
+      checkOrder(A,Ordering::AMD3,"diagonal 5x5   : AMD3 valid"); }
     { std::vector<std::size_t> cp={0,6,8,10,12,14,16};
       std::vector<std::int32_t> ri={0,1,2,3,4,5, 0,1, 0,2, 0,3, 0,4, 0,5};
       std::vector<std::complex<double>> v(ri.size(),{1,0}); SparseMatrix<std::complex<double>> C(6,cp,ri,v);
@@ -120,11 +121,7 @@ int main(){
       checkOrder(C,Ordering::MMD3,"arrow complex  : MMD3 valid");
       checkOrder(C,Ordering::AMD1,"arrow complex  : AMD1 valid");
       checkOrder(C,Ordering::AMD2,"arrow complex  : AMD2 valid");
-      checkOrder(C,Ordering::AMD3,"arrow complex  : AMD3 valid");
-      checkOrderFn(C,orderAmd1B,"arrow complex  : AMD1B valid");
-      checkOrderFn(C,orderAmd2B,"arrow complex  : AMD2B valid");
-      checkSameOrderFn(C,Ordering::AMD1,orderAmd1B,"arrow complex  : AMD1B == AMD1");
-      checkSameOrderFn(C,Ordering::AMD2,orderAmd2B,"arrow complex  : AMD2B == AMD2"); }
+      checkOrder(C,Ordering::AMD3,"arrow complex  : AMD3 valid"); }
     std::cout<<"\nOrderEngine tests: "<<pass<<"/"<<(pass+fail)<<" passed\n";
     return fail==0?0:1;
 }

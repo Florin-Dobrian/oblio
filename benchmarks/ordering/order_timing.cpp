@@ -36,8 +36,7 @@
 #include "oblio/SparseMatrix.h"
 #include "oblio/Permutation.h"
 #include "oblio/Mmd3B.h"
-#include "oblio/Amd1B.h"
-#include "oblio/Amd2B.h"
+#include "oblio/Amd3.h"
 #include "oblio/OrderEngine.h"
 
 // ASK FOR A PERFORMANCE CORE, on the one platform where cores differ. Apple Silicon runs a
@@ -95,6 +94,46 @@ static std::vector<int> gRaw;
 extern "C" int amd_order_raw(int n, const int* Ap, const int* Ai, int* P,
                              double* Control, double* Info);
 extern "C" void pbRawOrder(const int* raw, int n) { gRaw.assign(raw, raw + n); }
+#endif
+
+// THE TIMED VENDORED AMD, a second generated copy and a different instrument from the one above.
+// The raw copy answers what order AMD_2 eliminates in and carries a vector per vertex to do it, so
+// it is an oracle and cannot be timed; this one takes five timestamps and nothing else, so it can
+// be timed and reports no order.
+//
+// WHAT IT IS FOR. Every ratio in this file is against `amd_order` whole, and two of its phases have
+// no counterpart on our side: `AMD_aat` forms the pattern of A+A' because AMD takes a one-sided
+// matrix, where ours arrives full-symmetric with the diagonal present, and `AMD_postorder` relabels
+// the assembly tree, which `ElmForestEngine` redoes later on the exact supernodal tree with real
+// front and update sizes. So `AMD3 1.82x` is measured against a denominator that includes work we
+// deliberately do not do. This file has carried one estimate of that since 2026-08-01, 8 percent at
+// 140 a side, taken from a single profile and never measured per size. `make phases2d` measures it,
+// and the question it settles is not only the size of the correction but whether it is FLAT in n:
+// the amd branch's 2D ratio grows from 1.25x to 1.82x across the ladder, and part of that would be
+// the denominator rather than us if these phases were a falling share.
+//
+// The five phases and the comparable region are set out in tools/hook_amd.py. In brief,
+// `build + core` is the vendored routine turning a caller's pattern into its working structure and
+// then ordering it, which is what `orderAmd3` does from `QuotientGraph`'s constructor onward.
+//
+// IT IS CHECKED BEFORE IT IS READ, on the rule this tree keeps rediscovering: an instrument that
+// silently declines to measure is worse than one that is absent. The copy must return the shipped
+// routine's permutation entry for entry and its `Info[AMD_LNZ]` and `Info[AMD_NCMPA]` to the digit,
+// and the row says so and refuses if it does not. And its own total is printed beside the unhooked
+// `AMD` column, because a clock read is a compiler barrier: if the two disagree by more than this
+// benchmark's noise, the instrumentation is distorting what it measures and the phases are not to
+// be believed.
+#ifdef OBLIO_AMD_TIMED
+extern "C" int amd_order(int n, const int* Ap, const int* Ai, int* P,
+                         double* Control, double* Info);
+extern "C" int amd_order_timed(int n, const int* Ap, const int* Ai, int* P,
+                               double* Control, double* Info);
+extern "C" void amd_phase_ms(double out[5]);
+
+// Amd.cpp's own indices into Info[], repeated here rather than included: the vendored header is
+// not ours and this file takes nothing else from it. Same arrangement as amdorder.cpp's AMD_NDENSE.
+static constexpr int AMD_NCMPA = 8;
+static constexpr int AMD_LNZ   = 9;
 #endif
 
 // A pattern, from adjacency lists to full-symmetric CSC with the diagonal present, which is what a
@@ -196,28 +235,48 @@ struct Method {
     Ordering    ordering;
     bool        raw = false;
     // Three columns are not orderings and so are not in `Ordering`: `AMDraw` is the vendored
-    // routine through a hook, and `MMD3B`, `AMD1B` and `AMD2B` are B layers, the same ordering on
-    // a different schedule. Each is reached as a free function and flagged here, locally, for the
-    // reason the header gives: an enumerator would put a benchmark's oracle into the library's
-    // public enum and into every switch over it.
+    // routine through a hook, and `MMD3B` is a B layer, the same ordering on a different clique
+    // storage scheme. Each is reached as a free function and flagged here, locally, for the reason
+    // the header gives: an enumerator would put a benchmark's oracle into the library's public enum
+    // and into every switch over it.
+    //
+    // THE AMD B LAYERS ARE GONE, 2026-08-16. AMD1B and AMD2B were their originals on a fused
+    // eliminator schedule, and the schedule won: permutation-identical and faster on both families
+    // once the tagged W removed the array crossing that had been paying for it, so it moved into
+    // AMD1 and AMD2 and the files went. AMD3B, which carried the array folds, went with them, AMD3
+    // now being identical to it. See docs/DESIGN_DECISIONS.md (2026-08-16).
     bool        mmd3b = false;
     OrderFn     fn = nullptr;    // a B layer reached directly; see below
 };
 
-// The permutation the hooked routine produces. It takes the off-diagonal pattern as `int`, where
-// A holds both triangles with the diagonal present, so the conversion is a strip and a narrow.
+// What either vendored copy takes: the off-diagonal pattern as `int`, where A holds both triangles
+// with the diagonal present, so the conversion is a strip and a narrow. One function rather than
+// one per consumer, since a second copy of it would be a second thing to keep in step and what it
+// produces is a tie-break input: the order within a column decides which of several equal-degree
+// vertices a bucket hands over first.
+#if defined(OBLIO_AMD_RAW) || defined(OBLIO_AMD_TIMED)
+static void patternNoDiagonal(const SparseMatrix<double>& A,
+                              std::vector<int>& ap, std::vector<int>& ai) {
+    const int n = static_cast<int>(A.size());
+    ap.assign(n + 1, 0);
+    ai.clear();
+    for (int j = 0; j < n; ++j) {
+        for (std::size_t cp = A.colPtr()[j]; cp < A.colPtr()[j + 1]; ++cp)
+            if (A.rowIdx()[cp] != j) ai.push_back(A.rowIdx()[cp]);
+        ap[j + 1] = static_cast<int>(ai.size());
+    }
+}
+#endif
+
+// The permutation the hooked routine produces.
 static Permutation rawPermutation(const SparseMatrix<double>& A) {
 #ifndef OBLIO_AMD_RAW
     (void) A;
     return Permutation();
 #else
     const int n = static_cast<int>(A.size());
-    std::vector<int> ap(n + 1, 0), ai;
-    for (int j = 0; j < n; ++j) {
-        for (std::size_t cp = A.colPtr()[j]; cp < A.colPtr()[j + 1]; ++cp)
-            if (A.rowIdx()[cp] != j) ai.push_back(A.rowIdx()[cp]);
-        ap[j + 1] = static_cast<int>(ai.size());
-    }
+    std::vector<int> ap, ai;
+    patternNoDiagonal(A, ap, ai);
     std::vector<int> perm(n);
     double control[5] = {static_cast<double>(n), 1.0, 0, 0, 0};   // dense off, aggressive on
     double info[20]   = {0};
@@ -311,6 +370,82 @@ static double orderTime(const SparseMatrix<double>& A, Ordering method) {
     return best;
 }
 
+#ifdef OBLIO_AMD_TIMED
+// One run of each copy on the same pattern, compared. The permutation is the strong half and the
+// two Info figures are free beside it: `AMD_LNZ` is the routine's own fill count and `AMD_NCMPA` the
+// number of times it compacted its workspace, so between them they say the copy took the same
+// eliminations through the same storage. Run once per row, before anything is timed.
+//
+// Control is `nullptr` here and in the timed loop below, which is what `OrderEngine` passes for
+// `Ordering::AMD`, so the phases describe the same call the `AMD` column measures. A driver that
+// set the dense threshold would be measuring a routine no column in this table runs.
+static bool timedAgreesWithShipped(const SparseMatrix<double>& A, std::string& why) {
+    const int n = static_cast<int>(A.size());
+    std::vector<int> ap, ai;
+    patternNoDiagonal(A, ap, ai);
+
+    std::vector<int> shipped(n), timed(n);
+    double shippedInfo[20] = {0}, timedInfo[20] = {0};
+    amd_order(n, ap.data(), ai.data(), shipped.data(), nullptr, shippedInfo);
+    amd_order_timed(n, ap.data(), ai.data(), timed.data(), nullptr, timedInfo);
+
+    for (int k = 0; k < n; ++k)
+        if (shipped[k] != timed[k]) {
+            why = "permutations differ at entry " + std::to_string(k);
+            return false;
+        }
+    if (shippedInfo[AMD_LNZ] != timedInfo[AMD_LNZ]) {
+        why = "AMD_LNZ differs";
+        return false;
+    }
+    if (shippedInfo[AMD_NCMPA] != timedInfo[AMD_NCMPA]) {
+        why = "AMD_NCMPA differs";
+        return false;
+    }
+    return true;
+}
+
+struct AmdPhases {
+    double ms[5] = {0.0, 0.0, 0.0, 0.0, 0.0};   // valid, aat, build, core, post
+    double wall  = 0.0;                          // the whole call, measured from outside
+};
+
+// THE PHASES OF THE RUN WITH THE SMALLEST TOTAL, not the smallest of each phase taken separately.
+// The five come out of one call and describe one execution; taking a minimum per column would
+// assemble a run that never happened, and its parts would not sum to any total. Same warm-up and
+// the same probe-sized repeat count as every other column here, so the row is measured for about
+// the same wall time as its neighbors.
+static AmdPhases amdPhases(const SparseMatrix<double>& A) {
+    const int n = static_cast<int>(A.size());
+    std::vector<int> ap, ai;
+    patternNoDiagonal(A, ap, ai);
+    std::vector<int> perm(n);
+
+    auto once = [&]() -> AmdPhases {
+        AmdPhases p;
+        const auto t0 = std::chrono::steady_clock::now();
+        amd_order_timed(n, ap.data(), ai.data(), perm.data(), nullptr, nullptr);
+        const auto t1 = std::chrono::steady_clock::now();
+        p.wall = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        amd_phase_ms(p.ms);
+        return p;
+    };
+
+    { AmdPhases warm = once(); (void) warm; }          // warm-up, discarded
+
+    const double one = once().wall;
+    const int repeats = std::min(std::max(static_cast<int>(targetMs / std::max(one, 1e-3)), 3), 20000);
+
+    AmdPhases best;
+    best.wall = 1e30;
+    for (int trial = 0; trial < repeats; ++trial) {
+        const AmdPhases p = once();
+        if (p.wall < best.wall) best = p;
+    }
+    return best;
+}
+#endif
+
 // nnz(L) under that ordering, from the symbolic factor: exact, and the honest way to compare two
 // orderings, since a supernode contributes its own triangle plus its update rows.
 static std::size_t fill(const SparseMatrix<double>& A, const Method& method) {
@@ -357,12 +492,20 @@ int main(int argc, char** argv) {
     bool mmdOnly = false;
     bool amdOnly = false;
     bool cubic   = false;
+    bool phases  = false;
     for (int k = 1; k < argc && k <= 2; ++k) {
         const std::string word = argv[k];
         if      (word == "mmd") { mmdOnly = true; firstSide = k + 1; }
         else if (word == "amd") { amdOnly = true; firstSide = k + 1; }
         else if (word == "3d")  { cubic   = true; firstSide = k + 1; }
         else if (word == "2d")  { cubic   = false; firstSide = k + 1; }
+        // A THIRD QUESTION AND SO A THIRD TABLE, rather than columns added to the amd one. What it
+        // asks is what the vendored routine's own time is MADE OF, which is a question about the
+        // baseline and not about any of our orderings, and the two do not belong on one row. It
+        // also keeps every figure the amd table has ever printed exactly where it was: the ratios
+        // there are against `amd_order` whole, as they have always been, and this table is where
+        // the correction to them is read.
+        else if (word == "phases") { phases = true; amdOnly = true; firstSide = k + 1; }
         else break;
     }
     const bool branchOnly = mmdOnly || amdOnly;
@@ -387,6 +530,65 @@ int main(int argc, char** argv) {
         for (int k = firstSide; k < argc; ++k) sides.push_back(std::atoi(argv[k]));
     }
 
+    if (phases) {
+#ifndef OBLIO_AMD_TIMED
+        std::printf("phases: needs private/, the timed copy being generated from it\n");
+        return 0;
+#else
+        std::printf("what `amd_order` spends its time on, and how much of it we also do\n");
+        std::printf("  valid  AMD_valid, amd_preprocess, the Len and Pinv vectors\n");
+        std::printf("  aat    AMD_aat, forming the pattern of A+A'         WE DO NOT DO THIS\n");
+        std::printf("  build  the S workspace, and AMD_1 filling Iw and Pe\n");
+        std::printf("  core   AMD_2, entry to the end of its main loop\n");
+        std::printf("  post   path compression, AMD_postorder, the output permutation\n");
+        std::printf("                                                     WE DO NOT DO THIS\n");
+        std::printf("  comp   build + core, the region AMD3 is comparable against\n");
+        std::printf("  other  the call's wall time less the five phases, which is the clock\n");
+        std::printf("         reads themselves and should be near zero\n\n");
+
+        std::printf("%-12s %8s %9s %9s %8s %8s %8s %8s %8s %8s %9s %7s %9s %9s %10s\n",
+                    cubic ? "grid3d" : "grid", "n", "AMD ms", "AMDt ms",
+                    "valid", "aat", "build", "core", "post", "other",
+                    "comp ms", "comp%", "AMD3 ms", "AMD3/AMD", "AMD3/comp");
+
+        for (int side : sides) {
+            const SparseMatrix<double> A = cubic ? grid3D(side) : grid2D(side);
+            char label[16];
+            if (cubic) std::snprintf(label, sizeof label, "%d^3", side);
+            else       std::snprintf(label, sizeof label, "%dx%d", side, side);
+            std::printf("%-12s %8zu", label, A.size());
+
+            // Checked before it is read, and the row REFUSES rather than printing figures from a
+            // copy that has stopped reproducing the routine it is meant to be measuring.
+            std::string why;
+            if (!timedAgreesWithShipped(A, why)) {
+                std::printf("   TIMED COPY DISAGREES WITH THE SHIPPED ROUTINE: %s.\n"
+                            "             The hook is wrong, so nothing here is a measurement of "
+                            "AMD.\n", why.c_str());
+                std::fflush(stdout);
+                continue;
+            }
+
+            const double    amdMs  = orderTime(A, Ordering::AMD);
+            const AmdPhases ph     = amdPhases(A);
+            const double    amd3Ms = orderTime(A, Ordering::AMD3);
+
+            const double sum   = ph.ms[0] + ph.ms[1] + ph.ms[2] + ph.ms[3] + ph.ms[4];
+            const double other = ph.wall - sum;
+            const double comp  = ph.ms[2] + ph.ms[3];
+
+            std::printf(" %9.3f %9.3f %8.3f %8.3f %8.3f %8.3f %8.3f %8.3f %9.3f %6.1f%% %9.3f",
+                        amdMs, ph.wall, ph.ms[0], ph.ms[1], ph.ms[2], ph.ms[3], ph.ms[4],
+                        other, comp, ph.wall > 0.0 ? 100.0 * comp / ph.wall : 0.0, amd3Ms);
+            std::printf(" %9.2fx %9.2fx", amdMs > 0.0 ? amd3Ms / amdMs : 0.0,
+                        comp > 0.0 ? amd3Ms / comp : 0.0);
+            std::printf("\n");
+            std::fflush(stdout);
+        }
+        return 0;
+#endif
+    }
+
     // `AMDraw` sits immediately after `AMD`, so the two vendored readings are adjacent and the
     // difference between them is visible rather than something to compute. Its TIME IS NOT
     // REPORTED, and that is deliberate: the hooked copy carries the hook's own bookkeeping, a
@@ -403,8 +605,6 @@ int main(int argc, char** argv) {
         {"AMD1", Ordering::AMD1},
         {"AMD2", Ordering::AMD2},
         {"AMD3", Ordering::AMD3},
-        {"AMD1B", Ordering::AMD1, false, false, orderAmd1B},
-        {"AMD2B", Ordering::AMD2, false, false, orderAmd2B},
     };
     const std::vector<Method> mmdMethods = {
         {"MMD",  Ordering::MMD},  {"MMD1", Ordering::MMD1},
@@ -427,7 +627,8 @@ int main(int argc, char** argv) {
         {"AMDraw", Ordering::AMD, true},
 #endif
         {"AMD1", Ordering::AMD1},
-        {"AMD2", Ordering::AMD2}, {"AMD3", Ordering::AMD3},
+        {"AMD2", Ordering::AMD2},
+        {"AMD3", Ordering::AMD3},
     };
     const auto& methods = mmdOnly ? mmdMethods : (amdOnly ? amdMethods : allMethods);
 

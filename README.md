@@ -307,10 +307,9 @@ include/oblio/      , public headers (declarations only)
   QuotientGraph.h   , the representation Oblio's own orderings run on, and its degree buckets
   Mmd1.h  Mmd2.h    , Oblio's own MMD orderings
   Amd1.h  Amd2.h    , Oblio's own AMD orderings
-  Amd1B.h Amd2B.h   , the same two orderings on a fused eliminator schedule, and Mmd3B.h,
-                      MMD3 on the vendored storage scheme. NOT in the Ordering enum: each is a
-                      measuring instrument rather than an ordering, so each is reached as a free
-                      function and each must reproduce its original exactly
+  Mmd3B.h           , MMD3 on the vendored clique storage scheme. NOT in the Ordering enum: it is
+                      a measuring instrument rather than an ordering, so it is reached as a free
+                      function and must reproduce its original exactly
   ElmForest.h       , elimination forest and supernodes (data)
   ElmForestEngine.h , builds the elimination forest
   SymFactor.h       , symbolic factor: supernodal index structure (data)
@@ -360,11 +359,11 @@ experiments/        , frozen design studies, each answering one question with a 
 
 The ordering enum also carries Natural, the identity, and our own minimum-degree implementations
 under the names MMD1, MMD2, MMD3, AMD1, AMD2 and AMD3. Those are work in progress; see
-`experiments/ordering/`. Three further layers exist and are deliberately NOT offered through the
-enum, being instruments rather than orderings: AMD1B and AMD2B compute AMD1's and AMD2's
-permutations on a fused schedule, and MMD3B computes MMD3's on the vendored storage scheme. Each
-must reproduce its original entry for entry, which is what makes it useful, and each is reached as
-a free function. MMD3 is the default: it reproduces the vendored MMD's permutation
+`experiments/ordering/`. One further layer exists and is deliberately NOT offered through the enum,
+being an instrument rather than an ordering: MMD3B computes MMD3's permutation on the vendored
+storage scheme. It must reproduce its original entry for entry, which is what makes it useful, and
+it is reached as a free function. AMD1B and AMD2B were two more until 2026-08-16, when the fused
+schedule they carried measured identical and faster and moved into AMD1 and AMD2. MMD3 is the default: it reproduces the vendored MMD's permutation
 exactly, so it behaves as a reference implementation with decades of use behind it rather than as
 a tie-break of our own. AMD3 is its counterpart on the other branch and reproduces the vendored
 AMD's, up to the postorder that routine applies and Oblio does not want, since ElmForest orders

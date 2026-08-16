@@ -12,7 +12,7 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
     const std::size_t size = colPtr.size() - 1;
     if (size == 0) return std::vector<std::int32_t>();
 
-    QuotientGraph qg(colPtr, rowIdx);
+    QuotientGraph qg(colPtr, rowIdx, true);   // clique marks: this driver stamps clique ids
 
     // The two shared-class conventions this layer differs by. Both are off for every other driver
     // and neither changes which sets are computed, only which permutation comes out. See the
@@ -35,6 +35,13 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
     // still explicit, and a bound from the first elimination onward. That the cached value is
     // itself a bound is what makes the second cap below hold inductively: an upper bound on an
     // earlier degree is still an upper bound now.
+    // AMD_2's `Degree`, and it answers TWO questions from one array. For a live vertex it is the
+    // cached degree, exact at construction and a bound afterwards; for a dead one it is the
+    // WEIGHTED SIZE of the clique that vertex's elimination formed, which the prune subtracts
+    // from. The two never overlap: a clique id IS the id of the pivot that made it, and that
+    // vertex is dead from the moment the clique exists, so the store that retires it is the store
+    // that starts the clique's life. A separate `cliqueDegree` was one of the seven n-arrays
+    // AMD_2 allocates none of.
     std::vector<std::uint32_t> degrees(size);
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u)
         degrees[u] = qg.adjacencySize(u);
@@ -49,23 +56,17 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
     // stamping and queried by comparison, never allocated.
     // Sized for twice the vertex space: the hash comparison below stamps a clique id at
     // c + cliqueStamp, so vertices and cliques can be tested against one stamp without two arrays.
-    std::vector<std::int32_t> mark(2 * size, NIL);
-    std::int32_t              tag = 0;
-
-    // The stride separating the two halves of `mark`, and the one place a COUNT becomes an offset
-    // in the INDEX space. `size` is the matrix order, one dimensional and bounded by n, so it is a
-    // count and is held as std::size_t like every other count here; the sum below is an index into
-    // mark and so is std::int32_t. Naming the crossing once beats writing the cast at each of the
-    // sites that make it, which is what this file used to do: the cast is not a hazard here, since
-    // n is an int32_t by construction, but four unexplained casts of the same quantity read as
-    // four separate events rather than one convention.
+    // THE DRIVER'S OWN `mark` AND `tag` ARE GONE. They were a second membership scratch over the
+    // same entities as the quotient graph's, which is 2n when built with clique marks: vertices
+    // low, cliques at cliqueBase() + c. See the constructor argument in QuotientGraph.h for why
+    // the two halves cannot share one space.
     //
-    // It exists because there is no type for a count. docs/DESIGN_DECISIONS.md (2026-08-08) and
-    // experiments/ordering/REPORT.md carry that: an index names an entity and may be NIL, a
-    // position offsets into an n x n object and may exceed 2^31, and a count is bounded by a SIDE
-    // rather than an AREA and has neither category. With one, `size` would already be the right
-    // width and this line would not be needed.
-    const std::int32_t cliqueStamp = static_cast<std::int32_t>(size);
+    // ONE TAG COUNTER FOR BOTH, and what makes that safe is that a tag only ever increases and
+    // every pass stamps with the CURRENT one, so a stamp from an earlier pass is strictly below it
+    // and reads as absent. That is what the graph's own `mMark[v] < mTag` tests already rely on.
+    // What would break it is a graph call between the stamping of u's set and the walk of v's, and
+    // there is none. GONE sits above every tag and survives both.
+    const std::int32_t cliqueStamp = qg.cliqueBase();
 
     // The hash groups, an array indexed by the hash value rather than a map: the key is already
     // an index into 0 .. size, so a map would cost a log per insertion and a node per group for
@@ -78,9 +79,20 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
     //
     // hashNext is indexed by VERTEX and hashHead by hash, which is why they have different lengths;
     // the same asymmetry Buckets carries between its links and its heads.
+    // ONE ARRAY WHERE THERE WERE THREE. `hashNext` held the chain and the half-built key; both
+    // now ride in the buckets' own links, free for exactly the span that needs them because
+    // `eliminate` takes every member of C[pivot] out of the lists. `usedKeys` recorded which
+    // buckets to clear afterwards; AMD_2 clears a bucket by EMPTYING IT AS IT FINDS IT, so there
+    // is nothing to record and no clearing pass.
+    //
+    // `hashHead` STAYS, and that is where the alignment stops. AMD_2 overlays its hash heads on
+    // Head[], the degree-list heads, with FLIP marking which kind a slot holds, and parks a second
+    // head in Last[Head[hval]] when both kinds are live at one index. We cannot: Buckets carries
+    // genmmd's `bwd` encoding, in which a head's mPrev holds -(degree + 1) rather than being free,
+    // so the slot AMD_2 parks its second head in is already spoken for. Two encodings, each
+    // coherent, that do not compose. DESIGN_DECISIONS.md calls FLIP an anti-model, and n int32 to
+    // keep the two list kinds apart is the cheaper side of that trade.
     std::vector<std::int32_t> hashHead(size + 1, NIL);
-    std::vector<std::int32_t> hashNext(size, NIL);
-    std::vector<std::uint32_t> usedKeys;
 
     // |C[c] - C[p]| per clique, indexed by clique id and hoisted out of the loop. The prototype
     // allocates and zeroes it per pivot, which reads better and is O(n) per step, O(n^2) over the
@@ -95,7 +107,6 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
     // clique in I[v]. Mass elimination only removes a vertex whose I[u] is exactly {pivot}, so no
     // other clique is touched. And the value is written once, when the clique is formed, from the
     // already-trimmed member list.
-    std::vector<std::uint32_t> cliqueDegree(size, 0);
 
     // Amd.cpp's W ARRAY, and this file used to keep the same three facts in three places.
     //
@@ -150,7 +161,16 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
     // The half of each bound that does not involve the vertex's own weight, carried from the pass
     // that forms it across supervariable detection to the pass that finishes it. Amd.cpp keeps the
     // same quantity in Degree[i] between its scan 2 and its degree-list pass. See ledger entry 4.
-    std::vector<std::uint32_t> partial(size, 0);
+    // `partial` IS GONE, and with it the last driver array that had no counterpart in AMD_2. It
+    // carried the half of each bound that does not involve the vertex's own weight, from the pass
+    // that forms it across supervariable detection to the pass that finishes it. Amd.cpp keeps the
+    // same quantity in `Degree[i]` between its scan 2 and its degree-list pass, and we cannot:
+    // ledger entry 4 splits our bound so `nvi` is read AFTER the merge, and the min cap in the
+    // middle still needs the old `degrees[u]`, so that slot is occupied.
+    //
+    // It rides in `w[u]` instead, free for a live vertex for exactly the span required; see the
+    // store in QuotientGraph's tagged prune. The obligation is the reset at the end of the bound
+    // pass below.
 
     while (numEliminated < size) {
         while (buckets.empty(minDegree)) ++minDegree;   // walk up to the first live bucket
@@ -188,13 +208,17 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
         // written until the end of the bound pass, and `hashNext[u]` holds nothing until the
         // vertex is filed, which happens in that same pass after the key has been read. With the
         // arrays gone the 2D penalty went with them.
-        TaggedScan scan{partial, hashNext, w, cliqueDegree, touchedCliques, wflg,
+        TaggedScan scan{&buckets, w, degrees, touchedCliques, wflg,
                         static_cast<std::int32_t>(size + 1)};
         qg.eliminate(pivot, scan);
         pivots.push_back(pivot);
 
-        buckets.unfile(pivot);      // unfile before zeroing: the bucket index is
-        degrees[pivot] = 0;                         //   read from the degree
+        // The pivot leaves the lists. The zeroing that used to follow is gone: under the fold
+        // above `degrees[pivot]` is the slot the new clique's weight is written into a few lines
+        // down, so it was a store nobody read. The old comment warned to unfile before zeroing
+        // because the bucket index came from the degree; Buckets reads it out of mPrev, so that
+        // ordering was already vestigial.
+        buckets.unfile(pivot);
 
         // ---- the bound, in place of an exact refresh -----------------------------------
         // Everything the new clique reached needs a new degree, and nothing else can have
@@ -221,7 +245,7 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
         // computation below is NOT removable: it runs after mass elimination has trimmed the
         // clique, which is ledger entry 7, and this one is deliberately over the untrimmed one.
         std::uint32_t degme = qg.cliqueWeight();
-        cliqueDegree[pivot] = degme;                // what the scan below subtracts from
+        degrees[pivot] = degme;                     // what the scan below subtracts from
 
         // |C[c] - C[p]| once per clique. This is the whole reason the bound is cheap: the
         // quantity depends on c alone, so every vertex whose incidence list holds c reads it
@@ -262,8 +286,7 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
         numEliminated += 1 + static_cast<std::uint32_t>(merged.size());
         numLive -= qg.weight(pivot);                // every original the pivot stands for
         for (std::int32_t u : merged) {
-            buckets.unfile(u);
-            degrees[u] = 0;
+            degrees[u] = 0;                         // already out of the lists; see eliminate()
         }
 
         // The clique and its weight are re-read, both having moved: massEliminate trims C[p] of
@@ -296,11 +319,9 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
         // defect arrived with ledger entry 3, which moved mass elimination out and did not carry
         // the second write that placement is the whole reason for. Half a mechanism, as entry 6
         // was. See experiments/ordering/AMD3.md.
-        cliqueDegree[pivot] = degme;
+        degrees[pivot] = degme;
 
         const std::uint32_t numLeft = numLive;
-
-        usedKeys.clear();       // the bound pass below fills the buckets
 
         // The bound is formed in TWO halves here, where Amd2 forms it in one, and that split is
         // ledger entry 4. This pass computes the part that does not involve u's own weight and
@@ -336,11 +357,11 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
             // them, so the intermediate reaches O(n^2). It is the one accumulator in the ordering
             // that no disjointness argument bounds, and the minimum below is what brings it back
             // into range. `partial[u]` seeds it and is itself at most n.
-            std::size_t deg = partial[u];
+            std::size_t deg = static_cast<std::size_t>(w[u]);   // the adjacency half
             // The ADJACENCY HALF of the key, already reduced. The other half is accumulated below,
             // in the walk this pass makes anyway, and cannot move into the prune: absorption runs
             // between the two and compacts I[u], so the list to sum over does not exist there yet.
-            std::size_t key = static_cast<std::size_t>(hashNext[u]);
+            std::uint32_t key = static_cast<std::uint32_t>(buckets.key(u));
             // THE HASH KEY IS ACCUMULATED HERE, in the walks the bound is already making, which
             // is what Amd.cpp does with `hval += e` and `hval += j` inside its scan 2. It had a
             // pass of its own until 2026-08-10, walking A[u] and I[u] a second time; see the
@@ -372,7 +393,7 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
             // the rules.
             for (std::uint32_t i = 0; i < incidenceSize; ++i) {
                 const std::int32_t c = incidence[i];
-                key += static_cast<std::size_t>(c) + 1;
+                if (c != pivot) key += static_cast<std::uint32_t>(c);   // me is not in the key
                 if (c != pivot) deg += static_cast<std::size_t>(w[c] - wflg);
             }
 
@@ -386,7 +407,7 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
             // and it stays `std::size_t`; `degrees[u]` is one dimensional and at most n. The
             // minimum is taken WIDE and is what makes the result representable, being at most
             // `degrees[u]` and so at most n.
-            partial[u] = static_cast<std::uint32_t>(std::min<std::size_t>(deg, degrees[u]));
+            w[u] = static_cast<std::int32_t>(std::min<std::size_t>(deg, degrees[u]));
 
             // AND THE VERTEX IS FILED HERE, WHICH IS WHY THIS FUSION NEEDS NO ARRAY. It was tried
             // on 2026-08-08 and reverted: that version carried the key in a vector of size n and
@@ -431,13 +452,17 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
             // moved the refile below the hash, for the post-merge weight, and that is what leaves
             // this loop free of tie-break duty. Second thing that split has bought by accident.
             if (!qg.eliminated(u)) {
-                // THE NARROWING POINT for the key. `key` is one of the five wide accumulators, this
-            // one summing `c + 1` over A[u] and I[u]; the remainder is under `size + 1` and so
-            // at most n, which is what makes the bucket index one dimensional.
-            const std::uint32_t hash = static_cast<std::uint32_t>(key % (size + 1));
-                if (hashHead[hash] == NIL) usedKeys.push_back(hash);
-                hashNext[u]    = hashHead[hash];
+                // Amd.cpp's `hval = hval % n`, one reduction over a key that has wrapped in uint32
+                // rather than been reduced per term. See the prune for the other three halves of
+                // this arithmetic.
+                const std::int32_t hash = static_cast<std::int32_t>(
+                                              key % static_cast<std::uint32_t>(size));
+                buckets.setChain(u, hashHead[hash]);
                 hashHead[hash] = u;
+                // THE REDUCED KEY STAYS IN THE SLOT, which is `Last [i] = hval` in Amd.cpp. It is
+                // what lets the detection pass below find a vertex's bucket from the vertex, and so
+                // walk C[pivot] instead of a list of the keys it used.
+                buckets.setKey(u, hash);
             }
         }
 
@@ -454,8 +479,29 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
         // sweep, so it still comes out reversed against C[p], which is what the pair loop below
         // depends on.
 
-        for (std::uint32_t hash : usedKeys) {
-            for (std::int32_t u = hashHead[hash]; u != NIL; u = hashNext[u]) {
+        // DRIVEN BY C[pivot], NOT BY A LIST OF KEYS, and the bucket is EMPTIED the moment it is
+        // reached. That is Amd.cpp's supervariable detection exactly: it walks Lme, reads each
+        // member's key out of Last[i], takes the bucket and clears the head in one step, so a
+        // later member of the same bucket finds nothing and the clearing pass does not exist.
+        //
+        // Every bucket that was filled is reached: filing only happens for a principal member of
+        // C[pivot], and the survivor of every merge inside a bucket is principal and is itself a
+        // member of C[pivot]. So no head is left dirty for the next step.
+        for (std::uint32_t kk = 0; kk < pivotCliqueSize; ++kk) {
+            const std::int32_t seed = pivotClique[kk];
+            if (qg.eliminated(seed)) continue;
+            const std::int32_t hash = buckets.key(seed);
+            const std::int32_t headOfBucket = hashHead[hash];
+            if (headOfBucket == NIL) continue;      // an earlier member already emptied it
+            hashHead[hash] = NIL;
+
+            // THE CONDITION IS AMD_2'S, `while (i != EMPTY && Next [i] != EMPTY)`. A vertex at the
+            // END of its chain has nothing after it to compare against, so the body did nothing
+            // and returned; testing it here means a SINGLETON BUCKET, which most are, costs no
+            // iteration at all. Measured at 6.42 chain steps per pivot against AMD_2's 0.17 on a
+            // 400 square before this, and 0.33 after.
+            for (std::int32_t u = headOfBucket; u != NIL && buckets.chain(u) != NIL;
+                 u = buckets.chain(u)) {
                 if (qg.eliminated(u)) continue;
                 // AMD_2 enters this loop only for a bucket member with a successor,
                 // `while (i != EMPTY && Next [i] != EMPTY)`, and the guard is the other half of
@@ -466,7 +512,6 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
                 // the pass once entry 8 made them singletons. Amd2 and Amd2B need no counterpart:
                 // they stamp INSIDE the pair loop, so a member with no successor already costs
                 // them nothing.
-                if (hashNext[u] == NIL) continue;
 
                 // THE STAMP IS HOISTED, which is the second thing taken from Amd.cpp here. Its supervariable detection stamps the OUTER vertex once, before the
                 // inner loop, and then tests every candidate against that one stamp:
@@ -494,23 +539,22 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
                 // v stamped and u walked. The test is symmetric so the outcome does not move, and the SURVIVOR
                 // does not either, u being the outer vertex in both and merge(u, v) folding v into
                 // it. Amd.cpp merges j into i the same way round.
-                ++tag;
-                const std::int32_t other = tag;
+                const std::int32_t other = qg.advanceTag();
                 std::uint32_t sizeU = 0;       // list entries, so at most deg(u)
                 const std::int32_t* adjacencyU = qg.adjacency(u);
                 for (std::uint32_t a = 0; a < qg.adjacencySize(u); ++a) {
                     const std::int32_t w = adjacencyU[a];
-                    if (!qg.eliminated(w)) { mark[w] = other; ++sizeU; }
+                    if (!qg.eliminated(w)) { qg.setMark(w, other); ++sizeU; }
                 }
                 // Index 1: the new clique is at the front of every I[u] and is shared by every
                 // member of C[pivot], so it can never discriminate. Ledger entry 6.
                 const std::int32_t* incidenceU = qg.incidence(u);
                 for (std::uint32_t i = 1; i < qg.incidenceSize(u); ++i) {
-                    mark[incidenceU[i] + cliqueStamp] = other;
+                    qg.setMark(incidenceU[i] + cliqueStamp, other);
                     ++sizeU;
                 }
 
-                for (std::int32_t v = hashNext[u]; v != NIL; v = hashNext[v]) {
+                for (std::int32_t v = buckets.chain(u); v != NIL; v = buckets.chain(v)) {
                     if (qg.eliminated(v)) continue;
 
                     // The exact test the hash only filters for:
@@ -525,13 +569,13 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
                         const std::int32_t w = adjacencyV[a];
                         if (qg.eliminated(w)) continue;
                         ++sizeV;
-                        if (mark[w] != other) same = false;
+                        if (qg.mark(w) != other) same = false;
                     }
                     if (same) {
                         const std::int32_t* incidenceV = qg.incidence(v);
                         for (std::uint32_t i = 1; i < qg.incidenceSize(v) && same; ++i) {
                             ++sizeV;
-                            if (mark[incidenceV[i] + cliqueStamp] != other) same = false;
+                            if (qg.mark(incidenceV[i] + cliqueStamp) != other) same = false;
                         }
                     }
                     if (!same || sizeU != sizeV) continue;
@@ -571,14 +615,17 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
                     // the true external degree drops by exactly weight(v) as v stops being
                     // outside u's supervariable and becomes part of it.
                     const std::uint32_t weightV = qg.weight(v);
-                    buckets.unfile(v);
+
                     qg.merge(u, v);                 // v folded into u, left where it lies
-                    buckets.refile(degrees, u, degrees[u] - weightV);
+                    // NO BUCKET TRAFFIC HERE. Both are already out of the lists, taken out when
+                    // C[pivot] was formed, and u's mPrev is holding its hash key, so an unfile
+                    // would read that key as a link. AMD_2 does no list work here either: it
+                    // writes Nv and moves on.
+                    degrees[u] -= weightV;
                     ++numEliminated;                // out of the count, not out of the graph
                 }
             }
         }
-        for (std::uint32_t hash : usedKeys) hashHead[hash] = NIL;     // only what was used
 
         // THE FOURTH PASS, which finishes the bounds and files them. Amd.cpp spells it
         // `deg = Degree[i] + degme - nvi` then `deg = MIN (deg, nleft - nvi)`, under its RESTORE
@@ -594,11 +641,21 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
             // on why widening cannot be done after the addition the way narrowing is done after
             // the subtraction. `partial[u]` and `degme` each reach n, so the sum reaches 2n, and
             // in 32 bits that would fit only because n is capped at 2^31 - 1.
-            std::size_t bound = static_cast<std::size_t>(partial[u]) + degme - weightU;
+            std::size_t bound = static_cast<std::size_t>(w[u]) + degme - weightU;
+            // THE SLOT GOES BACK TO ALIVE-AND-UNSEEN, the last read having just happened. Without
+            // it a survivor later chosen as pivot would form a clique whose w already held a
+            // bound, which the next step's prune would read as a running value above the tag or as
+            // absorbed. A vertex the hash eliminated is skipped and never reset, which is right:
+            // it is dead, no clique is ever named after it, and clear_flag resets it anyway.
+            w[u] = 1;
             bound = std::min<std::size_t>(bound, numLeft - weightU);
             // THE NARROWING POINT, after the cap, which is where the value is at most n.
             const std::uint32_t filed = static_cast<std::uint32_t>(bound);
-            buckets.refile(degrees, u, filed);
+            // FILE, NOT REFILE. The vertex has been out of the lists since C[pivot] was formed
+            // and its mPrev holds a hash key rather than a link, so the unfile inside refile would
+            // read that key as one. It is also one pass less than refile did.
+            degrees[u] = filed;
+            buckets.file(filed, u);
             // The minimum, taken HERE rather than in a pass of its own. `bound` is in a register
             // and `degrees[u]` has just been written from it, so the pass this replaces was one
             // scattered read per survivor per pivot to recover a value it had already had.

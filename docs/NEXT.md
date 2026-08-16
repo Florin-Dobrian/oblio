@@ -1,4 +1,64 @@
-# NEXT: real matrices and a scaling ladder arrived, and what they said
+# NEXT: the amd branch's growth is gone, and where the differential goes next
+
+**REWRITTEN AT THE TOP ON 2026-08-16.** The section immediately below is the current state;
+everything under "Priority" and after is older and several of its items are now closed, marked
+where they are. The durable account of this session is `docs/DESIGN_DECISIONS.md` (2026-08-16),
+`benchmarks/ordering/README.md` and `experiments/ordering/README.md`; this file only points at
+them.
+
+## Where the amd branch stands, 2026-08-16
+
+**The 2D growth is gone.** `AMD3` read 1.25x the vendored routine at 32 a side and 1.82x at 400,
+rising monotonically; it now reads about 1.13 to 1.43x with no trend from 100 a side up. Seven
+folds did it, and ONE of them removed the slope: the clique descriptor moved into the dead pivot's
+own `mRun` entry, retiring `mCliquePtr` and `mCliqueSize`. The other six moved the column down by a
+constant. Seventeen entity-indexed streams became eleven, against `AMD_2`'s nine.
+
+**Nothing computed changed.** Every permutation from all ten drivers is identical to the
+`be589f2` baseline, checked as a digest over 73 grid sizes per driver at each step.
+
+**What the differential established, and it killed three of my hypotheses in a row.** Both codes do
+the same visits per pivot, 1.011 in 2D and 1.010 on cubes, in every pass. So the growth was never
+work. Not the clique arena either, whose excess misses FALL with n. Not the hash. Not `clear_flag`,
+which never fires. And not single-level cache locality, an L1 model putting the excess at a constant
+0.09 misses per visit. Read `experiments/ordering/README.md`, the 2026-08-16 section, before
+forming a new hypothesis: it also records where the first version of that counter was blind.
+
+### The four things to pick up
+
+**1. `AMD1` AND `AMD2` STILL CLIMB IN 2D**, 1.05 to 1.22x and 1.36 to 1.47x, where `AMD3` is flat.
+The descriptor fold is in the shared class and reached them for free, so what remains is
+driver-side. This is the open front and the differential is the instrument for it.
+
+**2. FOLD THE B LAYERS IN AND RETIRE THEM.** `AMD1B` and `AMD2B` now satisfy the stop condition in
+`Amd1B.h` for the first time: permutation-identical AND faster, 4 to 16 percent on cubes and even
+or better in 2D. Their 2D penalty was never the fused schedule, it was `ApproximateScan` crossing
+three arrays from the prune; with the tagged `W` the crossing is one. So `Amd1` and `Amd2` take the
+fused `TaggedScan` eliminate, the four B files go, and `ApproximateScan` and its overload go with
+them, having no users left. `Amd3B` and the `AMD3f` control retire in the same sweep, `Amd3` now
+being identical to `Amd3B`.
+
+**3. A DENSER LADDER.** The flatness claim rests on seven sides, geometric but sparse in the middle.
+The driver takes explicit sides, so `./order_timing_cpp amd 2d 32 45 64 90 128 181 256 362 400`
+needs no code. Worth doing before the claim is quoted anywhere outside this tree.
+
+**4. THE TEN-DRIVER DIGEST WANTS A HOME.** It is a throwaway in `/tmp` that hashes every driver's
+permutation over 73 grids and compares against a recorded baseline. It caught nothing this session,
+but it is what made a shared-class change safe to attempt at all, and it is strictly stronger than
+the `Amd1B == Amd1` pair check it is about to replace.
+
+### Two things worth carrying into any next fold
+
+**A fold can measure nothing and still be why another one works.** The dead-clique test measured
+nothing. The tagged `W` measured nothing in `Amd2`. Yet the tagged `W` is what made the fused scan
+viable in both B layers. Judging a fold by its own column alone would have discarded the
+precondition and kept the failure.
+
+**The footprint trade, now seen three times, is a rule.** A schedule change that saves visits but
+adds an array crossing a pass boundary tends to lose at large n. Fold 7 is the general answer to it:
+put the crossing in a slot that already exists.
+
+---
 
 A handover note between sessions, rewritten 2026-08-11 after three commits added a real-matrix
 benchmark, a scaling benchmark and the three reports drawn from them, and updated 2026-08-10 before
@@ -122,6 +182,14 @@ vendored routine reads 0.74 to 0.86, so they overlap, rising to about 1.2x at 32
 is 1.33x at 32 a side and about 1.95x at 400. Three days earlier it was 3.0x on cubes. `Mmd3` is
 0.87 to 1.05x genmmd on cubes and 1.26 to 1.55x in 2D, with no trend in n on either.
 
+**THE HASH KEY IS NOW `AMD_2`'S EXACTLY, 2026-08-16.** All four divergences listed anywhere in
+this file are closed in `Amd2`, `Amd2B` and `Amd3`: no `+ 1` on a term, the pivot's own clique
+excluded, modulus `n` rather than `n + 1`, and a `uint32` accumulator that WRAPS at 2^32 the way
+Amd.cpp's `UInt hval` does, one reduction at the end rather than one per term. It changed no
+permutation, checked over 730 across ten drivers, and it corrected the grouping: our `pair` and
+`stamp` counts now equal `AMD_2`'s digit for digit, where before we were UNDER-grouping on cubes.
+Worth about 4 percent. See `docs/DESIGN_DECISIONS.md` (2026-08-16).
+
 **What was done, 2026-08-08 to 08-10**, three commits: the hash key defect (ledger entry 8, worth a
 factor of two to three on cubes), the key folded into the bound pass, and the first scan folded into
 the prune. **The walk axis is finished**: `Amd3` walks `I[u]` twice per pivot and `A[u]` once,
@@ -155,6 +223,15 @@ said about the orderings, in order of how much it should affect the plan:
    are trying to match.
 2. **A profile that compares `amd3` against itself at two sizes**, 140 and 400 a side. It decides
    the next item and takes ten minutes. Item 2d.
+2b. **THE PER-ARRAY-AT-SETUP CONTAINER EXPERIMENT IS ANSWERED, 2026-08-16, and not in the form it
+   was posed.** It asked whether one allocation carved into arrays would beat separate vectors,
+   `AMD_2` carving Pe, Nv, Head, Elen, Degree, W and Iw out of one `S`. That was the leading
+   hypothesis for the 2D growth for one session and it was WRONG: `MMD3` has ten separate
+   allocations against genmmd's five and is flat, so a doubling of allocations does not by itself
+   produce growth. What did produce it was two random probes per clique visit into arrays indexed
+   by a dead pivot's id, and folding the arrays away removed them. The container question is
+   therefore still open as a question and is no longer a suspect.
+
 3. **A dense-row threshold in `QuotientGraph`.** NEW on 2026-08-11 and the largest ordering-time
    item the real matrices found. A single vertex adjacent to everything makes minimum degree
    quadratic; the vendored AMD sets such rows aside before ordering, above `max(16, 10*sqrt(n))`

@@ -1,7 +1,52 @@
 #!/usr/bin/env python3
-"""Generate a hooked copy of the vendored AMD that emits its RAW elimination order.
+"""Generate a hooked copy of the vendored AMD, in one of two modes.
 
-    python3 tools/hook_amd.py private/Amd.cpp <out>.cpp
+    python3 tools/hook_amd.py private/Amd.cpp <out>.cpp                 the RAW ORDER
+    python3 tools/hook_amd.py private/Amd.cpp <out>.cpp --mode=timed    the PHASE TIMES
+
+Both are additive: neither changes what the routine computes, and each is checked against the
+unhooked routine by its consumer before any number is read off it.
+
+THE TWO MODES ANSWER DIFFERENT QUESTIONS, and the second exists because the first cannot be timed.
+
+  raw     What order does AMD_2 eliminate in? The copy accumulates supervariable membership and
+          emits the pivot sequence with member order, which is the acceptance test for our amd
+          alignment. It carries a vector per vertex and a push per member, so it is an ORACLE and
+          not a stopwatch: timing it would measure the bookkeeping.
+
+  timed   How much of `amd_order` is work we also do? The copy takes six timestamps at phase
+          boundaries and nothing else, so it is a stopwatch and not an oracle: it reports no order
+          and reproduces the shipped routine's output exactly.
+
+WHY THE SECOND MODE IS NEEDED AT ALL. Every ratio this tree quotes for an ordering is against
+`amd_order` whole, and two of its phases have no counterpart on our side. `AMD_aat` forms the
+pattern of A+A' because AMD takes a one-sided matrix; ours arrives full-symmetric with the diagonal
+present, which is what a `SparseMatrix` holds. `AMD_postorder` relabels the assembly tree, which
+`ElmForestEngine` redoes later with real front and update sizes on the exact supernodal tree. So a
+figure like `AMD3 1.82x` is measured against a denominator carrying work we deliberately do not do,
+and `benchmarks/ordering/README.md` has recorded one estimate of that, 8 percent at 140 a side,
+without ever measuring it per size. This is the instrument that measures it per size.
+
+WHY THE PHASES ARE TIMED RATHER THAN THE POSTORDER REMOVED, which is the first thing to reach for
+and does not work. `AMD_postorder` runs INSIDE `AMD_2`, and the block after it builds the output
+permutation out of the ranks it writes into `W`. Delete the call and `W` is unwritten, the returned
+permutation is meaningless, and both of the checks that make a generated oracle trustworthy go with
+it: the permutation compared entry for entry against the unhooked routine, and `Info[AMD_LNZ]`
+compared against the fill this benchmark already records. A timestamp costs one call at a loop
+boundary and keeps both.
+
+THE PHASES, and what each is:
+
+  0  valid    AMD_valid, amd_preprocess where the input is jumbled, and the Len and Pinv vectors.
+  1  aat      AMD_aat, forming the pattern of A+A'.        WE DO NOT DO THIS.
+  2  build    the S workspace, and AMD_1's construction of Iw and Pe from that pattern.
+  3  core     AMD_2 from entry to the end of its main loop.
+  4  post     the assembly-tree path compression, AMD_postorder, and the output permutation.
+                                                            WE DO NOT DO THIS.
+
+`build + core` is the comparable region: it is the vendored routine turning a caller's pattern into
+its working structure and then ordering it, which is what `orderAmd3` does from `QuotientGraph`'s
+constructor to its last pivot.
 
 WHERE THIS LIVES, AND WHY NOT IN THE STUDY THAT FIRST NEEDED IT. It was written for
 `experiments/ordering` and moved here on 2026-08-09 when `benchmarks/ordering` wanted the same
@@ -53,9 +98,9 @@ wrong answer. That is the failure mode this whole arrangement exists to avoid.
 
 import sys
 
-DECLS = """#include <vector>
+DECLS_RAW = """#include <vector>
 
-/* ---- added by experiments/ordering/hook_amd.py; not part of the vendored source ---- */
+/* ---- added by tools/hook_amd.py --mode=raw; not part of the vendored source ---- */
 static std::vector<std::vector<int> > PB_members;   /* members[i], what supervariable i stands for */
 static std::vector<int>               PB_raw;       /* the raw elimination order */
 static void PB_reset (int n)
@@ -63,6 +108,47 @@ static void PB_reset (int n)
     PB_members.assign (n, std::vector<int> ()) ;
     for (int i = 0 ; i < n ; i++) PB_members [i].push_back (i) ;
     PB_raw.clear () ;
+}
+/* ----------------------------------------------------------------------------------- */
+
+"""
+
+# The timed mode's declarations. Six timestamps and nothing else: no container, no per-vertex
+# state, no allocation, so the copy computes exactly what the shipped routine computes and its
+# consumer can check that it does.
+#
+# A CLOCK READ IS A COMPILER BARRIER, which is the honest caveat and the reason the consumer prints
+# the hooked total beside the unhooked one. Each of the five sits at a phase boundary, between two
+# loops rather than inside one, so there is nothing across it for the optimizer to have been moving;
+# but that is an argument, and the two totals side by side are the measurement. Five reads against
+# an ordering of tens of microseconds is on the order of a hundred nanoseconds either way.
+#
+# `PB_mark(k)` closes phase k and opens the next, so the phases partition the run and the caller
+# needs one stamp per boundary rather than a pair per phase. `PB_reset` zeroes them, so a call that
+# returns early, on n = 0 or on invalid input, reports zeros rather than a stale reading from the
+# previous ordering.
+DECLS_TIMED = """#include <chrono>
+
+/* ---- added by tools/hook_amd.py --mode=timed; not part of the vendored source ---- */
+static double PB_ms [5] ;      /* 0 valid, 1 aat, 2 build, 3 core, 4 post; milliseconds */
+static std::chrono::steady_clock::time_point PB_at ;
+
+static void PB_mark (int phase)
+{
+    const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now () ;
+    PB_ms [phase] = std::chrono::duration<double, std::milli> (now - PB_at).count () ;
+    PB_at = now ;
+}
+
+static void PB_reset (void)
+{
+    for (int k = 0 ; k < 5 ; k++) PB_ms [k] = 0.0 ;
+    PB_at = std::chrono::steady_clock::now () ;
+}
+
+extern "C" void amd_phase_ms (double out [5])
+{
+    for (int k = 0 ; k < 5 ; k++) out [k] = PB_ms [k] ;
 }
 /* ----------------------------------------------------------------------------------- */
 
@@ -78,12 +164,7 @@ def need(text, anchor, what):
                  f"  anchor: {anchor!r}")
 
 
-def main():
-    if len(sys.argv) != 3:
-        sys.exit("usage: hook_amd.py <vendored Amd.cpp> <output>")
-    src, dst = sys.argv[1], sys.argv[2]
-    s = open(src).read()
-
+def transform_raw(s):
     # 1. the hash merge, where a supervariable absorbs another
     #    j is folded into i, so i's list grows and j's is EMPTIED. Clearing matters: without it a
     #    member reached through a chain of merges is copied more than once.
@@ -133,8 +214,75 @@ def main():
                   "      pbRawOrder (PB_raw.empty () ? 0 : &PB_raw[0], (int) PB_raw.size ()) ; }\n"
                   "    return pb_status;")
 
-    open(dst, "w").write(DECLS + s)
-    print(f"hook_amd.py: wrote {dst} from {src}")
+    return DECLS_RAW + s
+
+
+def transform_timed(s):
+    # 1. AMD_aat, bracketed. The mark before it closes `valid`, which is everything AMD_order does
+    #    up to here: the validity check, amd_preprocess where the input is jumbled, and the Len and
+    #    Pinv vectors. The mark after it closes `aat` itself.
+    aat = "    size_t nzaat = AMD_aat(n, Cp, Ci, Len.data(), P, Info);"
+    need(s, aat, "the AMD_aat call moved")
+    s = s.replace(aat, "    PB_mark (0) ;\n" + aat + "\n    PB_mark (1) ;")
+
+    # 2. the AMD_2 call, whose mark closes `build`: the S workspace allocated in AMD_order, and
+    #    AMD_1's construction of Iw and Pe out of the A+A' pattern. That is the phase our own
+    #    QuotientGraph constructor corresponds to.
+    two = "    AMD_2 (n, Pe, Iw, Len, iwlen, pfree,"
+    need(s, two, "the AMD_2 call moved")
+    s = s.replace(two, "    PB_mark (2) ;\n" + two)
+
+    # 3. the end of AMD_2's main loop, which is where the path compression for the assembly tree
+    #    begins. Everything from here is for AMD_postorder and the output permutation, and Oblio
+    #    does none of it: ElmForestEngine postorders the exact supernodal tree later, with real
+    #    front and update sizes.
+    #
+    #    The mark goes AFTER the banner rather than before it, so that the phase boundary sits with
+    #    the code it opens rather than between two comment lines. Same idiom as the finalize marker
+    #    in the raw transform above: find the closing `*/` of the banner line below the anchor, then
+    #    the newline after it.
+    compress = "/* compress the paths of the variables */"
+    need(s, compress, "the path-compression marker moved")
+    cut = s.index("\n", s.index("*/", s.index(compress) + len(compress))) + 1
+    s = s[:cut] + "\n    PB_mark (3) ;\n" + s[cut:]
+
+    # 4. the entry point, renamed so the shipped routine, the raw copy and this one can all be
+    #    linked at once, and wrapped so the phases are zeroed before the call and `post` is closed
+    #    after it. Nothing between the last mark and here but AMD_order's own two-line tail.
+    entry = 'extern "C" int amd_order('
+    need(s, entry, "the entry point moved")
+    s = s.replace(entry, 'extern "C" int amd_order_timed(')
+
+    call = "    return AMD_order(n, Ap, Ai, P, Control, Info);"
+    need(s, call, "the AMD_order call inside the entry point moved")
+    s = s.replace(call,
+                  "    PB_reset () ;\n"
+                  "    const int pb_status = AMD_order(n, Ap, Ai, P, Control, Info);\n"
+                  "    PB_mark (4) ;\n"
+                  "    return pb_status;")
+
+    return DECLS_TIMED + s
+
+
+MODES = {"raw": transform_raw, "timed": transform_timed}
+
+
+def main():
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    flags = [a for a in sys.argv[1:] if a.startswith("--")]
+    mode = "raw"
+    for f in flags:
+        if f.startswith("--mode="):
+            mode = f[len("--mode="):]
+        else:
+            sys.exit(f"hook_amd.py: unknown option {f!r}")
+    if len(args) != 2 or mode not in MODES:
+        sys.exit("usage: hook_amd.py <vendored Amd.cpp> <output> [--mode=raw|timed]")
+
+    src, dst = args
+    s = MODES[mode](open(src).read())
+    open(dst, "w").write(s)
+    print(f"hook_amd.py: wrote {dst} from {src}, mode {mode}")
 
 
 if __name__ == "__main__":

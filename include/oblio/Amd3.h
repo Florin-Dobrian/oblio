@@ -91,9 +91,14 @@
 // sweep over C[p] and a second walk of A[u] and I[u], 26.70 of this driver's 149.96 element visits
 // per pivot at 140 a side and 66.77 of 352.57 at 26 cubed. Measured on alpamayo at about 4 to 7
 // percent at six consecutive square grids from 64 to 400 a side and 5 to 14 percent on cubic grids
-// from 12 to 32, with nnz(L) unchanged everywhere. Approximate: the variant was timed as a free
-// function and this driver through OrderEngine, which also builds a Permutation, a bias of up to
-// 2.4 percent in the variant's favor. AMD3.md iteration 26.
+// from 12 to 32, with nnz(L) unchanged everywhere. AMD3.md iteration 26.
+//
+// THE CAVEAT THAT USED TO END THIS PARAGRAPH IS WITHDRAWN, 2026-08-16. It read that the variant was
+// timed as a free function and this driver through OrderEngine, a bias of up to 2.4 percent in the
+// variant's favor. Measured directly, with an `AMD3f` column that ran this driver down the free
+// function path beside the ordinary one, that seam is ZERO across the whole ladder in both
+// families. It was a real reading on a different driver on a different day and it does not
+// reproduce; every figure that leaned on it should be re-read without the correction.
 //
 // It is the FIRST of five attempts at this gap to move anything, and it had been tried and
 // reverted once already. The difference is that the earlier version carried the key in an array of

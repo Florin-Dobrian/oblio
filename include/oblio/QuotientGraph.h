@@ -147,6 +147,21 @@ public:
     // The next vertex in the same bucket, and whether u is filed at all. MMD reads both: it
     // walks a whole bucket in the prepass, and its refresh asks whether a vertex it reached has
     // already been dealt with this round.
+    // AMD_2'S TWO BORROWED SLOTS. A vertex that has been unfiled is in no degree list, so its
+    // predecessor and successor links carry nothing, and AMD_2 uses exactly that: `Last[i]` holds
+    // the hash key and `Next[i]` the hash chain for the whole middle of an elimination step, which
+    // is why it allocates neither a key array nor an Hhead.
+    //
+    // LEGAL ONLY BETWEEN unfile() AND file(). A key stored here is an arbitrary int32 and can look
+    // like any of the encodings mPrev carries, so `unfile()`, `filed()` and `outmatched()` MUST
+    // NOT be called on a vertex holding one; they would splice a list on garbage. Only the amd
+    // path uses these, and only after taking every member of C[pivot] out of the lists. No mmd
+    // driver may call them: mmd leaves its candidates filed and asks `filed()` about them.
+    void         setKey(std::int32_t u, std::int32_t k)   { mPrev[u] = k; }
+    std::int32_t key(std::int32_t u) const                { return mPrev[u]; }
+    void         setChain(std::int32_t u, std::int32_t v) { mNext[u] = v; }
+    std::int32_t chain(std::int32_t u) const              { return mNext[u]; }
+
     std::int32_t next(std::int32_t u) const      { return mNext[u]; }
     bool         filed(std::int32_t u) const     { return mPrev[u] != UNFILED
                                                           && mPrev[u] != OUTMATCHED; }
@@ -179,20 +194,6 @@ private:
     // construct one graph per run.
 };
 
-// What an approximate-degree driver accumulates while the eliminator is already walking the lists,
-// handed to the second `eliminate` overload so that the walk serves both. The members are the
-// driver's own arrays, held by reference: the graph fills them and owns none of them.
-//
-// `tag` is the only member that moves, and the driver sets it before each elimination, exactly as
-// it would before its own scan. The rest are bound once and reused for the whole ordering.
-struct ApproximateScan {
-    std::vector<std::uint32_t>&       explicitPart;  // per vertex, sum of weight over the pruned A[u]
-    std::vector<std::uint32_t>&       outside;       // per clique, |C[c] - C[p]| weighted
-    const std::vector<std::uint32_t>& cliqueDegree;  // per clique, |C[c]| weighted
-    std::vector<std::int32_t>&        touchedCliques;// the cliques this step reached, once each
-    std::vector<std::int32_t>&        mark;          // the driver's membership scratch
-    std::int32_t                      tag;           // its stamp for this elimination
-};
 
 // The same thing for a driver that carries `Amd.cpp`'s TAGGED W ARRAY instead of a value array and
 // a separate seen-this-step mark. One array holds three facts: `w[c] == 0` is absorbed, `0 < w[c] <
@@ -220,10 +221,20 @@ struct ApproximateScan {
 // side when this fusion was first built, which is the footprint trade REPORT.md names and the
 // same one that sank the 2026-08-08 key fusion.
 struct TaggedScan {
-    std::vector<std::uint32_t>&       explicitPart;  // per vertex, sum of weight over the pruned A[u]
-    std::vector<std::int32_t>&        key;           // per vertex, the whole hash key, reduced
+    // THE BUCKETS, OR NOT. A driver that wants AMD_2's hash arrangement passes them: the prune
+    // then takes every member of C[pivot] out of the degree lists and parks the adjacency half of
+    // the hash key in the predecessor link it has just freed. A driver that refiles inside its own
+    // bound pass, which is Amd2 and Amd2B, cannot have either: its links are still degree links
+    // when the hash runs. Those pass NULL and build their key in a pass of their own.
+    //
+    // Null therefore means "leave the degree lists alone and store no key". It does not change
+    // what the scan computes, only where the by-products go.
+    Buckets*                          buckets;
     std::vector<std::int32_t>&        w;             // per clique, Amd.cpp's tagged W
-    const std::vector<std::uint32_t>& cliqueDegree;  // per clique, |C[c]| weighted
+    // Amd.cpp's `Degree`, which serves a LIVE vertex's degree and a DEAD one's clique weight from
+    // one array, the two being disjoint because a clique id is the id of the pivot that formed it.
+    // The scan reads only the clique half.
+    const std::vector<std::uint32_t>& degree;
     std::vector<std::int32_t>&        touchedCliques;// the cliques this step reached, once each
     std::int32_t                      wflg;          // the tag for this elimination
     std::int32_t                      modulus;       // the driver's bucket count, n + 1
@@ -240,8 +251,27 @@ public:
     // triangles, a structurally present diagonal) hold by construction, which is why nothing here
     // symmetrizes, deduplicates or sorts. See the pass-5 discussion in
     // experiments/ordering/README.md.
+    // THE MARK'S WIDTH IS A CONSTRUCTOR ARGUMENT, and it is a sizing decision rather than a
+    // behaviour flag, which is why it is here and not a setter beside the other three.
+    //
+    // With `cliqueMarks` off, `mMark` is n and indexes vertices alone, which is all any mmd driver
+    // needs: genmmd stamps vertices and never cliques, and its refresh reaches a clique's members
+    // through the arena rather than testing the clique's own identity. With it on, `mMark` is 2n,
+    // vertices low and cliques at `cliqueBase() + c`, which is what the amd branch needs because
+    // supervariable detection tests I[u] == I[v], set equality over CLIQUE IDS.
+    //
+    // The two halves cannot share one space. A clique id IS the id of the dead pivot that formed
+    // it, so stamping a clique in the vertex half would write a live tag over a slot holding GONE,
+    // and a walk of an older clique still listing that pivot as a member would read it as live.
+    // Neither genmmd nor AMD_2 shares one array between the two kinds.
+    //
+    // It is an argument rather than always-2n so that the mmd drivers do not allocate and zero an
+    // n int32 they never read: the constructor cost of this class is not incidental, and the note
+    // beside Buckets' flag byte records a 12 percent ordering-time saving that was almost entirely
+    // construction.
     QuotientGraph(const std::vector<std::size_t>&  colPtr,
-                  const std::vector<std::int32_t>& rowIdx);
+                  const std::vector<std::int32_t>& rowIdx,
+                  bool cliqueMarks = false);
 
     std::size_t size() const           { return mRun.size(); }
     // GONE, which is genmmd's `marker[v] = maxint` exactly: one value reserved above every tag
@@ -265,6 +295,10 @@ public:
     // what genmmd's `marker` is: `mmdelm` stamps it at level `tag` and `mmdupd` at level
     // `mt = tag + md0`, one array and one counter serving both. One counter is what makes it
     // safe, since two tags drawn from it can never be equal.
+    // The stride between the two halves of `mMark`, and the one place a COUNT becomes an offset
+    // in the INDEX space. Meaningful only when the graph was built with cliqueMarks.
+    std::int32_t cliqueBase() const              { return static_cast<std::int32_t>(mRun.size()); }
+
     std::int32_t advanceTag()                    { return ++mTag; }
     std::int32_t mark(std::int32_t v) const      { return mMark[v]; }
     void setMark(std::int32_t v, std::int32_t t) { mMark[v] = t; }
@@ -278,9 +312,9 @@ public:
     // taken beforehand does not. Read a clique at the moment of use, which is the same rule the
     // numeric factor's blocks live by.
     const std::int32_t* clique(std::int32_t c) const {
-        return mCliqueArena.data() + mCliquePtr[c];
+        return mCliqueArena.data() + mRun[c].sourcePtr;
     }
-    std::uint32_t cliqueSize(std::int32_t c) const { return mCliqueSize[c]; }
+    std::uint32_t cliqueSize(std::int32_t c) const { return mRun[c].adjacencySize; }
 
     // |C[pivot]| WEIGHTED, which every amd driver needs and all four used to compute for
     // themselves in a pass of their own, one scattered weight load per member per pivot. It is
@@ -404,7 +438,6 @@ public:
     // before mass elimination could change any of them, which is safe because the prune has
     // already removed every member of C[p] from A[u] and mass elimination merges only members of
     // C[p]. Neither would survive reordering the phases.
-    const std::vector<std::int32_t>& eliminate(std::int32_t pivot, ApproximateScan& scan);
 
     // The same fusion for the tagged-W encoding, which is the one `Amd3` carries. Everything the
     // overload above says about why the fold is sound applies here unchanged; only the three-facts
@@ -566,10 +599,28 @@ private:
     // of every clique ever formed, which is bounded by nnz(L) and is a few megabytes at the sizes
     // we run. The offsets being indices rather than pointers is what lets the arena simply grow
     // instead, since a reallocation leaves every offset valid.
-    // The same split as the source pool above, and for the same reason: `mCliquePtr` offsets into
-    // the arena, which grows toward nnz(L), so it is two dimensional; `mCliqueSize` is a member
-    // count bounded by n. The one crossing is in `beginElimination`, where the arena's new length
-    // less the block's start is written as a count.
+    // A CLIQUE'S DESCRIPTOR IS THE DEAD PIVOT'S OWN RUN, 2026-08-15. `mRun[c].sourcePtr` is where
+    // C[c] starts in the arena and `mRun[c].adjacencySize` is how much of it is still live. Two
+    // arrays of size n, `mCliquePtr` and `mCliqueSize`, are gone.
+    //
+    // WHY IT IS SOUND. A clique id IS the id of the pivot that formed it, and that vertex's own
+    // A[c] and I[c] are read for the last time inside `beginElimination` and never again, so the
+    // three words describing its run are free from that moment. This is what `AMD_2` does with
+    // `Pe` and `Len`: an element takes over the slots of the variable it came from, which is why
+    // it allocates nothing for elements at all. The one crossing is still there, the arena's new
+    // length less the block's start written as a count, and it is still in `beginElimination`.
+    //
+    // WHAT IT WAS WORTH, and it was not the storage. Before this, every clique visit in a walk
+    // probed two separate n-arrays at a dead pivot's id, scattered across the whole id space, once
+    // per element of every I[u]. Now one 16-byte run gives both, on a line the walk is already
+    // touching. Measured on alpamayo with Amd3B: the amd branch's 2D ratio against the vendored
+    // routine had been RISING with n, 1.11x at 32 a side to 1.49x at 400, and it went FLAT at
+    // 1.38x from 100 a side up. A differential had already shown the two codes doing the same
+    // visits per pivot at every size, so the growth was cost per visit, and this was most of it.
+    //
+    // THE ARENA ITSELF DOES NOT MOVE. Blocks still live in their own storage in elimination
+    // order; only the two words describing them moved. `Mmd3B` priced genmmd's placement, cliques
+    // in the pivot's dead segment, and it lost. See docs/DESIGN_DECISIONS.md.
     // APPENDED BY push_back, NOT written through a cursor, and that was measured. A cursor with
     // an explicit used count removes a capacity test and a size update per clique member, about
     // 46000 of each per ordering, which is what genmmd's `adjncy[rl] = nb; rl++` costs nothing
@@ -578,8 +629,6 @@ private:
     // memory while `resize` value-initializes, so the constructor zeroes nnz(A) entries and every
     // growth zeroes its new region, which costs more than the tests it removes.
     std::vector<std::int32_t>  mCliqueArena;  // every C[c] ever formed, end to end
-    std::vector<std::size_t>   mCliquePtr;    // where c's block starts, fixed once written
-    std::vector<std::uint32_t> mCliqueSize;   // how much of it is still live
 
     // The supervariable a vertex stands for, as a chain rather than a list per vertex. A list
     // meant one allocation per vertex before anything had happened, n of them for a structure

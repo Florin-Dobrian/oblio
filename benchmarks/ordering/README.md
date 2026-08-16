@@ -70,6 +70,11 @@ columns are taken against it while the time gaps stay against the shipped routin
 not reported: the hooked copy carries the hook's bookkeeping, so timing it would measure our
 instrumentation. The column needs `private/` and leaves the table with `AMD` in a published build.
 
+**A SECOND generated copy answers the timing question instead**, since that objection is about the
+raw copy rather than about the idea. `make phases2d` splits `amd_order`'s own time into five phases
+and reports what share of it is the region Oblio is comparable against, which is the correction
+every ratio in this file needs and has never had. See "The vendored routine's own phases" below.
+
 nnz(L) comes from the symbolic factor rather than from any ordering's own estimate, summing each
 supernode's triangle and its update rows. That is exact, it is computed from the permutation
 actually emitted, and it is the same number whichever method produced the permutation, which is
@@ -1295,6 +1300,145 @@ a constant factor and the constant factor is nearly spent. Nothing measured so f
 that scales, and the knee says memory rather than instructions. `MMD3` over the same quotient graph
 shows no growth on either family, which is the control that makes this an amd-branch property
 rather than a shared-infrastructure one.
+
+## The amd branch's 2D growth, and the one change that removed it, 2026-08-16
+
+**The symptom this file recorded for two weeks.** `AMD3` read 1.25x the vendored routine at 32 a
+side and 1.82x at 400, rising monotonically, while `MMD3` over the same quotient graph was flat and
+`AMD3`'s own cubic column was nearly flat. Six folds were applied to the amd drivers over one
+session; five of them moved the whole 2D column down by a constant and left the slope exactly where
+it was.
+
+**The one that removed the slope** was moving a clique's descriptor into the dead pivot's own
+`mRun` entry, retiring `mCliquePtr` and `mCliqueSize`. Before it, every clique visit in a walk
+probed two separate n-arrays at a dead pivot's id, once per element of every `I[u]`; after it, one
+16-byte load on a line the walk already touches.
+
+```
+AMD3B against AMD    32    64   100   140   200   280   400
+before             1.11  1.19  1.26  1.42  1.39  1.43  1.49     rising
+after              1.26  1.15  1.38  1.33  1.38  1.38  1.38     flat
+```
+
+**Why 2D and not cubes, and it is not grid shape.** The differential in
+`experiments/ordering/README.md` shows a 2D pivot doing about 60 visits and a cubic one 149. A
+fixed per-pivot cost is therefore 2.5 times more visible in 2D, at the SAME n. That also explains
+why the cubic column never showed the symptom and why every fold has paid more here than there.
+
+**What did not cause it.** Recorded because each was a plausible reading and each was killed by
+measurement rather than by argument: it was not extra work, the two codes doing the same visits per
+pivot at every size in both families; not the clique arena, whose excess misses FALL with n and
+which is smaller than the vendored workspace in 2D; not the hash; not `clear_flag`, which fired
+zero times on every case; and not single-level cache locality, an L1 model putting the excess at a
+constant 0.09 misses per visit, real but far too small at sizes where everything fits in L2.
+
+### What to run, and what a reader should check
+
+`make scale-amd-2d` and `make scale-amd-3d`. The columns to read against each other are `AMD3` and
+`AMD3B` while both exist; they are the same algorithm and should agree within the plus or minus 3
+percent floor. The ladder's default sides are geometric enough to show a trend but sparse in the
+middle, and the driver takes explicit sides, so a denser ladder needs no code:
+
+```
+./order_timing_cpp amd 2d 32 45 64 90 128 181 256 362 400
+```
+
+**And the open one.** `AMD1` and `AMD2` still climb in 2D, 1.05 to 1.22x and 1.36 to 1.47x, where
+`AMD3` is flat. The descriptor fold is in the shared class and reached them for free, so whatever
+remains is driver-side. That is the next thing the differential should be pointed at.
+
+## The vendored routine's own phases, and the denominator every ratio here divides by, 2026-08-15
+
+**`make phases2d` and `make phases3d`.** Every time ratio in this file is against `amd_order`
+whole, and two of that routine's phases have no counterpart on our side:
+
+- **`AMD_aat`** forms the pattern of `A + A'`, because AMD takes a one-sided matrix. Ours arrives
+  full-symmetric with the diagonal present, which is what a `SparseMatrix` holds and what
+  `QuotientGraph` reads directly.
+- **`AMD_postorder`** relabels the assembly tree. `ElmForestEngine` postorders the exact supernodal
+  tree later with real front and update sizes, so the vendored one is redone and discarded, and
+  `Amd.cpp`'s own header says that tree "is not guaranteed to be the precise supernodal elimination
+  tree" in any case.
+
+So `AMD3 1.82x` at 400 a side is measured against more work than the comparison is about. **This
+file has carried one estimate of the correction since 2026-08-01**, 139 ms and 154 ms of a 3.67 s
+run at 140 a side, about 8 percent, from a single profile at a single size, with the conclusion
+"the true gap is nearer 1.6x than 1.46x" resting on it. The estimate has never been measured per
+size, and that is the part that matters: **a correction that FALLS with n would mean part of the
+amd branch's 2D growth, 1.25x at 32 a side to 1.82x at 400, is the baseline shrinking rather than
+us.**
+
+### The five phases
+
+```
+valid   AMD_valid, amd_preprocess where the input is jumbled, the Len and Pinv vectors
+aat     AMD_aat                                                     WE DO NOT DO THIS
+build   the S workspace, and AMD_1 filling Iw and Pe from that pattern
+core    AMD_2, from entry to the end of its main loop
+post    assembly-tree path compression, AMD_postorder, the output permutation
+                                                                    WE DO NOT DO THIS
+comp    build + core, the comparable region
+```
+
+**`build` belongs with `core` rather than with the excluded pair**, which is the one judgment in
+the split. It is the vendored routine turning a caller's pattern into its own working structure,
+and `orderAmd3` does the same thing in `QuotientGraph`'s constructor, so excluding it would flatter
+us by exactly the phase we have most recently been folding arrays out of.
+
+### It is a second generated copy, not a second use of the first
+
+`tools/hook_amd.py` now has two modes. The **raw** copy accumulates supervariable membership and
+emits the elimination order, which is what `make amdorder` compares against; it carries a vector
+per vertex and a push per member, so it is an oracle and timing it would measure the bookkeeping,
+which is why this file has always declined to report its time. The **timed** copy carries five
+timestamps and nothing else. Both are generated from whatever `private/Amd.cpp` currently says,
+both assert every anchor, and both are gitignored and removed by `make clean`.
+
+**The postorder is TIMED rather than removed, and the reason is worth recording because deleting
+the call is the first thing to reach for.** `AMD_postorder` runs inside `AMD_2`, and the block after
+it builds the output permutation out of the ranks it writes into `W`. Delete the call and `W` is
+unwritten, the returned permutation is meaningless, and both of the checks that make a generated
+oracle trustworthy go with it.
+
+### Two checks, and one caveat that cannot be checked away
+
+**The copy must reproduce the shipped routine**, and the row says so and refuses rather than
+printing figures if it does not: the permutation entry for entry, `Info[AMD_LNZ]` and
+`Info[AMD_NCMPA]`, all against unhooked `amd_order` on the same pattern, once per row before
+anything is timed. `Control` is `nullptr` in both, which is what `OrderEngine` passes for
+`Ordering::AMD`, so the phases describe the same call the `AMD` column measures.
+
+**And the caveat: a clock read is a compiler barrier.** Each of the five sits at a phase boundary,
+between two loops rather than inside one, so there is nothing across it the optimizer should have
+been moving; but that is an argument rather than a measurement. The measurement is the `AMDt ms`
+column, the hooked copy's own wall time, printed beside the unhooked `AMD ms`. **If the two
+disagree by more than this benchmark's plus or minus 3 percent floor, the instrument is distorting
+what it measures and the phases are not to be believed.** The `other` column is the second
+self-check: the call's wall time less the five phases, which is the clock reads themselves and
+should read zero.
+
+### A first reading, and it is NOT a result
+
+**Linux sandbox, GCC, 2026-08-15. Directional only**, on the standing rule that this machine is not
+a measurement platform:
+
+```
+grid          AMD ms   AMDt ms    valid      aat    build     core     post    other    comp%
+32x32          0.305     0.316    0.007    0.009    0.010    0.258    0.031    0.000    85.1%
+64x64          1.040     1.044    0.026    0.034    0.042    0.850    0.091    0.000    85.5%
+100x100        2.272     2.261    0.064    0.083    0.098    1.834    0.182    0.000    85.5%
+```
+
+Both self-checks pass: `AMDt` tracks `AMD` within the floor, and `other` is zero to three decimals.
+**And the share reads FLAT**, 85.1, 85.5, 85.5 over a tenfold range in n, which if it holds on
+alpamayo means the excluded phases are a constant fraction and **the amd branch's 2D growth is
+ours**. It also puts the correction nearer 15 percent than the 8 recorded here in August, which
+would move every amd ratio in this file by more than the noise floor.
+
+Three sizes on the wrong machine settle none of that. What the alpamayo run has to answer, in
+order: do both self-checks pass; is `comp%` flat across the full 32-to-400 ladder; and is it the
+same on cubes, where the phase mix should differ, `AMD_aat` being linear in nnz(A) while `core`
+grows with fill.
 
 ## MMD3's remaining gap is a CONSTANT, not growth, 2026-08-14
 

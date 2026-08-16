@@ -17,7 +17,7 @@
 // pass profiled as diffuse there while doing eight times the work per pivot on a cube. Profile the
 // family the question is about.
 //
-// The method may be one of ours (mmd1, mmd2, mmd3, amd1, amd2, amd3, amd1b, amd2b) or a vendored
+// The method may be one of ours (mmd1, mmd2, mmd3, amd1, amd2, amd3) or a vendored
 // one (mmd, amd). An unrecognized name is REFUSED rather than ignored: this driver used to fall
 // through such a name silently, order nothing, and produce a profile of process startup that looks
 // like a real trace with the ordering missing from it. That cost a profiling session.
@@ -45,10 +45,8 @@
 #endif
 
 #include "oblio/Amd1.h"
-#include "oblio/Amd1B.h"
 #include "oblio/Amd2.h"
 #include "oblio/Amd3.h"
-#include "oblio/Amd2B.h"
 #include "oblio/Mmd1.h"
 #include "oblio/Mmd2.h"
 #include "oblio/Mmd3.h"
@@ -170,11 +168,10 @@ int main(int argc, char** argv) {
     // Refuse an unknown method rather than falling through it. A profile of a method that never
     // ran is not empty, it is a trace of dyld and process startup, and it reads as a real one.
     if (!vendored && method != "mmd1" && method != "mmd2" && method != "mmd3" &&
-        method != "amd1" && method != "amd2" && method != "amd3" &&
-        method != "amd1b" && method != "amd2b") {
+        method != "amd1" && method != "amd2" && method != "amd3") {
         std::fprintf(stderr,
                      "order_profile: unknown method \"%s\"\n"
-                     "  ours:     mmd1 mmd2 mmd3 amd1 amd2 amd3 amd1b amd2b\n"
+                     "  ours:     mmd1 mmd2 mmd3 amd1 amd2 amd3\n"
                      "  vendored: mmd amd\n", method.c_str());
         return 2;
     }
@@ -186,8 +183,6 @@ int main(int argc, char** argv) {
         else if (method == "amd1") sum += orderAmd1(colPtr, rowIdx).size();
         else if (method == "amd2") sum += orderAmd2(colPtr, rowIdx).size();
         else if (method == "amd3") sum += orderAmd3(colPtr, rowIdx).size();
-        else if (method == "amd1b") sum += orderAmd1B(colPtr, rowIdx).size();
-        else if (method == "amd2b") sum += orderAmd2B(colPtr, rowIdx).size();
         else if (method == "mmd2") sum += orderMmd2(colPtr, rowIdx).size();
         else if (method == "mmd3") sum += orderMmd3(colPtr, rowIdx).size();
         else if (vendored) { Permutation P; engine.compute(A, P); sum += P.size(); }

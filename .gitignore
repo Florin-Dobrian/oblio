@@ -63,6 +63,7 @@ experiments/ordering/amd_int64.cpp
 experiments/ordering/mmd_int64.cpp
 experiments/ordering/amd_raw.cpp
 benchmarks/ordering/amd_raw.cpp
+benchmarks/ordering/amd_timed.cpp
 
 # Matrices downloaded from the SuiteSparse Matrix Collection, and the collection's index file.
 # Not ours, large, and reproducible from benchmarks/matrices/ssget.py, which is what is committed

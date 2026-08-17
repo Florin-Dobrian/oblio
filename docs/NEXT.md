@@ -22,6 +22,27 @@ zero-is-absorbed; we read `mMark[v]` for the tests and `mWeight[v]` for the valu
 **The storage change in the same file is a wash** and should not port: 2.6 percent fewer reads, 6
 to 8 percent more misses, both constant, and it drags a garbage collector behind it.
 
+### The layout matrix, which is where the next few days go
+
+```
+                 our arena      genmmd's layout    AMD_2's layout
+mmd ladder       Mmd3           Mmd3B              Mmd3C   PLANNED
+amd ladder       Amd3           Amd3C   PLANNED    Amd3B
+```
+
+Both existing B layers sit on the DIAGONAL, each aligned with its own vendored routine, which is
+what a same-lineage differential needs and is why they were built. The consequence is that every
+reading is a diagonal one and cannot separate layout from algorithm. With four cells the layout
+effect reads down a column and the algorithm effect across a row, and it becomes possible to ask
+whether genmmd's layout suits amd better, or `AMD_2`'s suits mmd better, which nobody has asked.
+
+It also matters for the port immediately below: the three shared-class folds have to work under
+every layout, and four cells exercise all three layouts against both algorithms.
+
+**`Amd3C` is the cheap one**, a storage swap into a driver that is otherwise settled. **`Mmd3C`
+carries the port's blocker** and is described under it. Order is a real choice and is open; see
+`docs/DESIGN_DECISIONS.md` (2026-08-16, the layout matrix).
+
 ### The port, which is the next piece of work
 
 Three of the five are in the SHARED class and so reach mmd; two are `Amd3` driver code.
@@ -47,9 +68,16 @@ in the refresh, so each call must clean up after itself. The plan is an `Mmd3C`,
 because the shared class had already paid for the encodings; split it and the next fold has to be
 discovered twice.
 
-Order: the three shared changes one at a time, each verified by the eight-driver digest and measured
-on mmd after each, starting with `eliminated()` since it is smallest and tests the liveness argument
+Order: the three shared changes one at a time, each verified by the digest and measured on mmd
+after each, starting with `eliminated()` since it is smallest and tests the liveness argument
 before anything depends on it. Then `Amd3` takes its two.
+
+**THE DIGEST IS `make digest-record` THEN `make digest`** in `benchmarks/ordering`, added
+2026-08-16: eight drivers over 73 small grids, half a second, and it names which driver moved.
+RECORD BEFORE TOUCHING ANYTHING, because it detects change rather than correctness and a baseline
+taken after a break certifies the break. Re-anchor with `make amdorder` and `make mmdorder` at both
+ends of the work; those are what say correct. Its section in `benchmarks/ordering/README.md` has
+the rest.
 
 ### Other things open
 

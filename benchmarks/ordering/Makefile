@@ -7,6 +7,12 @@
 #:   make scale2d  a wider ladder, one branch at a time, with the gap columns
 #:   make scale3d  the same, cubic
 #:                 Also scale-mmd-2d, scale-amd-2d, scale-mmd-3d, scale-amd-3d for one branch
+#:   make digest-record   record a permutation digest for every driver over 73 small grids
+#:   make digest          compare against it. "Did anything move?", asked of all eight drivers
+#:                 at once, in half a second. For re-encodings, which must leave every
+#:                 permutation untouched. NOT a substitute for `make amdorder` and
+#:                 `make mmdorder`, which compare against the vendored routines themselves;
+#:                 this only says "same as last time". The baseline is gitignored.
 #:   make phases2d what the vendored AMD's own time is MADE OF, per size: AMD_aat and
 #:                 AMD_postorder are work Oblio does not do, so every ratio in the tables
 #:                 above is against a denominator larger than the comparable region. This
@@ -97,7 +103,7 @@ ifneq ($(VENDOR_SRCS),)
 endif
 
 .PHONY: all run2d run3d scale2d scale3d scale-mmd-2d scale-amd-2d scale-mmd-3d \
-        scale-amd-3d phases2d phases3d profile clean help
+        scale-amd-3d phases2d phases3d digest digest-record profile clean help
 
 # Bare `make` prints the target list rather than building. Stated explicitly because the default
 # goal is otherwise the FIRST target in the file, so moving a rule would silently change it and the
@@ -196,6 +202,22 @@ phases3d: all
 # attach a profiler.
 profile: order_profile_cpp
 
+# THE DIGEST HARNESS. It links only our own drivers, so it needs neither the vendored sources nor
+# the hooked copies and builds in a published tree exactly as it does here. See its header for what
+# it is for and, more importantly, for what it is not.
+order_digest_cpp: order_digest.cpp $(OBLIO_SRCS) $(OBLIO_HDRS)
+	$(CXX) $(CXXFLAGS) $< $(OBLIO_SRCS) $(BLAS_LIBS) -o $@
+
+# RECORD THEN COMPARE. Record at the start of a session, compare after each change. A baseline that
+# is regenerated to make a failure go away is worse than none, so this one is gitignored and
+# short-lived by design: the durable external check is `make amdorder` and `make mmdorder`, which
+# cannot be quietly re-blessed.
+digest-record: order_digest_cpp
+	./order_digest_cpp record
+
+digest: order_digest_cpp
+	./order_digest_cpp
+
 order_profile_cpp: order_profile.cpp $(OBLIO_SRCS) $(OBLIO_HDRS) $(VENDOR_SRCS) .build-mode
 	$(if $(VENDOR_SRCS),$(CXX) $(CXXFLAGS) -g -fno-omit-frame-pointer -w -c $(VENDOR_SRCS))
 	$(CXX) $(CXXFLAGS) -g -fno-omit-frame-pointer $(VENDOR_DEFS) order_profile.cpp $(OBLIO_SRCS) \
@@ -212,5 +234,6 @@ order_profile_cpp: order_profile.cpp $(OBLIO_SRCS) $(OBLIO_HDRS) $(VENDOR_SRCS) 
 # it, and a # there is a shell comment rather than a make one, so an explanation written in the
 # recipe gets printed in full every time someone types `make clean`.
 clean:
-	rm -f .build-mode order_timing_cpp order_profile_cpp Amd.o Mmd.o amd_raw.cpp amd_timed.cpp
+	rm -f .build-mode order_timing_cpp order_profile_cpp order_digest_cpp .digest-baseline
+	rm -f Amd.o Mmd.o amd_raw.cpp amd_timed.cpp
 	rm -rf *.dSYM

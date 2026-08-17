@@ -1,6 +1,6 @@
 # Matrices Benchmark
 
-**`ACCURACY.md` and `PERFORMANCE.md` beside this file are the reports.** They are written for
+**`ACCURACY.md`, `PERFORMANCE.md` and `ORDERING.md` beside this file are the reports.** They are written for
 someone evaluating Oblio: how good the answers are, and what they cost. This README is the working
 notes behind both, including what went wrong on the way, the two measurement mistakes that had to
 be corrected before the accuracy results could be trusted, and the two ordering investigations the
@@ -646,6 +646,47 @@ there is no fill to trade against time. One `nnz(L)` column serves both, and tim
 that differs. Both routines go through the same timing helper with the same warm-up and the same
 repeat count, which is not fussiness: a column timed by one path against a column timed by another
 differed 2.4 percent on 2026-08-10 and the difference was read as a result.
+
+**IT ALSO CARRIES THE SPACE COLUMNS, 2026-08-16**, and they come first because they are a property
+of the matrix and the ordering rather than of a run:
+
+```
+n   m   tril(A)   A+I   C   nnz(L)   C/tril   C/nnzL
+```
+
+`tril(A) = n + m` is A in its stored form, `A+I = 2m` is what `mSource` holds, `C` is the clique
+arena and `nnz(L)` includes the diagonal. `m` is counted from the pattern rather than assumed, a
+Matrix Market file not necessarily carrying every diagonal entry.
+
+**The two ratios are the point.** `C/nnz(L)` says how much the compression bought, and
+`C/tril(A)` says whether the arena tracked the INPUT.
+
+**`C` IS MEASURED, not inferred.** The ordering reports the arena's own entry count through
+`orderMmd3`'s four-argument overload: a size rather than a capacity and, this arena never shrinking,
+also its peak.
+
+It was briefly approximated by summing update parts over supernodes off the elimination forest, and
+that OVERCOUNTED by 12 to 18 percent in 2D and up to 40 on cubes. Two reasons, worth keeping because
+they say what the arena actually stores. The groupings differ: supernodes are found afterwards from
+L's structure, supervariables during the ordering by mass elimination and hash merging. And there
+are two compressions where the forest sees one -- a clique is the update part alone, one per
+supervariable rather than per column, AND its entries are supervariable representatives while
+`updateSize` counts rows. The measured number needs neither argument.
+
+**Why measure it on real matrices at all.** On grids it is about 2x `tril(A)` in 2D and up to 4.5x
+on cubes, recorded in `docs/DESIGN_DECISIONS.md` (2026-08-16). But the compression is bought
+entirely by mass elimination, so it is a property of the MATRIX, not of the method: where
+supervariables barely form, the arena approaches `nnz(L)`. Grids are a friendly case, and this table
+is where an unfriendly one would show up. That matters because our arena, unlike the two vendored
+schemes, is not bounded from the input.
+
+The columns cost nothing: `C` comes off the same elimination forest the `nnz(L)` column was already
+building.
+
+**The timing half is still genmmd against `Mmd3` alone.** The amd ladder belongs here too and is
+not in yet.
+
+**`ORDERING.md` is this program's report**, over all 246 files.
 
 **`matrix_accuracy_cpp`** answers how good the answers are. One ordering, MMD3, and the
 left-looking traversal, both held fixed on purpose: the question is whether we compute correctly on

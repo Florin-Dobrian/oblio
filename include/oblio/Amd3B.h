@@ -1,8 +1,13 @@
 #pragma once
 
-// Amd3B.h - Amd3 on AMD_2's clique storage. TEMPORARY; see src/Amd3B.cpp for what is being
-// measured and for the stop condition. It returns Amd3's permutation, which is AMD_2's raw order,
-// so it is an oracle for itself.
+// Amd3B.h - Amd3 on AMD_2's clique storage: one pool with a free cursor and a garbage collection.
+// PERMANENT, and for two reasons. It is the ALIGNMENT VEHICLE for a differential against AMD_2,
+// holding cliques the way AMD_2 does so that whatever still differs is either layout or an
+// improvement to carry back into our own ladder; and it is the PREDICTABLE-SPACE version of AMD3,
+// staying inside `O(n + m)` so the answer is reachable whenever the input fits, which our arena
+// cannot promise. See src/Amd3B.cpp and docs/DESIGN_DECISIONS.md (2026-08-16).
+//
+// It returns Amd3's permutation, which is AMD_2's raw order, so it is an oracle for itself.
 //
 // It is otherwise Amd3 exactly. Every design note for that layer is in Amd3.h and is authoritative
 // there. The one difference is where cliques live: Amd3 keeps them in a separate append-only arena

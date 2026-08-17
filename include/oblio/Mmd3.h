@@ -49,4 +49,14 @@ std::vector<std::int32_t> orderMmd3(const std::vector<std::size_t>&  colPtr,
                                     const std::vector<std::int32_t>& rowIdx,
                                     std::int32_t delta = 0);
 
+// The same, reporting how many entries the clique arena ended up holding, which is a space figure
+// benchmarks/matrices prints beside nnz(L). An OVERLOAD rather than a fourth defaulted parameter: a
+// default argument is not part of a function's type, but adding one here would still change how the
+// name resolves where its address is taken, and `delta` must stay explicit at this call so the two
+// forms cannot be confused.
+std::vector<std::int32_t> orderMmd3(const std::vector<std::size_t>&  colPtr,
+                                    const std::vector<std::int32_t>& rowIdx,
+                                    std::int32_t delta,
+                                    std::size_t& arenaEntries);
+
 } // namespace Oblio

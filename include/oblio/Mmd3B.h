@@ -1,7 +1,13 @@
 #pragma once
 
-// Mmd3B.h - Mmd3 on a different clique storage scheme. TEMPORARY; see src/Mmd3B.cpp for the stop
-// condition. It returns Mmd3's permutation, which is genmmd's, so it is an oracle for itself.
+// Mmd3B.h - Mmd3 on genmmd's dead-segment clique storage. PERMANENT, and for two reasons. It is the
+// ALIGNMENT VEHICLE for a differential against genmmd, holding cliques the way genmmd does so that
+// whatever still differs is either layout or an improvement to carry back into our own ladder; and
+// it is the PREDICTABLE-SPACE version of Mmd3, staying inside `O(n + m)` so the answer is reachable
+// whenever the input fits, which our arena cannot promise. It costs 4 to 10 percent. See
+// src/Mmd3B.cpp and docs/DESIGN_DECISIONS.md (2026-08-16).
+//
+// It returns Mmd3's permutation, which is genmmd's, so it is an oracle for itself.
 //
 
 // It is otherwise Mmd3: multiple minimum degree with the mechanisms that ride with the batch. Section 5.11 of archive/sparse_factorization.md, and the mmd2 layer of

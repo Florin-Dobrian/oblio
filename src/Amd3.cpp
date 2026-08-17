@@ -5,9 +5,16 @@
 #include <utility>
 
 namespace Oblio {
+namespace {
 
-std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
-                                    const std::vector<std::int32_t>& rowIdx) {
+// THE BODY, WITH ONE OPTIONAL OUT-PARAMETER. The public forms are an overload pair rather than one
+// function with a default argument, because a default argument is not part of a function's type: a
+// defaulted parameter here would stop `orderAmd3` binding to the plain two-argument function
+// pointer that benchmarks/ordering and the digest harness take its address as. An overload leaves
+// that type intact.
+std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
+                                        const std::vector<std::int32_t>& rowIdx,
+                                        std::size_t* arenaEntries) {
     if (colPtr.empty()) return std::vector<std::int32_t>();
     const std::size_t size = colPtr.size() - 1;
     if (size == 0) return std::vector<std::int32_t>();
@@ -674,8 +681,25 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
         wflg += lemax;
     }
 
+    if (arenaEntries != nullptr) *arenaEntries = qg.arenaEntries();
     return qg.order(pivots);
 }
 
+
+} // namespace
+
+std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
+                                    const std::vector<std::int32_t>& rowIdx) {
+    return orderAmd3Impl(colPtr, rowIdx, nullptr);
+}
+
+// The same ordering, reporting how many entries the clique arena ended up holding. A SIZE, not a
+// capacity, and for this scheme also the peak, the arena never shrinking. `benchmarks/matrices`
+// prints it beside nnz(L); see QuotientGraph::arenaEntries.
+std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
+                                    const std::vector<std::int32_t>& rowIdx,
+                                    std::size_t& arenaEntries) {
+    return orderAmd3Impl(colPtr, rowIdx, &arenaEntries);
+}
 
 } // namespace Oblio

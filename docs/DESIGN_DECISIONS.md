@@ -65,6 +65,224 @@ be real, which requires Hermitian. Once that is on the table, the design collaps
 **Cholesky is `CC^H`, always, and in real that *is* `CC^T`.** No option, no flag, no forbidden
 combination to reject. The answer was not hard. Asking the right question was.
 
+## 2026-08-16: the layout matrix, which is where the next few days of work go
+
+Two algorithms, three clique layouts, so six cells. Four exist or are planned; the two that exist
+today are both on the diagonal, which is the limitation this entry is about.
+
+```
+                 our arena      genmmd's layout    AMD_2's layout
+mmd ladder       Mmd3           Mmd3B              Mmd3C   PLANNED
+amd ladder       Amd3           Amd3C   PLANNED    Amd3B
+```
+
+Ours is the separate append-only arena in elimination order. genmmd's is dead segments chained in
+place. `AMD_2`'s is one pooled workspace with a free cursor and a garbage collection. Both vendored
+schemes hold the ordering inside `O(n + m)`; ours does not.
+
+### Why the diagonal is not enough
+
+**Each branch is currently aligned only with ITS OWN vendored routine**, which is exactly what a
+same-lineage differential needs and is why the two B layers were built. But it means every reading
+is a diagonal one, and a diagonal cannot separate the two variables. **With four cells the layout
+effect reads DOWN a column and the algorithm effect ACROSS a row.**
+
+**And it asks a question nobody has asked: is genmmd's layout better for amd, or `AMD_2`'s better
+for mmd?** The two schemes are different animals, not two spellings of the same idea, and there is
+no reason to assume each vendor chose the better one for its own algorithm. Dead segments cost
+chaining and never compact; a pooled workspace costs a garbage collection and reuses everything.
+Which wins may well depend on how the algorithm walks, and the two algorithms walk differently:
+mmd's refresh runs over clique members contiguously, amd's prune alternates between the incidence
+list and the clique blocks.
+
+### The reason it matters right now, and not only for coverage
+
+**The shared-class port has to work under every layout.** Three of the five folds from the entry
+below land in `QuotientGraph`: the weight sign as the membership mark, `eliminated()` off a zero
+weight, and mass elimination merging before it compacts. That class serves every cell of the matrix.
+Four cells exercise all three layouts against both algorithms; two exercise each layout once and
+each algorithm once, which is the thinnest coverage that can still be called coverage.
+
+### What each of the two planned cells costs, since they are not equal
+
+**`Amd3C` is the cheap one**: `Amd3` on genmmd's layout. The amd side has already proved the
+encodings, so it is a storage swap into a driver that is otherwise settled, and it answers whether
+genmmd's layout behaves the same under a second algorithm.
+
+**`Mmd3C` carries a real design problem** and it is the blocker for the mmd port rather than a
+coverage exercise. Amd calls `reachableSet` ONCE PER PIVOT and restores the negated weights in a
+pass it already makes. Mmd calls `reachableSize` and `reachableWeight` PER VERTEX in the refresh, so
+the negation needs a per-call lifetime: each call must clean up after itself. The cheap form is to
+un-negate while walking the result, those callers already traversing it to count, but it has to be
+right at every call site or the state leaks into the next call.
+
+**So the order is a real choice.** `Amd3C` first confirms a layout under a second algorithm before
+the hard question is opened; `Mmd3C` first puts the mmd port's blocker on the table before anything
+ships. Both are defensible.
+
+### What protects six copies of a quotient graph from drifting
+
+`make digest` hashes every driver's permutation over 73 grids in half a second and names which one
+moved, and `tests/test_order.cpp` asserts each B layer against its original. A copy that stops
+reproducing its original is caught immediately, which is what makes the maintenance cost of this
+matrix tolerable. The alternative shape, one class with the layout behind a compile-time policy, is
+recorded in the entry below; three copies that exist beat one abstraction that does not, and this
+matrix makes that four.
+
+---
+
+## 2026-08-16: the three storage schemes are all KEPT, and why staying in A's space is a real goal
+
+From a conversation with Alex Pothen, one of the authors of the minimum-degree complexity paper
+(`experiments/ordering/README.md`, "What the literature proves about these algorithms"), and it
+explains something this tree had been reading as mere frugality.
+
+### The argument
+
+**Given a machine, you know whether A fits. You do not know whether L fits.** nnz(L) depends on the
+ordering, which is the thing being computed, so it cannot be bounded before the run. A method that
+works within `O(n + m)` therefore has a property no amount of speed substitutes for: **if the input
+fits, the answer is reachable.** A method that grows as it goes may simply fail to produce an answer
+at all, on a matrix whose input fitted comfortably.
+
+That is why genmmd chains its dead segments and why `AMD_2` carries a garbage collection. Neither is
+frugality for its own sake, and neither is an artifact of the era they were written in. They are
+machinery bought deliberately, in exchange for a bound that can be stated from the input.
+
+### And that is only HALF of what the B layers are for
+
+The framing above treats them as storage alternatives kept for the trade-off, which is true but is
+the outcome rather than the working reason. **Their operational role is to align the storage with
+the vendored routine so that a differential is clean.** Comparing our ordering against genmmd or
+`AMD_2` is confounded by layout until the two hold their cliques the same way; a B layer removes
+that confound, and then whatever still differs is either LAYOUT, whose price these files measure, or
+an IMPROVEMENT, which is carried back into our own ladder.
+
+**That is not a hypothetical.** With storage held equal on the amd side, the differential surfaced
+five array folds that have nothing to do with layout, which are the subject of the entry below and
+are being ported to `Amd3` and, where applicable, to `Amd1` and `Amd2`. The 2n mark shape came out
+of `Mmd3B` the same way. So a verdict on storage does not retire either file: storage was never the
+only thing they were for, and the next differential will want the same alignment.
+
+**The port target is every applicable layer, not just the 3s.** Three of the five folds live in the
+shared class and reach every driver whether or not anyone aims them; the two driver-side ones are a
+decision per layer.
+
+### How big our pool actually gets
+
+Measured, because "grows as needed" is not a size and the argument above is easy to read as "ours
+stores nnz(L)". It does not.
+
+`tril(A) = n + m` is A in its stored form. `A+I` is `mSource`, which is `2m`: each edge appears in
+both endpoints' lists. `nnz(L)` includes the diagonal.
+
+**`C` IN THE TABLES BELOW IS TAKEN OFF THE ELIMINATION FOREST AND OVERCOUNTS.** It sums update parts
+over SUPERNODES, where the arena holds one clique per pivot SUPERVARIABLE and each clique's entries
+are supervariable representatives rather than rows. Against the arena the ordering actually fills it
+reads 0.88 to 0.82 in 2D and 0.81 to 0.60 on cubes.
+
+`benchmarks/matrices` now reports the MEASURED figure instead, through an overload on `orderMmd3`
+and `orderAmd3`; the tables here are left as the run that produced them, and should be read as an
+upper bound.
+
+```
+2D, five point
+  grid          n           m      tril(A)          A+I            C         nnz(L)   C/tril(A)  C/nnz(L)
+ 50^2        2500        4900         7400         9800        12810          35913      1.73     0.357
+100^2       10000       19800        29800        39600        54842         206332      1.84     0.266
+200^2       40000       79600       119600       159200       227813        1081911      1.90     0.211
+400^2      160000      319200       479200       638400       934527        5663298      1.95     0.165
+800^2      640000     1278400      1918400      2556800      3783674       27361926      1.97     0.138
+
+3D, seven point
+  grid          n           m      tril(A)          A+I            C         nnz(L)   C/tril(A)  C/nnz(L)
+ 10^3        1000        2700         3700         5400         8668          32190      2.34     0.269
+ 20^3        8000       22800        30800        45600        90275         842282      2.93     0.107
+ 40^3       64000      187200       251200       374400       920867       20614676      3.67     0.045
+ 64^3      262144      774144      1036288      1548288      4447800      184222155      4.29     0.024
+ 80^3      512000     1516800      2028800      3033600      9172720      535760269      4.52     0.017
+```
+
+**C is about 2x tril(A) in 2D, flat, and 2.3 to 4.5x on cubes, rising. Against L it is 0.14 and
+0.017.** So the arena tracks the input, not the factor.
+
+### Why the compression is that large, and it is the same idea as symbolic factorization
+
+A clique holds the UPDATE part of a supervariable's column and nothing else; `SymFactor` holds front
+and update both. And mass elimination means one clique per pivot SUPERVARIABLE rather than one per
+column: without it each clique would be that column's off-diagonal pattern in L.
+
+**The factor is the update-weighted supernode size, not the plain average.** Mean front size on an
+800 square is 1.33 columns, but `nnz(L)` sums `f(f+1)/2 + f.u` and is dominated by the few large
+supernodes near the root, which have both a large front and a large update; the arena takes one
+update from each. The effective factor is 7.2 at 800 squared and 58 at 80 cubed, and it rises with
+n, which is why `C/nnz(L)` falls down both ladders while `C/tril(A)` barely moves in 2D.
+
+**AND THERE IS A SECOND COMPRESSION THE FOREST FIGURE CANNOT SEE**, which is why it overestimates. A
+clique's ENTRIES are supervariable representatives, one each; `updateSize` counts rows, one per
+vertex. So the arena is compressed on both axes, blocks and entries, where the forest sum captures
+only the blocks. That is the whole of the 0.82 in 2D and 0.60 on cubes above, and it explains the
+direction: the gap widens exactly where supervariables are larger.
+
+### And this is exactly why the guarantee still matters
+
+**Read the tables as "often close to nnz(A)", not "usually".** The compression is bought entirely by
+mass elimination, so it is a property of the MATRIX rather than of the method. Where supervariables
+barely form, `f` stays near 1, the weighted factor collapses toward 1, and the arena approaches
+nnz(L). Grids are a friendly case and both ladders here are grids.
+
+**We cannot tell in advance which matrix we have.** That is precisely the thing the vendored schemes
+do not need to know: they are bounded from the input whatever the matrix does. So ours being 2.5x
+nnz(A) on a grid is a good number and not a bound, and the two facts sit together rather than one
+displacing the other.
+
+### Two working styles, both valid, and the tree should hold both
+
+**Theirs is for DISCOVERY**: a matrix nobody has ordered before, on a machine of known size, where
+the question is whether an answer exists at all. Tight and predictable wins, and the extra work
+buys the guarantee.
+
+**Ours is for PRODUCTION**: a known shape on a known machine, solved repeatedly, where it has
+already been established that everything fits. Then the machinery is paid for a guarantee already
+in hand, and the simpler, faster arrangement is the right one.
+
+Neither is a better engineering choice in the abstract. They answer different questions.
+
+### So all three stay, and TWO OF THEM STOP BEING TEMPORARY
+
+| | space | measured cost against ours |
+|---|---|---|
+| ours: separate arena, grow as needed | not predictable before the run | baseline, and the production default |
+| genmmd's dead segments, `Mmd3B` | one pool, predictable from the input | 4 to 10 percent slower on mmd, at every size |
+| `AMD_2`'s pool with GC, `Amd3B` | one pool, predictable from the input | reads 2.6 percent fewer, D1 misses 6 to 8 percent more; a wash. Two compactions at every size from 50 to 1600 a side, constant |
+
+Ours stays the production scheme. `Mmd3B` and `Amd3B` are no longer experiments awaiting a verdict:
+they are **maintained alternatives**, kept so the choice remains available with its trade-off
+measured rather than argued. Their stop conditions are withdrawn; the language in both headers that
+said they go when a question closes is obsolete and has been replaced.
+
+Names may change later. What matters is the status.
+
+### The cost of keeping them, stated plainly because it is real
+
+Each carries a **private copy of `QuotientGraph`**, so every shared fold has to be written three
+times. The five folds of 2026-08-16 would have been fifteen. That is precisely what the stop-condition
+language existed to prevent, and it is being accepted on purpose.
+
+**The alternative shape, recorded so it is not rediscovered as an annoyance:** one class with the
+storage behind a compile-time policy, which costs a template parameter instead of two copies. Its
+price is that the hot loops become templated and the file harder to read, in a class whose
+readability has been load-bearing all along. Three copies that exist beat one abstraction that does
+not, so this is not the choice for now; but if the copies start diverging silently rather than
+deliberately, that is the signal to revisit.
+
+**What protects against silent divergence** is `make digest`, which hashes every driver's
+permutation including both B layers, and the pair assertions in `tests/test_order.cpp`. A B layer
+that stops reproducing its original is caught in half a second, which is what makes carrying three
+copies tolerable.
+
+---
+
 ## 2026-08-16, later still: five folds of one shape, and the amd slope goes below the vendored one
 
 The seven folds below removed arrays. These five remove ARRAY READS FROM CONDITIONALS, which turns

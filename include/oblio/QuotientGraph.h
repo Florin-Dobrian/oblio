@@ -274,6 +274,13 @@ public:
                   bool cliqueMarks = false);
 
     std::size_t size() const           { return mRun.size(); }
+
+    // HOW MANY ENTRIES THE CLIQUE ARENA HOLDS, for the drivers that report it. This is a SIZE and
+    // not a capacity: what was written, not what was reserved. Our arena only grows, so it is also
+    // the peak; a scheme that COMPACTS would have a final size below its high-water mark, so if
+    // Mmd3B or Amd3B ever answer the same question they must answer it with the peak or the column
+    // will be comparing three different things.
+    std::size_t arenaEntries() const   { return mCliqueArena.size(); }
     // GONE, which is genmmd's `marker[v] = maxint` exactly: one value reserved above every tag
     // makes the stamp array answer "is v dead" on the load it was making anyway, so no array is
     // spent on liveness at any walk site. AMD_2 does the same with `W[e] = 0` for a dead clique.

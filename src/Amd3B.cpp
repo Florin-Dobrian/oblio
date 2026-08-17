@@ -9,36 +9,48 @@
 #include <utility>
 #include <vector>
 
-// Amd3B.cpp - Amd3 on AMD_2'S CLIQUE STORAGE, everything else identical.
+// Amd3B.cpp - Amd3 on AMD_2'S CLIQUE STORAGE: one pool with a free cursor and a garbage collection.
 //
-// WHAT IS BEING MEASURED, and why this file had to exist eventually. Our clique arena is separate
-// from the source pool and append-only in elimination order. `Mmd3B` prices that against GENMMD's
-// dead-segment scheme and finds ours faster, and its slope is now measured too: 1.018 against
-// genmmd's 1.039 and Mmd3B's own 1.034 as `time ~ nnz(A)^alpha`, so on the mmd branch the arena
-// buys a growth term and not merely a constant.
+// WHAT IT IS FOR, AND IT IS TWO THINGS. Both are permanent; this file is not an experiment awaiting
+// a verdict and its old stop condition is withdrawn. It is the amd counterpart of Mmd3B, which says
+// the same of itself.
 //
-// **That says nothing about `AMD_2`'s storage, which is a THIRD design.** It keeps element lists
-// and variable lists in ONE pool `Iw` with elbow room, `slen = nzaat + nzaat/5 + 7n`; a new
-// element is built in the pivot's own space when the pivot has no elements and at a free cursor
-// otherwise; absorbed space is left dead; and a GARBAGE COLLECTION compacts the pool when the
-// cursor reaches the end. Nothing in this tree has ever compared our arena against that, and the
-// amd branch is where it matters: `AMD3` carries about 0.03 more in the exponent than `AMD` does
-// on the unaligned sizes, and the arena is one of the few structural differences left.
+// FIRST, IT IS THE ALIGNMENT VEHICLE FOR A DIFFERENTIAL. Comparing our ordering against `AMD_2` is
+// only clean when the two hold their cliques the same way; otherwise every difference is confounded
+// with layout. This file removes that confound. What then remains is either LAYOUT, whose price is
+// measured below, or an IMPROVEMENT, which is carried back into our own ladder.
 //
-// WHAT IS ALREADY KNOWN AND SHOULD FRAME THE READING. Cachegrind on the two codes across
-// `50 100 200 400 800`: we execute 1.5 percent more INSTRUCTIONS than the vendored routine, flat at
-// every size; we make 11 percent more DATA READS, also flat, which is the second stream the arena
-// costs; and we take FEWER D1 read misses than it does at every size, 0.875 of its count at 800.
-// Fitted as exponents, instructions, reads and misses all match to within 0.015 between the two
-// codes. So the wall-clock slope difference is in NONE of those, and if this file's storage change
-// moves it, the cause is something cachegrind's model does not see: prefetchability, LLd, or TLB.
+// THAT IS WHAT ACTUALLY HAPPENED HERE, and it is worth stating because the storage answer alone
+// would read as a null result. With storage held equal the differential surfaced FIVE ARRAY FOLDS
+// that have nothing to do with layout: the sign of the weight as the membership mark, the restore
+// riding in the bound pass, `eliminated()` off a zero weight, mass elimination merging before it
+// compacts, and supervariable detection stamping into `w`. They are what makes this file currently
+// faster than Amd3, and they are being ported to Amd3 and, where applicable, to Amd1 and Amd2 --
+// three of the five are in the shared class and reach every driver. Once they land, this file's
+// time column is the storage price alone, as Mmd3B's already is.
 //
-// STOP CONDITION. This file goes when the storage question is settled either way, and the answer is
-// recorded in docs/DESIGN_DECISIONS.md. It is not a second implementation to be maintained.
+// SECOND, IT IS THE PREDICTABLE-SPACE VERSION OF AMD3. From a conversation with Alex Pothen: given
+// a machine you know whether A fits, but you cannot know whether L fits, nnz(L) depending on the
+// ordering being computed. So a method that stays within `O(n + m)` carries a guarantee no amount
+// of speed substitutes for: IF THE INPUT FITS, THE ANSWER IS REACHABLE. The garbage collection
+// below is that guarantee bought deliberately, not frugality. Our arena is the right default for a
+// known shape on a known machine solved repeatedly; this is the right one when whether an answer
+// exists is the open question. See docs/DESIGN_DECISIONS.md (2026-08-16).
+//
+// THE STORAGE PRICE, measured on its own before the folds went in: 2.6 percent fewer data reads,
+// 6 to 8 percent more D1 read misses, both constant across the ladder. A wash. Two compactions at
+// every size from 50 to 1600 a side, constant, which is the assumption AMD_2's own complexity bound
+// rests on.
+//
+// IT CARRIES A PRIVATE COPY OF QuotientGraph, named QuotientGraphA, so the storage can be changed
+// without touching the class every driver shares. THE COST IS EVERY SHARED FOLD LANDING TWICE, and
+// it is accepted on purpose; `make digest` catches a copy that has stopped reproducing its original
+// in half a second.
 //
 // ITS OBLIGATION. It must return Amd3's permutation exactly, which is `AMD_2`'s raw order, so its
-// nnz(L) column in benchmarks/ordering must equal AMDraw's on every row. Its fill column therefore
-// carries nothing and its TIME column is the whole question, exactly as Mmd3B's is.
+// nnz(L) column in benchmarks/ordering must equal AMDraw's on every row and its fill column carries
+// nothing. That obligation is what makes it an instrument rather than a second ordering, and
+// `make digest` checks it across every driver in half a second.
 //
 // THE COPY IS MECHANICAL. QuotientGraphA and BucketsA are include/oblio/QuotientGraph.h and
 // src/QuotientGraph.cpp with the whole-line comments removed and the members no amd driver calls

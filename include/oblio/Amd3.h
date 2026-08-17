@@ -132,4 +132,11 @@ namespace Oblio {
 std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
                                     const std::vector<std::int32_t>& rowIdx);
 
+// The same, reporting how many entries the clique arena ended up holding, which is a space figure
+// benchmarks/matrices prints beside nnz(L). An OVERLOAD rather than a defaulted parameter, so the
+// two-argument form keeps its type and goes on binding to a plain function pointer.
+std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
+                                    const std::vector<std::int32_t>& rowIdx,
+                                    std::size_t& arenaEntries);
+
 } // namespace Oblio

@@ -91,6 +91,11 @@ int repeatsFor(double oneMs, double targetMs) {
     return std::min(std::max(wanted, 1), 200);
 }
 
+// nnz(L) with the diagonal. C is NOT taken from here: the ordering reports its own arena size, and
+// this used to approximate it by summing update parts over supernodes, which overcounted by 12 to
+// 18 percent in 2D and up to 40 on cubes. The two groupings differ, supernodes being found from L's
+// structure and supervariables during the ordering, and a clique's entries are supervariable
+// representatives where `updateSize` counts rows. The measured number needs no such argument.
 std::size_t fillOf(const SparseMatrix<double>& matrix, const std::vector<std::int32_t>& order) {
     Permutation P(matrix.size());
     if (!P.setNewToOld(order)) return 0;
@@ -98,6 +103,20 @@ std::size_t fillOf(const SparseMatrix<double>& matrix, const std::vector<std::in
     ElmForest forest;
     if (!engine.compute(matrix, P, forest)) return 0;
     return forest.nnz();
+}
+
+// n and m, from the pattern rather than from a formula: a Matrix Market file may or may not carry
+// every diagonal entry, so `m` is counted off the off-diagonal entries and halved, each edge
+// appearing in both endpoints' lists. `tril(A) = n + m` is A in its stored form and `A+I = 2m` is
+// what mSource holds.
+std::size_t edgesOf(const SparseMatrix<double>& matrix) {
+    std::size_t offDiagonal = 0;
+    const std::vector<std::size_t>&  colPtr = matrix.colPtr();
+    const std::vector<std::int32_t>& rowIdx = matrix.rowIdx();
+    for (std::int32_t j = 0; j < static_cast<std::int32_t>(matrix.size()); ++j)
+        for (std::size_t p = colPtr[j]; p < colPtr[j + 1]; ++p)
+            if (rowIdx[p] != j) ++offDiagonal;
+    return offDiagonal / 2;
 }
 
 // The pattern without the diagonal, which is what genmmd takes. Ours takes the matrix's own CSC.
@@ -146,9 +165,11 @@ void run(const std::string& path, const Options& options) {
     const SparseMatrix<double>& A = read.matrix;
     const std::size_t size = A.size();
     const std::size_t nnz  = A.rowIdx().size();
+    const std::size_t m    = edgesOf(A);
+    const std::size_t tril = size + m;
     if (size == 0 || size > options.maxN || nnz > options.maxNnz) {
-        std::printf("  %-38s %8zu %11zu %13s %9s %9s %8s  past the cap\n",
-                    name.c_str(), size, nnz, "-", "-", "-", "-");
+        std::printf("  %-38s %8zu %10zu %11zu %11zu %11s %13s %8s %8s %9s %9s %8s  past the cap\n",
+                    name.c_str(), size, m, tril, 2 * m, "-", "-", "-", "-", "-", "-", "-");
         return;
     }
 
@@ -162,7 +183,17 @@ void run(const std::string& path, const Options& options) {
                                             : repeatsFor(one, options.targetMs);
 
     const double ours = bestOf([&] { const auto p = orderMmd3(colPtr, rowIdx); (void) p; }, repeats);
-    const std::size_t fill = fillOf(A, orderMmd3(colPtr, rowIdx));
+    // C AS THE ORDERING ACTUALLY FILLED IT, not as the forest implies. `orderMmd3`'s four-argument
+    // overload reports the arena's entry count, which is a size rather than a capacity and, this
+    // arena never shrinking, also its peak.
+    std::size_t arena = 0;
+    const std::vector<std::int32_t> order = orderMmd3(colPtr, rowIdx, 0, arena);
+    const std::size_t nnzL = fillOf(A, order);
+    // Held as strings so a zero denominator, which a forest that failed to build would give, prints
+    // as a dash rather than as a number nobody can read.
+    char cTril[16] = "-", cFill[16] = "-";
+    if (tril != 0) std::snprintf(cTril, sizeof cTril, "%.2f", (double) arena / (double) tril);
+    if (nnzL != 0) std::snprintf(cFill, sizeof cFill, "%.3f", (double) arena / (double) nnzL);
 
 #ifdef OBLIO_VENDORED_ORDERINGS
     std::vector<int> ap, ai;
@@ -178,14 +209,17 @@ void run(const std::string& path, const Options& options) {
     // millisecond the column is a dash, which says "not measured here" where `1.00x` would have
     // said "the same".
     if (vendored >= 0.01 && ours >= 0.01)
-        std::printf("  %-38s %8zu %11zu %13zu %9.3f %9.3f %7.2fx\n",
-                    name.c_str(), size, nnz, fill, vendored, ours, ours / vendored);
+        std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %13zu %8s %8s %9.3f %9.3f %7.2fx\n",
+                    name.c_str(), size, m, tril, 2 * m, arena, nnzL, cTril, cFill,
+                    vendored, ours, ours / vendored);
     else
-        std::printf("  %-38s %8zu %11zu %13zu %9.3f %9.3f %8s\n",
-                    name.c_str(), size, nnz, fill, vendored, ours, "-");
+        std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %13zu %8s %8s %9.3f %9.3f %8s\n",
+                    name.c_str(), size, m, tril, 2 * m, arena, nnzL, cTril, cFill,
+                    vendored, ours, "-");
 #else
-    std::printf("  %-38s %8zu %11zu %13zu %9s %9.3f %8s  MMD needs private/\n",
-                name.c_str(), size, nnz, fill, "-", ours, "-");
+    std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %13zu %8s %8s %9s %9.3f %8s  MMD needs private/\n",
+                name.c_str(), size, m, tril, 2 * m, arena, nnzL, cTril, cFill,
+                "-", ours, "-");
 #endif
 }
 
@@ -236,8 +270,19 @@ int main(int argc, char** argv) {
     std::printf("  (best of N after a warm-up, both through the same helper; nnz(L) is both\n");
     std::printf("   routines', the two returning the same permutation. MMD3/MMD below 1 is ours\n");
     std::printf("   faster)\n\n");
-    std::printf("  %-38s %8s %11s %13s %9s %9s %8s\n",
-                "matrix", "n", "nnz(A)", "nnz(L)", "MMD ms", "MMD3 ms", "MMD3/MMD");
+    // THE SPACE COLUMNS COME FIRST because they are a property of the matrix and the ordering, not
+    // of a run: `tril(A) = n + m` is A in its stored form, `A+I = 2m` is what mSource holds, `C` is
+    // the clique arena and `nnz(L)` includes the diagonal. C/tril(A) and C/nnz(L) are the two
+    // ratios worth reading, and they say whether our arena tracked the input or the factor on this
+    // matrix. On grids it is about 2x tril(A) in 2D and up to 4.5x on cubes; the compression is
+    // bought by mass elimination and so is a property of the MATRIX, which is exactly why a real
+    // set is worth measuring. See docs/DESIGN_DECISIONS.md (2026-08-16).
+    //
+    // The timing half is still genmmd against Mmd3 alone. The amd ladder belongs here too and is
+    // not in yet.
+    std::printf("  %-38s %8s %10s %11s %11s %11s %13s %8s %8s %9s %9s %8s\n",
+                "matrix", "n", "m", "tril(A)", "A+I", "C", "nnz(L)", "C/tril", "C/nnzL",
+                "MMD ms", "MMD3 ms", "MMD3/MMD");
 
     for (const std::string& path : paths) run(path, options);
 

@@ -24,6 +24,8 @@ make run3d        the same on CUBIC grids at 12, 16, 20, 26
 make scale2d      one branch at a time over the ladder to 400 a side, with the gap columns
 make scale3d      the same, cubic, to 32 a side
 make scale-mmd-2d, scale-amd-2d, scale-mmd-3d, scale-amd-3d    one branch
+make phases2d, phases3d    what the vendored AMD's own time is made of, per size
+make digest-record, digest    did any driver's permutation move? see below
 make clean
 
 ./order_timing_cpp 200 280         any square sides
@@ -42,6 +44,60 @@ because the gap columns take the first entry as their baseline. The B variants a
 are their originals' permutations on a different schedule, so their fill column carries no
 information and their time column belongs to the question about the seam rather than to the
 question about the branch.
+
+## The digest, 2026-08-16: a change detector, not a correctness check
+
+```
+make digest-record     # BEFORE touching anything
+   ... edit ...
+make digest            # did any driver's output move?
+```
+
+`digest-record` runs all eight of our drivers over 73 small grids, squares from 2 to 55 a side and
+cubes from 2 to 20, hashes each permutation and writes 584 lines keyed by driver and grid into
+`.digest-baseline`. `digest` runs the same drivers over the same grids and compares. Half a second
+either way. It reports WHICH driver moved and at which size, which is what makes it useful for a
+change to `QuotientGraph`, where eight drivers read the code being edited.
+
+### What it is not, and this is the whole of how to use it
+
+It says "same as last time". It says nothing about correct. The four cases:
+
+| | previously correct | previously wrong |
+|---|---|---|
+| **moved** | broke it | possibly fixed it |
+| **unchanged** | still correct | still wrong |
+
+**It distinguishes the rows and is silent about the columns.** The columns are anchored by
+`make amdorder` and `make mmdorder` in `experiments/ordering`, which compare our elimination order
+entry for entry against `AMD_2` and genmmd. Those say correct; this says unmoved. Between two
+anchor runs you can make twenty changes and know at each step that nothing drifted, which is
+exactly what the encoding folds of 2026-08-15 and 08-16 needed.
+
+**THE FAILURE MODE IS RECORDING AFTER A BREAK**, which certifies the break forever. It is the same
+shape as the two dead-code leftovers that survived a counter-based revert check on 2026-08-15: an
+instrument measuring the wrong thing, confidently. Record first; re-anchor with `make amdorder` and
+`make mmdorder` at the start and end of a stretch of work.
+
+**Two drivers are a partial exception.** `MMD3` reproduces genmmd's permutation exactly and `AMD3`
+reproduces `AMD_2`'s, so for those two a baseline recorded from a state that passed the anchor runs
+IS a proxy for the vendored answer. The other six have no such anchor and are only ever "unmoved".
+
+### Why small grids, and why the baseline is gitignored
+
+**Small and many, which is the opposite of the timing ladder.** A re-encoding that breaks anything
+breaks it on a small graph, usually the smallest where the shape first appears; coverage of shapes
+catches it, not size. 2 a side earns its place on its own: a 2x2 grid is a clique, and an ordering
+that mishandles a fully connected component fails there and nowhere else.
+
+**The baseline is gitignored on purpose**, and the reason is a failure mode rather than a
+preference. A committed baseline catches drift over months, which is real value; but when it fails,
+the cheapest response is to regenerate it, and an oracle that can be quietly re-blessed is worse
+than none. `make amdorder` and `make mmdorder` cannot be re-blessed, so that is where the durable
+check belongs.
+
+**A driver added after recording has no baseline entry**, and the run says so rather than passing
+silently on rows it never checked.
 
 ## What it measures, and how
 

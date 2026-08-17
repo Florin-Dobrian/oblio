@@ -4,10 +4,14 @@
 #include <cstdint>
 
 namespace Oblio {
+namespace {
 
-std::vector<std::int32_t> orderMmd3(const std::vector<std::size_t>&  colPtr,
-                                    const std::vector<std::int32_t>& rowIdx,
-                                    std::int32_t delta) {
+// THE BODY, WITH ONE OPTIONAL OUT-PARAMETER. The public forms are an overload pair rather than one
+// function with another default argument; see Mmd3.h for why the type must not change.
+std::vector<std::int32_t> orderMmd3Impl(const std::vector<std::size_t>&  colPtr,
+                                        const std::vector<std::int32_t>& rowIdx,
+                                        std::int32_t delta,
+                                        std::size_t* arenaEntries) {
     if (colPtr.empty()) return std::vector<std::int32_t>();
     const std::size_t size = colPtr.size() - 1;
     if (size == 0) return std::vector<std::int32_t>();
@@ -234,7 +238,26 @@ std::vector<std::int32_t> orderMmd3(const std::vector<std::size_t>&  colPtr,
 
     }
 
+    if (arenaEntries != nullptr) *arenaEntries = qg.arenaEntries();
     return qg.orderAscending(pivots);   // genmmd's mmdnum. See the ledger, entry 6.
+}
+
+} // namespace
+
+std::vector<std::int32_t> orderMmd3(const std::vector<std::size_t>&  colPtr,
+                                    const std::vector<std::int32_t>& rowIdx,
+                                    std::int32_t delta) {
+    return orderMmd3Impl(colPtr, rowIdx, delta, nullptr);
+}
+
+// The same ordering, reporting how many entries the clique arena ended up holding. A SIZE, not a
+// capacity, and for this scheme also the peak, the arena never shrinking. `benchmarks/matrices`
+// prints it beside nnz(L); see QuotientGraph::arenaEntries.
+std::vector<std::int32_t> orderMmd3(const std::vector<std::size_t>&  colPtr,
+                                    const std::vector<std::int32_t>& rowIdx,
+                                    std::int32_t delta,
+                                    std::size_t& arenaEntries) {
+    return orderMmd3Impl(colPtr, rowIdx, delta, &arenaEntries);
 }
 
 } // namespace Oblio

@@ -5,17 +5,38 @@
 #include <utility>
 #include <vector>
 
-// Mmd3B.cpp - Mmd3 on a different clique STORAGE scheme, everything else identical.
+// Mmd3B.cpp - Mmd3 on GENMMD'S clique storage, everything else identical.
 //
-// THE SCHEME IS DECIDED AND THIS FILE STAYS, 2026-08-15. It carries a private copy of
-// QuotientGraph, named QuotientGraphB, so the storage scheme can be changed and measured without
-// touching the class six drivers share. It was written with a stop condition, that it would go
-// once the scheme was measured either way, and the measurement kept it: with every encoding fold
-// now present in BOTH files, storage is the only difference left between Mmd3 and Mmd3B, which
-// makes this the one place in the tree where our clique arena can be priced against genmmd's
-// dead-segment scheme on equal terms. It reads 1.15 to 1.38x genmmd on square grids where Mmd3
-// reads 1.02 to 1.19x, on 16.61M instructions against 14.22M and 123510 D1 read misses against
-// 119331, so the answer is that spending nnz(L) on a second arena buys speed.
+// WHAT IT IS FOR, AND IT IS TWO THINGS. Both are permanent; this file is not an experiment awaiting
+// a verdict and its old stop condition is withdrawn.
+//
+// FIRST, IT IS THE ALIGNMENT VEHICLE FOR A DIFFERENTIAL. Comparing our ordering against genmmd is
+// only clean when the two hold their cliques the same way; otherwise every difference is confounded
+// with layout. This file removes that confound. What then remains between it and genmmd is either
+// LAYOUT, whose price is now measured, or an IMPROVEMENT, which is carried back into our own
+// ladder. That is not hypothetical: with storage held equal on the amd side, the same arrangement
+// surfaced five array folds that had nothing to do with layout at all, and they are being ported to
+// Amd3 and, where applicable, to Amd1 and Amd2. The 2n mark shape came out of this file the same
+// way. A verdict on storage therefore does NOT retire it, storage never having been the only thing
+// it was for.
+//
+// SECOND, IT IS THE PREDICTABLE-SPACE VERSION OF MMD3, and that is worth having on its own. From a
+// conversation with Alex Pothen: given a machine you know whether A fits, but you cannot know
+// whether L fits, nnz(L) depending on the ordering being computed. So a method that stays within
+// `O(n + m)` carries a guarantee no amount of speed substitutes for: IF THE INPUT FITS, THE ANSWER
+// IS REACHABLE. genmmd's chaining and AMD_2's garbage collection are that guarantee bought
+// deliberately, not frugality for its own sake. Our arena is the right default for a known shape on
+// a known machine solved repeatedly; this is the right one when whether an answer exists is the
+// open question. See docs/DESIGN_DECISIONS.md (2026-08-16).
+//
+// THE PRICE, measured: 4 to 10 percent slower than Mmd3 at every size on the square ladder, and
+// 1.15 to 1.38x genmmd where Mmd3 reads 1.02 to 1.19x. On 16.61M instructions against 14.22M and
+// 123510 D1 read misses against 119331. So the second arena buys speed and costs the guarantee.
+//
+// IT CARRIES A PRIVATE COPY OF QuotientGraph, named QuotientGraphB, so the storage can be changed
+// without touching the class six drivers share. THE COST IS EVERY SHARED FOLD LANDING TWICE, and it
+// is accepted on purpose; `make digest` catches a copy that has stopped reproducing its original in
+// half a second, which is what makes carrying it tolerable.
 //
 // WHAT THIS FILE CANNOT ANSWER, stated because it was briefly assumed to, 2026-08-16. It prices our
 // arena against GENMMD's dead-segment scheme. It says nothing about `AMD_2`'s, which is a different

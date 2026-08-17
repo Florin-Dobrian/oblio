@@ -219,13 +219,15 @@ static constexpr double targetMs = 300.0;
 // it an enumerator in `Ordering` would put a benchmark's oracle into the library's public enum and
 // into every switch over it. So the identity is local to this file.
 //
-// `MMD3B` is local for the same reason and is TEMPORARY. It is MMD3 on a different clique storage
-// scheme, carried in src/Mmd3B.cpp with its own private copy of QuotientGraph so that the scheme
-// can be measured before the class six drivers share is touched. It returns MMD3's permutation by
-// construction, so its fill column carries nothing and its TIME column is the whole question. It
-// is not in `Ordering`, not in the library's source list and not in the examples: it is reached
-// here as a free function, so nothing outside this directory builds it. It comes out with the
-// file when the question closes. See src/Mmd3B.cpp for the stop condition, and the section "The
+// `MMD3B` is local for the same reason and is PERMANENT, 2026-08-16. It is MMD3 on genmmd's
+// dead-segment clique storage, carried in src/Mmd3B.cpp with its own private copy of QuotientGraph.
+// That storage keeps the ordering inside `O(n + m)`, so the answer is reachable whenever the input
+// fits, which our arena cannot promise; it is a maintained alternative rather than an experiment
+// awaiting a verdict, and the columns here are how its price stays measured. It returns MMD3's
+// permutation by construction, so its fill column carries nothing and its TIME column is the price.
+// It is not in `Ordering`, not in the library's source list and not in the examples: it is reached
+// here as a free function, so nothing outside this directory builds it. See src/Mmd3B.cpp,
+// docs/DESIGN_DECISIONS.md (2026-08-16), and the section "The
 // vendored storage scheme, and what it is worth" in experiments/ordering/README.md for what is
 // being measured.
 using OrderFn = std::vector<std::int32_t>(*)(const std::vector<std::size_t>&,
@@ -671,11 +673,11 @@ int main(int argc, char** argv) {
     // different schedule, so their fill column carries no information and their time column
     // belongs to the question about the seam rather than to the question about the branch.
     //
-    // MMD3B IS AN EXCEPTION AND A TEMPORARY ONE. Its fill column is MMD3's by construction and
-    // carries nothing, exactly as the rule says; its TIME column is the open question, because it
-    // is MMD3 on a different clique storage scheme and the scheme is being measured against the
-    // vendored routine's. It comes out of these lists when that question closes, with the file.
-    // See src/Mmd3B.cpp for the stop condition.
+    // MMD3B IS AN EXCEPTION AND A PERMANENT ONE, 2026-08-16. Its fill column is MMD3's by
+    // construction and carries nothing, exactly as the rule says; its TIME column is the PRICE of
+    // genmmd's dead-segment storage, which keeps the ordering inside `O(n + m)` where our arena
+    // cannot. It is a maintained alternative, not an experiment, so it stays in these lists: the
+    // price is something to keep measured rather than to settle once. See src/Mmd3B.cpp.
     // MMD1 AND AMD1 ARE OUT OF THE BRANCH LISTS, 2026-08-16, and symmetrically so the two tables
     // keep the same shape. They are still in `allMethods`, so `run2d` and `run3d` show them and
     // nothing is lost; what they are out of is the SCALING targets.
@@ -696,11 +698,16 @@ int main(int argc, char** argv) {
 #endif
         {"AMD2", Ordering::AMD2},
         {"AMD3", Ordering::AMD3},
-        // AMD3B IS TEMPORARY, exactly as MMD3B is on the mmd list. It is AMD3 on AMD_2's clique
-        // storage, one pool with a free cursor and a garbage collection rather than our separate
-        // append-only arena, so its fill column is AMD3's by construction and carries nothing and
-        // its TIME column is the whole question. It comes out with the file when the storage
-        // question closes. See src/Amd3B.cpp for the stop condition.
+        // AMD3B IS PERMANENT, exactly as MMD3B is on the mmd list, 2026-08-16. It is AMD3 on
+        // AMD_2's clique storage, one pool with a free cursor and a garbage collection rather than
+        // our separate append-only arena, which keeps the ordering inside `O(n + m)` where our
+        // arena cannot. Its fill column is AMD3's by construction and carries nothing.
+        //
+        // It is also the ALIGNMENT VEHICLE for the differential against AMD_2, which is the other
+        // half of why it is kept: holding cliques the way AMD_2 does is what lets a comparison
+        // separate layout from everything else. Five array folds came out of that arrangement and
+        // are being ported to Amd3, which is why this column currently reads faster than AMD3's;
+        // the storage on its own measured as a wash. See src/Amd3B.cpp.
         {"AMD3B", Ordering::AMD3, false, false, orderAmd3B},
     };
     const auto& methods = mmdOnly ? mmdMethods : (amdOnly ? amdMethods : allMethods);

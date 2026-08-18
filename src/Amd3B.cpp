@@ -24,10 +24,31 @@
 // would read as a null result. With storage held equal the differential surfaced FIVE ARRAY FOLDS
 // that have nothing to do with layout: the sign of the weight as the membership mark, the restore
 // riding in the bound pass, `eliminated()` off a zero weight, mass elimination merging before it
-// compacts, and supervariable detection stamping into `w`. They are what makes this file currently
-// faster than Amd3, and they are being ported to Amd3 and, where applicable, to Amd1 and Amd2 --
-// three of the five are in the shared class and reach every driver. Once they land, this file's
-// time column is the storage price alone, as Mmd3B's already is.
+// compacts, and supervariable detection stamping into `w`.
+//
+// FOUR OF THE FIVE ARE PORTED, 2026-08-17, and the fold set is closed. The sign, the merge before
+// the compaction and the restore all landed in `QuotientGraph`, so every driver has them; the
+// restore rides in massEliminate's walk over C[pivot] rather than in a bound pass, which is a
+// different existing pass serving the same purpose. The detection stamp landed in `Amd3` and in
+// `Amd2`, both of which already carried the tagged `w`. `Amd1` needed nothing, having no
+// supervariable detection at all. SO THIS FILE'S TIME COLUMN IS NOW THE STORAGE PRICE ALONE, as
+// Mmd3B's already was, and it reads about 6 to 8 percent below AMD3 up to 256 a side and 15 percent
+// below it from 400 up, reproduced across two runs.
+//
+// THE FIFTH CANNOT PORT, AND THE REASON IS Mmd1 RATHER THAN THE PREPASS. `eliminated()` answers
+// from `mWeight[u] == 0` here and from `mMark[u] == GONE` in the shared class, and the two differ
+// on exactly one thing: an ELIMINATED PIVOT. Nothing zeroes a pivot's weight, `merge` and
+// `massEliminate` zeroing the absorbed vertex instead, and `orderAscending` needs the pivot's
+// weight to the very end. So the zero means ABSORBED, not eliminated, and this file gets away with
+// it only because no list it walks can contain an eliminated pivot.
+//
+// A shared version would have to pick between the two answers, and the only flag available is
+// `mHasNumbered`, which is false for `Mmd1`: that driver never calls `number()`, so it would take
+// the weight branch, and its refresh filters a `touched` list that CAN hold a vertex a later pivot
+// in the same batch eliminated. It would read live and be refiled. Gating on "is this driver amd"
+// instead would be a worse thing to introduce than the load it saves, since the swap is
+// `mMark[u]` for `mWeight[u]`, both scattered, and the array stays for mmd either way. Checked and
+// declined 2026-08-17.
 //
 // SECOND, IT IS THE PREDICTABLE-SPACE VERSION OF AMD3. From a conversation with Alex Pothen: given
 // a machine you know whether A fits, but you cannot know whether L fits, nnz(L) depending on the
@@ -127,9 +148,11 @@ struct TaggedScanA {
 
 class QuotientGraphA {
 public:
+    // NO cliqueMarks ARGUMENT. Production takes one to size its mark array at n or 2n; this file
+    // has no mark array, so there was nothing for the flag to decide and it survived only as a
+    // member the constructor had to cast to void. Removed 2026-08-17.
     QuotientGraphA(const std::vector<std::size_t>&  colPtr,
-                  const std::vector<std::int32_t>& rowIdx,
-                  bool cliqueMarks = false);
+                  const std::vector<std::int32_t>& rowIdx);
 
     std::size_t size() const           { return mRun.size(); }
 
@@ -152,18 +175,13 @@ public:
     // own `nv <= 0` test has relied on this since the sign fold and 584 permutations agree.
     bool eliminated(std::int32_t u) const { return mWeight[u] == 0; }
 
-    std::int32_t cliqueBase() const              { return static_cast<std::int32_t>(mRun.size()); }
 
-    std::int32_t advanceTag()                    { return ++mTag; }
-    // THE VERTEX HALF SURVIVES FOR ONE READER, the hash exact test, which stamps A[u] and I[u]
-    // and compares against A[v] and I[v], so it needs both id spaces. Everything else that used to
-    // read a vertex mark now reads the weight: liveness, membership of the new clique, and the
-    // mass-elimination compaction. The GONE stores went with those readers, and GONE itself
-    // went with them: with no mark array there is nothing for a reserved tag to sit above.
-    //
-    // AMD_2 has no mark array at all: its supervariable detection stamps `W [Iw [p]] = wflg` over
-    // the whole list, variables and elements alike, and advances wflg per candidate. Doing the
-    // same here would retire mMark outright, and is the next thing to try.
+    // NO MARK ARRAY, AND THAT IS FINISHED RATHER THAN PENDING. Two comments stood here until
+    // 2026-08-17 saying the vertex half survived for the hash exact test and that retiring mMark
+    // outright was "the next thing to try". Both were written before the stamp moved into `w` a
+    // few hundred lines below, which did exactly that; the member declaration had said so all
+    // along. Recorded because a comment describing an intermediate state reads as current, and a
+    // reader would have concluded this file still has an array it does not.
 
 
     const std::int32_t* clique(std::int32_t c) const {
@@ -229,7 +247,7 @@ public:
 
 
 private:
-    void beginElimination(std::int32_t pivot, std::int32_t& inClique);
+    void beginElimination(std::int32_t pivot);
 
     const std::vector<std::int32_t>& finishElimination(std::int32_t pivot);
 
@@ -290,17 +308,11 @@ private:
     // W: liveness and clique membership from the sign, absorbed from the zero, and supervariable
     // detection's stamp from `w`, which is what AMD_2 does with `W [Iw [p]] = wflg`. That is the
     // last array this file owned that AMD_2 does not, and it was 2n int32 wide.
-    std::int32_t              mTag = 0;    // the reachable-set walk's counter; nothing indexes by it
-    bool                      mCliqueMarks = false;   // vestigial: the constructor argument, kept
-                                                      // so the signature matches production's
 };
 
 QuotientGraphA::QuotientGraphA(const std::vector<std::size_t>&  colPtr,
-                             const std::vector<std::int32_t>& rowIdx,
-                             bool cliqueMarks)
-    : mRun(colPtr.empty() ? 0 : colPtr.size() - 1),
-      mCliqueMarks(cliqueMarks) {
-    (void) mCliqueMarks;
+                             const std::vector<std::int32_t>& rowIdx)
+    : mRun(colPtr.empty() ? 0 : colPtr.size() - 1) {
     const std::int32_t size = static_cast<std::int32_t>(mRun.size());
 
     // ELBOW ROOM, `AMD_2`'s. It sizes `slen = nzaat + nzaat/5 + 7n` and hands `iwlen = slen - 6n`
@@ -333,7 +345,6 @@ QuotientGraphA::QuotientGraphA(const std::vector<std::size_t>&  colPtr,
 // second property is what the production version needs its reserve for and gets here for free.
 std::uint32_t QuotientGraphA::reachableSet(std::int32_t u) {
     const std::size_t start = mFree;
-    ++mTag;
     const VertexRun&    run           = mRun[u];          // one fetch; see the member
     const std::int32_t* source        = mSource.data() + run.sourcePtr;
     const std::uint32_t adjacencySize = run.adjacencySize;
@@ -442,7 +453,7 @@ void QuotientGraphA::garbageCollect() {
     mFree = dst;
 }
 
-void QuotientGraphA::beginElimination(std::int32_t pivot, std::int32_t& inClique) {
+void QuotientGraphA::beginElimination(std::int32_t pivot) {
     // ROOM FOR A WHOLE REACH BEFORE THE WALK STARTS, which is what makes the cursor safe inside
     // it. A reach has at most n entries, so room for n is room for any of them. `AMD_2` tests the
     // same thing per entry, `if (pfree >= iwlen) garbage_collection`, and can because it writes one
@@ -469,11 +480,10 @@ void QuotientGraphA::beginElimination(std::int32_t pivot, std::int32_t& inClique
     mRun[pivot].sourcePtr     = cliqueStart;
     mRun[pivot].adjacencySize = cliqueLen;
 
-    // NO STAMPING PASS. Membership was written by the walk, in the sign of the weight, so this
-    // only sums. `inClique` survives as a value the prune no longer reads; it is left because the
-    // signature is shared with the plain eliminate, which production still has.
-    ++mTag;
-    inClique = mTag;
+    // NO STAMPING PASS, AND NO TAG. Membership was written by the walk, in the sign of the weight,
+    // so this only sums. The `inClique` out-parameter and the two `++mTag` that fed it went on
+    // 2026-08-17: the prune reads the sign, nothing read the tag, and production's signature is not
+    // a reason for a private copy to carry a parameter it never uses.
     std::uint32_t cliqueWeight = 0;
     for (std::uint32_t k = 0; k < reachedSize; ++k)
         cliqueWeight += static_cast<std::uint32_t>(-mWeight[reached[k]]);
@@ -489,8 +499,7 @@ const std::vector<std::int32_t>& QuotientGraphA::eliminate(std::int32_t pivot, T
         for (std::uint32_t i = 0; i < count; ++i) scan.w[absorbed[i]] = 0;
     }
 
-    std::int32_t inClique = NIL;
-    beginElimination(pivot, inClique);
+    beginElimination(pivot);
     const std::int32_t* reached     = mSource.data() + mRun[pivot].sourcePtr;
     const std::uint32_t reachedSize = mRun[pivot].adjacencySize;
 
@@ -646,7 +655,7 @@ std::vector<std::int32_t> orderAmd3B(const std::vector<std::size_t>&  colPtr,
     const std::size_t size = colPtr.size() - 1;
     if (size == 0) return std::vector<std::int32_t>();
 
-    QuotientGraphA qg(colPtr, rowIdx, true);   // clique marks: this driver stamps clique ids
+    QuotientGraphA qg(colPtr, rowIdx);
 
     qg.setVendoredListOrder(true);      // cliques before adjacency; the new clique at the front
     qg.setLateMassElimination(true);    // and mass elimination becomes this driver's, below

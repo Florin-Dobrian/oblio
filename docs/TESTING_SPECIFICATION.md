@@ -25,16 +25,27 @@ below: it catches an example that crashes, that returns a failure, or that has q
 being built, and says nothing about whether the numbers it prints are right. The stronger version,
 checking deterministic output, is open in docs/TODO.md and is awkward while residuals are in the
 output, since those legitimately differ in the last bits across BLAS
-implementations. Totals today: **283 assertions across 8 suites** with the vendored orderings
-present, **269 without**. Corrected 2026-08-08 from 269 and 255, which had drifted: `MMD3` landed
-in `test_order` on 2026-08-07 and this file was not moved with it, which is exactly the failure
-the invariant above exists to prevent, and it went unnoticed because both counts are self
-consistent and the suite passes either way.
+implementations. Totals today: **279 assertions across 8 suites** with the vendored orderings
+present, **265 without**.
+
+**CORRECTED 2026-08-17, AND THE SAME FAILURE AS THE ONE RECORDED BELOW.** This file said 283 and
+269, `README.md` and `CLAUDE.md` said the same, `test_order.cpp`'s own header comment said a third
+thing, and the suite ran **261 and 247**. Retiring `AMD1B` and `AMD2B` on 2026-08-15 removed
+fourteen sameness assertions and, because the pair also left the enum, fourteen validity ones;
+`Mmd3B` added six back, for a net 22. None of the four files moved with them. The figures above are
+the post-correction totals INCLUDING the coverage added the same day, and they were measured by
+building and running every suite rather than by arithmetic.
+
+**Why nothing caught it, which is the part worth keeping.** Every figure was internally consistent,
+each file agreed with itself, and the suite passes whatever a document claims about how many
+assertions it has. This is the second recorded instance, after the 2026-08-08 one below, and both
+have the same shape: a test removed or added and a count left behind. The only reliable check is to
+run the suites and count, which takes one command.
 
 **The count depends on the build, and that is deliberate.** The vendored MMD and AMD live in
 `private/`, which is not published, and both builds detect rather than require it. Fourteen
 assertions in `test_order` check those two routines and compile only when they are there, so that
-suite reports 91 or 77. Nothing else varies: every other suite asserts the same thing either way,
+suite reports 87 or 73. Nothing else varies: every other suite asserts the same thing either way,
 everything they use being ours. The one place the difference shows outside `test_order` is the
 ordering sweep in `test_pipeline`, which expects every ordering the build has rather than a fixed
 number. That sweep covers seven orderings without `private/` and nine with it, having dropped
@@ -44,7 +55,7 @@ AMD1B and AMD2B on 2026-08-15 when they left the enum.
 |---|---|---|
 | `smoke` | 5 | the tree builds and the basic objects work |
 | `test_permutation` | 11 | the index map and its composition |
-| `test_order` | 91 / 77 | the orderings are valid, and each B pair reproduces its original (77 without `private/`) |
+| `test_order` | 87 / 73 | the orderings are valid, and each non-enum layer reproduces its original (73 without `private/`) |
 | `test_forest` | 29 | elimination forest, supernodes, amalgamation, multifrontal child order |
 | `test_symfactor` | 29 | supernodal index sets against a dense oracle |
 | `test_numfactor` | 18 | the numeric factor, by oracle and by reconstruction |
@@ -58,10 +69,10 @@ prevent.
 
 ## What the suite does NOT check, and how the amd and mmd alignments are verified instead
 
-`test_order` checks that each ordering returns a valid permutation, and that each B variant
-reproduces its original. It does NOT check either alignment against its vendored oracle, and it
-cannot: `genmmd` and `AMD_2` live in `private/`, which is unpublished, and the comparison needs a
-hooked scratch copy of the vendored source rather than a link against it.
+`test_order` checks that each ordering returns a valid permutation, and that each of the three
+non-enum layers reproduces its original. It does NOT check either alignment against its vendored
+oracle, and it cannot: `genmmd` and `AMD_2` live in `private/`, which is unpublished, and the
+comparison needs a hooked scratch copy of the vendored source rather than a link against it.
 
 That verification lives in `experiments/ordering`, is run by hand, and is described in that folder's
 README under "The two alignment checks". In short:
@@ -169,24 +180,40 @@ inverse it gives the identity, it is order sensitive in both directions, it is n
 identity on either side is neutral, and a size mismatch is refused. A random sweep of 500 checks
 composition against direct application and the inverse against the identity.
 
-### test_order, 91 assertions (14 of them the vendored pair's, and optional)
+### test_order, 87 assertions (14 of them the vendored pair's, and optional)
 
-Seven matrices, each checked for structural symmetry and then ordered by all ten non-trivial
-methods and checked for validity as a permutation. **Eight of the ten come from the `Ordering`
-enum**, AMD, AMD1, AMD2, AMD3, MMD, MMD1, MMD2 and MMD3; **the other two, AMD1B and AMD2B, are
-reached as free functions**, having left the enum on 2026-08-15 because a B is not an ordering a
-caller should choose but the same ordering on a different schedule. What is asserted about them
-did not change, only how they are called. See `include/oblio/OrderEngine.h`. Matrices: a 6x6 arrow, tridiagonals at n = 1, 2, 10 and 100, a 5x5 diagonal, and a
-complex arrow.
+Seven matrices, each checked for structural symmetry and then ordered by all eight enum methods and
+checked for validity as a permutation: AMD, AMD1, AMD2, AMD3, MMD, MMD1, MMD2 and MMD3. Matrices: a
+6x6 arrow, tridiagonals at n = 1, 2, 10 and 100, a 5x5 diagonal, and a complex arrow.
 
-**Fourteen further assertions compare each B variant against its original entry for entry**, seven
-for AMD1B against AMD1 and seven for AMD2B against AMD2, and they are the strongest oracle in this
-suite. They matter more since the two left the enum, because leaving it also took them out of
-`test_pipeline`'s ordering sweep: this is now the only thing in the suite that checks them at all,
-and they have no prototype in `experiments/ordering` either. Every other pair of orderings here can only be checked for validity, because each is a
-different ordering and their permutations legitimately differ. A B variant is its original on a
-different schedule, so an identical permutation is a requirement rather than a coincidence, and a
-difference is a defect in one of the two. Both maps are compared, `oldToNew` and `newToOld`.
+**Three further layers are reached as FREE FUNCTIONS and are the strongest oracle in this suite**,
+because each must reproduce its original ENTRY FOR ENTRY. Every other pair of orderings here can
+only be checked for validity, each being a different ordering whose permutation legitimately
+differs; a layer that is its original computed differently has no such licence, so an identical
+permutation is a requirement and any difference is a defect in one of the two.
+
+| layer | is | permanent |
+|---|---|---|
+| `MMD3B` | MMD3 on genmmd's dead-segment clique storage | yes |
+| `AMD3B` | AMD3 on AMD_2's pooled storage with garbage collection | yes |
+| `MMD3C` | MMD3 on the production layout, over a private quotient graph | no, transitional |
+
+None is in the `Ordering` enum, so none is reached by `test_pipeline`'s sweep, and none has a
+prototype in `experiments/ordering` or appears in its `PORTED` list. **This suite and `make digest`
+in `benchmarks/ordering` are the only things that check them at all**, which is why the coverage is
+uniform rather than sampled: one validity assertion per layer on the arrow, and one sameness
+assertion per layer on every one of the seven matrices, 24 in all.
+
+**That uniformity is new on 2026-08-17 and it closed two real gaps.** `MMD3B` ran on five of the
+seven, missing the 5x5 diagonal and the complex arrow, and `AMD3B` had no assertion anywhere in the
+suite despite being a permanent maintained alternative. The two matrices it was missing are the ones
+`experiments/ordering`'s own graphs cannot produce, since all seven of those are connected and none
+is trivial: the diagonal is n isolated vertices where every degree is zero and nothing merges, and
+the complex arrow exercises the structural overloads through a second instantiation.
+
+`AMD1B` and `AMD2B` were two more such layers until 2026-08-16, when the fused schedule they carried
+measured identical and faster and moved into `AMD1` and `AMD2`. Their 14 sameness assertions and 14
+validity ones went with them, which is the drift corrected at the top of this file.
 
 The AMD2 pair is the more valuable of the two, though it was the easier to add. AMD2 carries an
 absorption pass that kills cliques and a hash pass that folds one live vertex into another, so it

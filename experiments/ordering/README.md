@@ -6020,6 +6020,149 @@ Section 5.5 of `archive/sparse_factorization.md` states the same fork in one pla
 meeting supervariables there would otherwise take hashing to be the definition rather than one of
 two routes.
 
+## What each branch has to remember, and why an encoding does not transfer, 2026-08-17
+
+The section above compares the two DETECTION MECHANISMS. This one compares what each branch has to
+REMEMBER about a vertex while it works, which is a different question and is the one that decides
+whether an encoding found on one branch can be carried to the other. It was written while planning
+the port of `Amd3B`'s five array folds, three of which live in the shared quotient graph and so
+reach every driver whether or not anyone aims them.
+
+Every walk in either branch asks three things of a vertex it meets: **is it dead**, **have I already
+seen it this step**, and **what does it weigh**. Both branches ask all three. They differ in where
+the answers come from, and the differences are not stylistic.
+
+### The three ways a vertex leaves the graph, and the asymmetry is the whole finding
+
+|  | weight | mark | still named by other lists |
+|---|---|---|---|
+| `merge`, a live hash merge | zeroed | `GONE` | yes, left exactly where it lies |
+| `massEliminate` | zeroed | `GONE` | no, and it was in the pivot's clique alone |
+| `number`, the mmd prepass | UNCHANGED, and one for a fresh vertex | `GONE` | yes, everywhere |
+
+**Amd has only the first two.** So on that branch a zero weight and death are the same thing, and
+`Amd.cpp` reads exactly that: `nvj = Nv [j] ; if (nvj > 0)` answers all three questions off one
+load, positive being the weight, negative meaning already taken into the new clique, zero meaning
+absorbed. There is no fourth state to represent because there is no fourth way to die.
+
+**Mmd has the third, and it is deliberate rather than incidental.** A prepass vertex keeps its
+weight precisely so that its neighbors' degrees still count it, and it stays in every list that
+named it. Under the sign encoding it reads as live and unseen, so a reachable-set walk emits it. The
+substitution was tried and reverted on 2026-08-08, where it produced 201 entries for 200 vertices on
+a random `mmd2` pattern. So on the mmd branch the weight is a PARTIAL flag and the mark is what
+carries liveness.
+
+genmmd holds both at once rather than choosing, and that is the shape of the answer rather than a
+way around the problem. Its `marker[v] = maxint` is the general liveness test, and `qsize[nd] != 0`
+is used only inside element walks, where a prepass vertex cannot appear because the mark has already
+kept it out of every clique. Two encodings covering two regions, where amd needs one covering both.
+
+### The clique side, where the asymmetry runs the other way
+
+Amd stamps clique ids and mmd never does, which is why `mMark` is 2n on one branch and n on the
+other, and why the width is a constructor argument rather than always the larger.
+
+The reason is the section above: amd's exact test is set equality over `I[u]` and `I[v]`, two
+arbitrary lists, and set equality is done by stamping one side and walking the other, so the stamp
+has to reach the clique id space. Mmd asks nothing of that shape. Its merges fall out of a walk it
+is already making, testing whether a vertex under the cursor is also in the new element, which the
+vertex mark answers. Neither `w[c] == 0` for a dead clique nor `w[c] >= wflg` for one seen this step
+is a mark at all; both are the tagged W, which is amd's own and which mmd does not carry.
+
+So the two branches are each frugal where the other is not, and neither pays for what it does not
+ask.
+
+### The lifetime, which is where the port gets hard
+
+The negation is not a flag written once and left. It IS the reachable set's insertion operation:
+`nv > 0` means "not yet emitted" and `mWeight[v] = -nv` is the emit, so the array is deliberately in
+a non-canonical state for the length of an elimination and something has to restore it.
+
+- **Amd negates in `reachableSet`, called ONCE PER PIVOT, and restores in the bound pass it already
+  makes.** `Amd.cpp` does the same, `Nv[i] = -nvi` under CONSTRUCT NEW ELEMENT and `Nv[i] = nvi`
+  under RESTORE DEGREE LISTS. Neither is a pass of its own.
+- **Mmd calls `reachableSize` and `reachableWeight` PER VERTEX in the refresh**, and has no bound
+  pass to hide a restore in. Each call must therefore leave the array as it found it, which is a
+  per-call lifetime rather than a per-pivot one, and it is the design problem `Mmd3C` exists to
+  work out.
+
+### Where the sign can serve on the mmd branch, and what it costs there
+
+Two halves, pulling in opposite directions. Neither is measured.
+
+**The good half: a prepass vertex can never appear in a clique member list.** The prepass runs to
+completion before the main loop, so no clique exists at the moment `number` is called, and every
+clique formed afterwards comes from a reach set that already skipped numbered vertices through the
+mark. The exclusion is structural rather than probabilistic. `A[u]` is the opposite case, since
+`number` leaves the lists alone: a numbered vertex sits in the adjacency of every neighbor for the
+rest of the run.
+
+So the split follows the SOURCE KIND, and `reachableSet` and `reachableWeight` already write the two
+loops separately:
+
+```
+clique walk, C[c] for c in I[u]    sign carries liveness, dedup and value      one array
+adjacency walk, A[u]               sign carries dedup and value, and the
+                                   mark is still needed for liveness          two arrays
+```
+
+Dedup has to be one mechanism across both loops, or a vertex reached first through `A[u]` and then
+through a clique is emitted twice, so the negation goes in both and only the liveness test differs.
+The clique walk is the half that matters: by the conservation lemma `|A[u]| + |I[u]|` is bounded by
+u's original column for the whole run, so the adjacency half shrinks monotonically under the prune,
+while each clique in `I[u]` opens a `C[c]` that grows with fill.
+
+**IMPLEMENTED IN `Mmd3C` ON 2026-08-17, and the split above is exactly what landed.** The clique
+loops of `reachableSet` read one array, the adjacency loops read two, `beginElimination` loses its
+stamping pass, and the prune answers three of its four questions from the sign. `reachableWeight`
+was DECLINED rather than blocked, for the reason in the next paragraph. Permutations identical to
+`Mmd3` on 24 cases and across all nine drivers under `make digest`.
+
+**The bad half: the tag scheme invalidates in O(1) and the sign scheme cannot.** `++mTag` retires
+every mark in the array at once, which is exactly why `reachableWeight` can count a reach without
+materializing it and without cleaning up after itself. A negation has no such trick. Every one must
+be undone individually, and these two functions keep no record of what they negated, having been
+written deliberately not to build a list.
+
+Amd never meets this. `reachableSet` runs once per pivot and writes its result into the arena, and
+the bound pass walks exactly that result and restores as it goes, so the restore rides in a
+traversal that already exists. Mmd's refresh calls `reachableSize` and `reachableWeight` PER VERTEX
+and walks the result again nowhere, so there a restore is a new traversal rather than a free rider.
+
+**What landed instead, and it is cheaper than either.** `massEliminate` already walks C[pivot],
+which is exactly the set `reachableSet` negated, so the restore rides there and costs no pass at
+all. That is the mmd analogue of amd's bound pass, and it is why the fold was affordable on the
+elimination path. It does NOT extend to `reachableWeight`, which is called per refreshed vertex and
+whose result nothing walks again; that one is left on the mark.
+
+The cheapest form for `reachableWeight`, if it is ever wanted, is a member scratch holding the
+emitted vertices, cleared per call so its capacity survives, walked afterwards to restore. Per member that gives up one scattered mark load and one
+scattered mark store, and takes on one contiguous scratch store and one scattered weight store in
+the restore, against a gain of one fewer array touched in the clique walk. The scattered count comes
+out about even and lands on one array instead of two, which is the reason to expect anything at all.
+Whether it nets out is a measurement, and this is precisely the shape the tree has misjudged three
+times: a schedule change that saves visits and adds a pass. See the footprint trade in
+`docs/DESIGN_DECISIONS.md` (2026-08-16).
+
+### What this decides about the five folds
+
+| fold | reaches mmd | why |
+|---|---|---|
+| 1, weight sign as the membership mark | yes, with a caveat | shared class, but `number` breaks the premise |
+| 3, `eliminated()` off a zero weight | yes, with the same caveat | same premise, same break |
+| 4, mass elimination merges before it compacts | yes | independent of the encodings above |
+| 2, the restore rides in the bound pass | no | mmd has no bound pass |
+| 5, detection stamps into `w` | no | it retires the clique half of the mark, which mmd never had |
+
+Two of the five are amd-only by construction rather than by difficulty, which is worth knowing
+before either is attempted. Folds 1 and 3 are the ones with real work in them, and the work is not
+the encoding but finding which regions of the mmd walks a prepass vertex provably cannot reach.
+
+**So the success condition for `Mmd3C` is not that the mark array goes.** It probably cannot go, for
+the reason in the table above. It is that the hot walks stop reading it, which is what genmmd
+achieves while still carrying `marker`, and which is where the measured cost is: two scattered loads
+per clique member where the vendored routines make one.
+
 ## What the sandbox can and cannot answer, 2026-08-16
 
 Established the hard way, by nearly discarding a fold that turned out to be worth 30 percent.
@@ -6076,6 +6219,22 @@ gone, and nothing changed at 400.**
 perturbing the layout rather than by explaining it, and a perturbation that leaves the output
 identical is self-checking: if the permutation moves, the probe is wrong and the reading is void.
 This one took one command and settled a question three careful arguments had got wrong.
+
+**AND THE PERTURBATION HAS TO BE BIG ENOUGH TO PERTURB, 2026-08-17.** The same technique applied to
+`Mmd3C`, whose 200^2 column read 1.28x `MMD3` with 199 and 201 flat, padded by sixteen ints and
+moved NOTHING. That was read as evidence against data placement and was evidence of nothing: at 200
+a side those arrays are 160,000 bytes, forty pages, and 160,064 rounds to the same forty, so the
+allocator very probably returned the same addresses and no intervention took place. Padded by 1024
+ints, exactly one page, the ratio fell to 0.99 with the neighbours unchanged and the permutations
+byte-identical.
+
+Sixteen ints was the right size for the six arrays `AMD_1` carves out of one workspace and useless
+for separate vectors past the page threshold. **A perturbation that does not perturb is
+INCONCLUSIVE, not negative**, and the way to tell them apart is to know what granularity the
+allocator works at before choosing the amount. Two rounds went on other hypotheses first.
+
+It also refutes this section's own conclusion that our separate allocations buy immunity: they do
+not, being page aligned and page rounded once large. See `docs/DESIGN_DECISIONS.md` (2026-08-17).
 
 **And cachegrind now runs in the sandbox**, installed 2026-08-16. Instruction counts and data
 references are exact and machine-independent, so this whole class of question no longer needs

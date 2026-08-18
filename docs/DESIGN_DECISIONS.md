@@ -65,6 +65,157 @@ be real, which requires Hermitian. Once that is on the table, the design collaps
 **Cholesky is `CC^H`, always, and in real that *is* `CC^T`.** No option, no flag, no forbidden
 combination to reject. The answer was not hard. Asking the right question was.
 
+## 2026-08-17: a one dimensional size may go signed, but only to buy an encoding
+
+The 2026-08-11 entry narrowed four `QuotientGraph` arrays to `std::uint32_t` and named `mWeight`
+among them, on the reasoning that a size has nothing to stand in for and so spends no sign bit.
+`Amd3B` then found that `mWeight` does have something to stand in for, and the rule bends to admit
+it rather than being weakened.
+
+### The reasoning, which is the same reasoning
+
+The rule was written to DERIVE rather than assert: unsigned because there is no sentinel, signed
+because there is one. `AMD_2`'s `Nv` gives the weight a sentinel and a flag at once, so the premise
+changes for that field and the conclusion follows. **Nothing about the rule is being excepted.**
+What has to be stated is when the premise is allowed to change, since otherwise "it would be handy
+to have a flag here" reopens every field in the tree.
+
+Four conditions, in `docs/CODING_RULES.md`: per FIELD and never per category; the encoding written
+out at the declaration; justified by MEASUREMENT rather than by tidiness; and no range lost, checked
+rather than assumed.
+
+### What the encoding is, and that it is two things
+
+```
+mWeight[v] >  0    live, not yet taken into the clique being built; the weight
+mWeight[v] <  0    live, taken into it this step; the weight is -mWeight[v]
+mWeight[v] == 0    dead, by a hash merge or by mass elimination
+```
+
+**The SIGN and the ZERO are different in kind, and only the sign is general.** The sign is a spare
+bit: it carries an orthogonal fact while the magnitude still carries the value, which is unlike
+`NIL`, which destroys the value it replaces. The zero is a true sentinel and rests on no live
+supervariable weighing less than one. That holds on the amd branch, whose only death sites are
+`merge` and `massEliminate`, and NOT on the mmd branch, where `number()` leaves a prepass vertex
+live at weight one and in every list that named it. So a tree-wide "signed weights" change is safe
+and a tree-wide "zero means dead" change is not, and the two must not travel together on one
+justification.
+
+### No range is lost, and this does not contradict the half-range clause
+
+A weight is bounded by n and n is capped at `MAX_IDX = 2^31 - 1`, so the sign bit was never
+reachable. Every accumulation of weights is over DISJOINT sets and so also bounded by n, which is
+the exception the 2026-08-11 entry already carries. `CODING_RULES.md` says the half range "is not
+headroom to spend", and a reader will think that collides with this: it does not, because that
+clause is about ARITHMETIC that can exceed n, where the safety would be inherited from a cap
+enforced elsewhere. Spending a bit that no value reaches is a different act from relying on one.
+
+### One value is left spare, and it is worth writing down
+
+The negated range is `[-(2^31 - 1), -1]`, so **`INT32_MIN` is unreachable from either direction**
+and is free as a fourth state.
+
+**The obvious use for it was proposed here and is REFUTED, same day.** The obstacle to taking this
+encoding to the mmd branch is that `number()` must say "numbered" without destroying a weight, and
+since `number()` runs once per driver in the prepass, before any merge, every vertex it touches is
+at weight one; a `numbered` state at `INT32_MIN` would then be excluded by the same `nv > 0` test
+that already excludes dead and taken. That reasoning is sound and the conclusion is still wrong.
+**`orderAscending` reads `mWeight[pivot]` for every pivot**, to size each supervariable's run in the
+emitted permutation, and a prepass vertex is a pivot. Its weight is load-bearing to the very end of
+the ordering and cannot be spent. Found by reading `orderAscending` before implementing, which is
+the only reason it cost nothing.
+
+So `Mmd3C` keeps a mark array, and the slot stays free for some state carried by a vertex whose
+weight is never read, should one appear.
+
+### What moves with this
+
+`docs/CODING_RULES.md`, whose one dimensional bullet now carries the exception and its four
+conditions, and whose index bullet now says `NIL` is the common sentinel rather than the only one,
+`Buckets` having carried `UNFILED` and `OUTMATCHED` all along. `docs/NEXT.md` bucket 3 lists
+`mWeight` among the arrays narrowed on 2026-08-11 and is now wrong about that one.
+
+---
+
+## 2026-08-17: we self-alias too, and separate allocations do not prevent it
+
+`MMD3C` read 1.28x to 1.47x `MMD3` at exactly 200 a side across five builds, while sitting at 0.95x
+to 1.10x at 199 and 201 and at every other size on the ladder. The two compute the same permutation
+from the same algorithm, so nothing algorithmic could produce it. Padding every size-n allocation in
+`Mmd3C` by ONE PAGE, and changing nothing else, gives byte-identical permutations and:
+
+```
+MMD3C / MMD3            199^2    200^2    201^2
+as shipped               0.98     1.28     0.99
+padded by 1024 int32     0.95     0.99     0.97
+```
+
+**So it is data placement**, established by intervention rather than by argument, and the mechanism
+is the one found in `AMD_2` on 2026-08-16: size-n arrays landing in the same cache sets at a
+particular n.
+
+### What this refutes
+
+The 2026-08-16 entry concluded "our separate allocations are why we never had this." **We do have
+it.** A separate allocation large enough is page aligned and rounded up to whole pages, so a set of
+same-sized arrays lands at addresses congruent modulo the page size just as surely as a carve does.
+The carve makes it easier to reason about and does not cause it. That sentence has been marked in
+place; this entry is what it points at.
+
+### The probe that read as a negative result and was not
+
+The first attempt padded by SIXTEEN INTS, one cache line, and moved nothing, and I read that as
+evidence against data placement. It was not evidence of anything. At 200 a side these arrays are
+160,000 bytes, which rounds to 40 pages; 160,064 rounds to the same 40 pages, so the allocator very
+probably returned the same addresses and the intervention never happened. **A perturbation that
+does not perturb is inconclusive, not negative**, and the way to tell the difference is to know what
+granularity the thing under test works at. One cache line is right for a small array and useless for
+one past the page threshold.
+
+Two rounds were spent on other hypotheses because of it: heap history and position in the run, which
+were excluded by timing one function under two names at two positions and finding the spike at both.
+That exclusion is still sound and is recorded in `benchmarks/ordering/order_timing.cpp`.
+
+### What is not yet known, and matters more than this file
+
+`Mmd3C` is transitional and about to be replaced, at which point every address changes and this
+particular point disappears. **The open question is whether the shared class has such points**, since
+`QuotientGraph` allocates the same shaped set of size-n vectors and `Mmd3` and `Amd3` would collide
+by the same mechanism at whatever n happens to align. The ladder found this one only because 200 is
+a rung; a spike at a size nobody runs would be invisible, and would show up as an ordering that is
+mysteriously slow on one customer's matrix.
+
+Two follow-ups, cheap, and the second is the important one:
+
+- **Bisect which arrays collide**, by padding one at a time. Whether it is `mWeight` against `mMark`
+  or the arena against `mSource` says whether production is exposed at all.
+- **Sweep n finely for `MMD3` alone**, every side from say 190 to 210, and look for the same shape.
+  One loop, and it is the only thing that would tell us whether this is a property of one
+  transitional file or of the library.
+
+**THE SWEEP WAS RUN THE SAME DAY AND CAME BACK CLEAN.** `tools/sweep.cpp` walks consecutive sides
+and flags any whose cost per vertex stands more than ten percent above BOTH neighbors. Over 190 to
+210 on alpamayo, neither `MMD3` nor `AMD3` has a candidate, and side 200 is unremarkable in both:
+mmd reads 62.5 ns/vertex against 60.7 and 62.0, amd reads 85.0 against 85.7 and 87.2, which is
+BELOW both. So **the point belongs to `Mmd3C`'s allocations and not to the shared class's**, which
+is the answer the entry above wanted. `Mmd3C` differs in the one way that touches addresses: it is
+a single translation unit, so its vectors are constructed in a different order and land elsewhere.
+
+Two limits on that. It is one band of 21 sides, so a point at some other n is UNOBSERVED rather
+than excluded. And the amd series scatters 12 percent over the range against mmd's 6, close enough
+to the threshold that a genuine amd candidate would need a second invocation to separate from noise.
+
+The other follow-up, bisecting which arrays collide, was NOT run and is not worth running: it is
+about a file that is being replaced, and replacing it changes every address.
+
+### The lesson, which is a sharpening of the 2026-08-16 one
+
+That entry said prefer intervention to inference, and this one agrees and adds a condition:
+**an intervention has to be large enough to intervene.** Both probes here were interventions; only
+one of them changed anything, and the failed one looked exactly like a result.
+
+---
+
 ## 2026-08-16: the layout matrix, which is where the next few days of work go
 
 Two algorithms, three clique layouts, so six cells. Four exist or are planned; the two that exist
@@ -79,6 +230,24 @@ amd ladder       Amd3           Amd3C   PLANNED    Amd3B
 Ours is the separate append-only arena in elimination order. genmmd's is dead segments chained in
 place. `AMD_2`'s is one pooled workspace with a free cursor and a garbage collection. Both vendored
 schemes hold the ordering inside `O(n + m)`; ours does not.
+
+**WHAT THE SUFFIXES MEAN, stated 2026-08-17 because the matrix implies a rule that was never
+written down and both C cells were about to be built without one.** **B is a driver on its OWN
+branch's vendored layout; C is a driver on the OTHER branch's.** So `Mmd3B` is mmd on genmmd's
+scheme and `Amd3B` is amd on `AMD_2`'s, both same-lineage and both permanent, which is why they
+were built first and why each is the natural differential vehicle for its own branch. `Amd3C` is
+amd on genmmd's scheme and `Mmd3C` is mmd on `AMD_2`'s, both cross-lineage, and neither has a
+vendored routine to be aligned against.
+
+Two things follow that are easy to get wrong. **The two C files are not built from the files they
+are named after**: `Amd3C` copies `Mmd3B`'s storage and `Mmd3C` copies `Amd3B`'s, so each is a port
+from the sibling on the same LAYOUT rather than on the same branch. And the eventual pairing for
+any shared code runs down the columns, `Mmd3B` with `Amd3C` and `Mmd3C` with `Amd3B`, not along the
+suffixes.
+
+**The `Mmd3C` that exists today does not follow the rule and is transitional**, being mmd on the
+PRODUCTION arena. It was built to work the amd array folds out on the mmd side without disturbing
+the class six drivers run, which it did; it is to be replaced by the real cell. See `src/Mmd3C.cpp`.
 
 ### Why the diagonal is not enough
 
@@ -160,7 +329,8 @@ an IMPROVEMENT, which is carried back into our own ladder.
 
 **That is not a hypothetical.** With storage held equal on the amd side, the differential surfaced
 five array folds that have nothing to do with layout, which are the subject of the entry below and
-are being ported to `Amd3` and, where applicable, to `Amd1` and `Amd2`. The 2n mark shape came out
+were ported to `Amd3` and to `Amd2` on 2026-08-17, and the set is closed; see `src/Amd3B.cpp`'s
+header for where each landed and why the fifth could not. The 2n mark shape came out
 of `Mmd3B` the same way. So a verdict on storage does not retire either file: storage was never the
 only thing they were for, and the next differential will want the same alignment.
 
@@ -507,10 +677,11 @@ instruction-count fit would separate algorithmic growth from growth in cost per 
 
 ### What follows for us
 
-**Our separate allocations are why we never had this**, which is a second and unlooked-for argument
-for the shape the folds below already favoured. It is also a caution: `NEXT.md` item 2b asks whether
-one allocation carved into arrays would beat separate vectors, on the model of `AMD_2`'s `S`. This
-is what that costs when the sizes cooperate, and grid benchmarks are exactly where they do.
+**This said "our separate allocations are why we never had this". THAT IS REFUTED, 2026-08-17, and
+the correction is below.** It remains a caution about `NEXT.md` item 2b, which asks whether one
+allocation carved into arrays would beat separate vectors on the model of `AMD_2`'s `S`: this is
+what that costs when the sizes cooperate, and grid benchmarks are exactly where they do. But the
+immunity claimed for the separate form does not exist.
 
 ### Three lessons, and the middle one is the expensive one
 

@@ -19,7 +19,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
     const std::size_t size = colPtr.size() - 1;
     if (size == 0) return std::vector<std::int32_t>();
 
-    QuotientGraph qg(colPtr, rowIdx, true);   // clique marks: this driver stamps clique ids
+    QuotientGraph qg(colPtr, rowIdx);   // no clique marks: detection stamps into `w`; see below
 
     // The two shared-class conventions this layer differs by. Both are off for every other driver
     // and neither changes which sets are computed, only which permutation comes out. See the
@@ -58,22 +58,15 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
         buckets.file(degrees[u], u);
     std::uint32_t minDegree = *std::min_element(degrees.begin(), degrees.end());
 
-    // The driver's own membership scratch, separate from the quotient graph's: which vertices lie
-    // in the new clique, and which cliques the step has already listed. Both are sets built by
-    // stamping and queried by comparison, never allocated.
-    // Sized for twice the vertex space: the hash comparison below stamps a clique id at
-    // c + cliqueStamp, so vertices and cliques can be tested against one stamp without two arrays.
-    // THE DRIVER'S OWN `mark` AND `tag` ARE GONE. They were a second membership scratch over the
-    // same entities as the quotient graph's, which is 2n when built with clique marks: vertices
-    // low, cliques at cliqueBase() + c. See the constructor argument in QuotientGraph.h for why
-    // the two halves cannot share one space.
+    // NO SEPARATE MEMBERSHIP SCRATCH AT ALL, 2026-08-17. The driver's own `mark` and `tag` went
+    // first, folded into the quotient graph's; then the graph's mark stopped answering membership,
+    // the sign of the weight having taken it over; and now supervariable detection stamps into
+    // `w` instead of into a clique half, so this driver no longer asks for clique marks and
+    // `mMark` is n rather than 2n. `AMD_2` has no mark array whatever, which is the shape this
+    // has been converging on.
     //
-    // ONE TAG COUNTER FOR BOTH, and what makes that safe is that a tag only ever increases and
-    // every pass stamps with the CURRENT one, so a stamp from an earlier pass is strictly below it
-    // and reads as absent. That is what the graph's own `mMark[v] < mTag` tests already rely on.
-    // What would break it is a graph call between the stamping of u's set and the walk of v's, and
-    // there is none. GONE sits above every tag and survives both.
-    const std::int32_t cliqueStamp = qg.cliqueBase();
+    // The `cliqueStamp` offset that used to sit here, `qg.cliqueBase()`, went with the clique
+    // half: there is no second id space to bias into any more.
 
     // The hash groups, an array indexed by the hash value rather than a map: the key is already
     // an index into 0 .. size, so a map would cost a log per insertion and a node per group for
@@ -148,6 +141,19 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
     // bound comes out enormous. Amd.cpp's `Int` is signed for the same reason.
     std::vector<std::int32_t> w(size, 1);       // every clique alive and unseen, Amd.cpp's W
     std::int32_t wflg  = 2;                     // the tag, Amd.cpp's wflg
+    // SUPERVARIABLE DETECTION STAMPS INTO `w`, which is `AMD_2`'s `W [Iw [p]] = wflg` over the
+    // whole of i's list, variables and elements alike, both living in one id space. It replaces a
+    // 2n `mMark`, so this driver no longer asks for clique marks at all.
+    //
+    // IT HAS TO INTERLEAVE WITH THE TAG PROTOCOL, not clobber it. `stamp` starts above the values
+    // this step's scan wrote, `wflg + lemax`, and rises by one per candidate; `wflg` is then set
+    // past all of them at the end of the step, so next step every stamped entry reads BELOW wflg,
+    // which the prune's `we >= wflg` treats as alive-and-unseen and rebuilds from the clique
+    // degree. That is the reading Amd.cpp relies on and it is why stamping here is safe at all.
+    //
+    // The zeros survive: only entries of a LIVE vertex's list are stamped, and a dead clique is
+    // not in one.
+    std::int32_t stamp = 2;                     // detection's marks, above wflg; see above
     std::int32_t lemax = 0;                     // the largest clique so far, Amd.cpp's lemax
     // wflg + n must not overflow, which is the whole of Amd.cpp's wbig.
     const std::int32_t wbig = std::numeric_limits<std::int32_t>::max() - static_cast<std::int32_t>(size);
@@ -160,7 +166,8 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
         if (wflg < 2 || wflg >= wbig) {
             for (std::int32_t x = 0; x < static_cast<std::int32_t>(size); ++x)
                 if (w[x] != 0) w[x] = 1;
-            wflg = 2;
+            wflg  = 2;
+            stamp = 2;         // the detection marks live in the same array and the same scale
             ++numFlagSweeps;
         }
     };
@@ -546,18 +553,22 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
                 // v stamped and u walked. The test is symmetric so the outcome does not move, and the SURVIVOR
                 // does not either, u being the outer vertex in both and merge(u, v) folding v into
                 // it. Amd.cpp merges j into i the same way round.
-                const std::int32_t other = qg.advanceTag();
+                // THE STAMP GOES INTO `w`, which is what retires the clique half of mMark. Amd.cpp
+                // does exactly this, `W [Iw [p]] = wflg` over the whole of i's list, variables and
+                // elements alike, both living in one id space so one array holds a mark for either.
+                // See the declaration of `stamp` for the interleave with the tag protocol.
+                const std::int32_t other = ++stamp;
                 std::uint32_t sizeU = 0;       // list entries, so at most deg(u)
                 const std::int32_t* adjacencyU = qg.adjacency(u);
                 for (std::uint32_t a = 0; a < qg.adjacencySize(u); ++a) {
-                    const std::int32_t w = adjacencyU[a];
-                    if (!qg.eliminated(w)) { qg.setMark(w, other); ++sizeU; }
+                    const std::int32_t x = adjacencyU[a];
+                    if (!qg.eliminated(x)) { w[x] = other; ++sizeU; }
                 }
                 // Index 1: the new clique is at the front of every I[u] and is shared by every
                 // member of C[pivot], so it can never discriminate. Ledger entry 6.
                 const std::int32_t* incidenceU = qg.incidence(u);
                 for (std::uint32_t i = 1; i < qg.incidenceSize(u); ++i) {
-                    qg.setMark(incidenceU[i] + cliqueStamp, other);
+                    w[incidenceU[i]] = other;
                     ++sizeU;
                 }
 
@@ -573,16 +584,16 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
                     bool        same  = true;
                     const std::int32_t* adjacencyV = qg.adjacency(v);
                     for (std::uint32_t a = 0; a < qg.adjacencySize(v) && same; ++a) {
-                        const std::int32_t w = adjacencyV[a];
-                        if (qg.eliminated(w)) continue;
+                        const std::int32_t x = adjacencyV[a];
+                        if (qg.eliminated(x)) continue;
                         ++sizeV;
-                        if (qg.mark(w) != other) same = false;
+                        if (w[x] != other) same = false;
                     }
                     if (same) {
                         const std::int32_t* incidenceV = qg.incidence(v);
                         for (std::uint32_t i = 1; i < qg.incidenceSize(v) && same; ++i) {
                             ++sizeV;
-                            if (qg.mark(incidenceV[i] + cliqueStamp) != other) same = false;
+                            if (w[incidenceV[i]] != other) same = false;
                         }
                     }
                     if (!same || sizeU != sizeV) continue;
@@ -675,10 +686,16 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
             minDegree = std::min(minDegree, filed);
         }
 
-        // The whole array is invalidated in ONE ADDITION, where Amd3 walks the touched list and
-        // zeroes each entry. After scan 1 no entry exceeds wflg + lemax, so advancing the tag by
-        // lemax puts every one of them into the stale range. Amd.cpp's `wflg += lemax`.
-        wflg += lemax;
+        // The whole array is invalidated in ONE ADDITION rather than by walking the touched list and
+        // zeroing each entry. After scan 1 no entry exceeds wflg + lemax, so advancing past that
+        // puts every one of them into the stale range. Amd.cpp's `wflg += lemax`.
+        //
+        // PAST EVERY STAMP THIS STEP LAID DOWN, not merely past the scan's values, since detection
+        // now writes into this same array above `wflg + lemax`. Amd.cpp advances wflg through
+        // detection for the same reason: a stamp must read as alive-unseen next step, which means
+        // strictly below the new tag.
+        stamp = std::max(stamp, wflg + lemax);
+        wflg  = stamp + 1;
     }
 
     if (arenaEntries != nullptr) *arenaEntries = qg.arenaEntries();

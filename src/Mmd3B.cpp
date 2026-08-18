@@ -384,7 +384,12 @@ public:
     // have to be: its members are a chain rather than a list, so the size is no longer free to
     // read. Caching it purely for locality was measured earlier and made no difference at all,
     // 2.77x against 2.76x, so the array is here for the chain and not for the cache.
-    std::uint32_t weight(std::int32_t u) const { return mWeight[u]; }
+    // The MAGNITUDE, for the driver, which does not want to know about the sign. The walks inside
+    // this class read mWeight directly and test it, which is the whole point.
+    std::uint32_t weight(std::int32_t u) const {
+        const std::int32_t w = mWeight[u];
+        return static_cast<std::uint32_t>(w < 0 ? -w : w);
+    }
 
 
     // reach(u), as above. Not const: the mark array and its tag are scratch, and threading them
@@ -551,7 +556,7 @@ private:
     // between them the graph is half eliminated: the clique is written and stamped but the reached
     // vertices still name the pivot as a variable. Nothing outside may observe that state, which is
     // why the seam is two private calls rather than a public begin and end.
-    void beginElimination(std::int32_t pivot, std::int32_t& inClique, std::int32_t& absorbed);
+    void beginElimination(std::int32_t pivot, std::int32_t& absorbed);
 
     const std::vector<std::int32_t>& finishElimination(std::int32_t pivot);
 
@@ -642,7 +647,19 @@ private:
     // dimensional terms would otherwise need a wider type, and this is the exception to that.
     std::vector<std::int32_t>  mSuperNext;
     std::vector<std::int32_t>  mSuperLast;
-    std::vector<std::uint32_t> mWeight;
+    // SIGNED, MIRRORING QuotientGraph, 2026-08-17. A one dimensional size is normally unsigned
+    // because it has nothing to stand in for; this one has. `AMD_2`'s `Nv`: positive is the
+    // weight, negative means already taken into the clique being built, zero means dead, so one
+    // load answers what two arrays answered. No range is lost, a weight being bounded by n.
+    //
+    // IT IS HERE BECAUSE THIS FILE'S OBLIGATION IS TO STAY ENCODING-IDENTICAL TO Mmd3, not because
+    // it pays on its own: it measured a wash on the mmd side. Without it the time column stops
+    // being the price of genmmd's storage and becomes that plus four encoding folds, which is
+    // exactly what this file exists not to be. See docs/CODING_RULES.md for when a size may go
+    // signed and docs/DESIGN_DECISIONS.md (2026-08-17).
+    std::vector<std::int32_t> mWeight;
+    // Mirrors QuotientGraph::mHasNumbered; always true here once the prepass has run.
+    bool                      mHasNumbered = false;
     std::uint32_t              mCliqueWeight = 0;  // see cliqueWeight(); per-pivot, not per-vertex
 
     std::vector<std::int32_t> mMerged;   // scratch for the vertices an elimination merges away
@@ -727,24 +744,24 @@ std::uint32_t QuotientGraphB::reachableWeight(std::int32_t u) {
     const std::uint32_t incidenceSize = mRun[u].incidenceSize;
     for (std::uint32_t k = 0; k < adjacencySize; ++k) {
         const std::int32_t v = source[k];
-        if (mMark[v] != GONE) { mMark[v] = mTag; reached += mWeight[v]; }
+        if (mMark[v] != GONE) { mMark[v] = mTag; reached += static_cast<std::uint32_t>(mWeight[v]); }
     }
     const std::int32_t* incidence = source + adjacencySize;
     for (std::uint32_t i = 0; i < incidenceSize; ++i) {
         const std::int32_t c = incidence[i];
         forEachMember(c, [&](std::int32_t v) {
-            if (mMark[v] < mTag) { mMark[v] = mTag; reached += mWeight[v]; }
+            if (mMark[v] < mTag) { mMark[v] = mTag; reached += static_cast<std::uint32_t>(mWeight[v]); }
         });
     }
     return reached;
 }
 
 void QuotientGraphB::number(std::int32_t u) {
-    mMark[u] = GONE;         // a numbered vertex lingers in lists; GONE is what filters it
+    mHasNumbered = true;     // see the member: what makes the GONE test worth asking
+    mMark[u]     = GONE;     // a numbered vertex lingers in lists; GONE is what filters it
 }
 
-void QuotientGraphB::beginElimination(std::int32_t pivot,
-                                     std::int32_t& inClique, std::int32_t& absorbed) {
+void QuotientGraphB::beginElimination(std::int32_t pivot, std::int32_t& absorbed) {
     // The reach is written STRAIGHT INTO THE ARENA, with no scratch and no copy. C[pivot] is the
     // reach, so the block the walk fills is already the clique's own block; there was never a
     // reason for the set to exist anywhere else first.
@@ -806,8 +823,16 @@ void QuotientGraphB::beginElimination(std::int32_t pivot,
     for (std::uint32_t ii = 0; ii < incN; ++ii)
         mAbsorbed.push_back(mSource[base + adjN + (reverse ? incN - 1 - ii : ii)]);
 
+    // THE SIGN OF THE WEIGHT IS THE MEMBERSHIP MARK, mirroring QuotientGraph. The negation IS the
+    // insertion, and it is undone in massEliminate, which walks this same set. The pivot is
+    // negated so the walk cannot take it into its own clique.
+    //
+    // The adjacency loop keeps the GONE test, guarded: `number()` leaves a prepass vertex at
+    // weight one and in every neighbour's adjacency, so a positive weight does not mean live
+    // there. A clique cannot hold one, the prepass completing before the first elimination, so
+    // the clique loop asks nothing else.
     ++mTag;
-    mMark[pivot] = mTag;                       // never its own neighbor
+    mWeight[pivot] = -mWeight[pivot];          // never its own neighbor
 
     std::size_t   rl    = base;                        // write cursor
     std::size_t   rm    = mRun[pivot + 1].sourcePtr - 1;   // last entry of the segment being filled
@@ -829,9 +854,10 @@ void QuotientGraphB::beginElimination(std::int32_t pivot,
     // it is wrong -- with incN == 0 the cursor legitimately lands on the last entry, and a check
     // would read it as a link that was never written. Found by ASan on a 2 by 2 grid.
     for (std::uint32_t k = 0; k < adjN; ++k) {
-        const std::int32_t v = mSource[base + k];
-        if (mMark[v] < mTag) {
-            mMark[v] = mTag;
+        const std::int32_t v  = mSource[base + k];
+        const std::int32_t nv = mWeight[v];
+        if (nv > 0 && !(mHasNumbered && mMark[v] == GONE)) {
+            mWeight[v] = -nv;
             mSource[rl++] = v;
         }
     }
@@ -841,7 +867,8 @@ void QuotientGraphB::beginElimination(std::int32_t pivot,
     for (const std::int32_t c : mAbsorbed) {
         mSource[rm] = -(c + 1);                     // the continuation, before it can be read
         forEachMember(c, [&](std::int32_t v) {
-            if (mMark[v] < mTag) { mMark[v] = mTag; emit(v); }
+            const std::int32_t nv = mWeight[v];        // one load; see the note above the walk
+            if (nv > 0) { mWeight[v] = -nv; emit(v); }
         });
     }
 
@@ -860,19 +887,19 @@ void QuotientGraphB::beginElimination(std::int32_t pivot,
     // their segments now hold part of the new clique, so nothing can be written into them to say
     // so. The stamp below is what says it.
 
-    // NO STAMPING PASS. `inClique` IS the tag the emit above already wrote on every member as it
-    // placed it, so a second walk of C[pivot] would re-mark a set that is already marked. genmmd
-    // has no such pass either: its `marker[nb] = tag` happens inside the loop that builds the
-    // reach, which is what this now matches.
+    // NO STAMPING PASS, AND NO `inClique`. Membership was written by the walk, in the sign of the
+    // weight, so there is nothing to stamp and nothing for a tag to say; the out-parameter went on
+    // 2026-08-17 when the prune started reading the sign. genmmd has no such pass either. Only
+    // `absorbed` survives, and that is this file's own scheme rather than a shared one: it marks
+    // the CLIQUE half of mMark, which the shared class no longer has at all.
     //
     // What kept the pass alive was the weighted clique size accumulated beside it. That value has
     // NO READER in this file: `cliqueWeight()` exists for the amd drivers on the shared class, and
     // this one carries the mmd driver alone, whose refresh computes `dg0` itself from the element
     // members. So the accumulation goes with the walk rather than moving into the emit.
     //
-    // The pivot carries the tag too, from `mMark[pivot] = mTag` above, so it reads as a member of
-    // its own clique. The prune tests `v == pivot` before it tests `inClique`, so nothing sees it.
-    inClique = mTag;
+    // The pivot reads negative from the negation above, so it reads as a member of its own
+    // clique, and the prune's `mWeight[v] <= 0` drops it with the rest.
     ++mTag;
     absorbed = mTag;
     const std::size_t cliqueBase = mRun.size() - 1;
@@ -880,9 +907,8 @@ void QuotientGraphB::beginElimination(std::int32_t pivot,
 }
 
 const std::vector<std::int32_t>& QuotientGraphB::eliminate(std::int32_t pivot) {
-    std::int32_t inClique = NIL;
     std::int32_t absorbed = NIL;
-    beginElimination(pivot, inClique, absorbed);
+    beginElimination(pivot, absorbed);
     const std::size_t cliqueBase = mRun.size() - 1;
     // C[pivot] IS the reach here: beginElimination wrote it there and nothing has trimmed it yet
     // (massEliminate does, and runs after). So the prune walks the arena block rather than a copy.
@@ -921,10 +947,13 @@ const std::vector<std::int32_t>& QuotientGraphB::eliminate(std::int32_t pivot) {
         std::uint32_t       kept          = 0;
         std::int32_t        heldVertex    = NIL;        // the first survivor, appended last
         for (std::uint32_t k = 0; k < adjacencySize; ++k) {
+            // ONE LOAD, THREE QUESTIONS. A negative weight is a member of the new clique, the
+            // pivot included, so the explicit pivot test goes with the membership test; a zero is
+            // a vertex a live merge folded away. The fourth question, whether v was numbered by
+            // the prepass, still needs mMark.
             const std::int32_t v = source[k];
-            if (v == pivot) continue;                  // no longer a variable
-            if (mMark[v] == inClique) continue;        // both ends inside the new clique
-            if (mMark[v] == GONE) continue;   // numbered by a prepass, gone for good
+            if (mWeight[v] <= 0) continue;             // in the new clique, the pivot, or merged
+            if (mHasNumbered && mMark[v] == GONE) continue;   // numbered by a prepass
             if (amdOrder && heldVertex == NIL) { heldVertex = v; continue; }
             source[kept++] = v;
         }
@@ -1001,9 +1030,20 @@ const std::vector<std::int32_t>& QuotientGraphB::finishElimination(std::int32_t 
 const std::vector<std::int32_t>& QuotientGraphB::massEliminate(std::int32_t pivot) {
     std::vector<std::int32_t>& merged = mMerged;   // scratch, kept for its capacity
     merged.clear();
+    // THE SIGNS COME BACK HERE, IN A PASS THAT ALREADY EXISTS, mirroring QuotientGraph. The walk
+    // below is the only other traversal of C[pivot], so the restore rides in it and costs no pass.
+    // The pivot goes first, since the merge at the end adds into it and both operands must be
+    // magnitudes by then. Every path through an elimination reaches this function: no mmd driver
+    // sets late mass elimination.
+    //
+    // The compaction still tests GONE rather than the zero weight, unlike the shared class. Same
+    // effect for one pass and no tag, which is what fold 4 was about; GONE is the clearer test
+    // here because this compaction follows a chain of links and never sees a weight otherwise.
+    mWeight[pivot] = -mWeight[pivot];
     // Walks C[pivot], which is still the full reach: the trim below is this function's own and
     // happens after the loop.
     forEachMember(pivot, [&](std::int32_t u) {
+        mWeight[u] = -mWeight[u];                          // live again, and positive
         // Under mVendoredListOrder the new clique sits at the FRONT of I[u] rather than the back,
         // so the single remaining entry is at the head of the incidence run either way: with A[u]
         // empty the run starts with I[u], and with one element there is only one position. The
@@ -1063,7 +1103,7 @@ const std::vector<std::int32_t>& QuotientGraphB::massEliminate(std::int32_t pivo
             // experiments/ordering, with `make amdorder` and all 283 assertions passing: Amd3
             // mass-eliminates late, so its own first read is legitimately of the untrimmed clique
             // and every check that watches Amd3 stayed green.
-            mCliqueWeight -= mWeight[u];
+            mCliqueWeight -= static_cast<std::uint32_t>(mWeight[u]);
             mWeight[pivot] += mWeight[u];
             mWeight[u] = 0;
         }
@@ -1115,7 +1155,7 @@ std::vector<std::int32_t> QuotientGraphB::orderAscending(
         for (std::int32_t u = mSuperNext[pivot]; u != NIL; u = mSuperNext[u]) slot[u] = -(pivot + 1);
         order[pos]  = pivot;
         slot[pivot] = static_cast<std::int32_t>(pos) + 1;   // where its first member goes
-        pos += mWeight[pivot];                              // the whole supervariable's room
+        pos += static_cast<std::uint32_t>(mWeight[pivot]);  // the whole supervariable's room
     }
 
     for (std::size_t v = 0; v < n; ++v) {                   // ascending, so the members are too

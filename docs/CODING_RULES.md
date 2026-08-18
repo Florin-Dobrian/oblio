@@ -353,12 +353,60 @@ softer layer: conventions for consistency, not correctness.
     share a type with the values it stands in for**, so one `NIL` in an array makes the array
     signed, and every index array follows for uniformity. `NIL = -1` is a `constexpr
     std::int32_t`, never `static_cast<std::size_t>(-1)`. E.g. `SparseMatrix::rowIdx`, the
-    permutation maps, the forest's parent/child/sibling/map arrays.
+    permutation maps, the forest's parent/child/sibling/map arrays. `NIL` is the common sentinel
+    and not the only one: `Buckets` carries `UNFILED = 0` and `OUTMATCHED = INT32_MIN` beside it,
+    which is genmmd's `bwd` encoding, so an index array may hold several so long as they are
+    disjoint by construction and written out at the declaration.
   - **A one dimensional size is a `std::uint32_t`, and nothing forces it signed.** It counts along
     one side of the matrix, is bounded by n, and has nothing to stand in for, so no sentinel and no
     sign bit spent. The length of an adjacency list is a size, not an index, however close to one
-    it looks. E.g. `QuotientGraph::mAdjacencySize`, `mIncidenceSize`, `mCliqueSize`, `mWeight`, the
+    it looks. E.g. `QuotientGraph::mAdjacencySize`, `mIncidenceSize`, `mCliqueSize`, the
     drivers' `degrees` and the arrays the scan structs bind.
+
+    **UNLESS AN ENCODING IN THE SIGN BUYS SPEED, and then it is a `std::int32_t`. Only then.** The
+    rule above rests on "has nothing to stand in for", so a field that acquires something to stand
+    in for changes type by the same reasoning rather than by exception. Four conditions, and all
+    four have to hold:
+
+    - **It is a decision per FIELD, never per category.** One field earning this says nothing about
+      its neighbors. `mAdjacencySize`, `mIncidenceSize` and `mCliqueSize` sit beside the one field
+      that has earned it and stay unsigned.
+    - **The encoding is stated at the declaration**, value by value, saying what each means and
+      which caller depends on it. The compiler checks none of it.
+    - **It is justified by MEASUREMENT, not by tidiness.** The point is to answer several questions
+      from one load in a hot loop, which is the array-count finding of 2026-08-15. An encoding that
+      reads well and measures nothing is a cost.
+    - **No range is lost, and it must be checked rather than assumed.** A quantity bounded by n
+      fits `std::int32_t`, n being capped at `MAX_IDX = 2^31 - 1`, so the sign bit was never
+      reachable. This does NOT contradict the half-range clause below, which is about ARITHMETIC
+      that can exceed n; spending a bit no value reaches costs nothing.
+
+    **The worked example, and the only field carrying this today, is `QuotientGraph::mWeight`**,
+    which becomes a `std::int32_t` so that `AMD_2`'s `Nv` encoding can be carried:
+
+    ```
+    mWeight[v] >  0    live, and not yet taken into the clique being built; the weight
+    mWeight[v] <  0    live, and taken into it this step; the weight is -mWeight[v]
+    mWeight[v] == 0    dead, by a hash merge or by mass elimination
+    ```
+
+    One load answers "is it dead", "is it already inside the new clique" and "what does it weigh",
+    where the unsigned form asks the first two of a separate mark array in the two hottest loops in
+    the ordering. **The two halves are different in kind and only one of them is general.** The SIGN
+    is a spare bit: it carries an orthogonal fact and the magnitude still carries the value, unlike
+    `NIL`, which destroys the value it replaces. The ZERO is a true sentinel and rests on no live
+    supervariable weighing less than one, which holds on the amd branch and NOT on the mmd one,
+    where `number()` leaves a prepass vertex live at weight one.
+
+    **The encoding leaves one value spare, `INT32_MIN`, AND IT CANNOT BE SPENT ON THE OBVIOUS
+    THING.** A weight is bounded by n, so the negated range is `[-(2^31 - 1), -1]` and `-2^31` is
+    unreachable from either direction. The tempting use is a fourth state for a vertex the mmd
+    prepass has numbered, which is the one case a positive weight fails to exclude. **It does not
+    work**: `QuotientGraph::orderAscending` reads `mWeight[pivot]` for every pivot to size a
+    supervariable's run in the permutation, and a prepass vertex IS a pivot, so its weight is
+    load-bearing and cannot be overwritten. Checked 2026-08-17 while folding `Mmd3C`, and it is why
+    that file keeps a mark array. The slot remains free for a state carried by a vertex whose weight
+    is never read, if one ever appears.
   - **A two dimensional size or position is a `std::size_t`.** It measures or offsets into an
     object sized by an AREA, so it is bounded by nnz rather than by n and routinely exceeds 2^31.
     E.g. `SparseMatrix::colPtr`, `QuotientGraph::mSourcePtr` and `mCliquePtr`, `nnz()`, and every

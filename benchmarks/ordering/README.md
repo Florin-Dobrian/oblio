@@ -53,11 +53,16 @@ make digest-record     # BEFORE touching anything
 make digest            # did any driver's output move?
 ```
 
-`digest-record` runs all eight of our drivers over 73 small grids, squares from 2 to 55 a side and
-cubes from 2 to 20, hashes each permutation and writes 584 lines keyed by driver and grid into
+`digest-record` runs all nine of our drivers over 73 small grids, squares from 2 to 55 a side and
+cubes from 2 to 20, hashes each permutation and writes 657 lines keyed by driver and grid into
 `.digest-baseline`. `digest` runs the same drivers over the same grids and compares. Half a second
 either way. It reports WHICH driver moved and at which size, which is what makes it useful for a
-change to `QuotientGraph`, where eight drivers read the code being edited.
+change to `QuotientGraph`, where nine drivers read the code being edited.
+
+**`MMD3C` joined on 2026-08-17** and is the reason the count moved from eight. It is transitional
+rather than permanent, so expect it to leave again: see `src/Mmd3C.cpp`. A baseline recorded before
+it existed has no row for it, and `digest` treats a driver it has no baseline for as new rather
+than as moved.
 
 ### What it is not, and this is the whole of how to use it
 
@@ -1356,6 +1361,33 @@ a constant factor and the constant factor is nearly spent. Nothing measured so f
 that scales, and the knee says memory rather than instructions. `MMD3` over the same quotient graph
 shows no growth on either family, which is the control that makes this an amd-branch property
 rather than a shared-infrastructure one.
+
+## The two storage prices, measured with encoding held equal, 2026-08-17
+
+Until 2026-08-17 the B layers carried different array encodings from their originals, so their time
+columns were the storage price plus whatever folds each was missing. With the folds ported into the
+shared class and into `Mmd3B`'s private copy, each pair differs in ONE thing, the clique layout, and
+the columns finally mean what they were built to mean. Identical permutations throughout.
+
+```
+                                              square    cubic
+MMD3B / MMD3   genmmd's dead segments COST     1.079    1.288
+AMD3B / AMD3   AMD_2's pooled workspace EARNS  0.914    0.855 at large n
+```
+
+Geometric means over the ladder; the amd figure splits, 1.078 at 256 a side and below against 1.155
+from 400 up, reproduced across two runs, so the pool's advantage GROWS with n where the mmd cost
+does not.
+
+**Ours is the middle of three, which was not the expected answer.** The reading everyone had was
+that the vendored schemes buy a space bound and cost time. genmmd's does. `AMD_2`'s buys the bound
+AND the time. Cachegrind says `Amd3B` takes 10 percent more simulated L1 read misses at both sizes
+measured, flat, so whatever the advantage is, it is not L1: the candidates are page behavior, one
+compacted pool against two large regions one of which only grows, and prefetch, a cursor walking
+forward being a stride hardware can follow where a scatter across an append-only arena is not.
+
+The cubic price for `MMD3B` is large and was not recorded anywhere before; the 4 to 10 percent
+figure elsewhere in this file is the SQUARE ladder only.
 
 ## The ladders as they now stand, and how to read the tables, 2026-08-16
 

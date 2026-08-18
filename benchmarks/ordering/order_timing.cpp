@@ -36,6 +36,7 @@
 #include "oblio/SparseMatrix.h"
 #include "oblio/Permutation.h"
 #include "oblio/Mmd3B.h"
+#include "oblio/Mmd3C.h"
 #include "oblio/Amd3.h"
 #include "oblio/Amd3B.h"
 #include "oblio/OrderEngine.h"
@@ -324,8 +325,16 @@ static double orderTimeFnB(const SparseMatrix<double>& A, OrderFn f) {
     return best;
 }
 
-static Permutation mmd3bPermutation(const SparseMatrix<double>& A) {
-    Permutation P;
+// MMD3C reaches the general free-function path above rather than getting a flag of its own, which
+// is what MMD3B has for historical reasons. `orderMmd3C` carries a defaulted `delta` so its type is
+// not OrderFn and it cannot be named where one is wanted; this forwards it, exactly as
+// test_order.cpp and order_digest.cpp do. Zero is what OrderEngine passes.
+static std::vector<std::int32_t> mmd3cDefault(const std::vector<std::size_t>&  colPtr,
+                                              const std::vector<std::int32_t>& rowIdx) {
+    return orderMmd3C(colPtr, rowIdx);
+}
+
+static Permutation mmd3bPermutation(const SparseMatrix<double>& A) {    Permutation P;
     P.setNewToOld(orderMmd3B(A.colPtr(), A.rowIdx()));
     return P;
 }
@@ -576,11 +585,21 @@ int main(int argc, char** argv) {
     // agrees, and a pair of columns that always match is a pair nobody reads. It was found by hand
     // when the cubic builder went in, which is exactly the way a standing check should not have to
     // be discovered. n = 216, so it costs nothing.
+    // 199 AND 201 BRACKET 200, and they are a probe rather than a rung: n moves one percent across
+    // the three, so a real trend is flat over them and an artifact is not. They stay until the
+    // artifact is gone.
+    //
+    // WHAT THEY ESTABLISHED, 2026-08-17. `MMD3C` reads about 1.33x `MMD3` at 200 a side and 1.03x
+    // to 1.10x at 199 and 201, while `MMD3` itself is flat across all three. So it is a
+    // SINGULARITY AT ONE n, not a band, and the two codes compute the same permutation, which
+    // rules out anything algorithmic. A cache line of padding on every size-n vector moved it
+    // nothing, and timing the same function at two positions in the run reproduced it at both, so
+    // data placement and heap history are out too.
     std::vector<int> sides;
     if (cubic) sides = branchOnly ? std::vector<int>{8, 10, 16, 20, 32, 40, 64, 80}
                                   : std::vector<int>{6, 12, 16, 20, 26};
-    else       sides = branchOnly ? std::vector<int>{32, 50, 64, 100, 128, 200, 256, 400, 512, 800,
-                                                    1024, 1600}
+    else       sides = branchOnly ? std::vector<int>{32, 50, 64, 100, 128, 199, 200, 201, 256, 400,
+                                                    512, 800, 1024, 1600}
                                   : std::vector<int>{32, 64, 100, 140};
     if (argc > firstSide) {
         sides.clear();
@@ -655,6 +674,12 @@ int main(int argc, char** argv) {
         {"MMD",  Ordering::MMD},  {"MMD1", Ordering::MMD1},
         {"MMD2", Ordering::MMD2}, {"MMD3", Ordering::MMD3},
         {"MMD3B", Ordering::MMD3, false, true},
+        // MMD3C IS TRANSITIONAL, unlike every other row here, and its time column is currently
+        // MMD3's own: at this commit it is a verbatim copy, which is what makes it the error-bar
+        // column docs/NEXT.md asks for, two readings of one code under identical conditions. Once
+        // it carries the amd folds the column becomes the price of those. Expect the row to leave
+        // when the file does. See src/Mmd3C.cpp.
+        {"MMD3C", Ordering::MMD3, false, false, mmd3cDefault},
         {"AMD",  Ordering::AMD},
 #ifdef OBLIO_AMD_RAW
         {"AMDraw", Ordering::AMD, true},
@@ -662,11 +687,23 @@ int main(int argc, char** argv) {
         {"AMD1", Ordering::AMD1},
         {"AMD2", Ordering::AMD2},
         {"AMD3", Ordering::AMD3},
+        // AMD3B JOINS THIS LIST 2026-08-17. It was in `amdMethods` alone, so `make scale-amd-2d`
+        // and `scale-amd-3d` showed it while `run2d` and `run3d` did not, which is not a
+        // distinction anything wanted: it is a permanent maintained alternative and its storage
+        // price is a standing figure. MMD3B was in both lists all along.
+        {"AMD3B", Ordering::AMD3, false, false, orderAmd3B},
     };
+    // A SECOND MMD3C COLUMN SAT HERE ON 2026-08-17 and has been removed, having answered. It was
+    // the same function under a second name, timed second where MMD3C is timed sixth, to separate
+    // the driver from its place in the run. Both read about 1.33x `MMD3` at 200 a side, 3.20 and
+    // 3.28, so the effect follows the DRIVER: not heap history, not position. Worth knowing before
+    // anyone adds such a control again, and the shape is worth reusing, one function under two
+    // names being the only way to hold everything but position fixed.
     const std::vector<Method> mmdMethods = {
         {"MMD",  Ordering::MMD},
         {"MMD2", Ordering::MMD2}, {"MMD3", Ordering::MMD3},
         {"MMD3B", Ordering::MMD3, false, true},
+        {"MMD3C", Ordering::MMD3, false, false, mmd3cDefault},
     };
     // The vendored routine first, since the gap columns below take the first entry as the baseline.
     // The B variants are left out of the AMD list: they are their originals' permutations on a

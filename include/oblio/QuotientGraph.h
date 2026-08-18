@@ -251,27 +251,13 @@ public:
     // triangles, a structurally present diagonal) hold by construction, which is why nothing here
     // symmetrizes, deduplicates or sorts. See the pass-5 discussion in
     // experiments/ordering/README.md.
-    // THE MARK'S WIDTH IS A CONSTRUCTOR ARGUMENT, and it is a sizing decision rather than a
-    // behaviour flag, which is why it is here and not a setter beside the other three.
-    //
-    // With `cliqueMarks` off, `mMark` is n and indexes vertices alone, which is all any mmd driver
-    // needs: genmmd stamps vertices and never cliques, and its refresh reaches a clique's members
-    // through the arena rather than testing the clique's own identity. With it on, `mMark` is 2n,
-    // vertices low and cliques at `cliqueBase() + c`, which is what the amd branch needs because
-    // supervariable detection tests I[u] == I[v], set equality over CLIQUE IDS.
-    //
-    // The two halves cannot share one space. A clique id IS the id of the dead pivot that formed
-    // it, so stamping a clique in the vertex half would write a live tag over a slot holding GONE,
-    // and a walk of an older clique still listing that pivot as a member would read it as live.
-    // Neither genmmd nor AMD_2 shares one array between the two kinds.
-    //
-    // It is an argument rather than always-2n so that the mmd drivers do not allocate and zero an
-    // n int32 they never read: the constructor cost of this class is not incidental, and the note
-    // beside Buckets' flag byte records a 12 percent ordering-time saving that was almost entirely
-    // construction.
+    // ONE MARK PER VERTEX, and no longer an argument. `mMark` was sized n or 2n on a constructor
+    // flag: the wide form existed so amd's supervariable detection could stamp CLIQUE ids at
+    // `cliqueBase() + c`, set equality over I[u] and I[v] needing somewhere to put them. Detection
+    // now stamps into the driver's own tagged `W`, which is what AMD_2 does, so nothing asks for
+    // the second half and `cliqueBase()` has gone with it. Removed 2026-08-17.
     QuotientGraph(const std::vector<std::size_t>&  colPtr,
-                  const std::vector<std::int32_t>& rowIdx,
-                  bool cliqueMarks = false);
+                  const std::vector<std::int32_t>& rowIdx);
 
     std::size_t size() const           { return mRun.size(); }
 
@@ -302,9 +288,6 @@ public:
     // what genmmd's `marker` is: `mmdelm` stamps it at level `tag` and `mmdupd` at level
     // `mt = tag + md0`, one array and one counter serving both. One counter is what makes it
     // safe, since two tags drawn from it can never be equal.
-    // The stride between the two halves of `mMark`, and the one place a COUNT becomes an offset
-    // in the INDEX space. Meaningful only when the graph was built with cliqueMarks.
-    std::int32_t cliqueBase() const              { return static_cast<std::int32_t>(mRun.size()); }
 
     std::int32_t advanceTag()                    { return ++mTag; }
     std::int32_t mark(std::int32_t v) const      { return mMark[v]; }
@@ -372,7 +355,12 @@ public:
     // have to be: its members are a chain rather than a list, so the size is no longer free to
     // read. Caching it purely for locality was measured earlier and made no difference at all,
     // 2.77x against 2.76x, so the array is here for the chain and not for the cache.
-    std::uint32_t weight(std::int32_t u) const { return mWeight[u]; }
+    // The MAGNITUDE, so that a driver never has to know whether the sign encoding is in force. It
+    // is not, at this commit, and the cast is a widening of a value that is always positive.
+    std::uint32_t weight(std::int32_t u) const {
+        const std::int32_t w = mWeight[u];
+        return static_cast<std::uint32_t>(w < 0 ? -w : w);
+    }
 
 
     // reach(u), as above. Not const: the mark array and its tag are scratch, and threading them
@@ -538,7 +526,7 @@ private:
     // between them the graph is half eliminated: the clique is written and stamped but the reached
     // vertices still name the pivot as a variable. Nothing outside may observe that state, which is
     // why the seam is two private calls rather than a public begin and end.
-    void beginElimination(std::int32_t pivot, std::int32_t& inClique);
+    void beginElimination(std::int32_t pivot);
 
     const std::vector<std::int32_t>& finishElimination(std::int32_t pivot);
 
@@ -655,15 +643,29 @@ private:
     // three arrays allocated once: the next member, the last one (so an absorption appends in
     // O(1) and the members keep their order, which the emitted permutation depends on), and the
     // count, which a chain no longer gives away for free.
-    // `mWeight` is one dimensional and so `std::uint32_t`, and the bound is not the term count but
-    // DISJOINTNESS: the weights partition the original vertices, so a sum of them over a set of
-    // distinct vertices is at most n however many terms it has. That covers every accumulation of
-    // weights in the ordering, in `reachableWeight`, in the clique weight below, and in the
+    // `mWeight` is a one dimensional size, and the bound on an accumulation of weights is not the
+    // term count but DISJOINTNESS: the weights partition the original vertices, so a sum over a set
+    // of distinct vertices is at most n however many terms it has. That covers every accumulation
+    // of weights in the ordering, in `reachableWeight`, in the clique weight below, and in the
     // drivers' bound and refresh passes. An accumulation over an unbounded number of one
     // dimensional terms would otherwise need a wider type, and this is the exception to that.
+    //
+    // AND IT IS `std::int32_t` RATHER THAN `std::uint32_t`, 2026-08-17, WHICH IS THE RULE DERIVING
+    // AND NOT AN EXCEPTION TO IT. A one dimensional size is unsigned because it has nothing to
+    // stand in for; this one is about to have. `AMD_2`'s `Nv` carries three facts in one field,
+    // positive is the weight, negative means already taken into the clique being built, zero means
+    // dead, so one load answers what two arrays answer here. The sign is a SPARE BIT rather than a
+    // sentinel: a weight is bounded by n and n is capped at `MAX_IDX`, so no representable value is
+    // given up, and the magnitude still carries the number. See docs/CODING_RULES.md, which states
+    // the four conditions under which a size may go signed, and docs/DESIGN_DECISIONS.md
+    // (2026-08-17).
+    //
+    // AT THIS COMMIT NOTHING NEGATES IT. The type is landed on its own so that the encoding, which
+    // changes what several hot loops read, arrives against a tree where the width is already
+    // settled and the digest has already said so.
     std::vector<std::int32_t>  mSuperNext;
     std::vector<std::int32_t>  mSuperLast;
-    std::vector<std::uint32_t> mWeight;
+    std::vector<std::int32_t>  mWeight;
     std::uint32_t              mCliqueWeight = 0;  // see cliqueWeight(); per-pivot, not per-vertex
 
     std::vector<std::int32_t> mMerged;   // scratch for the vertices an elimination merges away
@@ -686,6 +688,22 @@ private:
     // Whether eliminate() stops at the prune and leaves mass elimination to the caller. Off by
     // default. See the setter, and massEliminate() for the half it hands over.
     bool mLateMassElimination = false;
+
+    // WHETHER ANY VERTEX HAS BEEN NUMBERED WITHOUT BEING ELIMINATED, which is what `number()` does
+    // and only an mmd prepass does. False for a whole amd run.
+    //
+    // IT GUARDS A LOAD RATHER THAN A DECISION. Since the sign of the weight took over membership
+    // and liveness, `mMark[v] != GONE` survives in the adjacency walk and in both prunes for one
+    // case alone: a prepass vertex keeps a positive weight and sits in every neighbor's adjacency,
+    // so a positive weight does not mean live THERE. Amd cannot produce such a vertex, so without
+    // this flag its three drivers pay a second scattered load per adjacency element for a
+    // condition that can never hold. `mHasNumbered &&` short circuits before the load, and the
+    // branch is perfectly predicted, being constant for the whole run.
+    //
+    // A FLAG AND NOT A CONSTRUCTOR ARGUMENT, deliberately: it is a fact about what has happened,
+    // discovered by `number()` being called, not a mode a caller selects. Nothing has to be kept
+    // in step, and a driver that gains a prepass later gets the correct behavior for free.
+    bool mHasNumbered = false;
 
     std::vector<std::int32_t> mMark;     // membership scratch, read against mTag
     std::int32_t              mTag = 0;

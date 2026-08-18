@@ -2,6 +2,8 @@
 #include "oblio/Permutation.h"
 #include "oblio/OrderEngine.h"
 #include "oblio/Mmd3B.h"
+#include "oblio/Mmd3C.h"
+#include "oblio/Amd3B.h"
 #include "test_util.h"
 #include <cstdint>
 #include <iostream>
@@ -12,24 +14,36 @@ static void ck(bool ok,const std::string& n){ std::cout<<"  "<<(ok?"PASS  ":"FAI
 template<class Val> static void checkOrder(const SparseMatrix<Val>& A, Ordering m, const std::string& lbl){
     OrderEngine e(m); Permutation P; bool ok=e.compute(A,P);
     ck(ok && P.size()==A.size() && P.validate(), lbl); }
-// THE B LAYERS ARE REACHED AS FREE FUNCTIONS, not through the Ordering enum, because a B is not
-// an ordering a caller should choose: it is the SAME ordering computed on a different schedule,
-// so it exists to be measured against its original. See OrderEngine.h. Every check they had
-// through the enum is kept here unchanged in what it asserts; only the call changes.
+// THE NON-ENUM LAYERS ARE REACHED AS FREE FUNCTIONS, not through the Ordering enum, because none
+// of them is an ordering a caller should choose: each is the SAME ordering computed differently,
+// so each exists to be measured against its original. See OrderEngine.h.
 //
 // And these are the strongest oracles in the ordering suite. The vendored pairs and the
-// digit-suffixed pairs are different orderings and can only be compared on fill, where a B pair
-// must agree ENTRY FOR ENTRY, and a difference is a defect rather than a tie-break. That matters
-// more than usual for these two: they have no prototype in experiments/ordering and are not in
-// its PORTED list, so this is the only thing checking them at all.
+// digit-suffixed pairs are different orderings and can only be compared on fill, where one of these
+// must agree with its original ENTRY FOR ENTRY, and a difference is a defect rather than a
+// tie-break. That matters more than usual here: none of the three has a prototype in
+// experiments/ordering or appears in its PORTED list, so this is the only thing checking them at
+// all, and `make digest` in benchmarks/ordering is the only other place any of them is exercised.
+//
+// ALL THREE ARE CHECKED ON EVERY MATRIX, deliberately and uniformly. Mmd3B ran on five of the seven
+// until 2026-08-17, missing the 5x5 diagonal and the complex arrow, and Amd3B had no assertion
+// anywhere. The two absent matrices are the ones the experiment's own graphs cannot produce: n
+// isolated vertices, where every degree is zero and nothing ever merges, and the complex scalar
+// type, which exercises the structural overloads on a second instantiation.
 using OrderFn = std::vector<std::int32_t>(*)(const std::vector<std::size_t>&,
                                              const std::vector<std::int32_t>&);
-// `orderMmd3B` takes a third argument, `delta`, with a default, so its type is not OrderFn and it
-// cannot be named directly where one is wanted. Forwarded rather than widening OrderFn: the helpers
-// exist to compare a free function against an enum member, and delta is Mmd3B's business.
+// `orderMmd3B` and `orderMmd3C` take a third argument, `delta`, with a default, so their type is
+// not OrderFn and neither can be named directly where one is wanted. Forwarded rather than widening
+// OrderFn: the helpers exist to compare a free function against an enum member, and delta is the
+// mmd layers' business. `orderAmd3B` needs no forwarder, the amd branch having no delta.
 static std::vector<std::int32_t> mmd3bDefault(const std::vector<std::size_t>&  colPtr,
                                               const std::vector<std::int32_t>& rowIdx) {
     return orderMmd3B(colPtr, rowIdx);
+}
+
+static std::vector<std::int32_t> mmd3cDefault(const std::vector<std::size_t>&  colPtr,
+                                              const std::vector<std::int32_t>& rowIdx) {
+    return orderMmd3C(colPtr, rowIdx);
 }
 
 template<class Val> static void checkOrderFn(const SparseMatrix<Val>& A, OrderFn f,
@@ -58,7 +72,14 @@ int main(){
         // The vendored MMD and AMD are checked only when private/ supplies them; see
     // docs/TESTING_SPECIFICATION.md. Fourteen assertions here are theirs, one pair on each of the
     // arrow, the diagonal and the complex arrow and one pair per size in the tridiagonal loop, so
-    // the total is 77 with that directory and 63 without. Nothing else changes.
+    // the total is 87 with that directory and 73 without. Nothing else changes.
+    //
+    // COUNTS CORRECTED 2026-08-17, having been wrong here and in three other files. This comment
+    // said 77 and 63, README.md, CLAUDE.md and docs/TESTING_SPECIFICATION.md said 91 and 77, and
+    // the suite ran 69 and 55. Retiring AMD1B and AMD2B on 2026-08-15 removed fourteen sameness
+    // assertions and, since the pair also left the enum, fourteen validity ones, and Mmd3B added
+    // six back. Nothing detected it because every figure was internally consistent and the suite
+    // passes whatever a comment claims.
     std::cout<<"=== OrderEngine tests (AMD / MMD lineages, full-symmetric A) ===\n";
     { std::vector<std::size_t> cp={0,6,8,10,12,14,16};
       std::vector<std::int32_t> ri={0,1,2,3,4,5, 0,1, 0,2, 0,3, 0,4, 0,5};
@@ -74,12 +95,22 @@ int main(){
       checkOrder(A,Ordering::AMD1,"arrow 6x6      : AMD1 valid");
       checkOrder(A,Ordering::AMD2,"arrow 6x6      : AMD2 valid");
       checkOrder(A,Ordering::AMD3,"arrow 6x6      : AMD3 valid");
-      // THE ONE REMAINING B LAYER. Mmd3B is Mmd3 on the vendored clique storage scheme and must
-      // reproduce its permutation entry for entry, which is the whole of what makes it a
-      // measurement rather than a second ordering. The two AMD B layers that used to be checked
-      // here were retired on 2026-08-16 when their schedule moved into their originals.
+      // THE THREE NON-ENUM LAYERS, each of which must reproduce its original entry for entry,
+      // which is the whole of what makes it a measurement rather than a second ordering. Mmd3B is
+      // Mmd3 on genmmd's clique storage and Amd3B is Amd3 on AMD_2's, both permanent; Mmd3C is
+      // Mmd3 on the production layout and is transitional, carrying the amd folds onto the mmd
+      // side. The two AMD B layers that used to be checked here were retired on 2026-08-16 when
+      // their schedule moved into their originals.
+      //
+      // Validity is asserted once per layer, here, and sameness on every matrix below. Sameness
+      // against an original already checked valid implies validity, so the arrow's three are what
+      // exercise the free-function path through setNewToOld rather than the comparison.
       checkOrderFn(A,mmd3bDefault,"arrow 6x6      : MMD3B valid");
-      checkSameOrderFn(A,Ordering::MMD3,mmd3bDefault,"arrow 6x6      : MMD3B == MMD3"); }
+      checkOrderFn(A,mmd3cDefault,"arrow 6x6      : MMD3C valid");
+      checkOrderFn(A,orderAmd3B,  "arrow 6x6      : AMD3B valid");
+      checkSameOrderFn(A,Ordering::MMD3,mmd3bDefault,"arrow 6x6      : MMD3B == MMD3");
+      checkSameOrderFn(A,Ordering::MMD3,mmd3cDefault,"arrow 6x6      : MMD3C == MMD3");
+      checkSameOrderFn(A,Ordering::AMD3,orderAmd3B,  "arrow 6x6      : AMD3B == AMD3"); }
     for(std::size_t size : {1u,2u,10u,100u}){ auto A=tridiagFull(size);
       reqSym(A,"tridiag n="+std::to_string(size)+" : symmetric");
 #ifdef OBLIO_VENDORED_ORDERINGS
@@ -93,7 +124,11 @@ int main(){
       checkOrder(A,Ordering::AMD2,"tridiag n="+std::to_string(size)+" : AMD2 valid");
       checkOrder(A,Ordering::AMD3,"tridiag n="+std::to_string(size)+" : AMD3 valid");
       checkSameOrderFn(A,Ordering::MMD3,mmd3bDefault,
-                       "tridiag n="+std::to_string(size)+" : MMD3B == MMD3"); }
+                       "tridiag n="+std::to_string(size)+" : MMD3B == MMD3");
+      checkSameOrderFn(A,Ordering::MMD3,mmd3cDefault,
+                       "tridiag n="+std::to_string(size)+" : MMD3C == MMD3");
+      checkSameOrderFn(A,Ordering::AMD3,orderAmd3B,
+                       "tridiag n="+std::to_string(size)+" : AMD3B == AMD3"); }
     { std::size_t size=5; std::vector<std::size_t> cp(size+1); std::vector<std::int32_t> ri(size); std::vector<double> v(size,1.0);
       for(std::size_t j=0;j<size;++j){cp[j]=j; ri[j]=static_cast<std::int32_t>(j);} cp[size]=size;
       SparseMatrix<double> A(size,cp,ri,v);
@@ -107,7 +142,13 @@ int main(){
       checkOrder(A,Ordering::MMD3,"diagonal 5x5   : MMD3 valid");
       checkOrder(A,Ordering::AMD1,"diagonal 5x5   : AMD1 valid");
       checkOrder(A,Ordering::AMD2,"diagonal 5x5   : AMD2 valid");
-      checkOrder(A,Ordering::AMD3,"diagonal 5x5   : AMD3 valid"); }
+      checkOrder(A,Ordering::AMD3,"diagonal 5x5   : AMD3 valid");
+      // n ISOLATED VERTICES, where every degree is zero and nothing ever merges. None of the three
+      // layers was checked on this shape until 2026-08-17, and it is the one the experiment's own
+      // graphs cannot produce: all seven of them are connected and none is trivial.
+      checkSameOrderFn(A,Ordering::MMD3,mmd3bDefault,"diagonal 5x5   : MMD3B == MMD3");
+      checkSameOrderFn(A,Ordering::MMD3,mmd3cDefault,"diagonal 5x5   : MMD3C == MMD3");
+      checkSameOrderFn(A,Ordering::AMD3,orderAmd3B,  "diagonal 5x5   : AMD3B == AMD3"); }
     { std::vector<std::size_t> cp={0,6,8,10,12,14,16};
       std::vector<std::int32_t> ri={0,1,2,3,4,5, 0,1, 0,2, 0,3, 0,4, 0,5};
       std::vector<std::complex<double>> v(ri.size(),{1,0}); SparseMatrix<std::complex<double>> C(6,cp,ri,v);
@@ -121,7 +162,13 @@ int main(){
       checkOrder(C,Ordering::MMD3,"arrow complex  : MMD3 valid");
       checkOrder(C,Ordering::AMD1,"arrow complex  : AMD1 valid");
       checkOrder(C,Ordering::AMD2,"arrow complex  : AMD2 valid");
-      checkOrder(C,Ordering::AMD3,"arrow complex  : AMD3 valid"); }
+      checkOrder(C,Ordering::AMD3,"arrow complex  : AMD3 valid");
+      // THE SECOND SCALAR TYPE. An ordering reads only the pattern, so the permutation must be the
+      // real arrow's; what this exercises is the structural overloads through a second
+      // instantiation of the templated helpers.
+      checkSameOrderFn(C,Ordering::MMD3,mmd3bDefault,"arrow complex  : MMD3B == MMD3");
+      checkSameOrderFn(C,Ordering::MMD3,mmd3cDefault,"arrow complex  : MMD3C == MMD3");
+      checkSameOrderFn(C,Ordering::AMD3,orderAmd3B,  "arrow complex  : AMD3B == AMD3"); }
     std::cout<<"\nOrderEngine tests: "<<pass<<"/"<<(pass+fail)<<" passed\n";
     return fail==0?0:1;
 }

@@ -329,10 +329,10 @@ src/                , method bodies + explicit instantiations (flat layout)
                       One .cpp per header, plus the vendored orderings, which have none:
   Amd.cpp           , AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
   Mmd.cpp           , MMD ordering (Sparspak/Liu, via Oblio 0.9)
-tests/              , test suites (283 assertions; see docs/TESTING_SPECIFICATION.md)
+tests/              , test suites (279 assertions; see docs/TESTING_SPECIFICATION.md)
   smoke.cpp                    5,  quick end-to-end sanity
-  test_order.cpp              91,  the ten non-trivial orderings, and each B pair against its
-                                   original entry for entry
+  test_order.cpp              87,  the eight enum orderings, and each of the three non-enum
+                                   layers against its original entry for entry
   test_permutation.cpp        11,  permutation maps
   test_forest.cpp             29,  elimination forest and supernodes
   test_symfactor.cpp          29,  symbolic factorization
@@ -345,6 +345,11 @@ examples/           , eight usage examples, named example_* as the tests are nam
   example_analysis.cpp         , example_indefinite.cpp
   example_reuse.cpp            , example_amalgamation.cpp
   example_pipeline_real.cpp    , example_pipeline_complex.cpp
+tools/              , standalone instruments, each answering one question, built by hand
+  hook_amd.py       , generates a hooked copy of the vendored AMD for the alignment checks
+  sweep.cpp         , walks CONSECUTIVE grid sides and flags any whose cost per vertex stands
+                      above both neighbors, which is how a cache self-aliasing point shows
+                      itself; the scaling ladder cannot see one, visiting twelve sizes
 benchmarks/         , measurement against the current tree, expected to keep compiling as it moves
   ordering/         , one phase against itself: what each ordering costs, in time and in fill
   pipeline/         , the phases against each other, and how the cost grows with problem size
@@ -436,7 +441,7 @@ Done:
 - [x] Namespaced headers (`include/oblio/`), explicit instantiation throughout
 - [x] Validated against Oblio 0.9 as oracle; end-to-end residual at machine precision
 - [x] `DirectSolver<Val>`, the top-level analyze / factor / solve driver
-- [x] 283 assertions across 8 suites
+- [x] 279 assertions across 8 suites
 - [x] Dynamic LDL, threshold 1x1 / 2x2 pivots: all three traversals, delayed columns and all, at
       machine precision. Non-root supernodes follow Ashcraft, Grimes and Lewis (1998) Figure 3.4
       with the Figure 3.3 acceptance test; roots, which cannot delay, use bounded Bunch-Kaufman

@@ -1,83 +1,103 @@
-# NEXT: the amd branch is past the vendored routine, and the port to mmd is the next piece
+# NEXT: the fold set is closed on both branches, and the layout matrix is what remains
 
-**REWRITTEN AT THE TOP ON 2026-08-16.** The section immediately below is the current state;
-everything under "Priority" and after is older and several of its items are now closed, marked
-where they are. The durable account of this session is `docs/DESIGN_DECISIONS.md` (2026-08-16),
-`benchmarks/ordering/README.md` and `experiments/ordering/README.md`; this file only points at
-them.
+**REWRITTEN AT THE TOP ON 2026-08-17.** The section immediately below is the current state;
+everything under "Other things open" and after is older and several of its items are now closed,
+marked where they are. The durable account is `docs/DESIGN_DECISIONS.md` (2026-08-16 and
+2026-08-17), `benchmarks/ordering/README.md` and `experiments/ordering/README.md`; this file only
+points at them.
 
-## Where the amd branch stands, 2026-08-16
+## Where both branches stand, 2026-08-17
 
-**`AMD3B` is faster than the vendored routine at the top of the square ladder**, 0.93x at 1024 and
-0.97x at 1600, and its slope is below `AMD_2`'s: `time ~ nnz(A)^1.056` against 1.080 on the
-unaligned series, where `AMD3` is 1.088. The excess growth this file has been chasing is now
-negative. `AMD3` itself still reads 1.24 to 1.73 and has none of the work below.
+**The five array folds `Amd3B` found are ported and the set is closed.** Four landed: the sign of
+the weight as the membership mark, mass elimination merging before it compacts, and the restore, all
+three in `QuotientGraph` and so in every driver; and supervariable detection stamping into `w`, in
+`Amd3` and `Amd2`. `Amd1` needed nothing, having no detection. The fifth cannot port and the reason
+is in `src/Amd3B.cpp`'s header.
 
-**What did it was five folds of ONE shape**, and the shape is the finding: not many arrays against
-one, but a second array consulted in a conditional where the vendored code answers from a load it is
-already making. `AMD_2`'s `Nv[j]` is positive-is-the-weight, negative-is-in-the-new-element,
-zero-is-absorbed; we read `mMark[v]` for the tests and `mWeight[v]` for the value. Full account in
-`docs/DESIGN_DECISIONS.md` (2026-08-16, later still).
+**What the folds measured is a wash, and that is the result rather than a disappointment.** On the
+mmd side, +1.2 percent instructions, -1.5 percent writes, -2 percent read misses. On the amd side
+the medians moved inside the noise. What they bought is not speed: `Amd3` and `Amd2` no longer
+allocate a mark of their own, `mMark` is n everywhere, and `Amd3B` and `Amd3` now differ in exactly
+one thing, which is why the storage numbers below mean something.
 
-**The storage change in the same file is a wash** and should not port: 2.6 percent fewer reads, 6
-to 8 percent more misses, both constant, and it drags a garbage collector behind it.
+**The storage prices, each measured with encoding held equal, and they point opposite ways.**
 
-### The layout matrix, which is where the next few days go
+```
+                              square        cubic
+MMD3B / MMD3   genmmd's dead segments cost    1.079        1.288
+AMD3B / AMD3   AMD_2's pool EARNS             0.914        0.855 at large n
+```
+
+Both files are their original with identical encoding and identical permutations; only the clique
+layout differs. So ours is not bad, it is the middle of three. The cubic figure for `MMD3B` is
+large, stable across two runs, and was not recorded anywhere before.
+
+### What is next, in the order I would take it
+
+**1. `Mmd3C` rebuilt on `AMD_2`'s pool.** The file exists but is TRANSITIONAL: it is mmd on the
+production arena, built to work the folds out on the mmd side without disturbing the shared class,
+which it did. It is to be replaced by the real cell, ported from `Amd3B`'s storage rather than from
+the file it replaces. Cheapest of the two remaining cells, and it tests the interesting claim: if
+mmd on the pool comes in below 1.0 against `MMD3`, the pool wins on both algorithms and our arena is
+the thing to change. Drop the `kPad` knob with the rewrite; the question it was built for is closed.
+
+**2. `Amd3C` on genmmd's dead segments**, which completes the matrix. **It has a real design problem
+and it is not small:** aggressive absorption. genmmd's scheme works because a clique dies one way,
+absorbed into the new one, so its block is already part of the chain the pivot is writing into.
+`absorb()` kills cliques that are not in `I[pivot]`, whose segments are nowhere near that chain, and
+there is no free cursor and no collector to reclaim them, so they would leak and the `O(n + m)`
+bound would go. Plausible fix: link an absorbed clique's segment into the pivot's chain as extra
+room at the moment it is absorbed, which is where `AMD_2` writes `Pe[e] = FLIP(pivot)`. Whether that
+link can be written while the walk still reads is the invariant `Mmd3B`'s emit already turns on.
+
+**3. The suffixes now mean something**, recorded beside the matrix in
+`docs/DESIGN_DECISIONS.md` (2026-08-16): **B is a driver on its OWN branch's vendored layout, C is a
+driver on the OTHER branch's.** Two consequences: each C file is ported from the sibling on the same
+LAYOUT, not the same branch; and any eventual sharing of a quotient graph pairs down the columns,
+`Mmd3B` with `Amd3C` and `Mmd3C` with `Amd3B`. That is worth doing only once both cells are
+measured, since a shared class is exactly what made one fold move four columns at once.
 
 ```
                  our arena      genmmd's layout    AMD_2's layout
-mmd ladder       Mmd3           Mmd3B              Mmd3C   PLANNED
+mmd ladder       Mmd3           Mmd3B              Mmd3C   TRANSITIONAL, to be rebuilt
 amd ladder       Amd3           Amd3C   PLANNED    Amd3B
 ```
 
-Both existing B layers sit on the DIAGONAL, each aligned with its own vendored routine, which is
-what a same-lineage differential needs and is why they were built. The consequence is that every
-reading is a diagonal one and cannot separate layout from algorithm. With four cells the layout
-effect reads down a column and the algorithm effect across a row, and it becomes possible to ask
-whether genmmd's layout suits amd better, or `AMD_2`'s suits mmd better, which nobody has asked.
+### Closed on 2026-08-17, so that nobody reopens them
 
-It also matters for the port immediately below: the three shared-class folds have to work under
-every layout, and four cells exercise all three layouts against both algorithms.
+**The port plan that used to fill this section.** It said to start with `eliminated()` "since it is
+smallest and tests the liveness argument"; that is the one fold that cannot port, and not for the
+reason anyone expected. A zero weight means ABSORBED rather than eliminated, nothing zeroing a
+pivot's weight, and the only available gate is `mHasNumbered`, which is false for `Mmd1`, whose
+refresh filters a list that can hold an eliminated pivot. It is `Mmd1` rather than the prepass.
 
-**`Amd3C` is the cheap one**, a storage swap into a driver that is otherwise settled. **`Mmd3C`
-carries the port's blocker** and is described under it. Order is a real choice and is open; see
-`docs/DESIGN_DECISIONS.md` (2026-08-16, the layout matrix).
+**The per-call lifetime problem**, which that section called the port's blocker. It is not one:
+`massEliminate` already walks C[pivot], so the restore rides there and costs no pass. What DID
+resist is `reachableWeight`, folded and then reverted the same day at +3 percent instructions and
++4 percent reads with the misses flat: it is called per refreshed vertex and nothing walks its
+result again, so a restore there is a new traversal. That one is a measured negative; do not retry.
 
-### The port, which is the next piece of work
+**"It could make mmd faster."** It did not, see the wash above.
 
-Three of the five are in the SHARED class and so reach mmd; two are `Amd3` driver code.
+**Whether the shared class has self-aliasing points.** `tools/sweep.cpp` walks consecutive grid
+sides and flags any standing above both neighbors. Over 190 to 210 on alpamayo neither `MMD3` nor
+`AMD3` has one, and side 200 is unremarkable in both. The point that prompted it belongs to
+`Mmd3C`'s allocations alone. One band of 21 sides, so other n are unobserved rather than excluded.
 
-| | lives in | mmd sees it |
-|---|---|---|
-| weight sign as the membership mark | `reachableSet`, `eliminate` | yes, and in mmd's hottest loop |
-| `eliminated()` from a zero weight | `QuotientGraph` | yes |
-| massEliminate merges before compacting | `QuotientGraph` | yes |
-| restore inside the bound pass | `Amd3` | no |
-| detection stamp into `w` | `Amd3` | no |
+**The assertion counts, which four files had wrong by 22.** Now 279 with `private/` and 265 without,
+measured by running every suite rather than by arithmetic. `docs/TESTING_SPECIFICATION.md` carries
+the account. The three non-enum layers are checked uniformly, 8 assertions each.
 
-**It could make mmd faster.** `Mmd3`'s degree refresh is the same walk, `mMark[v] < mTag` then
-`mWeight[v]`, and that is `mmdupd`, where genmmd spends most of its time. `MMD3` carries a constant
-of 1.04 to 1.20 against genmmd and no growth term at all, so the fold would attack the constant.
+**`mWeight` is `std::int32_t`**, reversing one line of the 2026-08-11 narrowing. That is the rule
+deriving rather than an exception: a size is unsigned because it has nothing to stand in for, and
+this one now has. Four conditions in `docs/CODING_RULES.md`.
 
-**THE LIFETIME IS WHAT MAKES IT HARDER, NOT THE ENCODING.** Amd calls `reachableSet` once per pivot
-and restores in a pass it already makes. Mmd calls `reachableSize` and `reachableWeight` PER VERTEX
-in the refresh, so each call must clean up after itself. The plan is an `Mmd3C`, on the precedent of
-`AMD3C`, which existed once to carry a re-schedule until it was proved and then went.
-
-**Two quotient graphs would be the failure, not the fallback.** The amd folds were cheap precisely
-because the shared class had already paid for the encodings; split it and the next fold has to be
-discovered twice.
-
-Order: the three shared changes one at a time, each verified by the digest and measured on mmd
-after each, starting with `eliminated()` since it is smallest and tests the liveness argument
-before anything depends on it. Then `Amd3` takes its two.
-
-**THE DIGEST IS `make digest-record` THEN `make digest`** in `benchmarks/ordering`, added
-2026-08-16: eight drivers over 73 small grids, half a second, and it names which driver moved.
-RECORD BEFORE TOUCHING ANYTHING, because it detects change rather than correctness and a baseline
-taken after a break certifies the break. Re-anchor with `make amdorder` and `make mmdorder` at both
-ends of the work; those are what say correct. Its section in `benchmarks/ordering/README.md` has
-the rest.
+**THE DIGEST IS `make digest-record` THEN `make digest`** in `benchmarks/ordering`: nine drivers
+over 73 small grids, half a second, and it names which driver moved. RECORD BEFORE TOUCHING
+ANYTHING, because it detects change rather than correctness and a baseline taken after a break
+certifies the break. It earned itself twice this session, catching a sign error in the amd prune
+within seconds of the fold landing. Re-anchor with `make amdorder` and `make mmdorder` at both ends;
+those are what say correct.
 
 ### Other things open
 
@@ -859,12 +879,17 @@ looked at:
   no dead size-n array at that moment. `Amd2B` has `hashNext`, dead until filing, and `Amd1B`
   appears to have nothing. **Entry 4's split is now the third thing it has bought by accident**,
   after `Amd3`'s immunity to the hash-bucket order and its ability to take the key fusion at all.
-- **The tagged W consolidation never propagated.** `Amd1`, `Amd1B`, `Amd2` and `Amd2B` all carry
-  `outside(size)` plus a mark plus a clearing pass, `for (c : touchedCliques) outside[c] = 0`,
-  where `Amd3` carries one `w` and invalidates the lot with a single addition. That is one size-n
-  array and one pass per pivot, in four drivers, and it is iteration 15's change which landed in
-  `Amd3` alone as `AMD3C`. Care needed in `Amd2` and `Amd2B`: their `mark` is 2n and serves the
-  hash stamp as well, so only `outside` folds away.
+- **The tagged W consolidation DID propagate, and this item is stale, 2026-08-17.** It said `Amd1`,
+  `Amd1B`, `Amd2` and `Amd2B` all carry `outside(size)` plus a mark plus a clearing pass where
+  `Amd3` carries one `w`. `Amd1` and `Amd2` both carry the tagged `w` and `wflg` today, and the two
+  B layers it names were retired on 2026-08-16. Finding this out is what made the supervariable
+  stamp fold into `Amd2` a direct application rather than a prerequisite: the `w` it needed to
+  stamp into was already there.
+- **AND THE 2n MARK IS GONE FROM BOTH AMD DRIVERS THAT HAD ONE, 2026-08-17.** `Amd3` and `Amd2`
+  now stamp supervariable detection into `w`, which is `AMD_2`'s `W [Iw [p]] = wflg`, so neither
+  allocates a mark of its own and neither asks the shared class for clique marks. The
+  `cliqueMarks` constructor argument and `cliqueBase()` went with them. `Amd1` has no detection at
+  all and needed nothing.
 - **The key fusion is NOT available to `Amd2` and `Amd2B`**, checked on 2026-08-10 and recorded
   under item 2b's neighbors: their key pass walks `C[p]` backward against a forward bound that
   also refiles, so head insertion into both structures wants opposite directions. `Amd1` and
@@ -955,7 +980,11 @@ which is the rule doing its job rather than the rule being slack.
 
 **Bucket 3, narrows to `std::uint32_t`.** In `QuotientGraph`, four arrays and one scalar, all
 bounded by n: `mAdjacencySize`, `mIncidenceSize`, `mCliqueSize`, `mWeight`, and the per-pivot
-`mCliqueWeight`. The accessors over them move too, `adjacencySize`, `incidenceSize`, `cliqueSize`,
+`mCliqueWeight`. **`mWeight` IS NOW WRONG IN THIS LIST, 2026-08-17.** It goes back to
+`std::int32_t` so that `AMD_2`'s `Nv` encoding can ride in its sign, which is the rule deriving
+correctly rather than an exception to it: the unsigned case rests on having nothing to stand in for,
+and that field now has. See `docs/DESIGN_DECISIONS.md` (2026-08-17) and the four conditions in
+`docs/CODING_RULES.md`. The other four are unaffected. The accessors over them move too, `adjacencySize`, `incidenceSize`, `cliqueSize`,
 `weight`, `cliqueWeight`, `reachableSize` and `reachableWeight`, which is what takes the casts out
 of the hot loops.
 

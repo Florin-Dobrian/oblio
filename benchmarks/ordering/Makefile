@@ -8,7 +8,7 @@
 #:   make scale3d  the same, cubic
 #:                 Also scale-mmd-2d, scale-amd-2d, scale-mmd-3d, scale-amd-3d for one branch
 #:   make digest-record   record a permutation digest for every driver over 73 small grids
-#:   make digest          compare against it. "Did anything move?", asked of all eight drivers
+#:   make digest          compare against it. "Did anything move?", asked of all nine drivers
 #:                 at once, in half a second. For re-encodings, which must leave every
 #:                 permutation untouched. NOT a substitute for `make amdorder` and
 #:                 `make mmdorder`, which compare against the vendored routines themselves;

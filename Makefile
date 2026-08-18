@@ -39,14 +39,22 @@ endif
 
 # Oblio units, full warnings apply.
 #
-# Mmd3B IS IN THIS LIST AND IS TEMPORARY, 2026-08-16. It is the one remaining B layer, Mmd3 on the
-# vendored clique storage scheme, and its whole obligation is to reproduce Mmd3's permutation entry
-# for entry. tests/test_order.cpp asserts exactly that, so it has to link into the test binaries,
-# and a check that never links is not a check. It leaves this list with the file.
+# THE THREE NON-ENUM LAYERS ARE IN THIS LIST, AND THIS IS THE WHOLE REASON THE LIST IS EXPLICIT.
+# Mmd3B, Amd3B and Mmd3C are each their original computed differently, and each one's obligation is
+# to reproduce that original's permutation entry for entry. tests/test_order.cpp asserts exactly
+# that, so each has to link into the test binaries, and A CHECK THAT NEVER LINKS IS NOT A CHECK.
 #
-# The two amd B layers retired on the same day were never here: they were reached only through the
-# benchmark's own glob of src/*.cpp, which is why their pair check, though written, never ran under
-# `make test` at all. That is worth knowing before another B layer is added.
+# AMD3B WAS MISSING FROM THIS LIST UNTIL 2026-08-17 and the cost was exactly what the warning below
+# predicted. It was reached only through the benchmarks' own glob of src/*.cpp, so it built and ran
+# there while `make test` never saw it; when test_order.cpp gained its assertions the link failed
+# outright, which is the good outcome. The bad one had already happened once: AMD1B and AMD2B were
+# in the same position, their pair check was written, and it never ran under `make test` at all.
+#
+# SO: A NEW LAYER NEEDS A LINE HERE AND A LINE IN CMakeLists.txt, and neither build will tell you
+# about the other. Verifying a new source with `g++ src/*.cpp` cannot see this, being the one form
+# that globs; build through `make` instead.
+#
+# Mmd3C is TRANSITIONAL and leaves this list with the file; Mmd3B and Amd3B are permanent.
 #
 # NO COMMENTS INSIDE THE LIST BELOW. It is one assignment continued with backslashes, so a comment
 # line between entries is swallowed by the continuation and make reports a missing separator.
@@ -60,9 +68,11 @@ OBLIO_SRCS = \
   src/Mmd2.cpp \
   src/Mmd3.cpp \
   src/Mmd3B.cpp \
+  src/Mmd3C.cpp \
   src/Amd1.cpp \
   src/Amd2.cpp \
   src/Amd3.cpp \
+  src/Amd3B.cpp \
   src/ElmForestEngine.cpp \
   src/SymFactorEngine.cpp \
   src/BlasLapack.cpp \

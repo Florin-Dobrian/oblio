@@ -44,28 +44,13 @@ std::vector<std::int32_t> orderAmd2(const std::vector<std::size_t>&  colPtr,
         buckets.file(degrees[u], u);
     std::uint32_t minDegree = *std::min_element(degrees.begin(), degrees.end());
 
-    // The driver's own membership scratch, separate from the quotient graph's: which vertices lie
-    // in the new clique, and which cliques the step has already listed. Both are sets built by
-    // stamping and queried by comparison, never allocated.
-    // Sized for twice the vertex space: the hash comparison below stamps a clique id at
-    // c + cliqueStamp, so vertices and cliques can be tested against one stamp without two arrays.
-    std::vector<std::int32_t> mark(2 * size, NIL);
-    std::int32_t              tag = 0;
-
-    // The stride separating the two halves of `mark`, and the one place a COUNT becomes an offset
-    // in the INDEX space. `size` is the matrix order, one dimensional and bounded by n, so it is a
-    // count and is held as std::size_t like every other count here; the sum below is an index into
-    // mark and so is std::int32_t. Naming the crossing once beats writing the cast at each of the
-    // sites that make it, which is what this file used to do: the cast is not a hazard here, since
-    // n is an int32_t by construction, but four unexplained casts of the same quantity read as
-    // four separate events rather than one convention.
+    // NO MEMBERSHIP SCRATCH OF ITS OWN, 2026-08-17. Supervariable detection used to stamp into a
+    // `mark` of 2n, vertices low and clique ids biased by a stride, and it now stamps into
+    // `w`, which is `AMD_2`'s `W [Iw [p]] = wflg` over the whole of i's list, variables and
+    // elements alike, both living in one id space so one array holds a mark for either. That is
+    // 2n int32 and a tag counter gone. Same change as `Amd3` took the same day.
     //
-    // It exists because there is no type for a count. docs/DESIGN_DECISIONS.md (2026-08-08) and
-    // experiments/ordering/REPORT.md carry that: an index names an entity and may be NIL, a
-    // position offsets into an n x n object and may exceed 2^31, and a count is bounded by a SIDE
-    // rather than an AREA and has neither category. With one, `size` would already be the right
-    // width and this line would not be needed.
-    const std::int32_t cliqueStamp = static_cast<std::int32_t>(size);
+    // IT INTERLEAVES WITH THE TAG PROTOCOL rather than clobbering it; see `stamp` beside `wflg`.
 
     // The hash groups, an array indexed by the hash value rather than a map: the key is already
     // an index into 0 .. size, so a map would cost a log per insertion and a node per group for
@@ -92,6 +77,12 @@ std::vector<std::int32_t> orderAmd2(const std::vector<std::size_t>&  colPtr,
     // things at once. See src/Amd2.cpp for the encoding and the tag arithmetic.
     std::vector<std::int32_t> w(size, 1);       // every clique alive and unseen, Amd.cpp's W
     std::int32_t wflg  = 2;                     // the tag, Amd.cpp's wflg
+    // DETECTION'S MARKS, in the same array and the same scale. `stamp` starts above the values
+    // this step's scan wrote, `wflg + lemax`, and rises by one per candidate; `wflg` ends the step
+    // past all of them, so next step every stamped entry reads BELOW wflg and the prune treats it
+    // as alive-and-unseen, rebuilding it from the clique degree. Amd.cpp relies on the same
+    // reading. Only a LIVE vertex's list is stamped, so the zeros that mark a dead clique survive.
+    std::int32_t stamp = 2;
     std::int32_t lemax = 0;                     // the largest clique so far, Amd.cpp's lemax
     const std::int32_t wbig = std::numeric_limits<std::int32_t>::max()
                               - static_cast<std::int32_t>(size);
@@ -99,7 +90,8 @@ std::vector<std::int32_t> orderAmd2(const std::vector<std::size_t>&  colPtr,
         if (wflg < 2 || wflg >= wbig) {
             for (std::int32_t x = 0; x < static_cast<std::int32_t>(size); ++x)
                 if (w[x] != 0) w[x] = 1;
-            wflg = 2;
+            wflg  = 2;
+            stamp = 2;         // the detection marks share this array and this scale
         }
     };
     std::vector<std::int32_t> touchedCliques;
@@ -353,16 +345,16 @@ std::vector<std::int32_t> orderAmd2(const std::vector<std::size_t>&  colPtr,
                 // both members of C[pivot] and the prune drops every neighbour inside the new
                 // clique, so A[u] cannot contain v. Roles swap, the test is symmetric, and the
                 // survivor does not move, u being the outer vertex either way.
-                const std::int32_t other = ++tag;
+                const std::int32_t other = ++stamp;
                 std::uint32_t sizeU = 0;   // list entries, so at most deg(u)
                 const std::int32_t* adjacencyU = qg.adjacency(u);
                 for (std::uint32_t a = 0; a < qg.adjacencySize(u); ++a) {
-                    const std::int32_t wv = adjacencyU[a];
-                    if (!qg.eliminated(wv)) { mark[wv] = other; ++sizeU; }
+                    const std::int32_t x = adjacencyU[a];
+                    if (!qg.eliminated(x)) { w[x] = other; ++sizeU; }
                 }
                 const std::int32_t* incidenceU = qg.incidence(u);
                 for (std::uint32_t i = 0; i < qg.incidenceSize(u); ++i) {
-                    mark[incidenceU[i] + cliqueStamp] = other;
+                    w[incidenceU[i]] = other;
                     ++sizeU;
                 }
 
@@ -376,16 +368,16 @@ std::vector<std::int32_t> orderAmd2(const std::vector<std::size_t>&  colPtr,
                     bool        same  = true;
                     const std::int32_t* adjacencyV = qg.adjacency(v);
                     for (std::uint32_t a = 0; a < qg.adjacencySize(v) && same; ++a) {
-                        const std::int32_t wv = adjacencyV[a];
-                        if (qg.eliminated(wv)) continue;
+                        const std::int32_t x = adjacencyV[a];
+                        if (qg.eliminated(x)) continue;
                         ++sizeV;
-                        if (mark[wv] != other) same = false;
+                        if (w[x] != other) same = false;
                     }
                     if (same) {
                         const std::int32_t* incidenceV = qg.incidence(v);
                         for (std::uint32_t i = 0; i < qg.incidenceSize(v) && same; ++i) {
                             ++sizeV;
-                            if (mark[incidenceV[i] + cliqueStamp] != other) same = false;
+                            if (w[incidenceV[i]] != other) same = false;
                         }
                     }
                     if (!same || sizeU != sizeV) continue;
@@ -438,7 +430,11 @@ std::vector<std::int32_t> orderAmd2(const std::vector<std::size_t>&  colPtr,
 
         // THE TAG ADVANCES, which is what replaces the clearing pass over `touchedCliques`. See
         // src/Amd2.cpp.
-        wflg += lemax;
+        // PAST EVERY STAMP THIS STEP LAID DOWN, not merely past the scan's values, detection now
+        // writing into this same array above `wflg + lemax`. Amd.cpp advances wflg through
+        // detection for the same reason.
+        stamp = std::max(stamp, wflg + lemax);
+        wflg  = stamp + 1;
 
 
         // Nothing above reads an entry this step did not write, since the cliques read are the

@@ -171,8 +171,8 @@ include them, or use the Makefile, which detects the directory itself.
 nobody else can. To build as they do, put `OBLIO_PUBLIC=1` in front of any make command:
 
 ```
-make test                          # this machine: 283 assertions
-OBLIO_PUBLIC=1 make test           # everyone else:  269
+make test                          # this machine: 279 assertions
+OBLIO_PUBLIC=1 make test           # everyone else:  265
 ```
 
 `make help` in any of those directories prints its target list and this note, so the reminder is a
@@ -208,7 +208,7 @@ cd /tmp/oblio-clone
 make test
 ```
 
-Expect `269/269 assertions across 8 suites, 8 examples run`, against 283 in the working tree. Then
+Expect `265/265 assertions across 8 suites, 8 examples run`, against 279 in the working tree. Then
 
 ```
 cd -
@@ -216,8 +216,15 @@ rm -rf /tmp/oblio-clone
 ```
 
 Run 2026-08-04 on alpamayo, after making the vendored orderings private: 252 in the tree, 238 in
-the clone, as expected. The counts have since grown to 283 and 269, with `MMD3`, `AMD3` and the amd
-alignment work; the figures above are the current ones.
+the clone, as expected. The counts are now 279 and 265, with `MMD3`, `AMD3`, the amd alignment work
+and the uniform coverage of the three non-enum layers; the figures above are the current ones.
+
+**They did not only grow, and this file was wrong about them until 2026-08-17.** It said 283 and
+269 while the suite ran 261 and 247, because retiring `AMD1B` and `AMD2B` on 2026-08-15 took 28
+assertions and no count moved with them. Nothing detects that: every figure was internally
+consistent and the suite passes whatever a document claims. `docs/TESTING_SPECIFICATION.md` carries
+the full account. **The check is to run the suites and count, which is one command**, and it is
+worth doing whenever these numbers are quoted rather than trusting them.
 
 Worth extending to the other directories when something there has changed, all of which should
 work in the clone with no `private/` present:

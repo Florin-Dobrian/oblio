@@ -30,20 +30,33 @@ check_c_source_compiles("
 unset(CMAKE_REQUIRED_LIBRARIES)
 
 # ----- Library ---------------------------------------------------------------
-# Source list matches REPO_MAP src/*.cpp. The two vendored ordering codes are not
+# Source list matches src/*.cpp. The two vendored ordering codes are not
 # here: they live in private/, which is not part of the published tree, and are
 # added below only when that directory exists.
+#
+# THIS LIST HAD DRIFTED BADLY AND WAS REPAIRED 2026-08-17. It named src/Amd1B.cpp and
+# src/Amd2B.cpp, which were deleted on 2026-08-16, and omitted src/Mmd3.cpp, which is the DEFAULT
+# ordering, along with Mmd3B, Amd3B and Mmd3C. So this build had been failing to configure for a
+# day and nobody noticed, the Makefile being what the development loop runs.
+#
+# NOTHING DETECTS THE DRIFT, because the two builds share no source list and neither reads the
+# other. Adding or removing a file in src/ means editing BOTH this list and OBLIO_SRCS in the
+# Makefile. The Makefile's own comment beside that list says the same thing from the other side.
+# CMake is the release path, so running it occasionally is the only thing that catches this; see
+# README.md, "Which to use".
 add_library(oblio STATIC
     src/Amd1.cpp
-    src/Amd1B.cpp
     src/Amd2.cpp
     src/Amd3.cpp
-    src/Amd2B.cpp
+    src/Amd3B.cpp
     src/BlasLapack.cpp
     src/DirectSolver.cpp
     src/ElmForestEngine.cpp
     src/Mmd1.cpp
     src/Mmd2.cpp
+    src/Mmd3.cpp
+    src/Mmd3B.cpp
+    src/Mmd3C.cpp
     src/MultiplyEngine.cpp
     src/NumFactorDynamic.cpp
     src/NumFactorEngine.cpp

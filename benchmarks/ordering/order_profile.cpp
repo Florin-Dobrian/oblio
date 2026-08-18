@@ -11,13 +11,15 @@
 //   make profile
 //   ./order_profile_cpp amd1 140 200         method, grid side, repeats
 //   ./order_profile_cpp amd3 3d 26 200       the same on a CUBIC grid, a different family
+//   ./order_profile_cpp mmd3c 140 200        one of the three non-enum layers
 //
 // BOTH FAMILIES, and the cubic mode is not an afterthought. Every profile taken through this
 // driver before 2026-08-09 was square, because square was all it could build, and the amd hash
 // pass profiled as diffuse there while doing eight times the work per pivot on a cube. Profile the
 // family the question is about.
 //
-// The method may be one of ours (mmd1, mmd2, mmd3, amd1, amd2, amd3) or a vendored
+// The method may be one of ours (mmd1, mmd2, mmd3, amd1, amd2, amd3), one of the three layers
+// reached as free functions (mmd3b, mmd3c, amd3b), or a vendored
 // one (mmd, amd). An unrecognized name is REFUSED rather than ignored: this driver used to fall
 // through such a name silently, order nothing, and produce a profile of process startup that looks
 // like a real trace with the ordering missing from it. That cost a profiling session.
@@ -47,9 +49,12 @@
 #include "oblio/Amd1.h"
 #include "oblio/Amd2.h"
 #include "oblio/Amd3.h"
+#include "oblio/Amd3B.h"
 #include "oblio/Mmd1.h"
 #include "oblio/Mmd2.h"
 #include "oblio/Mmd3.h"
+#include "oblio/Mmd3B.h"
+#include "oblio/Mmd3C.h"
 #include "oblio/OrderEngine.h"
 #include "oblio/Permutation.h"
 #include "oblio/SparseMatrix.h"
@@ -168,10 +173,12 @@ int main(int argc, char** argv) {
     // Refuse an unknown method rather than falling through it. A profile of a method that never
     // ran is not empty, it is a trace of dyld and process startup, and it reads as a real one.
     if (!vendored && method != "mmd1" && method != "mmd2" && method != "mmd3" &&
-        method != "amd1" && method != "amd2" && method != "amd3") {
+        method != "amd1" && method != "amd2" && method != "amd3" &&
+        method != "mmd3b" && method != "mmd3c" && method != "amd3b") {
         std::fprintf(stderr,
                      "order_profile: unknown method \"%s\"\n"
                      "  ours:     mmd1 mmd2 mmd3 amd1 amd2 amd3\n"
+                     "  layers:   mmd3b mmd3c amd3b\n"
                      "  vendored: mmd amd\n", method.c_str());
         return 2;
     }
@@ -185,6 +192,15 @@ int main(int argc, char** argv) {
         else if (method == "amd3") sum += orderAmd3(colPtr, rowIdx).size();
         else if (method == "mmd2") sum += orderMmd2(colPtr, rowIdx).size();
         else if (method == "mmd3") sum += orderMmd3(colPtr, rowIdx).size();
+        // THE THREE NON-ENUM LAYERS, added 2026-08-17. Each is its original computed differently,
+        // so each is a thing whose cost is a question in its own right: Mmd3B and Amd3B carry the
+        // vendored clique storage schemes and Mmd3C carries the port of the amd array folds onto
+        // the mmd side. Profiling them through THIS driver rather than another is the same
+        // argument the header already makes for the vendored pair: a comparison across two
+        // programs measures their differences too.
+        else if (method == "mmd3b") sum += orderMmd3B(colPtr, rowIdx).size();
+        else if (method == "mmd3c") sum += orderMmd3C(colPtr, rowIdx).size();
+        else if (method == "amd3b") sum += orderAmd3B(colPtr, rowIdx).size();
         else if (vendored) { Permutation P; engine.compute(A, P); sum += P.size(); }
     }
     if (cubic)

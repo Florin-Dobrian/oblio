@@ -1,103 +1,100 @@
-# NEXT: the fold set is closed on both branches, and the layout matrix is what remains
+# NEXT: the B and C layers must be layout-identical to their vendored codes, and are not yet
 
-**REWRITTEN AT THE TOP ON 2026-08-17.** The section immediately below is the current state;
-everything under "Other things open" and after is older and several of its items are now closed,
-marked where they are. The durable account is `docs/DESIGN_DECISIONS.md` (2026-08-16 and
-2026-08-17), `benchmarks/ordering/README.md` and `experiments/ordering/README.md`; this file only
-points at them.
+**REWRITTEN AT THE TOP ON 2026-08-17, second time that day.** The section below is the current
+state; everything under "Other things open" and after is older and several of its items are closed,
+marked where they are.
 
-## Where both branches stand, 2026-08-17
+## The point of the B and C layers, restated because it was being traded away
 
-**The five array folds `Amd3B` found are ported and the set is closed.** Four landed: the sign of
-the weight as the membership mark, mass elimination merging before it compacts, and the restore, all
-three in `QuotientGraph` and so in every driver; and supervariable detection stamping into `w`, in
-`Amd3` and `Amd2`. `Amd1` needed nothing, having no detection. The fifth cannot port and the reason
-is in `src/Amd3B.cpp`'s header.
-
-**What the folds measured is a wash, and that is the result rather than a disappointment.** On the
-mmd side, +1.2 percent instructions, -1.5 percent writes, -2 percent read misses. On the amd side
-the medians moved inside the noise. What they bought is not speed: `Amd3` and `Amd2` no longer
-allocate a mark of their own, `mMark` is n everywhere, and `Amd3B` and `Amd3` now differ in exactly
-one thing, which is why the storage numbers below mean something.
-
-**The storage prices, each measured with encoding held equal, and they point opposite ways.**
-
-```
-                              square        cubic
-MMD3B / MMD3   genmmd's dead segments cost    1.079        1.288
-AMD3B / AMD3   AMD_2's pool EARNS             0.914        0.855 at large n
-```
-
-Both files are their original with identical encoding and identical permutations; only the clique
-layout differs. So ours is not bad, it is the middle of three. The cubic figure for `MMD3B` is
-large, stable across two runs, and was not recorded anywhere before.
-
-### What is next, in the order I would take it
-
-**1. `Mmd3C` rebuilt on `AMD_2`'s pool.** The file exists but is TRANSITIONAL: it is mmd on the
-production arena, built to work the folds out on the mmd side without disturbing the shared class,
-which it did. It is to be replaced by the real cell, ported from `Amd3B`'s storage rather than from
-the file it replaces. Cheapest of the two remaining cells, and it tests the interesting claim: if
-mmd on the pool comes in below 1.0 against `MMD3`, the pool wins on both algorithms and our arena is
-the thing to change. Drop the `kPad` knob with the rewrite; the question it was built for is closed.
-
-**2. `Amd3C` on genmmd's dead segments**, which completes the matrix. **It has a real design problem
-and it is not small:** aggressive absorption. genmmd's scheme works because a clique dies one way,
-absorbed into the new one, so its block is already part of the chain the pivot is writing into.
-`absorb()` kills cliques that are not in `I[pivot]`, whose segments are nowhere near that chain, and
-there is no free cursor and no collector to reclaim them, so they would leak and the `O(n + m)`
-bound would go. Plausible fix: link an absorbed clique's segment into the pivot's chain as extra
-room at the moment it is absorbed, which is where `AMD_2` writes `Pe[e] = FLIP(pivot)`. Whether that
-link can be written while the walk still reads is the invariant `Mmd3B`'s emit already turns on.
-
-**3. The suffixes now mean something**, recorded beside the matrix in
-`docs/DESIGN_DECISIONS.md` (2026-08-16): **B is a driver on its OWN branch's vendored layout, C is a
-driver on the OTHER branch's.** Two consequences: each C file is ported from the sibling on the same
-LAYOUT, not the same branch; and any eventual sharing of a quotient graph pairs down the columns,
-`Mmd3B` with `Amd3C` and `Mmd3C` with `Amd3B`. That is worth doing only once both cells are
-measured, since a shared class is exactly what made one fold move four columns at once.
+A B or C layer exists so that a differential against a vendored code is APPLES TO APPLES: identical
+algorithm, identical encoding, identical storage layout, so that whatever still differs is either
+the layout being priced or a real improvement to carry back into `Amd3` and `Mmd3`. **If the layout
+is not identical the differential is not a differential**, and the file has no purpose. That is a
+validity question, not a cost-benefit one, and it was briefly treated as the latter.
 
 ```
                  our arena      genmmd's layout    AMD_2's layout
-mmd ladder       Mmd3           Mmd3B              Mmd3C   TRANSITIONAL, to be rebuilt
-amd ladder       Amd3           Amd3C   PLANNED    Amd3B
+mmd ladder       Mmd3           Mmd3B              Mmd3C
+amd ladder       Amd3           Amd3C   NOT BUILT  Amd3B
 ```
 
-### Closed on 2026-08-17, so that nobody reopens them
+Production keeps a separate append-only clique arena with no constraint and is not required to
+match anything. `Amd3B` and `Mmd3C` must match `AMD_2` exactly. `Mmd3B` must match genmmd exactly.
 
-**The port plan that used to fill this section.** It said to start with `eliminated()` "since it is
-smallest and tests the liveness argument"; that is the one fold that cannot port, and not for the
-reason anyone expected. A zero weight means ABSORBED rather than eliminated, nothing zeroing a
-pivot's weight, and the only available gate is `mHasNumbered`, which is false for `Mmd1`, whose
-refresh filters a list that can hold an eliminated pivot. It is `Mmd1` rather than the prepass.
+## Where faithfulness actually stands, 2026-08-17
 
-**The per-call lifetime problem**, which that section called the port's blocker. It is not one:
-`massEliminate` already walks C[pivot], so the restore rides there and costs no pass. What DID
-resist is `reachableWeight`, folded and then reverted the same day at +3 percent instructions and
-+4 percent reads with the misses flat: it is called per refreshed vertex and nothing walks its
-result again, so a restore there is a new traversal. That one is a measured negative; do not retry.
+**`Amd3B` and `Mmd3C` against `AMD_2`: three divergences found, two closed, one open.**
 
-**"It could make mmd faster."** It did not, see the wash above.
+- CLOSED, in-place construction, `AMD_2`'s `if (elenme == 0)`: a pivot with no elements has a reach
+  that is a subset of `A[pivot]`, so the clique is compacted where it stands and the pool is never
+  touched. 62 to 68 percent of eliminations on grids. Compactions fell from 4 per run to 1 on
+  squares and 2 on cubes in both files, and `AMD3B / AMD3` from 0.929 to 0.885.
+- CLOSED, the reclaim, `AMD_2`'s `if (elenme != 0) pfree = p`: the cursor is pulled back after the
+  clique is trimmed. Rests on the clique still being the last block in the pool, which is now an
+  `assert` checked on all 73 digest grids.
+- **OPEN, and the hard one: WHEN THE COLLECTOR RUNS.** `AMD_2` tests per entry inside the
+  construction and, when it collects mid-element, carries the half-built element along. We test
+  once before the walk for a worst-case reach of n. It is one-directional, we collect where `AMD_2`
+  would not and never the reverse, and it currently costs 1 or 2 compactions per run.
 
-**Whether the shared class has self-aliasing points.** `tools/sweep.cpp` walks consecutive grid
-sides and flags any standing above both neighbors. Over 190 to 210 on alpamayo neither `MMD3` nor
-`AMD3` has one, and side 200 is unremarkable in both. The point that prompted it belongs to
-`Mmd3C`'s allocations alone. One band of 21 sides, so other n are unobserved rather than excluded.
+**`Mmd3B` against genmmd: clique storage faithful, vertex list NOT.** The links, the chain
+following, the terminator rule and the unchecked first loop all match `mmdelm` line for line. But
+genmmd keeps ONE MIXED LIST per vertex, variables and elements together, told apart by the sign of
+`fwd`, where we keep two sublists in a run with explicit lengths.
 
-**The assertion counts, which four files had wrong by 22.** Now 279 with `private/` and 265 without,
-measured by running every suite rather than by arithmetic. `docs/TESTING_SPECIFICATION.md` carries
-the account. The three non-enum layers are checked uniformly, 8 assertions each.
+## Closing the last `AMD_2` divergence: three steps, and none works alone
 
-**`mWeight` is `std::int32_t`**, reversing one line of the 2026-08-11 narrowing. That is the rule
-deriving rather than an exception: a size is unsigned because it has nothing to stand in for, and
-this one now has. Four conditions in `docs/CODING_RULES.md`.
+**1. Flip the physical order of the run to incidence then adjacency.** `AMD_2` stores elements
+first, then variables, which is what makes its mid-walk truncation possible: `Pe[me] = p;
+Len[me] -= knt1` drops the consumed elements from the FRONT and leaves the remainder contiguous.
+Ours is `A[u]` then `I[u]` at every site, so the consumed part of `I[pivot]` sits in the middle with
+`A[pivot]` in front of it and there is no start to advance. `mVendoredListOrder` does NOT do this;
+it changes walk order and the prune's placement, not the physical layout. This step touches the
+descriptor, both prunes, every walk and every accessor, in `Amd3B`, `Mmd3C` and the shared class
+they are extracted from.
 
-**THE DIGEST IS `make digest-record` THEN `make digest`** in `benchmarks/ordering`: nine drivers
-over 73 small grids, half a second, and it names which driver moved. RECORD BEFORE TOUCHING
-ANYTHING, because it detects change rather than correctness and a baseline taken after a break
-certifies the break. It earned itself twice this session, catching a sign error in the amd prune
-within seconds of the fold landing. Re-anchor with `make amdorder` and `make mmdorder` at both ends;
-those are what say correct.
+**2. Rewrite the pool walks in INDEX arithmetic.** `AMD_2` walks in indices and can resume after the
+collector moves every block; our walks hold `const std::int32_t*` into the pool and cannot. The
+pointers were a measured choice, one hoisted out of a loop header being worth 277 ms of an 8.53 s
+run, so this step gives that back and must be re-measured rather than assumed free.
+
+**3. Teach the collector to carry a partially built element.** `AMD_2` sweeps to `pend = pme1 - 1`,
+then moves `[pme1, pfree)` down explicitly, sets `pme1 = p1` and restores `pj` and `p` from the
+truncated descriptors.
+
+Without 1 there is nothing to truncate; without 2 the walk cannot resume; without 3 the half-built
+clique is lost. **Do them in that order**, since 1 is the one that unblocks the others and is
+independently verifiable by the digest.
+
+## Closing the genmmd divergence in `Mmd3B`
+
+One mixed list per vertex instead of two sublists. Not started, and it is a separate piece of work
+from the `AMD_2` one, though step 1 above is a near neighbor of it: both are about how a vertex's
+own list is laid out.
+
+## What was done since commit 5ea68cc, all uncommitted
+
+- **`src/Mmd3C.cpp` and `include/oblio/Mmd3C.h` REBUILT.** The old file was mmd on the production
+  arena, a transitional vehicle that had served its purpose; this one is mmd on `AMD_2`'s pool,
+  the real matrix cell. Regenerated from current sources by `tmp/make_mmd3c.py`, so it inherits the
+  shared class's encoding, then the storage hand-ported from `Amd3B`.
+- **`src/Amd3B.cpp`**: in-place construction, the reclaim, and a `-Wunused-variable` under `NDEBUG`.
+- **`src/Mmd3C.cpp`**: the same two, plus a real bug found by ASan on a 3 by 3 grid. `Amd3B` negates
+  the pivot in `beginElimination` and `Mmd3C` inside `reachableSet`; the new in-place walk was a
+  third path and negated nothing, so the restore flipped a positive weight negative and
+  `orderAscending` wrote four billion entries past the permutation. Recorded at the site.
+- **`experiments/ordering/README.md`**: the three-layouts section on Florin's one-axis
+  classification, no constraint and no bookkeeping, a loose constraint and occasional bookkeeping,
+  a tight constraint and constant bookkeeping; the headroom cliff; and the divergence account.
+
+**Verification at every step**: 584 digests over the eight committed drivers identical, `test_order`
+87/87, 279 across the suite, both build modes warning-clean, and the digest re-run under ASan and
+UBSan with assertions live.
+
+**Figures now known to be stale**, marked in place rather than deleted: the pool timings and the
+headroom cliff were measured before the two fixes, so they price a variant and the cliff sits
+further left than it should. `AMD3B / AMD3` is 0.885 as of the last run; the mmd figure has not
+been re-measured.
 
 ### Other things open
 

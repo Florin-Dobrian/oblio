@@ -6163,6 +6163,201 @@ the reason in the table above. It is that the hot walks stop reading it, which i
 achieves while still carrying `marker`, and which is where the measured cost is: two scattered loads
 per clique member where the vendored routines make one.
 
+## Three clique layouts, and one axis: the tax is the price of the constraint, 2026-08-17
+
+A quotient graph has to put C[c] somewhere, and the three codes in this tree answer differently.
+With the array encodings finally equal across all six drivers, the difference between a driver and
+its B or C sibling is the layout alone, so the columns can be read as the price of a layout.
+
+**THE CLASSIFICATION THAT MAKES SENSE OF THEM IS ONE AXIS, NOT THREE SCHEMES.** Storage is
+constrained or it is not, and bookkeeping is what a constraint costs:
+
+```
+   no constraint      and no bookkeeping           ours
+   a loose constraint and occasional bookkeeping   AMD_2
+   a tight constraint and constant bookkeeping     genmmd
+```
+
+Chaining and compaction are then the same kind of thing at two points on that axis rather than two
+different taxes to be compared. That framing is Florin's and it is better than the one this section
+first carried, which treated them as rival mechanisms; the measurement below is what settled it.
+
+```
+                     extra space      what it pays instead        does that cost grow?
+ours, an arena       unbounded        nothing                     n/a
+AMD_2, a pool        45% on grids     compacting when it fills    NO, a handful of sweeps
+genmmd, segments     none             following chains            YES, with every clique read
+```
+
+**Ours** is a separate append-only region in elimination order. Nothing is ever reclaimed, so there
+is no bookkeeping of any kind and no bound either.
+
+**genmmd's** puts a clique in the dead pivot's own block and chains onward through the blocks of the
+cliques it absorbed, following a negative link at a segment's end. It fits in exactly `nnz`, and the
+reason is the conservation argument the prune already relies on: a source is destroyed for each one
+created.
+
+**`AMD_2`'s** keeps variable runs and clique blocks in ONE workspace with elbow room, builds each
+new clique at a free cursor, leaves absorbed space dead, and compacts when the cursor reaches the
+end.
+
+### The asymmetry, which is the point of this section
+
+**Chaining is a PER-ACCESS cost.** Every walk of a clique runs the link test, and a clique is walked
+many times over its life, so the total scales with how often cliques are read, which grows with fill.
+
+**Compaction is a ONE-OFF cost AT THE HEADROOM `AMD_2` CHOOSES.** `Mmd3C` compacts 4 times, flat,
+from 1,600 vertices to 160,000. Four sweeps of the pool for a whole run, against a number of clique
+walks that grows superlinearly, so the cost per pivot tends to zero.
+
+### But that is one point on a curve, and the curve is a CLIFF
+
+The pool's headroom is a knob, so the price of the constraint can be measured directly rather than
+argued. `Mmd3C` at 300 squared, headroom varied and nothing else changed:
+
+```
+pool / nnz     1.05    1.10    1.20    1.25    1.26   1.27   1.28   1.30   1.45   2.00
+compactions   49704   48583   46340   44749     58     29     20     13      4      1
+```
+
+**Four orders of magnitude across one percent of headroom.** Below about 1.25 the collector runs on
+essentially every pivot and the count scales with n; above about 1.26 it runs a handful of times and
+stops scaling. Cubes put the threshold in the same place, 7 compactions at 1.28 and 3 at 1.45, so
+the count is not a constant of the algorithm but the CLIFF LOCATION is stable across families.
+
+So the tax is not "more space, proportionally less work". It is: buy enough headroom to hold the
+working set and the bookkeeping nearly vanishes; buy slightly less and you pay it per pivot.
+`AMD_2`'s `nnz + nnz/5 + n` lands at 1.45 on grids, comfortably past the cliff, and the "4 sweeps,
+flat" figure above was taken on the safe side of it without knowing the cliff was there.
+
+### What that says about genmmd, and it is the interesting part
+
+genmmd sits at 1.00, which is BELOW the cliff by a wide margin: a compacting scheme at that headroom
+would compact on every pivot and be unusable. So chaining is not an alternative tax at the same
+price. **It is what makes the tightest point reachable at all**, buying the last quarter of space
+that compaction cannot. The per-access cost is what that space costs.
+
+"genmmd pays chaining, `AMD_2` pays collection, call it even" is therefore the wrong reading twice
+over: the costs have different shapes, and the two schemes are not even trying to buy the same
+thing.
+
+### What the timings say, and they are consistent with that
+
+Geometric means over the square and cubic ladders, each pair differing in layout alone:
+
+```
+MMD3B / MMD3   genmmd's segments COST     1.079 square    1.288 cubic
+AMD3B / AMD3   AMD_2's pool EARNS         0.914 square    0.855 at large n
+```
+
+The cubic figure for genmmd's scheme being much the worse fits a per-access cost: cubes carry far
+more fill and so far more clique reads per pivot. The pool's advantage GROWING with n fits the
+removal of one.
+
+**These are wall clock on alpamayo and should be treated as provisional** until they have been seen
+across more runs. The vendored columns in the same tables move several percent between invocations
+of unchanged code.
+
+**AND THEY PREDATE THE FAITHFULNESS FIXES BELOW.** Both pool figures were measured on a port that
+was missing `AMD_2`'s in-place construction and its reclaim, so they are the price of a variant.
+`AMD3B / AMD3` has since moved to 0.885; the mmd figure has not been re-measured. The headroom
+curve further down has the same problem: it was taken on a scheme that consumed the pool about three
+times faster than `AMD_2`'s does, so the cliff it locates sits further left than it should.
+
+### The space figure is 45 percent on grids, not 20, and it is space rather than time
+
+`AMD_2` sizes its workspace `nnz + nnz/5 + n`. On a 5-point grid `nnz(A+I)` is about 4n, so the `+n`
+term adds another quarter on top of the fifth and the pool comes out at 1.451, 1.453, 1.452, 1.451,
+1.451, 1.451 over sides 40 to 400: flat, and nowhere near the fifth the formula suggests at a
+glance. On a denser matrix the `+n` term shrinks against `nnz` and the ratio tends toward 1.2.
+
+Worth keeping distinct from the timing figures above. A layout that costs 45 percent more space and
+saves 9 to 15 percent of time is a trade; one that costs 45 percent more space and saves nothing is
+not, and only the measurement says which.
+
+**And 1.45 is not a number to tune downward casually.** The cliff sits at about 1.26 on both
+families measured, so there is real slack between it and `AMD_2`'s choice, but the penalty for
+crossing is four orders of magnitude rather than a few percent. Anything that trims the headroom
+wants the compaction count watched, which is what `gMmd3CCompactions` and `gAmd3BCompactions` are
+exported for.
+
+### Porting a layout faithfully is harder than it looks, 2026-08-17
+
+The B and C layers exist to price a layout, so a port that drops part of one prices something else.
+Three divergences from `AMD_2`'s storage were found in `Amd3B` by reading it against
+`private/Amd.cpp` on 2026-08-17, two days after the storage was ported into it. **Finding one was
+reason to look for more, and there were two more.**
+
+**The failure was not doing that reading at the time.** The storage was ported by writing something
+with the same shape rather than by translating `AMD_2` line by line, which is the one thing
+"port, don't rewrite" exists to prevent, and the figures the file produced in between were quoted as
+the price of `AMD_2`'s layout when they were the price of something else. An audit against the
+vendored source belongs in the port, not after the numbers look interesting.
+
+**What is NOT a divergence, checked the same day:** the vertex list. `AMD_2` splits one run into
+elements then variables, `Iw [Pe[i] .. Pe[i]+Elen[i]-1]` and `Iw [Pe[i]+Elen[i] .. Pe[i]+Len[i]-1]`,
+which is our run with `adjacencySize` and `incidenceSize` in the opposite order, and
+`mVendoredListOrder` is what selects that order. genmmd is the one that differs, keeping variables
+and elements MIXED in one list and telling them apart by the sign of `fwd`; that is a `Mmd3B`
+question and is open rather than closed.
+
+**IN-PLACE CONSTRUCTION, `AMD_2`'s `if (elenme == 0)`.** A pivot with no elements has a reach that
+is a SUBSET of `A[pivot]`, so the clique is compacted where the adjacency already sits and the pool
+is not touched. We built at the cursor every time. Measured, **62 to 68 percent of eliminations
+qualify on grids, rising with n**, so this was not a corner case: we were putting three times as
+much through the pool as `AMD_2` does, and throwing away the locality of a clique landing where its
+pivot's adjacency was.
+
+**THE RECLAIM, `AMD_2`'s `if (elenme != 0) pfree = p`.** After supervariable detection removes
+newly nonprincipal variables the element is shorter, and the cursor is pulled back. Ours only ever
+advanced. It rests on the clique still being the last block in the pool, which is true because
+nothing writes to the pool between construction and trimming; that is now an `assert` rather than a
+comment, and it is checked on all 73 digest grids in the root build.
+
+Both landed on 2026-08-17. **Compactions fell from 4 per run to 1 on squares and 2 on cubes** in
+both files, and `AMD3B / AMD3` moved from 0.929 to 0.885 as a geometric mean, evenly at both ends
+of the ladder. A faithful port coming out FASTER is the expected direction here and is the thing
+most likely to be accepted without checking; what says faithful is `make amdorder`, the assert, and
+the compaction count, not the clock.
+
+### The third divergence, which stays, and what it would cost to close
+
+`AMD_2` tests for room PER ENTRY inside the construction, `if (pfree >= iwlen) garbage_collection`,
+and when it collects mid-element it carries the half-built element along: it slides every live block
+down, moves the partial element separately, and resets `pme1` and its read pointers. We test ONCE,
+before the walk, for the worst case, room for a reach of n.
+
+**The reason is pointers, and it is a trade we took deliberately elsewhere.** `AMD_2` walks in
+INDICES, so after a collection it can recompute where it was and resume. Our walks hold
+`const std::int32_t*` into the pool, and the collector moves every block, so those pointers would
+dangle. The pointers are not an accident: hoisting one out of a loop header was worth 277 ms of an
+8.53 s run, which is why the walks are written that way. So the trade is a faster inner loop against
+the ability to relocate mid-walk.
+
+**It can only cost us.** Reserving for n when the reach is usually far smaller means we collect
+where `AMD_2` would not, never the reverse, so the column is pessimistic rather than flattering. It
+does not touch locality: the collector produces the same compacted layout either way. With
+compactions now at 1 or 2 per run the window is small.
+
+Three ways to close it, if it is ever worth closing. Rework the walks to index arithmetic, which is
+faithful and touches the hottest loop in the file. Keep pointers and re-derive them after a
+collection, which needs the collector to report where the partial element moved. Or leave it,
+documented, which is where it stands.
+
+### One thing the taxes do not explain, and it is a candidate for the rest
+
+The pool is not merely bounded, it is COMPACT: variable runs and clique blocks share one region,
+where ours keeps two and the second only grows. A walk that reads a vertex's run and then the
+cliques it names stays inside one region in the pool and crosses between two in ours. That is a
+locality effect independent of either tax, and it is the natural candidate for the part of the amd
+gap that counting could not find: cachegrind puts `Amd3B` at 10 percent MORE simulated L1 read
+misses than `Amd3` at both sizes measured, flat, while the clock has it 9 to 15 percent faster. A
+single-level L1 model with no TLB and no prefetcher is the wrong instrument for that difference, and
+this is the shape of what it is missing.
+
+**`Amd3C` would test it.** amd on genmmd's segments is the fourth cell, and if the per-access cost
+shows up there too, the account above holds on both algorithms rather than one.
+
 ## What the sandbox can and cannot answer, 2026-08-16
 
 Established the hard way, by nearly discarding a fold that turned out to be worth 30 percent.

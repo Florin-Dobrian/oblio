@@ -3,6 +3,7 @@
 #include "oblio/Types.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -222,7 +223,8 @@ public:
         if (mWeight[pivot] < 0) mWeight[pivot] = -mWeight[pivot];
     }
 
-    std::uint32_t reachableSet(std::int32_t u);   // writes at mFree, returns the length
+    std::uint32_t reachableSet(std::int32_t u);          // writes at mFree, returns the length
+    std::uint32_t reachableSetInPlace(std::int32_t u);   // rewrites A[u] as C[u]; see its note
 
 
 
@@ -268,6 +270,9 @@ private:
     // fold: a live vertex's run is A[e] then I[e], and a dead pivot's is C[e]. With one pool that
     // stops being two meanings of one field and becomes one.
     std::size_t mFree = 0;                    // AMD_2's pfree
+    // Whether the clique now being eliminated was built in the pivot's own run. Read by
+    // massEliminate, which can only give space back to the cursor in the other case.
+    bool        mBuiltInPlace = false;
     std::size_t mCompactions = 0;             // AMD_2's Info[AMD_NCMPA]
 public:
     std::size_t compactions() const { return mCompactions; }
@@ -337,6 +342,31 @@ QuotientGraphA::QuotientGraphA(const std::vector<std::size_t>&  colPtr,
     mSuperLast.resize(size);
     mWeight.assign(size, 1);
     for (std::int32_t u = 0; u < size; ++u) mSuperLast[u] = u;
+}
+
+// CONSTRUCTS THE CLIQUE IN THE PIVOT'S OWN RUN, which is `AMD_2`'s `if (elenme == 0)` branch and
+// the common case rather than a corner: a pivot with no elements has a reach that is a SUBSET of
+// A[pivot], so it fits where A[pivot] already is and the pool is not touched at all. Measured on
+// grids, 62 to 68 percent of eliminations qualify, and the share rises with n.
+//
+// IT IS AN IN-PLACE COMPACTION and safe for the reason every such loop here is: the write cursor
+// starts at the read cursor and only ever falls behind it, since a vertex is written only when it
+// was read. `AMD_2` spells it `Iw [++pme2] = i` with `pme2 = pme1 - 1`.
+//
+// WHY IT MATTERS TWICE. It keeps two thirds of cliques out of the pool, so the cursor advances far
+// more slowly and the collector runs far less; and it leaves the clique exactly where the pivot's
+// adjacency was, which is where the vertices that will read it next are. This file existed for a
+// year without it, and the figures it produced were the price of a DIFFERENT layout.
+std::uint32_t QuotientGraphA::reachableSetInPlace(std::int32_t u) {
+    std::int32_t*       run   = mSource.data() + mRun[u].sourcePtr;
+    const std::uint32_t count = mRun[u].adjacencySize;
+    std::uint32_t       kept  = 0;
+    for (std::uint32_t k = 0; k < count; ++k) {
+        const std::int32_t v  = run[k];
+        const std::int32_t nv = mWeight[v];
+        if (nv > 0) { mWeight[v] = -nv; run[kept++] = v; }
+    }
+    return kept;
 }
 
 // WRITES AT `mFree` RATHER THAN APPENDING, which is the storage change. The caller has already
@@ -454,24 +484,41 @@ void QuotientGraphA::garbageCollect() {
 }
 
 void QuotientGraphA::beginElimination(std::int32_t pivot) {
-    // ROOM FOR A WHOLE REACH BEFORE THE WALK STARTS, which is what makes the cursor safe inside
-    // it. A reach has at most n entries, so room for n is room for any of them. `AMD_2` tests the
-    // same thing per entry, `if (pfree >= iwlen) garbage_collection`, and can because it writes one
-    // entry at a time from a loop it can resume; ours writes from a walk with pointers taken into
-    // the pool, so the test has to come first and be for the worst case.
-    if (mSource.size() - mFree < size()) garbageCollect();
-
     // `Nv [me] = -nvpiv` in Amd.cpp, and it is what keeps the pivot out of its own clique: the
-    // walk below takes a vertex only when its weight reads positive. The old code needed an
+    // walks below take a vertex only when its weight reads positive. The old code needed an
     // explicit `mMark[u] = mTag` for the same purpose.
     mWeight[pivot] = -mWeight[pivot];
 
-    const std::size_t   cliqueStart = mFree;
-    const std::uint32_t cliqueLen   = reachableSet(pivot);
+    // TWO WAYS TO BUILD THE CLIQUE, and which one applies is `AMD_2`'s `elenme == 0`. With no
+    // elements the reach is a subset of A[pivot] and is compacted where it stands; otherwise it is
+    // assembled at the free cursor. The pool is touched only in the second case, which is why the
+    // branch is worth having and not merely faithful.
+    const bool inPlace = mRun[pivot].incidenceSize == 0;
+    mBuiltInPlace = inPlace;
+
+    std::size_t   cliqueStart;
+    std::uint32_t cliqueLen;
+    if (inPlace) {
+        cliqueStart = mRun[pivot].sourcePtr;
+        cliqueLen   = reachableSetInPlace(pivot);
+    } else {
+        // ROOM FOR A WHOLE REACH BEFORE THE WALK STARTS, which is what makes the cursor safe
+        // inside it. A reach has at most n entries, so room for n is room for any of them.
+        // `AMD_2` tests the same thing per entry, `if (pfree >= iwlen) garbage_collection`, and
+        // can because it writes one entry at a time from a loop it can resume; ours writes from a
+        // walk with pointers taken into the pool, so the test has to come first and be for the
+        // worst case. THIS IS A KNOWN DIVERGENCE and the only one left in the storage: we can
+        // collect where AMD_2 would not, never the reverse.
+        if (mSource.size() - mFree < size()) garbageCollect();
+        cliqueStart = mFree;
+        cliqueLen   = reachableSet(pivot);
+    }
 
     const std::int32_t* reached     = mSource.data() + cliqueStart;
     const std::uint32_t reachedSize = cliqueLen;
 
+    // The absorbed cliques die only after the walk has read them. In the in-place case there are
+    // none, the incidence list being empty, so this loop is skipped along with the branch above.
     const std::int32_t* absorbedCliques = mSource.data() + mRun[pivot].sourcePtr + mRun[pivot].adjacencySize;
     const std::uint32_t absorbedSize    = mRun[pivot].incidenceSize;
     for (std::uint32_t i = 0; i < absorbedSize; ++i)
@@ -479,6 +526,7 @@ void QuotientGraphA::beginElimination(std::int32_t pivot) {
 
     mRun[pivot].sourcePtr     = cliqueStart;
     mRun[pivot].adjacencySize = cliqueLen;
+    mRun[pivot].incidenceSize = 0;                    // a clique has no incidence list
 
     // NO STAMPING PASS, AND NO TAG. Membership was written by the walk, in the sign of the weight,
     // so this only sums. The `inClique` out-parameter and the two `++mTag` that fed it went on
@@ -607,6 +655,21 @@ const std::vector<std::int32_t>& QuotientGraphA::massEliminate(std::int32_t pivo
         for (std::uint32_t k = 0; k < membersSize; ++k)
             if (mWeight[members[k]] != 0) members[kept++] = members[k];
         mRun[pivot].adjacencySize = kept;
+
+        // THE SPACE THE COMPACTION FREED GOES BACK TO THE CURSOR, which is `AMD_2`'s
+        // `if (elenme != 0) pfree = p`: "element was not constructed in place: deallocate part of
+        // it since newly nonprincipal variables may have been removed". Only in the pooled case,
+        // and the in-place case has nothing to give back since it never took any.
+        //
+        // SAFE BECAUSE THE CLIQUE IS STILL THE LAST BLOCK IN THE POOL. Nothing is written to the
+        // pool between beginElimination building it and this function trimming it: the prune
+        // rewrites vertex runs in place, and absorption only zeroes lengths. If that ever stops
+        // being true this becomes wrong silently, so the condition is asserted rather than assumed.
+        if (!mBuiltInPlace) {
+            assert(mRun[pivot].sourcePtr + membersSize == mFree &&
+                   "the pivot's clique is no longer the last block in the pool");
+            mFree = mRun[pivot].sourcePtr + kept;
+        }
     }
     return merged;
 }

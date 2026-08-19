@@ -6281,6 +6281,31 @@ what was cheap, and the cheap thing was taken.
 one of the three routes above or changing the convention and moving the permutation. Neither is
 wrong; the choice has simply not been made.
 
+### The three stores, measured on 246 real matrices, 2026-08-19
+
+The layout program's first real answer, from `benchmarks/matrices`. Each sibling is its branch's
+driver on the vendored routine's clique store instead of our arena, so the ratio in the last column
+is the store and nothing else in the algorithm:
+
+| | store | against our arena |
+|---|---|---:|
+| `AMD3B` | `AMD_2`'s unified workspace, bounded at a fifth over, compacted | **0.95** |
+| `MMD3B` | genmmd's dead segments, chained, bounded at exactly nnz | **1.56** |
+
+**The two disagree, and the mechanism says why.** A compaction is a rare sweep: at a fifth of elbow
+room it runs about once for a whole ordering, so its cost amortises to nearly nothing and the pool
+beats the arena, on 224 of 242 matrices. A chain is a LINK TEST ON EVERY READ of every clique,
+forever, and no amount of headroom reduces it, because chaining exists precisely so that none is
+needed. In the band holding 96 per cent of the mmd time, `MMD3` reads 0.69 against genmmd and
+`MMD3B` reads 1.09.
+
+**The grid ladders understate chaining badly**, 1.1 to 1.3 there against 1.56 here, because grids
+have short cliques and few links to follow. That is worth remembering generally: a scheme whose
+cost is per-link is invisible on inputs whose lists are short.
+
+**And read both as directions rather than coefficients.** Each sibling differs from its driver in
+more than the store, so the store is the largest of those differences and not the only one.
+
 ### genmmd never shortens a clique, and `AMD_2` always does, 2026-08-18
 
 A contraction removes members from a live clique. What the three codes do with the SPACE those

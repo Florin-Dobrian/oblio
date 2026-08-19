@@ -45,6 +45,7 @@
 #include "oblio/ElmForest.h"
 #include "oblio/ElmForestEngine.h"
 #include "oblio/Mmd3.h"
+#include "oblio/Mmd3B.h"
 #include "oblio/Permutation.h"
 #include "oblio/QuotientGraph.h"
 #include "oblio/SparseMatrix.h"
@@ -239,24 +240,35 @@ void run(const std::string& path, const Options& options) {
     const std::size_t pC   = gPeakCliqueMembers;
     const std::size_t nnzL = fillOf(A, order);
 
-    // `AMD3B` RIDES ALONG ON THE AMD BRANCH, and only its time is reported. It is `Amd3` on
-    // `AMD_2`'s compacting pool rather than on our arena, so its clique storage is a different
-    // quantity entirely and there is nothing for a `cC` column to compare; see
-    // experiments/ordering/README.md on the three layouts. Everything else about it MUST match
-    // `Amd3`, the two being the same algorithm with the same encodings, so the order, the fill and
-    // the peak live members are checked rather than printed and a mismatch is flagged at the end
-    // of the row. That check has teeth: `pC` is a property of the algorithm and not of the layout,
-    // so two drivers that agree on the permutation can still be caught doing different work.
-    double      b3ms  = 0.0;
+    // THE B SIBLING RIDES ALONG ON BOTH BRANCHES, and only its time is reported: `Amd3B` on the amd
+    // side, `Mmd3B` on the mmd side. Each is its branch's driver on a DIFFERENT CLIQUE LAYOUT,
+    // `AMD_2`'s compacting pool and genmmd's chained segments respectively, so in neither case is
+    // there anything for a `cC` column to compare; see experiments/ordering/README.md on the three
+    // layouts. Everything else about a sibling MUST match its driver, the two being the same
+    // algorithm with the same encodings, so the order, the fill and the peak live members are
+    // CHECKED rather than printed and a mismatch is flagged at the end of the row.
+    //
+    // THE `pC` CHECK IS THE SHARP ONE, and it is why this exists. Peak live clique members is a
+    // property of the ALGORITHM and not of the layout, so two drivers agreeing on the permutation
+    // can still be caught doing different work. It found two defects in `Amd3B`'s mid-walk
+    // collector on 2026-08-19, neither of which moved a permutation or a fill figure and neither
+    // of which the digest, the vendored acceptance checks, `test_order` or the sanitizers could
+    // see. Order and fill compare the ANSWER; a B layer exists to differ in MECHANISM while
+    // agreeing on the answer, so until this check there was nothing watching the thing it varies.
+    double      sibMs = 0.0;
     std::string extra;
-    if (amd) {
-        b3ms = bestOf([&] { const auto p = orderAmd3B(colPtr, rowIdx); (void) p; }, repeats);
+    {
+        const char* tag = amd ? "AMD3B" : "MMD3B";
+        auto sibling = [&] {
+            return amd ? orderAmd3B(colPtr, rowIdx) : orderMmd3B(colPtr, rowIdx);
+        };
+        sibMs = bestOf([&] { const auto p = sibling(); (void) p; }, repeats);
         gPeakCliqueMembers = 0;
-        const std::vector<std::int32_t> b3order = orderAmd3B(colPtr, rowIdx);
-        const std::size_t b3pC = gPeakCliqueMembers;
-        if (b3order != order)              extra += "  AMD3B order differs";
-        else if (fillOf(A, b3order) != nnzL) extra += "  AMD3B fill differs";
-        if (b3pC != pC)                    extra += "  AMD3B pC differs";
+        const std::vector<std::int32_t> sibOrder = sibling();
+        const std::size_t sibPC = gPeakCliqueMembers;
+        if (sibOrder != order)                extra += std::string("  ") + tag + " order differs";
+        else if (fillOf(A, sibOrder) != nnzL) extra += std::string("  ") + tag + " fill differs";
+        if (sibPC != pC)                      extra += std::string("  ") + tag + " pC differs";
     }
     // Held as strings so a zero denominator, which a forest that failed to build would give, prints
     // as a dash rather than as a number nobody can read.
@@ -314,18 +326,18 @@ void run(const std::string& path, const Options& options) {
     std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %11zu %13zu %8s %8s %7s %9.3f %9.3f %8s",
                 name.c_str(), size, m, tril, 2 * m, cC, pC, nnzL, cTril, cFill, pOverC,
                 vendored, ours, ratio);
-    if (amd) {
-        char b3ratio[16] = "-";
-        if (vendored >= 0.01 && b3ms >= 0.01)
-            std::snprintf(b3ratio, sizeof b3ratio, "%.2fx", b3ms / vendored);
-        std::printf(" %9.3f %9s", b3ms, b3ratio);
+    {
+        char sibRatio[16] = "-";
+        if (vendored >= 0.01 && sibMs >= 0.01)
+            std::snprintf(sibRatio, sizeof sibRatio, "%.2fx", sibMs / vendored);
+        std::printf(" %9.3f %9s", sibMs, sibRatio);
     }
     std::printf("%s\n", note.c_str());
 #else
     std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %11zu %13zu %8s %8s %7s %9s %9.3f %8s",
                 name.c_str(), size, m, tril, 2 * m, cC, pC, nnzL, cTril, cFill, pOverC,
                 "-", ours, "-");
-    if (amd) std::printf(" %9.3f %9s", b3ms, "-");
+    std::printf(" %9.3f %9s", sibMs, "-");
     std::printf("%s  vendored needs private/\n", extra.c_str());
 #endif
 }
@@ -335,12 +347,14 @@ void usage() {
     std::printf("  ./matrix_ordering_cpp mmd|amd [--repeats=N] [--target-ms=X]\n");
     std::printf("                        [--max-n=N] [--max-nnz=N] <file.mtx> ...\n\n");
     std::printf("  mmd  genmmd against Mmd3. They return the same permutation on every matrix\n");
-    std::printf("       experiments/ordering's `make mmdmatrices` checks, so the fill column is\n");
-    std::printf("       both of theirs and the only difference between them is time.\n");
+    std::printf("       here, checked per matrix below, so the fill column is both of theirs\n");
+    std::printf("       and the only difference between them is time.\n");
     std::printf("  amd  amd_order against Amd3. The CLOCK is on amd_order whole, what a caller\n");
     std::printf("       pays; EVERYTHING ELSE comes from the hooked pre-postorder copy, because\n");
-    std::printf("       Amd3 does no postorder and returns that order. Amd3B is timed too, and\n");
-    std::printf("       its order, fill and pC are checked against Amd3's rather than printed.\n");
+    std::printf("       Amd3 does no postorder and returns that order.\n\n");
+    std::printf("  Each branch also times its B sibling, Mmd3B or Amd3B, and CHECKS its order,\n");
+    std::printf("  fill and pC against the driver's rather than printing them. A mismatch is\n");
+    std::printf("  flagged at the end of the row.\n");
 }
 
 } // namespace
@@ -416,7 +430,8 @@ int main(int argc, char** argv) {
                 "matrix", "n", "m", "tril(A)", "A+I", "cC", "pC", "nnz(L)", "cC/tril", "cC/nnzL",
                 "pC/cC", amd ? "AMD ms" : "MMD ms", amd ? "AMD3 ms" : "MMD3 ms",
                 amd ? "AMD3/AMD" : "MMD3/MMD");
-    if (amd) std::printf(" %9s %9s", "AMD3B ms", "AMD3B/AMD");
+    std::printf(" %9s %9s", amd ? "AMD3B ms" : "MMD3B ms",
+                amd ? "AMD3B/AMD" : "MMD3B/MMD");
     std::printf("\n");
 
     for (const std::string& path : paths) run(path, options);

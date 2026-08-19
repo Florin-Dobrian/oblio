@@ -65,6 +65,45 @@ be real, which requires Hermitian. Once that is on the table, the design collaps
 **Cholesky is `CC^H`, always, and in real that *is* `CC^T`.** No option, no flag, no forbidden
 combination to reject. The answer was not hard. Asking the right question was.
 
+## 2026-08-19: a shared class splits where the vendored codes disagree, and nowhere else
+
+**The decision.** `QuotientGraphCompacted` will be one public class serving both `Amd3B` and
+`Mmd3C`. Where the two vendored codes disagree, the class carries TWO METHODS with a branch suffix,
+`pruneAmd` and `pruneMmd`, rather than one method with a flag. Where they agree, one
+implementation. The count of splits is not a constraint; contorting shared code to avoid a suffix
+is worse than having one.
+
+**Why suffixes and not flags.** The class had flags, `mVendoredListOrder` and `mReverseIncidence`,
+and `Amd3B` removed them in favour of one hardcoded layout. Flags put both vendored conventions in
+one body, which is where they are hardest to check against the sources they came from; two bodies
+can be read against `AMD_2` and `mmdelm` directly. The runtime branch is the smaller argument, being
+constant for a whole run and perfectly predicted.
+
+**What the split is FOR, and it is narrow.** Two conventions, both about ORDER and neither about
+storage: where the new clique is written into I[u], `AMD_2` first and genmmd last; and which of a
+vertex's two halves `reachableSet` walks first, with the incidence direction. Both decide the order
+members enter C[pivot], hence bucket order, hence which of several equal-degree vertices is picked.
+Neither is free to move: each driver reproduces its reference's permutation exactly or it is not a
+differential.
+
+**And what is NOT the split.** The placement rule is common and stays shared: build the clique in
+place when the incidence list is empty, otherwise at the free cursor, compact when the cursor runs
+out. So is the collector, including the mid-walk truncation, which was the part that had two bugs.
+
+**One general point worth keeping.** It was tempting to look for a single layout serving both, and
+the search was settled by TESTING rather than by argument: four walk variants over `AMD_2`'s
+insertion, none reproducing genmmd past a 5-squared grid. The reasoning that preceded it had been
+wrong twice in both directions on the same day. Where a claim about equivalence can be run, run it.
+
+**AND A CAUTION ON HOW THIS DECISION WAS REACHED, recorded because it may yet reverse it.** The
+split was derived by diffing `Amd3B` against `Mmd3C`, two copies taken into private namespaces and
+then evolved apart for months. The SHARED class already serves `Amd3` and `Mmd3` on one layout with
+two flags, so two vendored conventions provably coexist in one body. How much of the catalogued
+divergence is the references disagreeing and how much is drift between two unreconciled copies is
+NOT settled. A private copy is a fine instrument and a poor baseline: what it shows is where one
+line of work went, not what the problem requires. See docs/NEXT.md (2026-08-19) for the one
+experiment that separates the two.
+
 ## 2026-08-19: a derived counter is only as good as the sites it is funnelled through
 
 **The claim being made when `numPeakCliqueMembers` went in** was that funnelling every birth,

@@ -22,7 +22,7 @@ correctness bug in supervariable detection that had been silently costing fill; 
 
 | | vendored | ours | ratio | ours slower on |
 |---|---:|---:|---:|---:|
-| mmd | 75.2 s | 53.0 s | **0.71** | 157 of 237 |
+| mmd | 75.9 s | 52.9 s | **0.70** | 156 of 237 |
 | amd | 3.52 s | 4.12 s | **1.17** | 162 of 242 |
 
 Those two rows are not comparable to each other and the reasons are in the next section. Within
@@ -31,7 +31,7 @@ what this report is about; the amd branch is slower on both counts and honestly 
 
 ## The one number that reframes the rest
 
-**MMD costs 21.4 times what AMD costs on this set, for 1.6 per cent more fill.** 75.2
+**MMD costs 21.6 times what AMD costs on this set, for 1.6 per cent more fill.** 75.9
 seconds against 3.52, and 18.41 billion factor entries against 18.11 billion.
 
 That is a property of the two ALGORITHMS rather than of either implementation, and it dwarfs every
@@ -40,7 +40,7 @@ degree bounds them and never looks at a clique twice. On a set like this the bou
 nothing in quality and saves an order of magnitude in time.
 
 It also means the two halves of this report are asking different questions. The mmd table is about
-a 75-second budget where a 30 per cent saving is 22 seconds; the amd table is about a 3.5-second
+a 76-second budget where a 30 per cent saving is 23 seconds; the amd table is about a 3.5-second
 budget where a 17 per cent loss is 0.60 seconds. Read them accordingly.
 
 ### Which wins, counted matrix by matrix
@@ -113,27 +113,29 @@ hold at its worst, and so the saving that scheme would buy.
 the factor, clique storage is noise beside what the factorization will need and no clique scheme is
 worth building for it whatever `pC/cC` says. Where the arena is half the factor, it decides.
 
-### The amd table carries `AMD3B` too, and only its time
+### Each table carries its B sibling too, and only its time
 
-`AMD3B ms` and `AMD3B/AMD` are the last two columns of the amd table. `AMD3B` is `AMD3` on `AMD`'s
-own storage rather than on our arena, so **it is the layout comparison**: same algorithm, same
-encodings, same C++, different clique storage. Ours is SEPARATE, UNBOUNDED and never reclaimed;
-`AMD`'s is UNIFIED with the adjacency and incidence lists, BOUNDED with elbow room, and COMPACTED
-when it fills. BOTH ARE FLAT, one contiguous block per clique, which is what makes compaction the
-only reclamation either of them can have. The section "The layout question" below sets that out,
-adds the chunked store neither of them is, and reads the result.
+The last two columns of each table are the branch's B sibling: `MMD3B ms` and `MMD3B/MMD` on the
+mmd side, `AMD3B ms` and `AMD3B/AMD` on the amd side. A sibling is its branch's driver on the
+VENDORED ROUTINE'S OWN CLIQUE STORAGE rather than on our arena, so **it is the layout comparison**:
+same algorithm, same encodings, same C++, different clique store. The section "The layout question"
+below sets the three stores out, adds the chunked one that none of them is, and reads the result.
 
-**Nothing else about it is printed, and that is deliberate.** Its clique storage is a different
-quantity from `cC`, a fixed workspace that is compacted rather than an arena that grows, so there
-is nothing for that column to compare. Everything else about it MUST equal `AMD3`'s, the two being
-the same algorithm, so the order, the fill and `pC` are CHECKED rather than shown and a mismatch is
-flagged at the end of the row: `AMD3B order differs`, `AMD3B fill differs`, `AMD3B pC differs`.
+**Nothing else about a sibling is printed, and that is deliberate.** Its clique storage is a
+different quantity from `cC` in both cases, a compacted workspace on one side and chained dead
+segments on the other, so there is nothing for that column to compare. Everything else about it
+MUST equal its driver's, the two being the same algorithm, so the order, the fill and `pC` are
+CHECKED rather than shown and a mismatch is flagged at the end of the row: `AMD3B order differs`,
+`MMD3B pC differs`, and so on.
 
-**That last check is the sharp one.** `pC` is a property of the algorithm and not of the layout, so
-two drivers that agree on the permutation can still be caught doing different work. It found two
-defects in `Amd3B`'s mid-walk garbage collector within an hour of existing, neither of which moved
-a permutation and neither of which any test in the suite could see; see `docs/NEXT.md`
-(2026-08-19). All four markers were clear across the 246 afterwards.
+**That last check is the sharp one, and it is why the columns exist.** `pC` is a property of the
+algorithm and not of the layout, so two drivers that agree on the permutation can still be caught
+doing different work. Order and fill compare the ANSWER, and a B layer exists to differ in
+MECHANISM while agreeing on the answer, so until this check there was nothing watching the thing it
+varies. It found two defects in `Amd3B`'s mid-walk garbage collector within an hour of existing,
+neither of which moved a permutation or a fill figure and neither of which the digest, the vendored
+acceptance checks, `test_order` or the sanitizers could see; see `docs/NEXT.md` (2026-08-19). Every
+marker was clear across the 246 on both branches afterwards.
 
 On the amd table the same columns carry `AMD ms`, `AMD3 ms` and `AMD3/AMD`, with one caveat that has
 no counterpart on the mmd side: **the AMD clock is on the whole vendored call**, which is what a
@@ -154,19 +156,23 @@ disagreement is the report's main finding on the mmd side:
 
 **mmd, `MMD` against `MMD3`**
 
-| `cC/tril(A)` | matrices | median ratio | share of total time | aggregated ratio |
+| `cC/tril(A)` | matrices | share of total time | `MMD3/MMD` | `MMD3B/MMD` |
 |---|---|---|---|---|
-| 0, no off-diagonal at all | 14 | 2.12 | 0.0% | 2.15 |
-| 0 to 0.5 | 52 | 1.19 | 0.3% | 0.80 |
-| 0.5 to 1.0 | 64 | 1.12 | 0.4% | 0.99 |
-| 1.0 to 2.0 | 79 | 1.02 | 1.7% | 0.83 |
-| 2.0 to 5.0 | 25 | 0.85 | 1.6% | 0.74 |
-| 5.0 and above | 12 | 0.73 | **96.0%** | **0.70** |
+| 0, no off-diagonal at all | 14 | 0.0% | 2.24 | 2.20 |
+| 0 to 0.5 | 52 | 0.3% | 0.79 | 0.88 |
+| 0.5 to 1.0 | 64 | 0.4% | 0.99 | 0.94 |
+| 1.0 to 2.0 | 79 | 1.7% | 0.83 | 0.94 |
+| 2.0 to 5.0 | 25 | 1.6% | **0.73** | 1.13 |
+| 5.0 and above | 12 | **96.0%** | **0.69** | 1.09 |
 
-**The twelve hardest matrices are 96 per cent of all the work, and we are 30 per cent faster on
-them.** The 157 matrices where we are slower cost **28.4 milliseconds in total, all of them
-together**; the 80 where we are faster save **22.2 seconds**. The largest single loss anywhere is
-2.28 ms, on `GHS_indef/bloweybl`.
+**The twelve hardest matrices are 96 per cent of all the work, and we are 31 per cent faster on
+them.** The 156 matrices where we are slower cost **28.5 milliseconds in total, all of them
+together**; the 81 where we are faster save **23.1 seconds**. The largest single loss anywhere is
+2.75 ms, on `GHS_indef/bloweybl`.
+
+**AND `MMD3B` LOSES EXACTLY WHERE `MMD3` WINS**, 1.09 against 0.69 in the band holding 96 per cent
+of the time. That is chaining's price and it is the mirror of the amd result; the layout section
+below reads both.
 
 **amd, `AMD` against `AMD3`**
 
@@ -191,18 +197,18 @@ move up by roughly a seventh.
 **The ten most expensive matrices, each branch.** They are 95 per cent of the mmd total and 85 per
 cent of the amd one.
 
-| mmd | `MMD` | ratio | `cC/tril` | `cC/nnzL` | `pC/cC` |
+| mmd | `MMD` | `MMD3/MMD` | `MMD3B/MMD` | `cC/tril` | `pC/cC` |
 |---|---:|---:|---:|---:|---:|
-| FlowIPM22/uni_chimera_i5 | 15.86 s | **0.43** | 52.71 | 0.090 | 0.01 |
-| PARSEC/Ga41As41H72 | 13.53 s | 0.85 | 5.78 | 0.008 | 0.02 |
-| PARSEC/Si87H76 | 11.78 s | 0.84 | 7.87 | 0.008 | 0.02 |
-| JGD_Trefethen/Trefethen_20000 | 10.34 s | 0.75 | 7.27 | 0.024 | 0.07 |
-| FlowIPM22/uni_chimera_i1 | 9.81 s | **0.59** | 48.92 | 0.025 | 0.01 |
-| JGD_Trefethen/Trefethen_20000b | 6.41 s | 0.85 | 24.14 | 0.084 | 0.03 |
-| Pajek/Reuters911 | 1.32 s | 0.81 | 10.07 | 0.723 | 0.03 |
-| DIMACS10/vsp_befref_fxm_2_4_air02 | 0.92 s | 0.71 | 9.58 | 0.417 | 0.08 |
-| Schenk/nlpkkt80 | 0.74 s | 0.80 | 1.42 | 0.006 | 0.61 |
-| Andrews/Andrews | 0.73 s | 0.71 | 5.65 | 0.019 | 0.06 |
+| FlowIPM22/uni_chimera_i5 | 15.77 s | **0.40** | 1.12 | 52.71 | 0.01 |
+| PARSEC/Ga41As41H72 | 13.72 s | 0.84 | 1.04 | 5.78 | 0.02 |
+| PARSEC/Si87H76 | 11.89 s | 0.83 | 1.05 | 7.87 | 0.02 |
+| JGD_Trefethen/Trefethen_20000 | 10.37 s | 0.75 | 1.12 | 7.27 | 0.07 |
+| FlowIPM22/uni_chimera_i1 | 10.04 s | **0.59** | 1.07 | 48.92 | 0.01 |
+| JGD_Trefethen/Trefethen_20000b | 6.50 s | 0.85 | 1.16 | 24.14 | 0.03 |
+| Pajek/Reuters911 | 1.33 s | 0.80 | 1.14 | 10.07 | 0.03 |
+| DIMACS10/vsp_befref_fxm_2_4_air02 | 0.99 s | 0.67 | 1.10 | 9.58 | 0.08 |
+| Schenk/nlpkkt80 | 0.74 s | 0.79 | **0.91** | 1.42 | 0.61 |
+| Andrews/Andrews | 0.73 s | 0.66 | 1.06 | 5.65 | 0.06 |
 
 | amd | `AMD` | `AMD3/AMD` | `AMD3B/AMD` | `cC/tril` | `pC/cC` |
 |---|---:|---:|---:|---:|---:|
@@ -218,25 +224,27 @@ cent of the amd one.
 | Rothberg/cfd1 | 0.03 s | 0.95 | 0.93 | 0.81 | 0.24 |
 
 **The two lists are almost the same matrices at wildly different costs.** `uni_chimera_i5` is
-15.9 seconds of `MMD` and 0.07 of `AMD`, a factor of 230. That is the 21.4x above, seen one
+15.8 seconds of `MMD` and 0.07 of `AMD`, a factor of 230. That is the 21.6x above, seen one
 row at a time.
 
-## The layout question: `AMD`'s pool against our arena
+## The layout question: three clique stores, measured
 
 **WHAT THE TWO ACTUALLY ARE, because the ratio means nothing without it.** Four axes, and they
 agree on only one of them:
 
 | | clique space | shape | bounded | reclamation |
 |---|---|---|---|---|
-| `AMD3` | separate arena | FLAT | no, it grows | none, ever |
-| `AMD3B` | unified with A and I | FLAT | yes, plus a fifth | compaction |
-| `AMD` | as `AMD3B`, that being the point | FLAT | the same | the same |
+| `AMD3`, `MMD3` | separate arena | FLAT | no, it grows | none, ever |
+| `AMD3B`, `AMD` | unified with A and I | FLAT | yes, plus a fifth | compaction |
+| `MMD3B`, `MMD` | dead segments, chained | FLAT | yes, exactly nnz | reuse by chaining |
 | a chunked store | one allocation per clique | CHUNKED | no | free, on death |
 
-So `AMD3` buys simplicity with memory: no collector to write, no bound to respect, and an arena
-that on this set reaches 98.1 million entries and on the worst row 15 times `tril(A)`. `AMD3B` buys
-a hard bound with machinery: `AMD`'s workspace, its twenty per cent of elbow room, and its garbage
-collection, which at that headroom runs about once per ordering.
+So our arena buys simplicity with memory: no collector to write, no bound to respect, and a store
+that on this set reaches 98.1 million entries on the amd side and 199.9 on the mmd, 15 and 53 times
+`tril(A)` on their worst rows. The two vendored schemes buy a hard bound with machinery, and with
+DIFFERENT machinery, which is the whole point of having both siblings. `AMD` compacts a workspace
+sized at a fifth over the pattern; `MMD` chains a clique through the dead segments of the cliques
+it absorbed and needs no spare space at all.
 
 **FLAT IS WHY COMPACTION IS THE ONLY WAY TO RECLAIM, and that is the axis the fourth row is on.**
 In a flat store a clique must be one contiguous block, so the space a dead one leaves is a hole
@@ -258,27 +266,41 @@ once: the collector's cost, minus whatever the unified layout gains by keeping a
 and its lists in one array, against an arena that pays nothing to reclaim because it never does.
 Over the 246:
 
-| | total | against `AMD` |
-|---|---:|---:|
-| `AMD` | 3.52 s | |
-| `AMD3` | 4.12 s | 1.17 |
-| `AMD3B` | 3.92 s | **1.11** |
+| | total | against its vendored | against our arena |
+|---|---:|---:|---:|
+| `AMD` | 3.52 s | | |
+| `AMD3`, arena | 4.12 s | 1.17 | |
+| `AMD3B`, compacted pool | 3.92 s | **1.11** | **0.95** |
+| `MMD` | 75.9 s | | |
+| `MMD3`, arena | 52.9 s | 0.70 | |
+| `MMD3B`, chained | 82.5 s | **1.09** | **1.56** |
 
-**The pool is 5 per cent faster than the arena over the set and faster on 224 of 242 matrices**,
-median ratio 0.90, and it wins in every band of the table above that has work in it: 0.78 against
-0.87 on the small end, 1.12 against 1.18 in the band holding 74 per cent of the time. On the two
-largest PARSEC matrices it is 1.09 and 1.11 where the arena is 1.19 and 1.23.
+**THE TWO SIBLINGS SAY OPPOSITE THINGS, AND THAT IS THE RESULT.** Compaction is nearly free:
+`AMD3B` beats the arena by 5 per cent over the set and on 224 of 242 matrices, median ratio 0.90,
+winning in every band that has work in it. Chaining is not: `MMD3B` costs 56 per cent over the
+arena and wins on only 60 of 237.
 
-**Read that as a direction and not as a coefficient**, because `Amd3B` differs from `Amd3` in more
-than the clique store: it carries its own copy of the quotient graph, `AMD`'s run order, the
-three-move rotation, positions in the pool walks and a garbage collector. The arena is the largest
-of those differences and the one the file exists to price, but it is not the only one, and a clean
-measurement would be the same code with only the placement rule swapped. See
+**And chaining loses precisely where it matters.** In the band holding 96 per cent of the mmd time,
+`MMD3` reads 0.69 against `MMD` and `MMD3B` reads 1.09, a 31 per cent win turned into a 9 per cent
+loss. The grid ladders understate this badly, reading 1.1 to 1.3, because grids have short cliques
+and few links to follow.
+
+**The reason is in the two mechanisms and it is not a surprise.** A compaction is a rare sweep: at
+a fifth of elbow room it runs about once for a whole ordering, so its cost is amortised to nearly
+nothing. A chain is a link test on EVERY READ of every clique, forever, and no amount of headroom
+reduces it because chaining exists precisely to need none. That asymmetry was written down as
+reasoning in `experiments/ordering/README.md` before it was measured; this is the measurement.
+
+**Read both as directions and not as coefficients.** Each sibling differs from its driver in more
+than the clique store: `Amd3B` also carries `AMD`'s run order, the three-move rotation and
+positions in the pool walks; `Mmd3B` carries genmmd's list conventions. The clique store is the
+largest of those differences and the one each file exists to price, but it is not the only one, and
+a clean measurement would be the same code with only the placement rule swapped. See
 `experiments/ordering/README.md` on the two axes, memory against machinery.
 
-**The one band the pool loses is the one with no work in it**, the 13 purely diagonal matrices at
-1.25 against 0.77. There is no ordering to do there and the figure is the cost of standing up a
-pool that is then never used.
+**The bands with no work in them say nothing.** The purely diagonal matrices read 1.25 and 2.20 for
+the two siblings; there is no ordering to do there and the figure is the cost of standing up a
+store that is then never used.
 
 ## Where we lose, and why it does not matter
 

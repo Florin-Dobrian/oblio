@@ -1,19 +1,26 @@
-# NEXT: the amd branch matches `AMD_2` on all 246 real matrices; the mmd branch is next
+# NEXT: both branches match their references on all 246 real matrices; build the shared class
 
-**CURRENT AS OF `db377c9` PLUS THE UNCOMMITTED WORK BELOW, 2026-08-18.** Everything from here down
-to "What was done since commit 5ea68cc" is this session; that section and everything after it is
-older, and several of its items are closed and marked where they are.
+**CURRENT AS OF `1bb8da3` PLUS THE UNCOMMITTED WORK BELOW, 2026-08-19.** Everything from here down
+to "What was done since commit 5ea68cc" is recent; that section and everything after it is older,
+and several of its items are closed and marked where they are.
 
-THE HEADLINE, and it is new today: `Amd3` and `Amd3B` now return `AMD_2`'S PRE-POSTORDER
-PERMUTATION ON EVERY MATRIX IN `benchmarks/matrices`, 246 of 246, where before four kinds of
-difference showed on about sixty of them. Four changes did it, and one of them was a CORRECTNESS
-BUG in supervariable detection that had been costing fill silently. See "Aligning the amd branch
-to `AMD_2` on real matrices" below; it is the section to read first.
+**WHERE TO START: "Promoting the private classes" below**, and read its FIRST subsection before
+the rest of it. The three decisions are made and the work is a merge. But the split inventory in
+that section was derived by diffing two private copies that had drifted apart, and the shared class
+already serves both branches on one layout with flags, so the split may largely dissolve. One
+experiment decides it and that subsection names it.
 
-The rest of the state in one line: `Amd3B` is aligned to `AMD_2` in storage and in schedule but for
-the prune fusion; the private classes are now named for what they are and the next step is
-promoting them, which is blocked on two decisions rather than on work, under "Promoting the private
-classes".
+What got done and is now behind us:
+
+- `Amd3` and `Amd3B` return `AMD_2`'s PRE-POSTORDER PERMUTATION ON ALL 246 real matrices, where
+  before four kinds of difference showed on about sixty. One of the four fixes was a CORRECTNESS
+  BUG in supervariable detection that had been costing fill silently.
+- `Mmd3` and `Mmd3B` return genmmd's permutation on all 246, and needed no fixes at all.
+- Peak live clique members is published by all five drivers and CHECKED across each branch's pair,
+  in `test_order` and in both benchmark tables. It found two defects in `Amd3B`'s collector that
+  nothing else in the tree could see.
+- The layout question is measured: `AMD_2`'s compacted pool beats our arena by five per cent,
+  genmmd's chaining loses to it by 56.
 
 ## The point of the B and C layers, restated because it was being traded away
 
@@ -247,6 +254,46 @@ temporarily; with it in place the second would have been a `test_order` failure 
 benchmark marker on a matrix someone happened to send. Adding it is small and is the obvious next
 step.
 
+## The peak counter reaches all five drivers, and the layout answer, 2026-08-19
+
+**`Mmd3B` publishes `pC` now, and it cost an array.** The flat drivers read a clique's size from
+`mRun[c].adjacencySize`, a descriptor they keep anyway; the chained store has NO clique length at
+all, ending a list at a terminator, so `Mmd3B` carries `mCliqueLiveMembers`, one uint32 per vertex.
+Birth and contraction are free, the reach count and `merged.size()`; DEATH is the only event that
+needs the array, a clique's size then being born minus contracted with nothing else carrying it.
+
+**It tracks the NOTIONAL count, not this file's stored one**, which is the odd part and is
+deliberate: `Mmd3` drops the mass-eliminated from C[pivot] and `Mmd3B` does not, `mmdelm` leaving
+them in place. Tracking what the flat drivers hold is what makes the comparison possible at all.
+Read as a description of the chained store it would be wrong, and the declaration says so.
+
+**Cost measured, not assumed:** O(1) per elimination and nothing in the member walks, so the ladder
+shift was about two per cent with an inconsistent sign, inside a harness whose run-to-run spread on
+an unchanged driver is up to seven. The real cost is footprint.
+
+**Both benchmark tables now carry the branch's B sibling**, timed and with its order, fill and `pC`
+checked against the driver rather than printed. All markers were clear over the 246 on both
+branches.
+
+### And the layout answer, which is the point of having the siblings
+
+| | total | against its vendored | against our arena |
+|---|---:|---:|---:|
+| `AMD3B`, `AMD_2`'s compacted pool | 3.92 s | 1.11 | **0.95** |
+| `MMD3B`, genmmd's chained segments | 82.5 s | 1.09 | **1.56** |
+
+**The two say opposite things and both are consistent with the mechanism.** Compaction is a rare
+sweep, about once per ordering at a fifth of elbow room, so it amortises to nearly nothing and the
+pool BEATS our arena by five per cent, on 224 of 242 matrices. Chaining is a link test on every
+read of every clique forever, and no headroom reduces it because chaining exists precisely to need
+none, so it COSTS 56 per cent and wins on 60 of 237. In the band holding 96 per cent of the mmd
+time, `MMD3` reads 0.69 against genmmd and `MMD3B` reads 1.09: a 31 per cent win turned into a nine
+per cent loss.
+
+**The grid ladders understate chaining badly**, 1.1 to 1.3 there against 1.56 on real matrices,
+because grids have short cliques and few links to follow. benchmarks/matrices ORDERING.md carries
+the full reading.
+
 ## What was borrowed into production, 2026-08-18
 
 Two of the audit's findings were not `Amd3B` defects but shared ones, so they went into `Amd3` and
@@ -311,10 +358,12 @@ set is `QuotientGraphFlat`, `QuotientGraphChunked`, `QuotientGraphCompacted` and
 to `QuotientGraphA` and `QuotientGraphC`, so regenerating either file undoes this. They also carry
 sandbox paths from a previous session. Fix both before running them.
 
-## Promoting the private classes: the order, and the decision that gates it
+## Promoting the private classes: the design is settled, the merge is the work
 
-The plan is documentation, then `QuotientGraphChained`, then `QuotientGraphCompacted`. The
-documentation is done. The other two are not, and neither is a move-and-rename.
+The plan was documentation, then `QuotientGraphChained`, then `QuotientGraphCompacted`. The
+documentation is done. **The order has since reversed: `QuotientGraphCompacted` is the one with a
+settled design and is what the next session should build.** `QuotientGraphChained` is still on a
+bucket question and can wait.
 
 **`QuotientGraphChained` is blocked on a bucket question.** `BucketsChained` has diverged from the
 shared `Buckets` in BOTH directions, not merely been pruned. It lacks the four amd-only hash
@@ -327,17 +376,117 @@ one call, which is `mmdelm`'s `bwd[rn] = 0` and which production spells as two c
 - Promote `BucketsChained` as its own public class, and keep two bucket classes aligned forever.
 - Leave the chained graph private until the bucket question is settled.
 
-**`QuotientGraphCompacted` is blocked on a convention question**, and this one is older. The two
-copies have DIVERGED: `Amd3B`'s carries the run flip, the rotation, positions and the mid-walk
-collector; `Mmd3C`'s carries none of it. One class cannot serve both as they stand, because the
-flipped run leaves no free slot for `Mmd3C`'s back-of-list convention. Three ways out, listed in
-docs/DESIGN_DECISIONS.md (2026-08-18) and repeated here because this is where the work starts:
+**`QuotientGraphCompacted` IS NO LONGER BLOCKED. The design is settled and the next session builds
+it**, 2026-08-19. What follows replaces the three options that stood here, which were written
+before the question was tested.
 
-- `Mmd3C` adopts the rotation. Its permutation MOVES, so its fill column stops being comparable to
-  `MMD3`'s and its digest baseline has to be re-recorded.
-- The class carries both conventions, costing a shift or a spare word per vertex on the mmd path
-  and putting back a branch the flip removed.
-- Promote the amd side alone, with `Mmd3C` joining once the convention is decided.
+### READ THIS BEFORE THE PLAN BELOW: the split may be smaller than it looks
+
+**The shared class already serves both branches on ONE layout, with flags.** `Amd3` sets
+`setVendoredListOrder(true)`, `Mmd3` sets `setReverseIncidence(true)`, both reproduce their
+references, and both live on the same adjacency-first storage. So two vendored conventions coexist
+in one body today and have for some time.
+
+**Which means the inventory below was derived from the wrong comparison.** It came from diffing
+`Amd3B` against `Mmd3C`: two copies that were taken into private namespaces and then evolved apart
+for months with no one reconciling them. `Amd3B` dropped the flags, hardcoded `AMD_2`'s layout and
+grew a mid-walk collector; `Mmd3C` kept the flags and grew neither. MUCH OF WHAT IS CATALOGUED
+BELOW AS "the vendored codes disagree" MAY SIMPLY BE THAT DRIFT.
+
+Two things have to be told apart, and the plan below conflates them:
+
+- **The conventions genuinely differ**, and that is proven: four walk variants over `AMD_2`'s
+  insertion, none reproducing genmmd past a 5-squared grid. But the shared class ALREADY handles
+  them, with two flags, on one layout.
+- **The layout, incidence-first against adjacency-first, is `Amd3B`'s own choice** for the
+  three-move rotation. Neither reference forces it: `Amd3` matches `AMD_2` exactly on
+  adjacency-first, using the held-vertex trick instead.
+
+**So the question to ask first is not how to split the class.** It is whether the compacting class
+needs a layout the shared one does not already have. The only reason to think so is the MID-WALK
+COLLECTOR, which requires that what remains of the pivot's run stay contiguous. That is satisfied
+for mmd on adjacency-first, as established below. WHETHER IT IS SATISFIED FOR AMD'S CLIQUES-FIRST
+WALK ON ADJACENCY-FIRST STORAGE IS UNTESTED, and it is the one experiment that decides whether any
+split is needed at all.
+
+If it holds, the merge is small: take `Mmd3C`'s class, add the pool and the collector, set the
+flags, and the six splits below reduce to what the shared class does already. If it does not, the
+plan below stands.
+
+### What the experiments established
+
+**The two vendored codes disagree on two conventions, and neither is free to move.** Where the new
+clique is written into I[u]: `AMD_2` puts it first, genmmd appends it last. And the order
+`reachableSet` walks a vertex's two halves: `AMD_2` takes the cliques then the adjacency, forwards;
+genmmd takes the adjacency then the cliques in REVERSE, because `mmdelm` pushes elements onto a
+stack and pops them. Both decide the order members enter C[pivot], hence bucket order, hence which
+of several equal-degree vertices is picked. Change either and the permutation moves, and each
+driver exists to reproduce its reference's exactly.
+
+**Front insertion cannot reproduce genmmd, and that was tested rather than argued.** Four walk
+variants over `AMD_2`'s insertion, cliques-first or adjacency-first crossed with incidence forward
+or reversed, and none matches beyond a 5-squared grid. So THERE IS NO SHARED LAYOUT: the flipped
+run, incidence before adjacency, is `AMD_2`'s alone.
+
+**But the flip is NOT what the mid-walk collector needs**, which was the reason it looked mandatory.
+The collector needs only that what remains of the pivot's run stay contiguous. Amd walks cliques
+first, so the flip makes the consumed part a prefix. Mmd walks the adjacency first and then the
+incidence REVERSED, so the consumed part of A[u] is a prefix and the consumed part of I[u] is a
+suffix, and the remainder is contiguous in both phases with no flip at all. `Mmd3C` can have the
+collector on its own A-then-I layout.
+
+### The shape IF a split turns out to be needed, and the three decisions Florin made
+
+The rule is that a method splits ONLY where the two vendored codes disagree, and that a split is
+spelled with a branch suffix so each body can be read against `AMD_2` or `mmdelm` directly. The
+count of splits is not a constraint; contorting shared code to avoid one is worse than having one.
+
+```
+split      reachableSetAmd / reachableSetMmd        walk order and direction
+           pruneAmd / pruneMmd                      where the new clique lands in I[u]
+           eliminatedAmd / eliminatedMmd            zero weight against mark GONE
+           adjacencyAmd / adjacencyMmd              and the two incidence accessors: the
+                                                    layout lives here and, we think, only here
+           beginElimination, probably               for the absorbed-clique pointer alone
+           the truncation in the collector          which of the two size fields shortens
+shared     the pool, the free cursor, elbow room, garbageCollect's sweep, reachableSetInPlace,
+           massEliminate, merge, killClique, finishElimination, the descriptors, the weights,
+           the supervariable chains, the counters
+gone       `eliminate`, the wrapper. Each driver calls beginElimination, its own prune, then
+           finishElimination, so the sequence is visible at the call site
+per-driver `order` against `orderAscending`, and the amd-only and mmd-only methods, each
+           already distinct by name and needing no suffix
+```
+
+**Decision 1, `eliminated()`: keep both.** `Amd3B` reads a zero weight, `Mmd3C` reads `GONE`, and
+the mark cannot simply go: a vertex numbered by the mmd prepass is NOT eliminated in the
+quotient-graph sense and keeps its weight, so only a tag can hide it. Pragmatic for now, worth
+revisiting.
+
+**Decision 2, `mMark`: allocated on demand.** The member exists for both, and only the mmd driver
+asks for it, so amd pays a pointer rather than an n-array and `Amd3B`'s footprint claim stays true.
+**`mHasNumbered` BECOMES LOAD-BEARING** by this decision, not merely an optimisation: it is the
+short circuit that keeps an empty array safe in the shared bodies that carry the
+`mHasNumbered && mMark[v] == GONE` guard. That must be said at its declaration.
+
+**Decision 3, `eliminate`'s signature: the wrapper goes.** `Amd3B` takes a `TaggedScanCompacted&`
+and `Mmd3C` takes nothing, because amd's prune computes the degree bound and the hash key in the
+same pass and mmd's does neither. With the prune split out as its own method the difference lands
+where it belongs and no dummy parameter is invented.
+
+### The one thing still unverified, and it gates the estimate
+
+**That the shared bodies can be written through the accessors.** If `adjacency(u)` and
+`incidence(u)` are the only places that know where the two halves sit, everything else is
+layout-agnostic and the split above is complete. Several shared bodies do RAW POINTER ARITHMETIC
+today rather than going through them, and converting those is the actual work. This claim is from
+reading signatures and a few bodies, not from attempting the merge, and it is the softest part of
+the plan. Check it first.
+
+**And `beginElimination` splitting is the biggest loss of the six**, because it holds the placement
+rule that is genuinely common to both: build in place when the incidence list is empty, otherwise
+at the free cursor, compact when the cursor runs out. Prefer factoring the two layout-dependent
+lines out and keeping the rule shared over duplicating it.
 
 ## The ladders moved off the power-of-two sides, 2026-08-18
 

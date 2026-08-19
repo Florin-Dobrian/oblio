@@ -65,6 +65,8 @@
 // WITHDRAWN, this file being what refuted it.
 
 namespace Oblio {
+
+extern std::size_t gPeakCliqueMembers;   // defined in src/QuotientGraph.cpp; see it there
 namespace {
 
 class BucketsChained {
@@ -359,6 +361,26 @@ public:
     // recomputes it afterwards over the trimmed clique, which is ledger entry 7 and stays.
     std::uint32_t cliqueWeight() const { return mCliqueWeight; }
 
+    // PEAK LIVE CLIQUE MEMBERS, for the cross-driver check in tests/test_order.cpp and in
+    // benchmarks/matrices. `Mmd3`, `Mmd3B` and `Mmd3C` return the same permutation, so they form
+    // the same cliques and lose the same members at the same moments; this figure MUST be equal
+    // across the three however differently they store them. The digest says the outputs agree,
+    // this says the work behind them agreed too, and on the amd side the same check found two
+    // defects in a day.
+    //
+    // IT IS THE NOTIONAL COUNT, NOT THIS FILE'S STORED ONE, which is the odd part and is
+    // deliberate. `Mmd3` drops the mass-eliminated from C[pivot]; this file does not, `mmdelm`
+    // leaving them in place and skipping them on `qsize != 0`. So the size tracked here is one
+    // the storage does not have: it is what the flat drivers hold, maintained so the comparison
+    // is possible at all. Reading it as a description of the chained store is a mistake.
+    //
+    // AND IT COSTS AN ARRAY, which the flat drivers do not pay: they read a clique's size from
+    // `mRun[c].adjacencySize`, a descriptor they keep anyway, and this file keeps no clique length
+    // at all. INSTRUMENTATION rather than mechanism, and it is present in release because the
+    // benchmark that reads it builds with NDEBUG. It should not be counted against this file's
+    // argument about how many arrays a vertex's state lives in.
+    std::size_t numPeakCliqueMembers() const { return mNumPeakCliqueMembers; }
+
     // The two halves of the neighbor relation, read by an approximate degree, which decomposes
     // reach(u) rather than forming it: A[u] contributes its own term and each clique in I[u]
     // contributes one number computed for the clique rather than for u. An exact degree has no
@@ -615,10 +637,6 @@ private:
     // of every clique ever formed, which is bounded by nnz(L) and is a few megabytes at the sizes
     // we run. The offsets being indices rather than pointers is what lets the arena simply grow
     // instead, since a reallocation leaves every offset valid.
-    // The same split as the source pool above, and for the same reason: `mCliquePtr` offsets into
-    // the arena, which grows toward nnz(L), so it is two dimensional; `mCliqueSize` is a member
-    // count bounded by n. The one crossing is in `beginElimination`, where the arena's new length
-    // less the block's start is written as a count.
     // THE CHANGE UNDER TEST. There is no clique arena. C[c] lives in the segment of the vertex
     // that formed it, mSource[mRun[c].sourcePtr ...], which is dead the moment c is eliminated, so a
     // clique costs no storage and is addressed by its pivot. When the reach outgrows that segment
@@ -629,9 +647,10 @@ private:
     // clique 0 from member 0. The encoding maps [0, 2^31-1] onto [-2^31, -1] exactly, no value
     // spare and none overlapping, which is what makes a sign test the whole discriminator.
     //
-    // genmmd ends a list with a 0 entry, which works only because its ids start at 1. We keep the
-    // length instead, in mCliqueSize, which every walk here counts down; a length is also what
-    // several passes want without walking, and AMD_2 keeps one too, as `Len`.
+    // genmmd ends a list with a 0 entry, which works only because its ids start at 1. Ours is a
+    // reserved value, TERMINATOR, for the same job. THIS FILE KEEPS NO CLIQUE LENGTH: it did, in
+    // `mCliqueSize`, and the stamp scheme retired it; see the note on mMark below. The paragraph
+    // that stood here said the opposite and had been stale since.
     std::vector<std::int32_t>  mAbsorbed;     // I[pivot], copied out before its segment is overwritten
 
     // The supervariable a vertex stands for, as a chain rather than a list per vertex. A list
@@ -691,6 +710,12 @@ private:
     // nor AMD_2 shares one array between the two kinds, and this is the cheap way to stop doing
     // so. It is what lets the dead-clique test be a stamp again rather than a size, which is what
     // retires mCliqueSize.
+    // PEAK LIVE CLIQUE MEMBERS, and this array is the price of having it here. See
+    // `numPeakCliqueMembers`.
+    std::vector<std::uint32_t> mCliqueLiveMembers;
+    std::size_t mNumLiveCliqueMembers = 0;
+    std::size_t mNumPeakCliqueMembers = 0;
+
     std::vector<std::int32_t> mMark;     // membership scratch, read against mTag
     std::int32_t              mTag = 0;
 };
@@ -699,6 +724,7 @@ private:
 QuotientGraphChained::QuotientGraphChained(const std::vector<std::size_t>&  colPtr,
                              const std::vector<std::int32_t>& rowIdx)
     : mRun(colPtr.empty() ? 1 : colPtr.size()),
+      mCliqueLiveMembers(mRun.size() - 1, 0),
       mMark(2 * (mRun.size() - 1), NIL) {
     const std::int32_t size = static_cast<std::int32_t>((mRun.size() - 1));
 
@@ -842,7 +868,7 @@ void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int32_t& ab
     // there to be followed: it is written before the walk that can reach it.
     const auto emit = [&](std::int32_t v) {
         while (rl >= rm) {
-            const std::int32_t l = mSource[rm];         // -(c + 1); see mCliqueSize's note
+            const std::int32_t l = mSource[rm];         // -(c + 1); see the link encoding above
             rl = mRun[-l - 1].sourcePtr;
             rm = mRun[-l].sourcePtr - 1;
         }
@@ -854,22 +880,31 @@ void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int32_t& ab
     // first loop is unchecked for exactly this reason, and checking here is not merely wasteful,
     // it is wrong -- with incN == 0 the cursor legitimately lands on the last entry, and a check
     // would read it as a link that was never written. Found by ASan on a 2 by 2 grid.
+    std::uint32_t born = 0;                     // the clique's size; see numPeakCliqueMembers
     for (std::uint32_t k = 0; k < adjN; ++k) {
         const std::int32_t v  = mSource[base + k];
         const std::int32_t nv = mWeight[v];
         if (nv > 0 && !(mHasNumbered && mMark[v] == GONE)) {
             mWeight[v] = -nv;
             mSource[rl++] = v;
+            ++born;
         }
     }
 
     // Then the cliques, each writing its continuation before it can be reached. This loop is the
     // one that can outgrow the segment, and it is the only one that follows a link.
     for (const std::int32_t c : mAbsorbed) {
+        // c DIES HERE, absorbed into the clique being built, and this is where its members leave
+        // the live count. The size is read rather than derived: walking c to count it would double
+        // the cost of the only loop that matters, and nothing else in this file carries a clique's
+        // length. See numPeakCliqueMembers.
+        mNumLiveCliqueMembers -= mCliqueLiveMembers[c];
+        mCliqueLiveMembers[c]  = 0;                 // so a second sighting subtracts nothing
+
         mSource[rm] = -(c + 1);                     // the continuation, before it can be read
         forEachMember(c, [&](std::int32_t v) {
             const std::int32_t nv = mWeight[v];        // one load; see the note above the walk
-            if (nv > 0) { mWeight[v] = -nv; emit(v); }
+            if (nv > 0) { mWeight[v] = -nv; emit(v); ++born; }
         });
     }
 
@@ -901,6 +936,12 @@ void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int32_t& ab
     //
     // The pivot reads negative from the negation above, so it reads as a member of its own
     // clique, and the prune's `mWeight[v] <= 0` drops it with the rest.
+    // AND THE NEW CLIQUE IS BORN, the maximum taken here alone since nothing else raises the
+    // total. See numPeakCliqueMembers.
+    mCliqueLiveMembers[pivot] = born;
+    mNumLiveCliqueMembers    += born;
+    mNumPeakCliqueMembers     = std::max(mNumPeakCliqueMembers, mNumLiveCliqueMembers);
+
     ++mTag;
     absorbed = mTag;
     const std::size_t cliqueBase = mRun.size() - 1;
@@ -1076,6 +1117,12 @@ const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std::int32_
     // THE COST IS SPACE, and it is the space genmmd spends. A clique keeps its dead members for as
     // long as it lives, so live clique storage here is strictly above what the compacting classes
     // report for the same ordering.
+    // THE MERGED LEAVE THE LIVE COUNT even though they do NOT leave this file's storage: `mmdelm`
+    // keeps them in the list and skips them on `qsize != 0`. Tracking the notional size is what
+    // makes the figure comparable with `Mmd3`, which does drop them. See numPeakCliqueMembers.
+    mCliqueLiveMembers[pivot] -= static_cast<std::uint32_t>(merged.size());
+    mNumLiveCliqueMembers     -= merged.size();
+
     if (!merged.empty()) {
         for (std::int32_t u : merged) {                // the pivot now stands for them too
             mSuperNext[mSuperLast[pivot]] = u;         // append u's chain, order preserved
@@ -1379,6 +1426,7 @@ std::vector<std::int32_t> orderMmd3B(const std::vector<std::size_t>&  colPtr,
 
     }
 
+    gPeakCliqueMembers = qg.numPeakCliqueMembers();   // see src/QuotientGraph.cpp
     return qg.orderAscending(pivots);   // genmmd's mmdnum. See the ledger, entry 6.
 }
 

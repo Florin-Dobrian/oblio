@@ -65,6 +65,35 @@ be real, which requires Hermitian. Once that is on the table, the design collaps
 **Cholesky is `CC^H`, always, and in real that *is* `CC^T`.** No option, no flag, no forbidden
 combination to reject. The answer was not hard. Asking the right question was.
 
+## 2026-08-19: a derived counter is only as good as the sites it is funnelled through
+
+**The claim being made when `numPeakCliqueMembers` went in** was that funnelling every birth,
+contraction and death through `killClique` and `trimClique` made the counter correct by
+construction. That was wrong twice within a day, both times in `Amd3B`, and the shape of both
+mistakes is the same: a site that changes a clique's length WITHOUT going through either funnel.
+
+- `beginElimination` re-read `I[pivot]` after the walk to find the cliques to kill, and the
+  mid-walk collector truncates that list as it consumes it. Cliques lost that way were never killed
+  at all.
+- The truncation itself shortens the clique being consumed. That is a contraction, and nothing told
+  the counter.
+
+**The durable point.** A funnel is a claim about the CALL GRAPH, and it holds only while every
+writer of the underlying state goes through it. Neither of these did, and neither was visible by
+reading, because both sites look like storage bookkeeping rather than like liveness. The way to
+make such a claim checkable is a RECOMPUTATION from independent state, which is what
+`QuotientGraph::cliqueCountBalances` does and what `Amd3B` still lacks.
+
+**And on what found them: not a test.** The digest, the vendored acceptance checks, `test_order`
+and the sanitizers were all green throughout. What caught them was a cross-driver comparison in a
+BENCHMARK, `Amd3B`'s peak against `Amd3`'s, on matrices from a real collection. A quantity that is
+a property of the algorithm rather than of the implementation makes two implementations comparable
+in a way that output equality does not: the permutations agreed the whole time.
+
+**The general rule this supports**, and it is now twice-earned in two days: an oracle that asks
+whether an answer is LEGAL cannot see a defect that changes only how the answer was reached. The
+2026-08-18 stamp entry is the other instance, and it cost fill rather than work.
+
 ## 2026-08-18: a tag array holding two kinds of value needs the ranges kept apart
 
 **The bug.** `Amd3`'s `w` array carries the scan's `w[c] = degree[c] + wflg - nvi`, which reaches

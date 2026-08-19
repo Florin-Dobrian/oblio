@@ -41,6 +41,7 @@
 #include "MatrixMarket.h"
 
 #include "oblio/Amd3.h"
+#include "oblio/Amd3B.h"
 #include "oblio/ElmForest.h"
 #include "oblio/ElmForestEngine.h"
 #include "oblio/Mmd3.h"
@@ -237,6 +238,26 @@ void run(const std::string& path, const Options& options) {
                                                 : orderMmd3(colPtr, rowIdx, 0, cC);
     const std::size_t pC   = gPeakCliqueMembers;
     const std::size_t nnzL = fillOf(A, order);
+
+    // `AMD3B` RIDES ALONG ON THE AMD BRANCH, and only its time is reported. It is `Amd3` on
+    // `AMD_2`'s compacting pool rather than on our arena, so its clique storage is a different
+    // quantity entirely and there is nothing for a `cC` column to compare; see
+    // experiments/ordering/README.md on the three layouts. Everything else about it MUST match
+    // `Amd3`, the two being the same algorithm with the same encodings, so the order, the fill and
+    // the peak live members are checked rather than printed and a mismatch is flagged at the end
+    // of the row. That check has teeth: `pC` is a property of the algorithm and not of the layout,
+    // so two drivers that agree on the permutation can still be caught doing different work.
+    double      b3ms  = 0.0;
+    std::string extra;
+    if (amd) {
+        b3ms = bestOf([&] { const auto p = orderAmd3B(colPtr, rowIdx); (void) p; }, repeats);
+        gPeakCliqueMembers = 0;
+        const std::vector<std::int32_t> b3order = orderAmd3B(colPtr, rowIdx);
+        const std::size_t b3pC = gPeakCliqueMembers;
+        if (b3order != order)              extra += "  AMD3B order differs";
+        else if (fillOf(A, b3order) != nnzL) extra += "  AMD3B fill differs";
+        if (b3pC != pC)                    extra += "  AMD3B pC differs";
+    }
     // Held as strings so a zero denominator, which a forest that failed to build would give, prints
     // as a dash rather than as a number nobody can read.
     char cTril[16] = "-", cFill[16] = "-", pOverC[16] = "-";
@@ -262,36 +283,50 @@ void run(const std::string& path, const Options& options) {
             [&] { mmd_order(n, ap.data(), ai.data(), perm.data(), invp.data()); }, repeats);
     }
 
-    // AND THE FILL COLUMN'S PREMISE IS CHECKED RATHER THAN ASSUMED. It is printed once and called
-    // both routines', which is only true while the two orders agree. On the mmd side that holds by
-    // construction and is checked by experiments/ordering's `make mmdmatrices`; on the amd side
-    // `make amdorder` checks it on 38 generated shapes and on NONE of these matrices. So a row
-    // where they part is marked rather than quietly reporting our fill as theirs.
-    const char* note = "";
-    if (amd && (gRawOrder.size() != order.size() ||
-                !std::equal(gRawOrder.begin(), gRawOrder.end(), order.begin())))
-        note = "  raw order differs";
+    // AND THE FILL COLUMN'S PREMISE IS CHECKED RATHER THAN ASSUMED, ON BOTH BRANCHES. It is printed
+    // once and called both routines', which is only true while the two orders agree. Nothing on
+    // this set was checking that until 2026-08-18, and when the amd half got the check it lit up
+    // about sixty rows and cost four fixes, one of them a correctness bug in supervariable
+    // detection that had been quietly costing fill. The mmd half is now checked the same way.
+    //
+    // WHAT IS COMPARED DIFFERS BY BRANCH, and the asymmetry is genmmd's rather than ours. `AMD_2`
+    // relabels its output through `AMD_postorder`, so the comparable object has to be
+    // reconstructed upstream of it by the hooked copy. genmmd does no postorder at all, so
+    // `mmd_order`'s own `perm` IS the elimination order, 0-based new-to-old exactly as
+    // `orderMmd3` returns it. Same reasoning as experiments/ordering's two checkers; see the
+    // header of mmdorder.cpp there.
+    const std::vector<int>& theirs = amd ? gRawOrder : perm;
+    std::string note = extra;
+    if (theirs.size() != order.size() ||
+        !std::equal(theirs.begin(), theirs.end(), order.begin()))
+        note += amd ? "  raw order differs" : "  order differs";
 
     // NO RATIO ON A READING TOO SMALL TO CARRY ONE. The set spans four orders of magnitude in
     // ordering time and the smallest matrices finish inside the clock's own resolution, where a
     // quotient of two such readings is noise printed to two decimals. Below a hundredth of a
     // millisecond the column is a dash, which says "not measured here" where `1.00x` would have
     // said "the same".
+    // ONE ROW, PRINTED IN THREE PIECES so the branch-specific columns need no second format
+    // string: the shared columns, then the amd branch's two, then whatever the checks had to say.
+    char ratio[16] = "-";
     if (vendored >= 0.01 && ours >= 0.01)
-        std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %11zu %13zu %8s %8s %7s %9.3f %9.3f"
-                    " %7.2fx%s\n",
-                    name.c_str(), size, m, tril, 2 * m, cC, pC, nnzL, cTril, cFill, pOverC,
-                    vendored, ours, ours / vendored, note);
-    else
-        std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %11zu %13zu %8s %8s %7s %9.3f %9.3f"
-                    " %8s%s\n",
-                    name.c_str(), size, m, tril, 2 * m, cC, pC, nnzL, cTril, cFill, pOverC,
-                    vendored, ours, "-", note);
+        std::snprintf(ratio, sizeof ratio, "%.2fx", ours / vendored);
+    std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %11zu %13zu %8s %8s %7s %9.3f %9.3f %8s",
+                name.c_str(), size, m, tril, 2 * m, cC, pC, nnzL, cTril, cFill, pOverC,
+                vendored, ours, ratio);
+    if (amd) {
+        char b3ratio[16] = "-";
+        if (vendored >= 0.01 && b3ms >= 0.01)
+            std::snprintf(b3ratio, sizeof b3ratio, "%.2fx", b3ms / vendored);
+        std::printf(" %9.3f %9s", b3ms, b3ratio);
+    }
+    std::printf("%s\n", note.c_str());
 #else
-    std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %11zu %13zu %8s %8s %7s %9s %9.3f %8s"
-                "  vendored needs private/\n",
+    std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %11zu %13zu %8s %8s %7s %9s %9.3f %8s",
                 name.c_str(), size, m, tril, 2 * m, cC, pC, nnzL, cTril, cFill, pOverC,
                 "-", ours, "-");
+    if (amd) std::printf(" %9.3f %9s", b3ms, "-");
+    std::printf("%s  vendored needs private/\n", extra.c_str());
 #endif
 }
 
@@ -303,8 +338,9 @@ void usage() {
     std::printf("       experiments/ordering's `make mmdmatrices` checks, so the fill column is\n");
     std::printf("       both of theirs and the only difference between them is time.\n");
     std::printf("  amd  amd_order against Amd3. The CLOCK is on amd_order whole, what a caller\n");
-    std::printf("       caller pays; EVERYTHING ELSE comes from the hooked pre-postorder copy,\n");
-    std::printf("       because Amd3 does no postorder and returns that order.\n");
+    std::printf("       pays; EVERYTHING ELSE comes from the hooked pre-postorder copy, because\n");
+    std::printf("       Amd3 does no postorder and returns that order. Amd3B is timed too, and\n");
+    std::printf("       its order, fill and pC are checked against Amd3's rather than printed.\n");
 }
 
 } // namespace
@@ -376,10 +412,12 @@ int main(int argc, char** argv) {
     //
     // The timing half is still genmmd against Mmd3 alone. The amd ladder belongs here too and is
     // not in yet.
-    std::printf("  %-38s %8s %10s %11s %11s %11s %11s %13s %8s %8s %7s %9s %9s %8s\n",
+    std::printf("  %-38s %8s %10s %11s %11s %11s %11s %13s %8s %8s %7s %9s %9s %8s",
                 "matrix", "n", "m", "tril(A)", "A+I", "cC", "pC", "nnz(L)", "cC/tril", "cC/nnzL",
                 "pC/cC", amd ? "AMD ms" : "MMD ms", amd ? "AMD3 ms" : "MMD3 ms",
                 amd ? "AMD3/AMD" : "MMD3/MMD");
+    if (amd) std::printf(" %9s %9s", "AMD3B ms", "AMD3B/AMD");
+    std::printf("\n");
 
     for (const std::string& path : paths) run(path, options);
 

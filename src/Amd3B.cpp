@@ -399,6 +399,7 @@ private:
     std::vector<std::int32_t> mWeight;
     std::uint32_t              mCliqueWeight = 0;  // see cliqueWeight(); per-pivot, not per-vertex
 
+    std::vector<std::int32_t> mAbsorbed;   // I[pivot], captured before the walk truncates it
     std::vector<std::int32_t> mMerged;   // scratch for the vertices an elimination merges away
 
 
@@ -567,9 +568,20 @@ std::uint32_t QuotientGraphCompacted::reachableSet(std::int32_t u) {
                     mRun[u].incidenceSize = 0;
                     mRun[u].adjacencySize = ln;
                 }
+                // TRUNCATING A CLIQUE IS A CONTRACTION AND THE COUNTER HAS TO SEE IT. `c` is a
+                // live clique being consumed into the new one; dropping its consumed prefix
+                // shortens it, and `killClique` below will then subtract only what remained. Not
+                // telling the counter here left the difference live forever, which is what the
+                // `AMD3B pC differs` check caught on `JGD_Trefethen/Trefethen_2000`, +31 of 11091.
+                // The peak is unaffected either way, being taken only at a birth, and by then the
+                // clique is dead in full: the two subtractions sum to its original length.
+                //
+                // The pivot's own run needs no such line. `u` is a live vertex and the length
+                // being shortened is A[u]'s, which this counter never held.
                 if (c != NIL) {
-                    mRun[c].sourcePtr     = pj;
-                    mRun[c].adjacencySize = ln;
+                    mNumLiveCliqueMembers -= mRun[c].adjacencySize - ln;
+                    mRun[c].sourcePtr      = pj;
+                    mRun[c].adjacencySize  = ln;
                 }
                 garbageCollect(cliqueStart);
                 // AND RESUME FROM THE DESCRIPTORS, which is `AMD_2`'s `pj = Pe [e] ; p = Pe [me]`.
@@ -683,12 +695,22 @@ void QuotientGraphCompacted::beginElimination(std::int32_t pivot) {
     const std::int32_t* reached     = mSource.data() + cliqueStart;
     const std::uint32_t reachedSize = cliqueLen;
 
-    // The absorbed cliques die only after the walk has read them. In the in-place case there are
-    // none, the incidence list being empty, so this loop is skipped along with the branch above.
-    const std::int32_t* absorbedCliques = mSource.data() + mRun[pivot].sourcePtr;
-    const std::uint32_t absorbedSize    = mRun[pivot].incidenceSize;
-    for (std::uint32_t i = 0; i < absorbedSize; ++i)
-        killClique(absorbedCliques[i]);               // dead, its block left behind
+    // THE ABSORBED CLIQUES DIE HERE: after the walk has read them and BEFORE the new clique is
+    // born. Both halves of that placement are forced. After the walk, because it needs their
+    // member lists. Before the birth, because `numPeakCliqueMembers` is a running maximum and the
+    // absorbed cliques and the one absorbing them are never live at the same instant; killing
+    // afterwards would raise the peak by their combined size on every step that absorbs anything.
+    //
+    // THE LIST COMES FROM `mAbsorbed`, CAPTURED BEFORE THE WALK, and re-reading I[pivot] here is
+    // WRONG NOW THAT THE WALK TRUNCATES. `reachableSet` advances `sourcePtr` and shortens
+    // `incidenceSize` past whatever a mid-walk collection has consumed, so after one the list is
+    // short or empty and the cliques it named are never marked dead. That was the state until
+    // 2026-08-19: the permutation was unaffected, `eliminate` having zeroed their `w` before the
+    // walk so the prune dropped them anyway, but each kept a non-zero length, stayed a live block
+    // for `garbageCollect` to copy, and was never subtracted from the live count. Found by the
+    // `AMD3B pC differs` check in benchmarks/matrices on `Arenas/email`, +6 of 1776, and
+    // `rand1200`, +32 of 3456. `Amd3B` alone truncates, so `Amd3` and `Mmd3C` never had it.
+    for (std::int32_t c : mAbsorbed) killClique(c);   // dead, their blocks left behind
 
     mRun[pivot].sourcePtr     = cliqueStart;
     mRun[pivot].adjacencySize = cliqueLen;
@@ -712,10 +734,17 @@ void QuotientGraphCompacted::beginElimination(std::int32_t pivot) {
 
 const std::vector<std::int32_t>& QuotientGraphCompacted::eliminate(std::int32_t pivot,
                                                                    TaggedScanCompacted& scan) {
+    // I[pivot] IS CAPTURED HERE BECAUSE THE WALK DESTROYS IT. This pass exists to zero the absorbed
+    // cliques' `w`, and it is the last point at which the list is whole: `reachableSet` truncates
+    // it as it consumes it. `beginElimination` kills them from this copy. See its note.
+    mAbsorbed.clear();
     {
         const std::int32_t* absorbed = mSource.data() + mRun[pivot].sourcePtr;
         const std::uint32_t count    = mRun[pivot].incidenceSize;
-        for (std::uint32_t i = 0; i < count; ++i) scan.w[absorbed[i]] = 0;
+        for (std::uint32_t i = 0; i < count; ++i) {
+            scan.w[absorbed[i]] = 0;
+            mAbsorbed.push_back(absorbed[i]);
+        }
     }
 
     beginElimination(pivot);

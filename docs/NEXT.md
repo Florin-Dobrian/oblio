@@ -210,6 +210,43 @@ two must already agree. What worked was intervention and logging:
 - **Dump the actual state at that point.** Printing both vertices' lists from both codes showed
   them identical and NOT duplicates, which proved the test wrong rather than the lists divergent.
 
+## Two bugs in `Amd3B`'s collector, found by a benchmark rather than by a test, 2026-08-19
+
+**Both were introduced by the mid-walk collector**, step 3 of the storage alignment, and both were
+invisible to everything the suite runs. `Amd3B` alone truncates a list while walking it; `Amd3` has
+no collector and `Mmd3C` still reserves before the walk, so neither could have them.
+
+**Neither moved a permutation.** `make digest` over 73 grids, `make amdorder` over 38 shapes,
+`test_order`, the sanitizers and both scaling ladders were green throughout, before and after. They
+were found by the `AMD3B pC differs` marker added to `benchmarks/matrices`'s amd table, which
+compares `Amd3B`'s PEAK LIVE CLIQUE MEMBERS against `Amd3`'s. That figure is a property of the
+algorithm and not of the layout, so two drivers agreeing on the permutation can still be caught
+doing different work, and they were.
+
+**1. The absorbed cliques were read from a list the walk had destroyed.** `beginElimination`
+re-read `I[pivot]` after the walk to kill them. `reachableSet` truncates that list as it consumes
+it, so after a mid-walk collection it is short or empty and the cliques it named were never marked
+dead: each kept a non-zero length, stayed a live block for `garbageCollect` to copy, and was never
+subtracted from the live count. `eliminate` now captures the ids into `mAbsorbed` in the pass that
+already walks the list to zero `w`, and `beginElimination` kills from that copy.
+
+**And the placement of that kill is forced from both sides**, which is worth knowing because it
+looks arbitrary. AFTER the walk, because the walk needs those cliques' member lists. BEFORE the new
+clique is born, because the peak is a running maximum and an absorbed clique is never live at the
+same instant as the one absorbing it; killing later inflates the peak on every step that absorbs
+anything. My first attempt moved it after the birth and `test_order` caught it immediately, which
+is the pC check earning itself a second time.
+
+**2. The truncation itself was not counted.** Shortening the clique being consumed, `mRun[c]
+.adjacencySize = ln`, is a contraction, and `killClique` afterwards then subtracted only what
+remained. One line where the truncation happens.
+
+**What is still missing, and it is the lesson.** `Amd3B` has no permanent `cliqueCountBalances`,
+the debug recomputation the shared class has. Both bugs were diagnosed by bolting one on
+temporarily; with it in place the second would have been a `test_order` failure rather than a
+benchmark marker on a matrix someone happened to send. Adding it is small and is the obvious next
+step.
+
 ## What was borrowed into production, 2026-08-18
 
 Two of the audit's findings were not `Amd3B` defects but shared ones, so they went into `Amd3` and

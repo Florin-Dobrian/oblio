@@ -250,6 +250,7 @@ std::vector<std::int32_t> orderMmd3Impl(const std::vector<std::size_t>&  colPtr,
     // no one to absorb them; the amd side leaves 1 to 3 entries on small grids. Holding on these
     // graphs would have made it a trap rather than a check.
     assert(qg.cliqueCountBalances() && "clique births and deaths do not balance");
+    gPeakCliqueMembers = qg.numPeakCliqueMembers();   // see QuotientGraph.cpp
     if (arenaEntries != nullptr) *arenaEntries = qg.arenaEntries();
     return qg.orderAscending(pivots);   // genmmd's mmdnum. See the ledger, entry 6.
 }

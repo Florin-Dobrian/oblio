@@ -45,6 +45,9 @@
 
 namespace Oblio {
 
+// See src/QuotientGraph.cpp. Written by every driver that tracks it; read by test_order.
+extern std::size_t gPeakCliqueMembers;
+
 // The degree buckets: one doubly linked list per degree, threaded through arrays of size n, so
 // that filing, unfiling and taking the head are all O(1). MMD spells these fwd/bwd and AMD
 // Next/Last. An ordered container cannot give O(1) removal from the middle, which is what a
@@ -279,8 +282,15 @@ public:
     // only. A real implementation also pays a header per clique, allocator rounding, and capacity
     // above size, none of which is counted here.
     //
+    // A CLIQUE HAS THREE EVENTS AND THE COUNTER SEES ALL OF THEM: it is BORN once, in
+    // `beginElimination`; it CONTRACTS, keeping its identity and losing members, at mass
+    // elimination and again at supervariable detection; and it DIES, absorbed into a new clique or
+    // absorbed aggressively once its external degree reaches zero. mmd has one of each; amd has
+    // one birth, two contractions and two deaths. The full inventory, and why a contraction is not
+    // a death, is in experiments/ordering/README.md (2026-08-18).
+    //
     // IT IS A LIVENESS QUESTION, NOT A PLACEMENT ONE, which is why it is exact under every layout
-    // in this tree and not only under this one: add on birth, subtract on death, keep the maximum.
+    // in this tree and not only under this one: add on birth, subtract on both, keep the maximum.
     // The maximum is taken at BIRTH ALONE, deaths and shrinks being the only other events and
     // neither able to raise the total. A compacting layout's own high water mark is a different
     // and less useful number, being the array's rather than the live set's.
@@ -499,6 +509,13 @@ public:
     // it is what genmmd's prepass does with the degree-0 and degree-1 vertices. The lists are left
     // alone; every walk skips a numbered vertex from here on.
     void number(std::int32_t u);
+
+    // SET u ASIDE, taking it out of the elimination without numbering it. `AMD_2`'s dense-row
+    // rule: `Nv [i] = 0 ; Elen [i] = EMPTY ; nel++ ; Pe [i] = EMPTY`, a variable that is neither
+    // eliminated nor available, kept out of every reachable set and every list by its ZERO WEIGHT
+    // alone, which is the same mechanism a merged vertex leaves by. The caller owns where it
+    // lands in the permutation; `AMD_2` appends the set at the end.
+    void setAside(std::int32_t u);
 
     // Walk I[u] from the back in reachableSet(), matching genmmd's element stack. A tie-break
     // convention and nothing else: it changes which permutation comes out, never which sets are

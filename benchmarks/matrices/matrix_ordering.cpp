@@ -40,10 +40,12 @@
 
 #include "MatrixMarket.h"
 
+#include "oblio/Amd3.h"
 #include "oblio/ElmForest.h"
 #include "oblio/ElmForestEngine.h"
 #include "oblio/Mmd3.h"
 #include "oblio/Permutation.h"
+#include "oblio/QuotientGraph.h"
 #include "oblio/SparseMatrix.h"
 
 #include <algorithm>
@@ -60,6 +62,28 @@ using namespace Oblio;
 // column reports a refusal, which is how every driver in this folder treats private/.
 #ifdef OBLIO_VENDORED_ORDERINGS
 void mmd_order(int n, const int colPtr[], const int rowIdx[], int perm[], int invp[]);
+
+// TWO ENTRY POINTS ON THE AMD SIDE, AND THEY MEASURE DIFFERENT THINGS.
+//
+//   amd_order      SuiteSparse as it ships. TIMED, because it is what a caller selecting AMD
+//                  actually pays: `AMD_aat`, `AMD_1`, `AMD_2` and `AMD_postorder`, of which the
+//                  first and last have no counterpart here.
+//   amd_order_raw  the hooked copy, ../../tools/hook_amd.py, reporting the elimination order
+//                  BEFORE the postorder. NOT timed: it carries a vector per vertex, so it is an
+//                  oracle rather than a stopwatch.
+//
+// Everything but the clock therefore comes from the raw copy, because `Amd3` does no postorder and
+// so returns the pre-postorder order. Comparing against `amd_order`'s output would compare two
+// different permutations and report a fill difference that is the postorder's, not ours.
+extern "C" int amd_order(int n, const int* colPtr, const int* rowIdx, int* perm,
+                         double* control, double* info);
+extern "C" int amd_order_raw(int n, const int* colPtr, const int* rowIdx, int* perm,
+                             double* control, double* info);
+// The raw copy hands its order back through this callback rather than through a parameter, the
+// generator having no way to widen the signature it copies. Same arrangement as
+// ../ordering/order_timing.cpp.
+std::vector<int> gRawOrder;
+extern "C" void pbRawOrder(const int* raw, int n) { gRawOrder.assign(raw, raw + n); }
 #endif
 
 namespace {
@@ -141,7 +165,10 @@ void toVendored(const SparseMatrix<double>& matrix,
 }
 #endif
 
+enum class Branch { Mmd, Amd };
+
 struct Options {
+    Branch      branch   = Branch::Mmd;
     int         repeats  = 0;          // 0 means choose from a timed pass
     double      targetMs = 200.0;      // how long one matrix's repeats should take
     std::size_t maxN     = 2000000;
@@ -178,30 +205,72 @@ void run(const std::string& path, const Options& options) {
 
     // One pass to choose the repeat count, then the measurement. The pass is ours, and the same
     // count is given to both routines so neither gets a longer or shorter minimum than the other.
-    const double one = bestOf([&] { const auto p = orderMmd3(colPtr, rowIdx); (void) p; }, 1);
+    const bool   amd = options.branch == Branch::Amd;
+    const double one = amd
+        ? bestOf([&] { const auto p = orderAmd3(colPtr, rowIdx); (void) p; }, 1)
+        : bestOf([&] { const auto p = orderMmd3(colPtr, rowIdx); (void) p; }, 1);
     const int repeats = options.repeats > 0 ? options.repeats
                                             : repeatsFor(one, options.targetMs);
 
-    const double ours = bestOf([&] { const auto p = orderMmd3(colPtr, rowIdx); (void) p; }, repeats);
-    // C AS THE ORDERING ACTUALLY FILLED IT, not as the forest implies. `orderMmd3`'s four-argument
-    // overload reports the arena's entry count, which is a size rather than a capacity and, this
-    // arena never shrinking, also its peak.
-    std::size_t arena = 0;
-    const std::vector<std::int32_t> order = orderMmd3(colPtr, rowIdx, 0, arena);
+    const double ours = amd
+        ? bestOf([&] { const auto p = orderAmd3(colPtr, rowIdx); (void) p; }, repeats)
+        : bestOf([&] { const auto p = orderMmd3(colPtr, rowIdx); (void) p; }, repeats);
+    // TWO CLIQUE FIGURES, AND THEY ANSWER DIFFERENT QUESTIONS.
+    //
+    //   cC   CUMULATIVE, from the ordering's own arena-reporting overload: every entry the arena
+    //        ever handed
+    //        out. Nothing here is reclaimed, so it holds dead cliques AND the members that
+    //        contractions dropped out of live ones. It is what the flat layout actually costs.
+    //   pC   PEAK LIVE MEMBERS, read from `gPeakCliqueMembers`: the most that was alive at any one
+    //        instant. It is what a CHUNKED clique store would ask the allocator for at its worst
+    //        moment, and PAYLOAD ONLY, with no per-clique header, no allocator rounding and no
+    //        capacity above size.
+    //
+    // pC IS A PROPERTY OF THE ALGORITHM, NOT OF THE LAYOUT. `Mmd3`, `Mmd3B` and `Mmd3C` return the
+    // same permutation, so they form the same cliques and lose the same members at the same
+    // moments; the figure is identical for all three, and the same holds for `Amd3` against
+    // `Amd3B`. Neither vendored routine can report one. Only cC is ours, and a chunked version
+    // would show this same pC with a cC of nothing.
+    std::size_t cC = 0;
+    gPeakCliqueMembers = 0;
+    const std::vector<std::int32_t> order = amd ? orderAmd3(colPtr, rowIdx, cC)
+                                                : orderMmd3(colPtr, rowIdx, 0, cC);
+    const std::size_t pC   = gPeakCliqueMembers;
     const std::size_t nnzL = fillOf(A, order);
     // Held as strings so a zero denominator, which a forest that failed to build would give, prints
     // as a dash rather than as a number nobody can read.
-    char cTril[16] = "-", cFill[16] = "-";
-    if (tril != 0) std::snprintf(cTril, sizeof cTril, "%.2f", (double) arena / (double) tril);
-    if (nnzL != 0) std::snprintf(cFill, sizeof cFill, "%.3f", (double) arena / (double) nnzL);
+    char cTril[16] = "-", cFill[16] = "-", pOverC[16] = "-";
+    if (tril != 0) std::snprintf(cTril, sizeof cTril, "%.2f", (double) cC / (double) tril);
+    if (nnzL != 0) std::snprintf(cFill, sizeof cFill, "%.3f", (double) cC / (double) nnzL);
+    if (cC   != 0) std::snprintf(pOverC, sizeof pOverC, "%.2f", (double) pC / (double) cC);
 
 #ifdef OBLIO_VENDORED_ORDERINGS
     std::vector<int> ap, ai;
     toVendored(A, ap, ai);
     const int n = static_cast<int>(size);
     std::vector<int> perm(n), invp(n);
-    const double vendored = bestOf(
-        [&] { mmd_order(n, ap.data(), ai.data(), perm.data(), invp.data()); }, repeats);
+    double vendored = 0.0;
+    if (amd) {
+        // THE CLOCK IS ON `amd_order` WHOLE and everything else comes from the raw copy; see the
+        // note beside the declarations. The raw copy is called once, outside the timed loop.
+        vendored = bestOf(
+            [&] { amd_order(n, ap.data(), ai.data(), perm.data(), nullptr, nullptr); }, repeats);
+        gRawOrder.clear();
+        amd_order_raw(n, ap.data(), ai.data(), perm.data(), nullptr, nullptr);
+    } else {
+        vendored = bestOf(
+            [&] { mmd_order(n, ap.data(), ai.data(), perm.data(), invp.data()); }, repeats);
+    }
+
+    // AND THE FILL COLUMN'S PREMISE IS CHECKED RATHER THAN ASSUMED. It is printed once and called
+    // both routines', which is only true while the two orders agree. On the mmd side that holds by
+    // construction and is checked by experiments/ordering's `make mmdmatrices`; on the amd side
+    // `make amdorder` checks it on 38 generated shapes and on NONE of these matrices. So a row
+    // where they part is marked rather than quietly reporting our fill as theirs.
+    const char* note = "";
+    if (amd && (gRawOrder.size() != order.size() ||
+                !std::equal(gRawOrder.begin(), gRawOrder.end(), order.begin())))
+        note = "  raw order differs";
 
     // NO RATIO ON A READING TOO SMALL TO CARRY ONE. The set spans four orders of magnitude in
     // ordering time and the smallest matrices finish inside the clock's own resolution, where a
@@ -209,27 +278,33 @@ void run(const std::string& path, const Options& options) {
     // millisecond the column is a dash, which says "not measured here" where `1.00x` would have
     // said "the same".
     if (vendored >= 0.01 && ours >= 0.01)
-        std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %13zu %8s %8s %9.3f %9.3f %7.2fx\n",
-                    name.c_str(), size, m, tril, 2 * m, arena, nnzL, cTril, cFill,
-                    vendored, ours, ours / vendored);
+        std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %11zu %13zu %8s %8s %7s %9.3f %9.3f"
+                    " %7.2fx%s\n",
+                    name.c_str(), size, m, tril, 2 * m, cC, pC, nnzL, cTril, cFill, pOverC,
+                    vendored, ours, ours / vendored, note);
     else
-        std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %13zu %8s %8s %9.3f %9.3f %8s\n",
-                    name.c_str(), size, m, tril, 2 * m, arena, nnzL, cTril, cFill,
-                    vendored, ours, "-");
+        std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %11zu %13zu %8s %8s %7s %9.3f %9.3f"
+                    " %8s%s\n",
+                    name.c_str(), size, m, tril, 2 * m, cC, pC, nnzL, cTril, cFill, pOverC,
+                    vendored, ours, "-", note);
 #else
-    std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %13zu %8s %8s %9s %9.3f %8s  MMD needs private/\n",
-                name.c_str(), size, m, tril, 2 * m, arena, nnzL, cTril, cFill,
+    std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %11zu %13zu %8s %8s %7s %9s %9.3f %8s"
+                "  vendored needs private/\n",
+                name.c_str(), size, m, tril, 2 * m, cC, pC, nnzL, cTril, cFill, pOverC,
                 "-", ours, "-");
 #endif
 }
 
 void usage() {
-    std::printf("the ordering step alone, genmmd against Mmd3, on real matrices\n\n");
-    std::printf("  ./matrix_ordering_cpp [--repeats=N] [--target-ms=X]\n");
+    std::printf("the ordering step alone, a vendored routine against ours, on real matrices\n\n");
+    std::printf("  ./matrix_ordering_cpp mmd|amd [--repeats=N] [--target-ms=X]\n");
     std::printf("                        [--max-n=N] [--max-nnz=N] <file.mtx> ...\n\n");
-    std::printf("  The two return the same permutation on every matrix experiments/ordering's\n");
-    std::printf("  `make mmdmatrices` checks, so the fill column is both of them and the only\n");
-    std::printf("  difference between the routines is time.\n");
+    std::printf("  mmd  genmmd against Mmd3. They return the same permutation on every matrix\n");
+    std::printf("       experiments/ordering's `make mmdmatrices` checks, so the fill column is\n");
+    std::printf("       both of theirs and the only difference between them is time.\n");
+    std::printf("  amd  amd_order against Amd3. The CLOCK is on amd_order whole, what a caller\n");
+    std::printf("       caller pays; EVERYTHING ELSE comes from the hooked pre-postorder copy,\n");
+    std::printf("       because Amd3 does no postorder and returns that order.\n");
 }
 
 } // namespace
@@ -254,6 +329,8 @@ int main(int argc, char** argv) {
         else if (arg.rfind("--max-nnz=", 0) == 0)
             options.maxNnz = std::strtoull(arg.c_str() + 10, nullptr, 10);
         else if (arg == "--help" || arg == "-h") { usage(); return 0; }
+        else if (arg == "mmd") options.branch = Branch::Mmd;
+        else if (arg == "amd") options.branch = Branch::Amd;
         else
             paths.push_back(arg);
     }
@@ -266,23 +343,43 @@ int main(int argc, char** argv) {
 
     std::sort(paths.begin(), paths.end());
 
-    std::printf("the ordering step alone, genmmd against Mmd3, on real matrices\n");
-    std::printf("  (best of N after a warm-up, both through the same helper; nnz(L) is both\n");
-    std::printf("   routines', the two returning the same permutation. MMD3/MMD below 1 is ours\n");
-    std::printf("   faster)\n\n");
+    const bool amd = options.branch == Branch::Amd;
+    if (amd) {
+        std::printf("the ordering step alone, amd_order against Amd3, on real matrices\n");
+        std::printf("  (best of N after a warm-up, through the same helper. THE CLOCK IS ON\n");
+        std::printf("   amd_order WHOLE, which is what a caller pays and includes AMD_aat and\n");
+        std::printf("   AMD_postorder, neither of which we do; nnz(L) is both routines', from\n");
+        std::printf("   the hooked PRE-POSTORDER copy, Amd3 returning it. AMD3/AMD below 1 is\n");
+        std::printf("   ours faster)\n\n");
+    } else {
+        std::printf("the ordering step alone, genmmd against Mmd3, on real matrices\n");
+        std::printf("  (best of N after a warm-up, both through the same helper; nnz(L) is both\n");
+        std::printf("   routines', the two returning the same permutation. MMD3/MMD below 1 is\n");
+        std::printf("   ours faster)\n\n");
+    }
     // THE SPACE COLUMNS COME FIRST because they are a property of the matrix and the ordering, not
-    // of a run: `tril(A) = n + m` is A in its stored form, `A+I = 2m` is what mSource holds, `C` is
-    // the clique arena and `nnz(L)` includes the diagonal. C/tril(A) and C/nnz(L) are the two
-    // ratios worth reading, and they say whether our arena tracked the input or the factor on this
-    // matrix. On grids it is about 2x tril(A) in 2D and up to 4.5x on cubes; the compression is
-    // bought by mass elimination and so is a property of the MATRIX, which is exactly why a real
-    // set is worth measuring. See docs/DESIGN_DECISIONS.md (2026-08-16).
+    // of a run: `tril(A) = n + m` is A in its stored form, `A+I = 2m` is what mSource holds, `cC`
+    // and `pC` are the clique figures described where they are computed, and `nnz(L)` includes the
+    // diagonal. cC/tril(A) and cC/nnz(L) say whether our arena tracked the input or the factor on
+    // this matrix. On grids it is about 2x tril(A) in 2D and up to 4.5x on cubes; the compression
+    // is bought by mass elimination and so is a property of the MATRIX, which is exactly why a
+    // real set is worth measuring. See docs/DESIGN_DECISIONS.md (2026-08-16).
+    //
+    // pC/cC IS THE ONE THAT DECIDES ANYTHING: the fraction of the flat arena a CHUNKED clique store
+    // would hold at its worst moment, and so the saving that scheme would buy. On grids it is
+    // about 0.43 in 2D and 0.28 on cubes.
+    //
+    // READ IT CONDITIONED ON cC/nnzL, or it will mislead. Where the arena is one per cent of the
+    // factor, and this set has such matrices, clique storage is noise beside what the
+    // factorization will need and no clique scheme is worth building for it whatever pC/cC says.
+    // Where the arena is half the factor, and this set has those too, it decides.
     //
     // The timing half is still genmmd against Mmd3 alone. The amd ladder belongs here too and is
     // not in yet.
-    std::printf("  %-38s %8s %10s %11s %11s %11s %13s %8s %8s %9s %9s %8s\n",
-                "matrix", "n", "m", "tril(A)", "A+I", "C", "nnz(L)", "C/tril", "C/nnzL",
-                "MMD ms", "MMD3 ms", "MMD3/MMD");
+    std::printf("  %-38s %8s %10s %11s %11s %11s %11s %13s %8s %8s %7s %9s %9s %8s\n",
+                "matrix", "n", "m", "tril(A)", "A+I", "cC", "pC", "nnz(L)", "cC/tril", "cC/nnzL",
+                "pC/cC", amd ? "AMD ms" : "MMD ms", amd ? "AMD3 ms" : "MMD3 ms",
+                amd ? "AMD3/AMD" : "MMD3/MMD");
 
     for (const std::string& path : paths) run(path, options);
 

@@ -64,6 +64,7 @@ experiments/ordering/mmd_int64.cpp
 experiments/ordering/amd_raw.cpp
 benchmarks/ordering/amd_raw.cpp
 benchmarks/ordering/amd_timed.cpp
+benchmarks/matrices/amd_raw.cpp
 benchmarks/ordering/order_digest_cpp
 benchmarks/ordering/.digest-baseline
 

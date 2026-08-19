@@ -5,6 +5,16 @@
 
 namespace Oblio {
 
+// PEAK LIVE CLIQUE MEMBERS OF THE LAST ORDERING TO RUN, written by every driver that tracks it and
+// read by tests/test_order.cpp. One symbol rather than one per driver, because the whole use is to
+// compare two drivers back to back: run one, read this, run the other, read it again.
+//
+// A GLOBAL RATHER THAN A RETURN VALUE, and deliberately. The figure is a cross-check between
+// implementations rather than a result anyone orders a matrix to obtain, so it does not belong in
+// the public ordering signature; `gAmd3BCompactions` is here for the same reason. Not thread safe,
+// and it does not need to be: nothing writes it outside a test.
+std::size_t gPeakCliqueMembers = 0;
+
 QuotientGraph::QuotientGraph(const std::vector<std::size_t>&  colPtr,
                              const std::vector<std::int32_t>& rowIdx)
     : mRun(colPtr.empty() ? 0 : colPtr.size() - 1),
@@ -242,6 +252,18 @@ void QuotientGraph::number(std::int32_t u) {
     // sets it, so a run that never calls this function never pays for the test.
     mHasNumbered = true;
     mMark[u]     = GONE;
+}
+
+void QuotientGraph::setAside(std::int32_t u) {
+    // ZERO WEIGHT IS THE WHOLE MECHANISM. `reachableSet` takes a vertex on `nv > 0` and the prune
+    // keeps one on the same test, so a zero-weight vertex is unreachable and is dropped from every
+    // list the first time that list is rewritten. GONE additionally stops `eliminated` reporting
+    // it live, which is what this class asks rather than the weight.
+    //
+    // ITS NEIGHBORS KEEP DEGREES THAT STILL COUNT IT, exactly as after `number`, and `AMD_2` does
+    // not correct them either: a degree is a bound and one that is too large only delays a pivot.
+    mWeight[u] = 0;
+    mMark[u]   = GONE;
 }
 
 void QuotientGraph::beginElimination(std::int32_t pivot) {
@@ -758,10 +780,36 @@ void QuotientGraph::absorb(const std::vector<std::int32_t>& cliques,
         const std::int32_t u         = vertices[k];
         std::int32_t*      incidence = mSource.data() + mRun[u].sourcePtr + mRun[u].adjacencySize;
         const std::uint32_t size     = mRun[u].incidenceSize;
-        std::uint32_t       kept     = 0;
+
+        // THE ROTATION HAS TO BE REDONE WHEN ITS SUBJECT DIES, 2026-08-18, and this is the whole
+        // of the correction. Both codes end I[u] as `[pivot][entries 1..k][entry 0]`, the first
+        // entry moved to the back. `AMD_2` performs that rotation inside scan 2, where an
+        // aggressively absorbed element has ALREADY been dropped, so `entry 0` is the first
+        // SURVIVOR of this step's absorption. Our prune rotates first and absorbs afterwards, so
+        // when the entry it parked at the back is one this pass then removes, the two lists come
+        // out in different orders.
+        //
+        // It costs nothing when it does not apply: the test is one read of the last slot, and the
+        // extra rotation runs only for a vertex whose parked entry actually died. Where the parked
+        // entry survives, it is still the first survivor and the two agree already.
+        //
+        // WHAT IT COST BEFORE, and why a six-entry difference was worth this. On GHS_indef/aug2d,
+        // n = 29008, two hash buckets of 1314 came out with two entries transposed, which changed
+        // which vertex of a supervariable absorbed the others: six positions of the permutation,
+        // identical fill, and one of twelve matrices in benchmarks/matrices that differed from
+        // `AMD_2` for this reason. Turning aggressive absorption off in both made the orders
+        // identical, which is what identified it.
+        const bool parkedDied = size > 0 && mRun[incidence[size - 1]].adjacencySize == 0;
+
+        std::uint32_t kept = 0;
         for (std::uint32_t i = 0; i < size; ++i)
             if (mRun[incidence[i]].adjacencySize != 0) incidence[kept++] = incidence[i];
         mRun[u].incidenceSize = kept;
+
+        // Entry 0 is the pivot's own new clique, which the prune put at the front and which is
+        // never absorbed, so the rotation runs over positions 1 onward.
+        if (parkedDied && kept > 2)
+            std::rotate(incidence + 1, incidence + 2, incidence + kept);
     }
 }
 

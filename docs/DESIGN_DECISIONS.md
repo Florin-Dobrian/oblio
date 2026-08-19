@@ -65,6 +65,36 @@ be real, which requires Hermitian. Once that is on the table, the design collaps
 **Cholesky is `CC^H`, always, and in real that *is* `CC^T`.** No option, no flag, no forbidden
 combination to reject. The answer was not hard. Asking the right question was.
 
+## 2026-08-18: a tag array holding two kinds of value needs the ranges kept apart
+
+**The bug.** `Amd3`'s `w` array carries the scan's `w[c] = degree[c] + wflg - nvi`, which reaches
+`wflg + lemax`, AND supervariable detection's stamps. A stamp has to sit above every scan value of
+the same step, or a clique whose scan value happens to equal the current stamp reads as marked. We
+raised the stamp base at the END of the step, which left this step's stamps starting at `wflg` while
+this step's scan values ran up to `wflg + lemax`. The ranges overlapped exactly.
+
+**What it did.** The exact test in supervariable detection could return a FALSE MATCH, merging two
+vertices that are not duplicates. On `Grund/meg4` it merged 5779 into 5780 although their lists
+differ in six of sixteen entries: 109 positions of the permutation moved and fill went to 51809
+against `AMD_2`'s 51512.
+
+**The fix is one statement moved**, `stamp = std::max(stamp, wflg + lemax)` before the detection
+loop rather than after it. `AMD_2` does exactly this with `wflg += lemax ; wflg = clear_flag (...)`
+between scan 2 and SUPERVARIABLE DETECTION, and the reason is the same one.
+
+**The durable lesson, which is why this is here and not only in NEXT.md.** When one array holds two
+populations of value, the invariant separating them is a design obligation and belongs written at
+the declaration, not inferred at each use. This tree has folded several arrays into one on purpose
+and will fold more; every such fold creates exactly this kind of obligation. The 2026-08-11 entry
+narrowing arrays and the fold work generally should be read with this attached.
+
+**And on what could have caught it: nothing we run.** The digest over 73 grids, both scaling
+ladders, the 38 vendored acceptance cases and the sanitizers were green throughout. The overlap
+needs a clique degree landing on one specific value; it fired on ONE matrix in 246, and only
+because `benchmarks/matrices` had just been given a check comparing our permutation against the
+vendored one entry by entry. A defect that changes fill without changing validity is invisible to
+every oracle that asks whether an answer is legal rather than whether it is the same.
+
 ## 2026-08-18: flat and chunked, and the four quotient graph classes
 
 **The words.** A SEGMENT is the logical unit of storage: one vertex's run of `A[u]` and `I[u]`, or
@@ -979,7 +1009,7 @@ is not there.
 
 ### The one optimization that did work, and it came from a matrix with nothing to order
 
-The 246-matrix timing run of the same day, `benchmarks/matrices`, `make ordering`, put the shape of
+The 246-matrix timing run of the same day, `benchmarks/matrices`, `make mmdorder`, put the shape of
 the remaining gap in plain view: where there is elimination work we run at 0.40 to 0.86x genmmd,
 and where there is none we run at 2.5 to 2.8x. The worst five rows are matrices with NO OFF-DIAGONAL
 ENTRIES, `nnz(A) = n` and `nnz(L) = n`. A higher per-vertex constant and a lower per-unit-of-work

@@ -6281,6 +6281,68 @@ what was cheap, and the cheap thing was taken.
 one of the three routes above or changing the convention and moving the permutation. Neither is
 wrong; the choice has simply not been made.
 
+### genmmd never shortens a clique, and `AMD_2` always does, 2026-08-18
+
+A contraction removes members from a live clique. What the three codes do with the SPACE those
+members occupied is a separate question, and they answer it differently:
+
+- **genmmd leaves them where they lie.** `mmdelm`'s mass elimination is
+  `qsize [md] += qsize [rn] ; qsize [rn] = 0` and it does NOT rewrite the list; the merged vertex
+  keeps its slot and every later reader skips it on `qsize [nb] != 0`. Same for the further
+  absorption inside `mmdupd`. So a clique is placed once and never shortened.
+- **`AMD_2` compacts.** Its RESTORE DEGREE LISTS pass writes survivors back with `Iw [p++] = i`,
+  sets `Len [me] = p - pme1`, and hands the tail back with `pfree = p`.
+- **Ours compact**, in every class.
+
+**`Mmd3B` was corrected to match genmmd**, its compaction removed. It cost a pass genmmd never pays
+and saved the skipped entries genmmd pays on every later read; measured afterwards, its column
+against genmmd is unchanged within noise, so the two costs are about equal. NEITHER IS VISIBLE IN A
+PERMUTATION, a skipped member and an absent one reading alike, so no check in this tree would have
+caught it. It was found by reading `mmdelm` while answering a question about clique lifetimes.
+
+**What it costs is space, and it is genmmd's space:** a chained clique keeps its dead members for as
+long as it lives, so live clique STORAGE there is strictly above what the compacting classes report
+for the same ordering. The live MEMBER count is unaffected and is the same for all three, being a
+property of the algorithm.
+
+### The life of a clique: birth, contraction, death, 2026-08-18
+
+**THREE EVENTS, AND ONLY THREE.** They are worth naming because the counter that reports peak live
+clique members has to see every one of them, and because two of the five sites below were found by
+reading rather than by any check the tree runs.
+
+**BIRTH.** One site, `beginElimination`, in every class. The reach of the pivot is placed and the
+pivot's own descriptor becomes the clique's. Nothing else creates a clique, which is why the
+running maximum is taken here alone: no other event can raise the live total.
+
+**CONTRACTION.** The clique survives and loses members.
+
+| cause | amd | mmd |
+|---|---|---|
+| mass elimination, the merged leave C[pivot] | yes | yes |
+| supervariable detection, the hash-absorbed leave | yes | no |
+
+**DEATH.** The clique ceases to exist.
+
+| cause | amd | mmd |
+|---|---|---|
+| absorbed into the new clique, being in I[pivot] | yes | yes |
+| absorbed aggressively, its external degree reaching zero | yes | no |
+
+So mmd has one of each and amd has one birth, two contractions and two deaths. The first death is
+the common case and the reason cliques do not accumulate: every clique the pivot belonged to is
+subsumed by the one the pivot forms.
+
+**A CONTRACTION IS NOT A DEATH, and the distinction is not pedantry.** A contracted clique keeps its
+identity, its descriptor and its remaining members, and is still read. Conflating the two was what
+made the first version of the counter wrong.
+
+**TWO THINGS THAT LOOK LIKE EVENTS AND ARE NOT.** `merge` zeroes a vertex's adjacency length, but
+that vertex never formed a clique, so the length is A[v]'s and nothing is subtracted; feeding it to
+a clique counter corrupts the total. And in the CHAINED layout the two contractions change the count
+without touching storage at all: genmmd leaves the dead members where they lie and skips them on
+read, so live members fall while occupied space does not.
+
 ### What puts each scheme where it sits, and it is ONE question
 
 **MAY A CLIQUE BE SPLIT?** Everything else follows from the answer, and the three sections above

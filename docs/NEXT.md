@@ -1,8 +1,19 @@
-# NEXT: the B and C layers must be layout-identical to their vendored codes, and are not yet
+# NEXT: the amd branch matches `AMD_2` on all 246 real matrices; the mmd branch is next
 
-**REWRITTEN AT THE TOP ON 2026-08-17, second time that day.** The section below is the current
-state; everything under "Other things open" and after is older and several of its items are closed,
-marked where they are.
+**CURRENT AS OF `db377c9` PLUS THE UNCOMMITTED WORK BELOW, 2026-08-18.** Everything from here down
+to "What was done since commit 5ea68cc" is this session; that section and everything after it is
+older, and several of its items are closed and marked where they are.
+
+THE HEADLINE, and it is new today: `Amd3` and `Amd3B` now return `AMD_2`'S PRE-POSTORDER
+PERMUTATION ON EVERY MATRIX IN `benchmarks/matrices`, 246 of 246, where before four kinds of
+difference showed on about sixty of them. Four changes did it, and one of them was a CORRECTNESS
+BUG in supervariable detection that had been costing fill silently. See "Aligning the amd branch
+to `AMD_2` on real matrices" below; it is the section to read first.
+
+The rest of the state in one line: `Amd3B` is aligned to `AMD_2` in storage and in schedule but for
+the prune fusion; the private classes are now named for what they are and the next step is
+promoting them, which is blocked on two decisions rather than on work, under "Promoting the private
+classes".
 
 ## The point of the B and C layers, restated because it was being traded away
 
@@ -53,10 +64,29 @@ with no elbow room at all it fires on nearly every large pivot, 3 to 14 compacti
 side, and every permutation is byte identical, clean under ASan and UBSan. That also confirms
 `AMD_2`'s own claim that it runs with no elbow room, only slowly.
 
+**AND FOUR MORE THINGS CLOSED SINCE, none of them storage:** the empty-row prepass, the dense-row
+rule, the rotation in `absorb`, and the stamp base. Those are what took the amd branch from about
+sixty differing matrices to none, and the last was a correctness bug. They have their own section
+above; this list is the storage half and stops here.
+
 **`Mmd3B` against genmmd: clique storage faithful, vertex list NOT.** The links, the chain
 following, the terminator rule and the unchecked first loop all match `mmdelm` line for line. But
 genmmd keeps ONE MIXED LIST per vertex, variables and elements together, told apart by the sign of
 `fwd`, where we keep two sublists in a run with explicit lengths.
+
+**One thing was closed there today: `Mmd3B` no longer compacts C[pivot].** `mmdelm` mass-eliminates
+with `qsize [md] += qsize [rn] ; qsize [rn] = 0` and does NOT rewrite the list; the merged vertex
+keeps its place and every later reader skips it on `qsize [nb] != 0`. We had been compacting, which
+cost a pass genmmd never pays and saved the skipped entries it pays on every read. Neither is
+visible in a permutation, so no check in this tree would have caught it; it was found by reading
+`mmdelm` while answering a question about clique lifetimes. Measured after: `MMD3B / MMD` unchanged
+within noise, so the two costs are about equal, and the file is now honest rather than faster.
+
+**AND THE MMD BRANCH IS NOW THE OPEN FRONT.** `make mmdorder` in benchmarks/matrices has never had
+the marker the amd table has, because genmmd's own order is what `mmd_order` returns and there is
+no postorder to hook around. So the mmd side has no equivalent of the check that found four amd
+divergences today. Whether the same kinds of difference exist there is UNKNOWN rather than ruled
+out, and giving that table an equality check is the obvious next move.
 
 **`Mmd3C` has NOT followed `Amd3B`.** It is mmd on `AMD_2`'s layout and it uses the plain list
 convention, which the flipped run cannot serve: with the incidence part at the front there is no
@@ -85,10 +115,222 @@ And un-fusing would also let the bound live where `AMD_2` puts it, in `Degree[i]
 **Do not start this without deciding it is wanted.** It reverses a deliberate change of 2026-08-10
 and it lands in the hottest loop in the file.
 
+## Aligning the amd branch to `AMD_2` on real matrices, 2026-08-18
+
+**Nothing on grids could see any of this.** The digest over 73 grids, both scaling ladders and the
+38 acceptance cases in `experiments/ordering` were green before and after every one of the four
+changes below. All four were found through `benchmarks/matrices`, `make amdorder`, and three of the
+four needed a matrix Florin supplied by hand.
+
+**THE MARKER IS WHAT MADE THEM VISIBLE.** `matrix_ordering.cpp` prints `raw order differs` on a row
+where our permutation and the hooked pre-postorder `AMD_2` order disagree. It was added because the
+table calls the fill column "both routines'" and nothing was checking that claim on this set.
+Sixty-odd rows lit up immediately. They are now zero.
+
+### 1. The empty-row prepass
+
+`AMD_2` numbers every degree-zero vertex where it stands during initialization, ascending, in the
+same pass that files everything else. We filed them at degree zero and popped them from the head,
+so they came out LIFO: a pure diagonal gave `4 3 2 1 0` against its `0 1 2 3 4`. Identical fill,
+reversed order, and twelve `m = 0` matrices in the set differed for this reason alone.
+
+It rides in the filing loop and does NOT call `number()`. That function exists for a vertex
+numbered while its neighbors still name it, the degree-ONE case; it sets `mHasNumbered` and puts a
+test in every walk for the rest of the run. A degree-ZERO vertex is in nobody's adjacency, so
+there is nothing to mark and not filing it is the whole of what has to happen.
+
+### 2. The dense-row rule
+
+`AMD_2` sets aside any row above `max (16, 10 * sqrt (n))`: `Nv [i] = 0`, kept out of every
+reachable set, and appended to the output permutation at the end. We had none.
+
+**It is a performance change as much as a fidelity one, and the size of it is new information.** A
+hub of degree in the thousands that nobody sets aside sits in every reachable set it touches.
+Measured on a 100-squared mesh with eight hubs of degree 3000, our ordering alone: 4.08 ms with the
+rule, 80.28 ms without. On the real set it is what the worst rows were: `GHS_indef/bloweybq` 20.4 ms
+to 0.43, `bloweybl` 41.0 to 1.24, `QY/case9` 12.7 to 1.24.
+
+`setAside` on both quotient graph classes does it, and a ZERO WEIGHT is the whole mechanism, since
+`reachableSet` takes a vertex on `nv > 0` and the prune keeps one on the same test. The threshold is
+fixed at the vendored default rather than exposed: `AMD_2` reads `Control [AMD_DENSE]` and has a
+control structure to read it from, this driver has none, and inventing one to hold a single constant
+while that constant is the thing being matched is the wrong trade.
+
+**The hook had to learn about them too.** `AMD_2` does not eliminate a dense row at all, so it never
+reached the raw order and `amd_order_raw` came up short by `ndense` on any matrix with a hub.
+`tools/hook_amd.py` now collects them at the branch that sets them aside and appends them after
+`AMD_order` returns, which is where `AMD_2`'s own output assembly puts them, `Next [i] = nel++` over
+i ascending.
+
+### 3. The rotation in `absorb`
+
+Both codes end I[u] as `[pivot][entries 1..k][entry 0]`. `AMD_2` rotates inside scan 2, where an
+aggressively absorbed element has ALREADY been dropped, so entry 0 is the first SURVIVOR. Our prune
+rotates first and absorbs afterwards, so when the entry parked at the back is one absorption then
+removes, the two lists come out in different orders. That changed which vertex of a hash bucket
+absorbed the others, which moved the permutation without moving the fill.
+
+The correction is one read and a conditional `std::rotate` inside a pass `absorb` was already
+making. On `GHS_indef/aug2d` it took 6 differing positions of 29008 to 0.
+
+**This is the prune fusion showing its teeth**, and it is worth knowing that it can: the fusion of
+scan 1 into the prune is what forces absorption to be a later pass, and the list order is a
+consequence. See the section on it below.
+
+### 4. THE STAMP BASE, and this one was a correctness bug
+
+`w` holds two kinds of value: the scan's `w[c] = degree[c] + wflg - nvi`, which reaches
+`wflg + lemax`, and detection's stamps. A stamp must be ABOVE every scan value of the same step.
+`AMD_2` guarantees it with `wflg += lemax` BETWEEN scan 2 and detection. We raised the base at the
+END of the step, so this step's stamps started at `wflg` while this step's scan values ran up to
+`wflg + lemax`: the two ranges overlapped exactly, and a clique whose scan value landed on the
+current stamp read as marked.
+
+**So the exact test could return a false match and two vertices that are not duplicates could be
+merged.** On `Grund/meg4`, n = 5860, vertices 5779 and 5780 were merged at pivot 5080 although their
+lists differ in six of sixteen entries. That one false merge moved 109 positions and cost 297
+entries of fill, 51809 against `AMD_2`'s 51512.
+
+The fix is one statement moved: `stamp = std::max(stamp, wflg + lemax)` before the detection loop
+rather than after it, in both drivers. It has presumably been wrong for as long as detection has
+stamped into `w`, which is since the fifth fold, and NOTHING WE RUN COULD HAVE SEEN IT: it needs a
+clique degree that lands on exactly the right value and it fired on one matrix in 246.
+
+### How they were found, because the method is the transferable part
+
+Reading the code failed twice on item 3 and once on item 4; each time the argument concluded the
+two must already agree. What worked was intervention and logging:
+
+- **Turn a feature off in both and recount.** Aggressive absorption off gave 0 differences on both
+  `aug2d` and `meg4`, which said absorption was implicated without saying how.
+- **Count the events.** Absorptions matched at 582 on `aug2d` and differed, 504 against 497, on
+  `meg4`, which separated a different DECISION from a different EFFECT.
+- **Log the event streams and diff them.** Pivots, merges and absorptions separately, since the
+  interleaving differs harmlessly. That located `meg4` to one merge at one pivot.
+- **Dump the actual state at that point.** Printing both vertices' lists from both codes showed
+  them identical and NOT duplicates, which proved the test wrong rather than the lists divergent.
+
+## What was borrowed into production, 2026-08-18
+
+Two of the audit's findings were not `Amd3B` defects but shared ones, so they went into `Amd3` and
+`QuotientGraph` as well. Both verified by digest, `make amdorder` and `make mmdorder`.
+
+- **THE CLIQUE TRIM AFTER DETECTION.** `trimClique` on the shared class, called from `Amd3`'s
+  restore pass, which now writes survivors back as it walks. One difference from `Amd3B`: there is
+  NO CURSOR TO PULL BACK, the arena's length being the vector's own and the clique not necessarily
+  its last block, so the trimmed tail is left as a hole. The trim buys visits here, not space.
+- **DETECTION'S BLIND STAMP AND LENGTH REJECT.** `sizeU` and `sizeV` are gone. Production gets TWO
+  stamp loops where `Amd3B` gets one, and that is the layout rather than a choice: with `A[u]` then
+  `I[u]` the entry to skip sits in the middle, where `AMD_2`'s order puts it at index 0.
+
+**A third was considered and DECLINED: positions in the walks.** It works in `Amd3B` because that
+pool never reallocates, so the base is provably invariant and hoisting it is free. Production's
+arena can reallocate, so the compiler cannot hoist `mCliqueArena.data()` across a `push_back` and
+positions would add a load per member in the hottest loop. The reserve it would retire is not a
+behavioural divergence there either: with no collector, reserving early changes capacity policy and
+nothing observable.
+
+## The peak clique counter, 2026-08-18
+
+`numPeakCliqueMembers` and `numLiveCliqueMembers` on the shared class, so all six drivers have them.
+Add on birth, subtract on death, take the maximum at BIRTH ALONE since nothing else raises the
+total. MEMBERS, not entries: an entry is a slot the arena hands out and never takes back, a member
+is a vertex in a live clique at this instant, and `arenaEntries` remains the cumulative figure.
+
+**Why it exists.** It is what a CHUNKED clique store would need, and the flat classes can predict it
+before any allocator work is done. On grids the ratio is already known, peak about 0.40x nnz(A)
+against cumulative 0.94x in 2D and 1.45x in 3D; what it will say on real matrices is the open
+question. It is the payload figure only, with no per-clique header or allocator rounding in it.
+
+**Making it correct meant funnelling four sites, and the fourth was missed twice.** A clique's
+length was being zeroed or shortened in `beginElimination`, in `absorb`, in `trimClique`, and in
+`massEliminate` dropping the members it merged. Births and deaths now go through `killClique` and
+`trimClique`. `merge` deliberately does NOT: `v` there is a live supervariable that never formed a
+clique, so its length is `A[v]`'s.
+
+**The check is `cliqueCountBalances`, and it lives in the class for a reason.** Two earlier versions
+were wrong. Asserting the live count returns to zero is false: a clique dies when a member becomes a
+pivot, and at the close of a run the last cliques have had every member mass eliminated instead, so
+a handful of entries legitimately survive. Summing `cliqueSize` over a driver's pivot list is exact
+for `Amd3` and wrong for `Mmd3`, which pushes prepass vertices onto that list. Only the class knows
+which vertices ever formed a clique, so it keeps a debug-only owner list and does the recomputation
+itself.
+
+## The private types are named for what they are, 2026-08-18
+
+```
+Amd3B    QuotientGraphA  BucketsA  TaggedScanA                  ->  ...Compacted
+Mmd3C    QuotientGraphC  BucketsC  TaggedScanC                  ->  ...Compacted
+Mmd3B    QuotientGraphB  BucketsB  TaggedScanB  ApproximateScanB ->  ...Chained
+```
+
+All three are in anonymous namespaces, so two files declaring `QuotientGraphCompacted` is legal.
+The terminology and the four-class scheme behind these names are in docs/DESIGN_DECISIONS.md
+(2026-08-18): a SEGMENT is the logical unit, FLAT and CHUNKED name the allocation, and the eventual
+set is `QuotientGraphFlat`, `QuotientGraphChunked`, `QuotientGraphCompacted` and
+`QuotientGraphChained`.
+
+**`tmp/` STILL GENERATES THE OLD NAMES.** `make_amd3b.py` and `make_mmd3c.py` rename `QuotientGraph`
+to `QuotientGraphA` and `QuotientGraphC`, so regenerating either file undoes this. They also carry
+sandbox paths from a previous session. Fix both before running them.
+
+## Promoting the private classes: the order, and the decision that gates it
+
+The plan is documentation, then `QuotientGraphChained`, then `QuotientGraphCompacted`. The
+documentation is done. The other two are not, and neither is a move-and-rename.
+
+**`QuotientGraphChained` is blocked on a bucket question.** `BucketsChained` has diverged from the
+shared `Buckets` in BOTH directions, not merely been pruned. It lacks the four amd-only hash
+accessors and `restore`, which is pruning; it ADDS `evict`, an `unfile` and a reset to `UNFILED` in
+one call, which is `mmdelm`'s `bwd[rn] = 0` and which production spells as two calls at
+`Mmd3.cpp:115`; and its `refile` does not take or write the `degrees` vector. Three ways out:
+
+- Add `evict` to the shared `Buckets` and have `Mmd3` use it, since it is the clearer spelling of
+  what that driver already does in two calls. Then one bucket class serves both.
+- Promote `BucketsChained` as its own public class, and keep two bucket classes aligned forever.
+- Leave the chained graph private until the bucket question is settled.
+
+**`QuotientGraphCompacted` is blocked on a convention question**, and this one is older. The two
+copies have DIVERGED: `Amd3B`'s carries the run flip, the rotation, positions and the mid-walk
+collector; `Mmd3C`'s carries none of it. One class cannot serve both as they stand, because the
+flipped run leaves no free slot for `Mmd3C`'s back-of-list convention. Three ways out, listed in
+docs/DESIGN_DECISIONS.md (2026-08-18) and repeated here because this is where the work starts:
+
+- `Mmd3C` adopts the rotation. Its permutation MOVES, so its fill column stops being comparable to
+  `MMD3`'s and its digest baseline has to be re-recorded.
+- The class carries both conventions, costing a shift or a spare word per vertex on the mmd path
+  and putting back a branch the flip removed.
+- Promote the amd side alone, with `Mmd3C` joining once the convention is decided.
+
+## The ladders moved off the power-of-two sides, 2026-08-18
+
+```
+square   33 51 65 101 129 201 257 401 513 801 1025 1601
+cubic    9 11 17 21 33 41 65 81
+```
+
+199 and 200 are gone; 201 stays as the rung 200 would have become. The 6 cube stays at 6, being the
+largest size where `AMD` and `AMDraw` disagree on fill and therefore the only row that observes the
+postorder's effect.
+
+**WHAT THIS GIVES UP, and it was deliberate.** The interleaving was originally a power-of-two series
+against a non-power-of-two one precisely so that an addressing artifact could be told apart from a
+real trend. That diagnostic is gone. What is gained is that no row's denominator carries the
+artifact, the vendored routine suffering it worst. If the question comes back, put the old sides
+back for a run rather than reading these rows harder.
+
+**AND THE PHASE SPLIT CHANGED WHAT THE AMD LADDER MEANS.** `make phases2d`, from the gitignored
+`amd_timed.cpp` that `tools/hook_amd.py` regenerates, shows `AMD_aat` and `AMD_postorder` plus
+`valid` at about 13 per cent of the vendored column, none of which we do. Against the comparable
+region alone, `AMD3` reads 1.63x at 401 a side where the raw column says 1.43x. So the amd ladder
+does NOT say containers are free; the denominator was inflated. That removes the apparent
+contradiction with the mmd ladder's 15 per cent and takes the pressure off `Mmd3B` being
+misaligned as the explanation.
+
 ## What was done since commit 5ea68cc
 
-**The first two bullets are committed as `c21f447`; everything from the 2026-08-18 section
-above is uncommitted on top of it.**
+**All of this is committed. The bullets below are `c21f447`; everything in the 2026-08-18 sections
+above, plus the sections that follow this line, are `db377c9`.**
 
 - **`src/Mmd3C.cpp` and `include/oblio/Mmd3C.h` REBUILT.** The old file was mmd on the production
   arena, a transitional vehicle that had served its purpose; this one is mmd on `AMD_2`'s pool,
@@ -380,7 +622,7 @@ said about the orderings, in order of how much it should affect the plan:
      is the array-count finding of the same day, moved from the loops into the constructor, and it
      is invisible on a grid because real work amortizes it.
 
-   **Why it matters and where.** `benchmarks/matrices`, `make ordering`, has the evidence: the five
+   **Why it matters and where.** `benchmarks/matrices`, `make mmdorder`, has the evidence: the five
    pure-diagonal matrices, `Boeing/bcsstm39`, `Cunningham/m3plates`, `HB/bcsstm25`,
    `Oberwolfach/t3dl_e` and `Oberwolfach/t2dal_e`, read 2.03 to 2.28x genmmd after the prepass fold,
    where matrices with real work read 0.40 to 0.86x. Absolute times there are tenths of a

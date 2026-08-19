@@ -150,7 +150,7 @@ one; see `PERFORMANCE.md` for the split.
 ```
 cd benchmarks/matrices
 python3 ssget.py            # fetch the collection subset into data/
-make ordering               # this table, all 246 files
+make mmdorder               # this table, all 246 files
 ```
 
 The private vendored sources are needed for the genmmd columns. Without them the table still runs

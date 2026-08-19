@@ -103,11 +103,13 @@ DECLS_RAW = """#include <vector>
 /* ---- added by tools/hook_amd.py --mode=raw; not part of the vendored source ---- */
 static std::vector<std::vector<int> > PB_members;   /* members[i], what supervariable i stands for */
 static std::vector<int>               PB_raw;       /* the raw elimination order */
+static std::vector<int>               PB_dense;     /* the rows the dense rule set aside */
 static void PB_reset (int n)
 {
     PB_members.assign (n, std::vector<int> ()) ;
     for (int i = 0 ; i < n ; i++) PB_members [i].push_back (i) ;
     PB_raw.clear () ;
+    PB_dense.clear () ;
 }
 /* ----------------------------------------------------------------------------------- */
 
@@ -193,6 +195,19 @@ def transform_raw(s):
     need(s, empty, "the empty-variable branch moved")
     s = s.replace(empty, empty + "\n\t    PB_raw.push_back (i) ;")
 
+    # 3b. DENSE VARIABLES, which AMD_2 does not eliminate at all: `Nv [i] = 0`, `Pe [i] = EMPTY`,
+    #    and the comment there says they take no part in the postorder. So they never reach the
+    #    finalize marker and the raw order came up short by `ndense` on any matrix with a hub,
+    #    which is most social and power-law graphs in the collection.
+    #
+    #    THEY ARE COLLECTED HERE AND APPENDED AT THE END, not pushed where they are found, because
+    #    that is where AMD_2's own output assembly puts them: `Next [i] = nel++` under "This is a
+    #    dense unordered variable, with no parent. Place it last in the output order", over i
+    #    ascending. This branch also runs over i ascending, so collecting here gives that order.
+    dense = "\t    ndense++ ;\n\t    Nv [i] = 0 ;\t\t/* do not postorder this node */"
+    need(s, dense, "the dense-variable branch moved")
+    s = s.replace(dense, dense + "\n\t    PB_dense.push_back (i) ;")
+
     # 4. once per pivot, at the finalize marker, before AMD_postorder runs
     fin = "/* FINALIZE THE NEW ELEMENT */"
     need(s, fin, "the finalize marker moved")
@@ -210,6 +225,7 @@ def transform_raw(s):
     s = s.replace(call,
                   "    PB_reset (n) ;\n"
                   "    const int pb_status = AMD_order(n, Ap, Ai, P, Control, Info);\n"
+                  "    PB_raw.insert (PB_raw.end (), PB_dense.begin (), PB_dense.end ()) ;\n"
                   "    { extern void pbRawOrder (const int*, int) ;\n"
                   "      pbRawOrder (PB_raw.empty () ? 0 : &PB_raw[0], (int) PB_raw.size ()) ; }\n"
                   "    return pb_status;")

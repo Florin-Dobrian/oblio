@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -65,7 +66,8 @@
 // rests on.
 //
 // IT CARRIES A PRIVATE COPY OF QuotientGraph, named QuotientGraphCompacted, so the storage can
-// be changed without touching the class every driver shares. THE COST IS EVERY SHARED FOLD LANDING TWICE, and
+// be changed without touching the class every driver shares. THE COST IS EVERY SHARED FOLD
+// LANDING TWICE, and
 // it is accepted on purpose; `make digest` catches a copy that has stopped reproducing its original
 // in half a second.
 //
@@ -119,6 +121,7 @@
 namespace Oblio {
 
 std::size_t gAmd3BCompactions = 0;   // read by tmp/ probes; see the note at the return below
+extern std::size_t gPeakCliqueMembers;   // defined in src/QuotientGraph.cpp; see it there
 
 namespace {
 
@@ -234,6 +237,22 @@ public:
     std::int32_t* clique(std::int32_t c) { return mSource.data() + mRun[c].sourcePtr; }
     void trimClique(std::int32_t pivot, std::uint32_t kept);
 
+    // THE ONE PLACE A CLIQUE DIES, so that the counter below can see every death. Three causes:
+    // absorbed into the new clique, absorbed aggressively once its external degree reaches zero,
+    // and merged away with its owner. All three used to store the zero where they stood.
+    void killClique(std::int32_t c);
+
+    // PEAK LIVE CLIQUE MEMBERS, mirroring QuotientGraph's. A MEMBER is a vertex in a live clique
+    // at this instant, where an entry is a pool slot; the two differ here because this layout
+    // reclaims and the flat one does not.
+    //
+    // IT IS A PROPERTY OF THE ALGORITHM, NOT OF THE LAYOUT, which is the point of having it in
+    // both classes. `Amd3` and `Amd3B` compute the same permutation, so they form the same cliques
+    // and merge the same vertices at the same moments, and these two numbers MUST be equal. The
+    // digest says the outputs agree; this says the work behind them agreed too, which is a
+    // stronger statement and one nothing else in the suite makes. Checked in tests/test_order.cpp.
+    std::size_t numPeakCliqueMembers() const { return mNumPeakCliqueMembers; }
+
     std::uint32_t cliqueWeight() const { return mCliqueWeight; }
 
     // INCIDENCE FIRST, ADJACENCY BEHIND IT, which is `AMD_2`'s order and the reverse of
@@ -279,6 +298,11 @@ public:
     const std::vector<std::int32_t>& eliminate(std::int32_t pivot, TaggedScanCompacted& scan);
 
     void merge(std::int32_t u, std::int32_t v);
+
+    // SET u ASIDE, taking it out of the elimination without numbering it. `AMD_2`'s dense-row
+    // rule; see the shared class for the whole of it. Here a zero weight is the dead state
+    // outright, so this is the one store and there is no mark to write.
+    void setAside(std::int32_t u) { mWeight[u] = 0; }
 
 
     // NO setReverseIncidence. Walking I[u] from the back is genmmd's convention and cannot
@@ -344,6 +368,9 @@ private:
     // Whether the clique now being eliminated was built in the pivot's own run. Read by
     // massEliminate, which can only give space back to the cursor in the other case.
     bool        mBuiltInPlace = false;
+
+    std::size_t mNumLiveCliqueMembers = 0;   // see numPeakCliqueMembers
+    std::size_t mNumPeakCliqueMembers = 0;
     std::size_t mCompactions = 0;             // AMD_2's Info[AMD_NCMPA]
 public:
     std::size_t compactions() const { return mCompactions; }
@@ -661,11 +688,16 @@ void QuotientGraphCompacted::beginElimination(std::int32_t pivot) {
     const std::int32_t* absorbedCliques = mSource.data() + mRun[pivot].sourcePtr;
     const std::uint32_t absorbedSize    = mRun[pivot].incidenceSize;
     for (std::uint32_t i = 0; i < absorbedSize; ++i)
-        mRun[absorbedCliques[i]].adjacencySize = 0;   // dead, its block left behind
+        killClique(absorbedCliques[i]);               // dead, its block left behind
 
     mRun[pivot].sourcePtr     = cliqueStart;
     mRun[pivot].adjacencySize = cliqueLen;
     mRun[pivot].incidenceSize = 0;                    // a clique has no incidence list
+
+    // A CLIQUE IS BORN HERE AND NOWHERE ELSE, which is what makes the peak countable, and the
+    // maximum is taken here alone since nothing else raises the total.
+    mNumLiveCliqueMembers += cliqueLen;
+    mNumPeakCliqueMembers  = std::max(mNumPeakCliqueMembers, mNumLiveCliqueMembers);
 
     // NO STAMPING PASS, AND NO TAG. Membership was written by the walk, in the sign of the weight,
     // so this only sums. The `inClique` out-parameter and the two `++mTag` that fed it went on
@@ -814,6 +846,7 @@ const std::vector<std::int32_t>& QuotientGraphCompacted::massEliminate(std::int3
         std::uint32_t       kept        = 0;
         for (std::uint32_t k = 0; k < membersSize; ++k)
             if (mWeight[members[k]] != 0) members[kept++] = members[k];
+        mNumLiveCliqueMembers -= membersSize - kept;   // a shrink is a partial death
         mRun[pivot].adjacencySize = kept;
 
         // THE SPACE THE COMPACTION FREED GOES BACK TO THE CURSOR, which is `AMD_2`'s
@@ -847,6 +880,7 @@ const std::vector<std::int32_t>& QuotientGraphCompacted::massEliminate(std::int3
 void QuotientGraphCompacted::trimClique(std::int32_t pivot, std::uint32_t kept) {
     const std::uint32_t was = mRun[pivot].adjacencySize;
     if (kept == was) return;
+    mNumLiveCliqueMembers -= was - kept;
     mRun[pivot].adjacencySize = kept;
     if (!mBuiltInPlace) {
         assert(mRun[pivot].sourcePtr + was == mFree &&
@@ -861,8 +895,15 @@ void QuotientGraphCompacted::merge(std::int32_t u, std::int32_t v) {
     mWeight[u] += mWeight[v];
     mWeight[v] = 0;
 
+    // NOT `killClique`. v is a live supervariable being absorbed and never formed a clique, so
+    // this length is A[v]'s, not a clique's, and feeding it to the counter would corrupt the peak.
     mRun[v].adjacencySize = 0;
     mRun[v].incidenceSize = 0;
+}
+
+void QuotientGraphCompacted::killClique(std::int32_t c) {
+    mNumLiveCliqueMembers -= mRun[c].adjacencySize;
+    mRun[c].adjacencySize = 0;
 }
 
 void QuotientGraphCompacted::absorb(const std::vector<std::int32_t>& cliques,
@@ -870,7 +911,7 @@ void QuotientGraphCompacted::absorb(const std::vector<std::int32_t>& cliques,
     if (cliques.empty()) return;
 
     // dead; the compaction reads the size
-    for (std::int32_t c : cliques) mRun[c].adjacencySize = 0;
+    for (std::int32_t c : cliques) killClique(c);
 
     // I[u] LESS THE DEAD, COMPACTED RIGHTWARD SO THE ADJACENCY NEVER MOVES. The incidence part is
     // at the front of the run and the adjacency starts at `sourcePtr + incidenceSize`, so
@@ -888,11 +929,26 @@ void QuotientGraphCompacted::absorb(const std::vector<std::int32_t>& cliques,
         const std::int32_t u         = vertices[k];
         std::int32_t*      incidence = mSource.data() + mRun[u].sourcePtr;
         const std::uint32_t size     = mRun[u].incidenceSize;
-        std::uint32_t       write    = size;
+
+        // THE ROTATION HAS TO BE REDONE WHEN ITS SUBJECT DIES. `AMD_2` rotates inside scan 2, with
+        // this step's absorbed elements already dropped, so the entry it parks at the back is the
+        // first SURVIVOR; our prune rotates first and absorbs here, so when the parked entry is
+        // one this pass removes the two lists differ. See the shared class for the measurement
+        // that found it, and note the same correction has to exist in both files or their columns
+        // stop being comparable.
+        const bool parkedDied = size > 0 && mRun[incidence[size - 1]].adjacencySize == 0;
+
+        std::uint32_t write = size;
         for (std::uint32_t i = size; i-- > 0;)
             if (mRun[incidence[i]].adjacencySize != 0) incidence[--write] = incidence[i];
         mRun[u].sourcePtr    += write;                  // the dropped entries fall off the front
         mRun[u].incidenceSize = size - write;
+
+        // Entry 0 of what survives is the pivot's own new clique, never absorbed, so the rotation
+        // runs over the entries behind it.
+        const std::uint32_t kept = size - write;
+        if (parkedDied && kept > 2)
+            std::rotate(incidence + write + 1, incidence + write + 2, incidence + size);
     }
 }
 
@@ -928,9 +984,50 @@ std::vector<std::int32_t> orderAmd3B(const std::vector<std::size_t>&  colPtr,
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u)
         degrees[u] = qg.adjacencySize(u);
 
+    // THE EMPTY-ROW PREPASS, riding in the filing loop as `AMD_2` does and as Amd3 now does. See
+    // src/Amd3.cpp for why it exists and what it fixes; the two must produce the same permutation
+    // and `test_order` asserts it.
+    // AND THE DENSE-ROW RULE, the other half of `AMD_2`'s initialization pass. A row whose degree
+    // exceeds `max (16, 10 * sqrt (n))` is SET ASIDE: not eliminated, not available, kept out of
+    // every reachable set by a zero weight, and appended to the permutation at the end. `AMD_2`:
+    //
+    //     ndense++ ; Nv [i] = 0 ; Elen [i] = EMPTY ; nel++ ; Pe [i] = EMPTY ;
+    //
+    // and at the output assembly, "This is a dense unordered variable, with no parent. Place it
+    // last in the output order", `Next [i] = nel++` over i ascending.
+    //
+    // WHY IT MATTERS HERE AND NOT ON GRIDS. A grid has no vertex anywhere near the threshold, so
+    // nothing in the digest or the scaling ladders can see this rule at all. On real matrices it
+    // is the difference between our order and `AMD_2`'s on most social and power-law graphs, and
+    // it is also where our worst timings on that set came from: a hub of degree in the thousands
+    // that nobody set aside sits in every reachable set it touches. Measured before the rule went
+    // in, benchmarks/matrices `make amdorder`: GHS_indef/bloweybq 0.36 ms for `amd_order` against
+    // 20.4 for ours, bloweybl 0.90 against 41.0, QY/case9 1.05 against 12.7.
+    //
+    // THE THRESHOLD IS FIXED AT THE VENDORED DEFAULT rather than exposed. `AMD_2` reads
+    // `Control [AMD_DENSE]`, defaulting to 10.0, and has a whole control structure to read it
+    // from; this driver has none, and inventing one to hold a single constant would be the wrong
+    // trade while the constant is the thing being matched.
+    const std::uint32_t dense = static_cast<std::uint32_t>(std::max<double>(
+        16.0, 10.0 * std::sqrt(static_cast<double>(size))));
+    std::vector<std::int32_t> denseRows;             // ascending by construction; see the tail
     BucketsCompacted buckets(size);
-    for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u)
+    for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u) {
+        if (degrees[u] == 0) {
+            pivots.push_back(u);
+            ++numEliminated;
+            --numLive;
+            continue;
+        }
+        if (degrees[u] > dense) {                    // a hub; see the note above
+            qg.setAside(u);
+            denseRows.push_back(u);
+            ++numEliminated;
+            --numLive;
+            continue;
+        }
         buckets.file(degrees[u], u);
+    }
     std::uint32_t minDegree = *std::min_element(degrees.begin(), degrees.end());
 
 
@@ -1021,6 +1118,26 @@ std::vector<std::int32_t> orderAmd3B(const std::vector<std::size_t>&  colPtr,
                 buckets.setKey(u, hash);
             }
         }
+
+        // THE STAMP BASE IS RAISED BEFORE DETECTION, NOT AFTER IT, 2026-08-18, and this is a
+        // CORRECTNESS requirement rather than tidiness. `w` holds two kinds of value: the scan's
+        // `w[c] = degree[c] + wflg - nvi`, which reaches as high as `wflg + lemax`, and
+        // detection's stamps. A stamp must be ABOVE every scan value of the same step, or a clique
+        // whose scan value happens to land on the current stamp reads as marked and two vertices
+        // that are not duplicates compare equal.
+        //
+        // Amd.cpp does exactly this, `wflg += lemax ; wflg = clear_flag (...)` between scan 2 and
+        // SUPERVARIABLE DETECTION, and then stamps with `wflg` upward. Ours used to raise the base
+        // at the END of the step, which left this step's stamps starting at `wflg` while this
+        // step's scan values ran up to `wflg + lemax`: the two ranges overlapped exactly.
+        //
+        // WHAT IT COST. On Grund/meg4, n = 5860, vertices 5779 and 5780 were merged at pivot 5080
+        // although their lists differ in six of sixteen entries, because one entry's scan value
+        // equalled the stamp. That single false merge moved 109 positions of the permutation and
+        // cost 297 entries of fill, 51809 against `AMD_2`'s 51512. No grid ever triggered it: the
+        // overlap needs a clique degree that lands on the right value, and it fired on one matrix
+        // in 246.
+        stamp = std::max(stamp, wflg + lemax);
 
         for (std::uint32_t kk = 0; kk < pivotCliqueSize; ++kk) {
             const std::int32_t seed = pivotClique[kk];
@@ -1127,14 +1244,19 @@ std::vector<std::int32_t> orderAmd3B(const std::vector<std::size_t>&  colPtr,
         // PAST EVERY STAMP THIS STEP LAID DOWN, not merely past the scan's values. Amd.cpp
         // advances wflg through detection for the same reason: a stamp must read as alive-unseen
         // next step, which means strictly below the new tag.
-        stamp = std::max(stamp, wflg + lemax);
-        wflg  = stamp + 1;
+        wflg = stamp + 1;                 // past every stamp this step laid down
     }
 
     // How often the pool actually needed collecting. `AMD_2` reports the same figure as
     // Info[AMD_NCMPA] and its complexity bound assumes it stays constant; this is where that
     // assumption can be checked for OUR storage rather than for its.
-    gAmd3BCompactions = qg.compactions();
+    gAmd3BCompactions  = qg.compactions();
+    gPeakCliqueMembers = qg.numPeakCliqueMembers();   // see src/QuotientGraph.cpp
+    // THE ROWS THE DENSE RULE SET ASIDE GO LAST, in index order, which is where `AMD_2`'s output
+    // assembly puts them. They were collected in an ascending pass, so appending the vector is
+    // that order; each stands only for itself, having been set aside before it could absorb
+    // anything, so `order` expands a chain of one.
+    pivots.insert(pivots.end(), denseRows.begin(), denseRows.end());
     return qg.order(pivots);
 }
 

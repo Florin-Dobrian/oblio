@@ -4,6 +4,7 @@
 #include "oblio/Mmd3B.h"
 #include "oblio/Mmd3C.h"
 #include "oblio/Amd3B.h"
+#include "oblio/QuotientGraph.h"
 #include "test_util.h"
 #include <cstdint>
 #include <iostream>
@@ -52,14 +53,29 @@ template<class Val> static void checkOrderFn(const SparseMatrix<Val>& A, OrderFn
     Permutation P(A.size());
     const bool set = (order.size()==A.size()) && P.setNewToOld(order);
     ck(set && P.validate(), lbl); }
+// SAME PERMUTATION, AND SAME WORK BEHIND IT. The order comparison is the older half. The second
+// half compares PEAK LIVE CLIQUE MEMBERS, which is a property of the algorithm rather than of the
+// layout: two drivers running the same method form the same cliques and merge the same vertices at
+// the same moments whatever their storage, so the figure must agree exactly. Two orderings that
+// agree on output while doing different work is the failure this catches and the permutation
+// comparison cannot, and it is the shape of defect this tree has repeatedly found by hand.
+//
+// ZERO MEANS NOT TRACKED, and then only the order is compared. `Mmd3B` does not track it: chained
+// storage ends a clique at a terminator and keeps no size, so subtracting a length on death would
+// need a per-vertex array in the one file whose purpose is genmmd's array economy.
 template<class Val> static void checkSameOrderFn(const SparseMatrix<Val>& A, Ordering m,
                                                  OrderFn f, const std::string& lbl){
     OrderEngine a(m); Permutation pa;
+    gPeakCliqueMembers = 0;
     const bool ok = a.compute(A,pa);
+    const std::size_t peakEngine = gPeakCliqueMembers;
+    gPeakCliqueMembers = 0;
     const std::vector<std::int32_t> order = f(A.colPtr(), A.rowIdx());
+    const std::size_t peakFn = gPeakCliqueMembers;
     bool same = ok && order.size()==A.size();
     for (std::size_t k = 0; same && k < order.size(); ++k)
         same = (pa.newToOld()[k] == order[k]);
+    if (same && peakEngine != 0 && peakFn != 0) same = (peakEngine == peakFn);
     ck(same, lbl); }
 template<class Val> static void reqSym(const SparseMatrix<Val>& A, const std::string& lbl){
     ck(OblioTest::isStructurallySymmetric(A), lbl); }

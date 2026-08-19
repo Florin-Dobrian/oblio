@@ -1,7 +1,8 @@
 #include "oblio/Amd3.h"
 
-#include <cassert>
 #include <algorithm>
+#include <cassert>
+#include <cmath>
 #include <limits>
 #include <utility>
 
@@ -54,9 +55,75 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u)
         degrees[u] = qg.adjacencySize(u);
 
+    // THE EMPTY-ROW PREPASS, AND IT RIDES IN THE FILING LOOP, 2026-08-18. `AMD_2` numbers every
+    // degree-zero vertex where it stands during initialization, in one ascending pass that files
+    // everything else:
+    //
+    //     for (i = 0 ; i < n ; i++) { deg = Degree [i] ;
+    //         if (deg == 0) { Elen [i] = FLIP (1) ; nel++ ; Pe [i] = EMPTY ; W [i] = 0 ; }
+    //         else { ...file i... } }
+    //
+    // A vertex with no off-diagonal entry has nothing to eliminate and nothing to update, so it is
+    // simply given the next number. NUMBERED, NOT ELIMINATED: no clique is formed and no list is
+    // pruned, which is what `number` means here and what the mmd prepass already does.
+    //
+    // WITHOUT IT THE ORDER IS REVERSED AMONG THOSE VERTICES and nothing else moves. Filed at
+    // degree zero and popped from the head, they came out LIFO, so a pure diagonal gave `4 3 2 1
+    // 0` where `AMD_2` gives `0 1 2 3 4`. Identical fill, different permutation, and twelve
+    // matrices in benchmarks/matrices are entirely of this kind: every `m = 0` row there differed
+    // for this reason alone.
+    //
+    // `numLive` LOSES THEM TOO, which is `nel++` above and `nleft = n - nel` at the degree bound.
+    // Leaving them in would make the `numLeft - weight(u)` cap one too large per empty row.
+    //
+    // AND IT DOES NOT CALL `number`, which the mmd prepass does. That function exists for a vertex
+    // that is numbered while still being NAMED by its neighbors, which is the degree-1 case; it
+    // marks the vertex GONE and sets `mHasNumbered`, and the flag puts a test in every walk for
+    // the rest of the run. A degree-ZERO vertex is in nobody's adjacency, so no walk can reach it
+    // and there is nothing to mark. `AMD_2` writes `W [i] = 0` here for the same non-reason and
+    // keeps `Nv [i] = 1`. Not filing it is the whole of what has to happen.
+    //
+    // AND THE DENSE-ROW RULE, the other half of `AMD_2`'s initialization pass. A row whose degree
+    // exceeds `max (16, 10 * sqrt (n))` is SET ASIDE: not eliminated, not available, kept out of
+    // every reachable set by a zero weight, and appended to the permutation at the end. `AMD_2`:
+    //
+    //     ndense++ ; Nv [i] = 0 ; Elen [i] = EMPTY ; nel++ ; Pe [i] = EMPTY ;
+    //
+    // and at the output assembly, "This is a dense unordered variable, with no parent. Place it
+    // last in the output order", `Next [i] = nel++` over i ascending.
+    //
+    // WHY IT MATTERS HERE AND NOT ON GRIDS. A grid has no vertex anywhere near the threshold, so
+    // nothing in the digest or the scaling ladders can see this rule at all. On real matrices it
+    // is the difference between our order and `AMD_2`'s on most social and power-law graphs, and
+    // it is also where our worst timings on that set came from: a hub of degree in the thousands
+    // that nobody set aside sits in every reachable set it touches. Measured before the rule went
+    // in, benchmarks/matrices `make amdorder`: GHS_indef/bloweybq 0.36 ms for `amd_order` against
+    // 20.4 for ours, bloweybl 0.90 against 41.0, QY/case9 1.05 against 12.7.
+    //
+    // THE THRESHOLD IS FIXED AT THE VENDORED DEFAULT rather than exposed. `AMD_2` reads
+    // `Control [AMD_DENSE]`, defaulting to 10.0, and has a whole control structure to read it
+    // from; this driver has none, and inventing one to hold a single constant would be the wrong
+    // trade while the constant is the thing being matched.
+    const std::uint32_t dense = static_cast<std::uint32_t>(std::max<double>(
+        16.0, 10.0 * std::sqrt(static_cast<double>(size))));
+    std::vector<std::int32_t> denseRows;             // ascending by construction; see the tail
     Buckets buckets(size);
-    for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u)
+    for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u) {
+        if (degrees[u] == 0) {
+            pivots.push_back(u);
+            ++numEliminated;
+            --numLive;
+            continue;
+        }
+        if (degrees[u] > dense) {                    // a hub; see the note above
+            qg.setAside(u);
+            denseRows.push_back(u);
+            ++numEliminated;
+            --numLive;
+            continue;
+        }
         buckets.file(degrees[u], u);
+    }
     std::uint32_t minDegree = *std::min_element(degrees.begin(), degrees.end());
 
     // NO SEPARATE MEMBERSHIP SCRATCH AT ALL, 2026-08-17. The driver's own `mark` and `tag` went
@@ -502,6 +569,26 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
         // Every bucket that was filled is reached: filing only happens for a principal member of
         // C[pivot], and the survivor of every merge inside a bucket is principal and is itself a
         // member of C[pivot]. So no head is left dirty for the next step.
+        // THE STAMP BASE IS RAISED BEFORE DETECTION, NOT AFTER IT, 2026-08-18, and this is a
+        // CORRECTNESS requirement rather than tidiness. `w` holds two kinds of value: the scan's
+        // `w[c] = degree[c] + wflg - nvi`, which reaches as high as `wflg + lemax`, and
+        // detection's stamps. A stamp must be ABOVE every scan value of the same step, or a clique
+        // whose scan value happens to land on the current stamp reads as marked and two vertices
+        // that are not duplicates compare equal.
+        //
+        // Amd.cpp does exactly this, `wflg += lemax ; wflg = clear_flag (...)` between scan 2 and
+        // SUPERVARIABLE DETECTION, and then stamps with `wflg` upward. Ours used to raise the base
+        // at the END of the step, which left this step's stamps starting at `wflg` while this
+        // step's scan values ran up to `wflg + lemax`: the two ranges overlapped exactly.
+        //
+        // WHAT IT COST. On Grund/meg4, n = 5860, vertices 5779 and 5780 were merged at pivot 5080
+        // although their lists differ in six of sixteen entries, because one entry's scan value
+        // equalled the stamp. That single false merge moved 109 positions of the permutation and
+        // cost 297 entries of fill, 51809 against `AMD_2`'s 51512. No grid ever triggered it: the
+        // overlap needs a clique degree that lands on the right value, and it fired on one matrix
+        // in 246.
+        stamp = std::max(stamp, wflg + lemax);
+
         for (std::uint32_t kk = 0; kk < pivotCliqueSize; ++kk) {
             const std::int32_t seed = pivotClique[kk];
             if (qg.eliminated(seed)) continue;
@@ -709,8 +796,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
         // now writes into this same array above `wflg + lemax`. Amd.cpp advances wflg through
         // detection for the same reason: a stamp must read as alive-unseen next step, which means
         // strictly below the new tag.
-        stamp = std::max(stamp, wflg + lemax);
-        wflg  = stamp + 1;
+        wflg = stamp + 1;                 // past every stamp this step laid down
     }
 
     // EVERY CLIQUE IS DEAD BY NOW, every vertex having been eliminated, so the live count must
@@ -725,7 +811,13 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
     // member MASS ELIMINATED into the pivot instead, so no one is left to absorb them. A handful
     // of entries survive, 1 to 3 on grids from 2 to 5 a side.
     assert(qg.cliqueCountBalances() && "clique births and deaths do not balance");
+    gPeakCliqueMembers = qg.numPeakCliqueMembers();   // see QuotientGraph.cpp
     if (arenaEntries != nullptr) *arenaEntries = qg.arenaEntries();
+    // THE ROWS THE DENSE RULE SET ASIDE GO LAST, in index order, which is where `AMD_2`'s output
+    // assembly puts them. They were collected in an ascending pass, so appending the vector is
+    // that order; each stands only for itself, having been set aside before it could absorb
+    // anything, so `order` expands a chain of one.
+    pivots.insert(pivots.end(), denseRows.begin(), denseRows.end());
     return qg.order(pivots);
 }
 

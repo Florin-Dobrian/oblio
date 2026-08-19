@@ -634,7 +634,7 @@ nothing marks and nothing should: the answer is correct and the question was ill
 file is, what it converted to, and what was refused. Run it first on a new set.
 
 **`matrix_ordering_cpp`** answers what the ORDERING STEP ALONE costs, genmmd against `Mmd3`, and
-is the newest of the four, 2026-08-15. `make ordering`, over all of `data/` rather than a
+is the newest of the four, 2026-08-15. `make mmdorder`, over all of `data/` rather than a
 candidates file: an ordering needs neither values nor definiteness, so what it wants is everything
 on disk, which is 246 files against the performance report's 107.
 
@@ -1079,7 +1079,7 @@ unexplained; it is recorded here rather than chased.
 
 ## What the ordering run showed, 2026-08-15
 
-The first `make ordering`, all 246 matrices, `Mmd3` against genmmd on the ordering step alone.
+The first `make mmdorder`, all 246 matrices, `Mmd3` against genmmd on the ordering step alone.
 
 **Where there is work to do, we win, and the margin grows with the work.** 0.83 to 0.85x on the two
 PARSEC giants, 0.81x on `Schenk/nlpkkt80`, 0.60x and 0.40x on the `FlowIPM22/uni_chimera` pair,

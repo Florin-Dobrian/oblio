@@ -34,7 +34,8 @@
 // 123510 D1 read misses against 119331. So the second arena buys speed and costs the guarantee.
 //
 // IT CARRIES A PRIVATE COPY OF QuotientGraph, named QuotientGraphChained, so the storage can be
-// changed without touching the class six drivers share. THE COST IS EVERY SHARED FOLD LANDING TWICE, and it
+// changed without touching the class six drivers share. THE COST IS EVERY SHARED FOLD LANDING
+// TWICE, and it
 // is accepted on purpose; `make digest` catches a copy that has stopped reproducing its original in
 // half a second, which is what makes carrying it tolerable.
 //
@@ -1035,13 +1036,9 @@ const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std::int32_
     // The pivot goes first, since the merge at the end adds into it and both operands must be
     // magnitudes by then. Every path through an elimination reaches this function: no mmd driver
     // sets late mass elimination.
-    //
-    // The compaction still tests GONE rather than the zero weight, unlike the shared class. Same
-    // effect for one pass and no tag, which is what fold 4 was about; GONE is the clearer test
-    // here because this compaction follows a chain of links and never sees a weight otherwise.
     mWeight[pivot] = -mWeight[pivot];
-    // Walks C[pivot], which is still the full reach: the trim below is this function's own and
-    // happens after the loop.
+    // Walks C[pivot], which is the full reach and STAYS the full reach: see the note below on why
+    // nothing here shortens it.
     forEachMember(pivot, [&](std::int32_t u) {
         mWeight[u] = -mWeight[u];                          // live again, and positive
         // Under mVendoredListOrder the new clique sits at the FRONT of I[u] rather than the back,
@@ -1055,46 +1052,39 @@ const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std::int32_
             merged.push_back(u);
         }
     });
-    if (!merged.empty()) {                             // C[pivot] - merged, one compaction pass
-        // ON GONE, not on a fresh stamp. The test above wrote GONE into each merged vertex and
-        // GONE is permanent, so the tag and the store per merged vertex this used to spend were
-        // writing a live tag over it. That was unobservable, since a merged vertex has A[u] empty
-        // and I[u] == {pivot} by the test and membership is symmetric, so nothing names it; but
-        // unobservable is a weaker property than never written, and this tree has been wrong
-        // about exactly that shape before. The shared QuotientGraph already compacts this way.
-        // The compaction follows the chain on BOTH cursors. Only removals happen, so the write
-        // cursor trails the read one within a segment; when either meets a link it follows it,
-        // and a link is structural and stays where it is. The two can be in different segments,
-        // which is why each carries its own position.
-        std::size_t rp = mRun[pivot].sourcePtr, wp = rp;
-        std::size_t re = mRun[pivot + 1].sourcePtr, we = re;
-        while (rp != re) {
-            const std::int32_t v = mSource[rp];
-            if (v == TERMINATOR) break;
-            if (v < 0) {                                // a link: both cursors may follow it
-                const std::int32_t d = -v - 1;
-                rp = mRun[d].sourcePtr; re = mRun[d + 1].sourcePtr;
-                continue;
-            }
-            ++rp;
-            if (mMark[v] == GONE) continue;             // merged away, drop it
-            while (wp != rp && mSource[wp] < 0 && mSource[wp] != TERMINATOR) {
-                const std::int32_t d = -mSource[wp] - 1;
-                wp = mRun[d].sourcePtr; we = mRun[d + 1].sourcePtr;
-            }
-            mSource[wp++] = v;
-        }
-        // The block just got shorter, so it needs a new end. The write cursor stopped inside a
-        // segment whenever anything was dropped, which is the case this branch runs in.
-        if (wp < we) mSource[wp] = TERMINATOR;
-
+    // NO COMPACTION OF C[pivot], AND THAT IS GENMMD'S BEHAVIOUR RATHER THAN AN OMISSION,
+    // 2026-08-18.
+    // `mmdelm`'s n1100 loop mass-eliminates with `qsize[md] += qsize[rn] ; qsize[rn] = 0` and DOES
+    // NOT rewrite the list: the merged vertex keeps its place and every later reader skips it on
+    // `qsize[nb] != 0`. The same is true of the further absorption inside `mmdupd`. So genmmd
+    // places a clique once and never shortens it, where `AMD_2` compacts in its restore pass and
+    // hands the tail back with `pfree = p`.
+    //
+    // WE USED TO COMPACT HERE, following the chain on two cursors, which cost a pass genmmd never
+    // pays and saved the skipped entries it pays on every later read. Neither is visible in a
+    // permutation, a skipped member and an absent one reading alike, so no check in this tree
+    // would have caught it; it was found by reading `mmdelm`. Since this file exists so that a
+    // differential against genmmd measures the layout and nothing else, the pass had to go.
+    //
+    // EVERY READER ALREADY SKIPS THE DEAD, which is what makes the removal a deletion:
+    // `reachableSet` tests `nv > 0`, genmmd's own test; the reach count tests the mark, and GONE
+    // outranks any tag; the driver's element walk tests `eliminated`; its pair test rejects on
+    // `m >= vertexTag`. The one loop with no test is the eviction over C[pivot], which is
+    // `mmdelm`'s `bwd[rn] = 0` and which genmmd likewise runs over the uncompacted list;
+    // `BucketsChained::evict` is idempotent, so a merged vertex is evicted harmlessly.
+    //
+    // THE COST IS SPACE, and it is the space genmmd spends. A clique keeps its dead members for as
+    // long as it lives, so live clique storage here is strictly above what the compacting classes
+    // report for the same ordering.
+    if (!merged.empty()) {
         for (std::int32_t u : merged) {                // the pivot now stands for them too
             mSuperNext[mSuperLast[pivot]] = u;         // append u's chain, order preserved
             mSuperLast[pivot]             = mSuperLast[u];
             // The weighted clique size follows the clique. `cliqueWeight()` promises the weighted
-            // size of C[pivot] AS IT NOW STANDS, and a merged vertex has just left it, so the
-            // decrement belongs here rather than in the caller. AMD_2 spells the same line
-            // `degme -= nvi` inside its own mass elimination.
+            // size of the LIVE members of C[pivot], and a merged vertex has just stopped being
+            // one, so the decrement belongs here rather than in the caller. It is unaffected by
+            // the list no longer being compacted: the entry stays, the weight does not count.
+            // AMD_2 spells the same line `degme -= nvi` inside its own mass elimination.
             //
             // WITHOUT IT the drivers that mass-eliminate inside the eliminator, Amd1, Amd2 and
             // Amd2B, read the UNTRIMMED size where they had been computing the trimmed one, which
@@ -1189,7 +1179,8 @@ std::vector<std::int32_t> orderMmd3B(const std::vector<std::size_t>&  colPtr,
     std::uint32_t numEliminated = 0;
 
     // NO `degrees` ARRAY AND NO `outmatched` ARRAY. Both live in BucketsChained::mPrev now, on
-    // genmmd's `bwd` encoding; see the class. The filed value was never the degree anyway (mmdint files a
+    // genmmd's `bwd` encoding; see the class. The filed value was never the degree anyway
+    // (mmdint files a
     // degree-0 vertex under 1 and the refresh files under degree plus one), and the only reader
     // that needed it kept was `unfile`, which now recovers the bucket from the link itself.
     //

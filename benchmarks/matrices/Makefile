@@ -5,13 +5,20 @@
 #:   make all         build the four programs
 #:   make accuracy    the accuracy pass over accuracy_candidates.txt
 #:   make performance the timing pass over performance_candidates.txt
-#:   make ordering    the ORDERING STEP ALONE, genmmd against Mmd3, over all of data/. A
+#:   make mmdorder    the ORDERING STEP ALONE, genmmd against Mmd3, over all of data/. A
 #:                    different question from the performance table's ordering column and so a
 #:                    different set: every matrix whose PATTERN can be read, values or not,
 #:                    positive definite or not, which is roughly twice as many. The two return
 #:                    the same permutation on every matrix experiments/ordering's `make
 #:                    mmdmatrices` checks, so the fill column is both of theirs and time is the
-#:                    only difference between them.
+#:                    only difference between them. NAMED FOR ITS BRANCH because the amd half is
+#:                    coming and will be `make amdorder` beside it. Not to be confused with
+#:                    experiments/ordering's targets of the same names, which check that our
+#:                    orderings match the vendored ones rather than timing them.
+#:   make amdorder    the same for the amd branch, amd_order against Amd3, over the same set.
+#:                    The CLOCK is on amd_order whole, which is what a caller pays and includes
+#:                    AMD_aat and AMD_postorder, neither of which we do; every other column comes
+#:                    from the hooked PRE-POSTORDER copy, since Amd3 returns that order.
 #:   make read        the reader alone over data/, an inventory of what is usable
 #:   make clean
 #:   make help        print this list
@@ -83,6 +90,13 @@ endif
 ifneq ($(VENDOR_SRCS),)
   VENDOR_DEFS = -DOBLIO_VENDORED_ORDERINGS
   VENDOR_OBJS = Amd.o Mmd.o
+  # The hooked copy, for `make amdorder`. It reports the elimination order BEFORE AMD_postorder,
+  # which is the order Amd3 returns, so the fill column can be both routines' as it is on the mmd
+  # side. Present only where private/ is, exactly as the vendored objects are. GENERATED from
+  # whatever private/Amd.cpp currently says, gitignored, removed by clean, so no edited copy of
+  # vendored code can drift from the original unnoticed. Same generator and same discipline as
+  # ../ordering; see its Makefile for why the tool lives at the repo root.
+  RAW_SRCS    = amd_raw.cpp
 endif
 
 # Which configuration this directory is built in. The two differ by a macro, so a binary from one
@@ -110,7 +124,7 @@ MATRICES = ../../data/*/*.mtx
 # `make` the same way; see docs/CODING_RULES.md.
 .DEFAULT_GOAL := help
 
-.PHONY: all read accuracy performance clean help
+.PHONY: all read accuracy performance mmdorder amdorder clean help
 
 # Print the target list from this file's header. Those lines are marked with #: so there is one
 # source of truth: the header comment is the help text.
@@ -132,10 +146,14 @@ matrix_performance_cpp: matrix_performance.cpp MatrixMarket.h $(OBLIO_SRCS) $(VE
 	$(if $(VENDOR_SRCS),$(CXX) $(CXXFLAGS) -w -c $(VENDOR_SRCS))
 	$(CXX) $(CXXFLAGS) $(VENDOR_DEFS) $< $(OBLIO_SRCS) $(VENDOR_OBJS) $(BLAS_LIBS) -o $@
 
+amd_raw.cpp: ../../private/Amd.cpp ../../tools/hook_amd.py
+	@python3 ../../tools/hook_amd.py $< $@
+
 matrix_ordering_cpp: matrix_ordering.cpp MatrixMarket.h $(OBLIO_SRCS) $(VENDOR_SRCS) \
-                     $(OBLIO_HDRS) .build-mode
+                     $(RAW_SRCS) $(OBLIO_HDRS) .build-mode
 	$(if $(VENDOR_SRCS),$(CXX) $(CXXFLAGS) -w -c $(VENDOR_SRCS))
-	$(CXX) $(CXXFLAGS) $(VENDOR_DEFS) $< $(OBLIO_SRCS) $(VENDOR_OBJS) $(BLAS_LIBS) -o $@
+	$(CXX) $(CXXFLAGS) $(VENDOR_DEFS) $< $(OBLIO_SRCS) $(RAW_SRCS) $(VENDOR_OBJS) \
+	  $(BLAS_LIBS) -o $@
 
 # Both run targets take the whole of data/ through the shell rather than through the program, so
 # any subset is a matter of typing a different glob and needs no option here.
@@ -146,8 +164,13 @@ read: mmread_cpp
 # targets below. They each read their own list because the pool holds the union of two sets and
 # neither report wants the other's matrices; an ordering has no such constraint, needing neither
 # values nor definiteness, so what it wants is everything on disk.
-ordering: matrix_ordering_cpp
-	@./matrix_ordering_cpp $(MATRICES)
+mmdorder: matrix_ordering_cpp
+	@./matrix_ordering_cpp mmd $(MATRICES)
+
+# The amd half, over the same set. The clock is on `amd_order` whole and everything else comes
+# from the hooked pre-postorder copy; see the driver's own note for why.
+amdorder: matrix_ordering_cpp
+	@./matrix_ordering_cpp amd $(MATRICES)
 
 # The two report targets read their own candidates file rather than globbing data/, because the
 # pool holds the union of both sets and neither report wants the other's matrices. A candidates
@@ -173,6 +196,7 @@ performance: matrix_performance_cpp
 # is overridable, `make CXXFLAGS="... -g"` produces one on macOS, and clean removes what a build
 # in this directory CAN produce.
 clean:
-	rm -f mmread_cpp matrix_accuracy_cpp matrix_performance_cpp matrix_ordering_cpp \
+	rm -f amd_raw.cpp \
+	      mmread_cpp matrix_accuracy_cpp matrix_performance_cpp matrix_ordering_cpp \
 	      Amd.o Mmd.o .build-mode
 	rm -rf *.dSYM

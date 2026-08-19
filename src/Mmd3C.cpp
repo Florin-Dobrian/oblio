@@ -55,6 +55,7 @@ namespace Oblio {
 // copy. Non-zero and growing would mean the room is too small and the compactions are being paid
 // for repeatedly.
 std::size_t gMmd3CCompactions = 0;
+extern std::size_t gPeakCliqueMembers;   // defined in src/QuotientGraph.cpp; see it there
 
 namespace {
 
@@ -177,6 +178,17 @@ public:
 
     void merge(std::int32_t u, std::int32_t v);
 
+    // THE ONE PLACE A CLIQUE DIES, so the counter below sees every death. Here there is one cause,
+    // absorption into the new clique; the amd side has two more.
+    void killClique(std::int32_t c);
+
+    // PEAK LIVE CLIQUE MEMBERS, mirroring QuotientGraph's. IT IS A PROPERTY OF THE ALGORITHM AND
+    // NOT OF THE LAYOUT: `Mmd3` and `Mmd3C` compute the same permutation, so they form the same
+    // cliques and merge the same vertices at the same moments, and these two numbers must be equal
+    // however differently the storage behaves. The digest says the outputs agree; this says the
+    // work behind them agreed too. Checked in tests/test_order.cpp.
+    std::size_t numPeakCliqueMembers() const { return mNumPeakCliqueMembers; }
+
     void number(std::int32_t u);
 
     void setReverseIncidence(bool on) { mReverseIncidence = on; }
@@ -216,6 +228,9 @@ private:
     // Whether the clique now being eliminated was built in the pivot's own run. Read by
     // massEliminate, which can only give space back to the cursor in the other case.
     bool        mBuiltInPlace = false;
+
+    std::size_t mNumLiveCliqueMembers = 0;   // see numPeakCliqueMembers
+    std::size_t mNumPeakCliqueMembers = 0;
     std::size_t mCompactions = 0;             // AMD_2's Info[AMD_NCMPA]
 public:
     std::size_t compactions() const { return mCompactions; }
@@ -463,10 +478,15 @@ void QuotientGraphCompacted::beginElimination(std::int32_t pivot) {
     const std::int32_t* absorbedCliques = mSource.data() + mRun[pivot].sourcePtr + mRun[pivot].adjacencySize;
     const std::uint32_t absorbedSize    = mRun[pivot].incidenceSize;
     for (std::uint32_t i = 0; i < absorbedSize; ++i)
-        mRun[absorbedCliques[i]].adjacencySize = 0;   // dead, its block left behind
+        killClique(absorbedCliques[i]);               // dead, its block left behind
 
     mRun[pivot].sourcePtr     = cliqueStart;
     mRun[pivot].adjacencySize = cliqueLen;
+
+    // A CLIQUE IS BORN HERE AND NOWHERE ELSE, and the maximum is taken here alone since nothing
+    // else raises the total. See numPeakCliqueMembers.
+    mNumLiveCliqueMembers += cliqueLen;
+    mNumPeakCliqueMembers  = std::max(mNumPeakCliqueMembers, mNumLiveCliqueMembers);
 
     std::uint32_t cliqueWeight = 0;
     for (std::uint32_t k = 0; k < reachedSize; ++k)
@@ -555,6 +575,7 @@ const std::vector<std::int32_t>& QuotientGraphCompacted::massEliminate(std::int3
         std::uint32_t       kept        = 0;
         for (std::uint32_t k = 0; k < membersSize; ++k)
             if (mWeight[members[k]] != 0) members[kept++] = members[k];
+        mNumLiveCliqueMembers -= membersSize - kept;   // a shrink is a partial death
         mRun[pivot].adjacencySize = kept;
 
         // THE SPACE THE COMPACTION FREED GOES BACK TO THE CURSOR, which is `AMD_2`'s
@@ -577,9 +598,16 @@ void QuotientGraphCompacted::merge(std::int32_t u, std::int32_t v) {
     mWeight[u] += mWeight[v];
     mWeight[v] = 0;
 
+    // NOT `killClique`. v is a live supervariable being absorbed and never formed a clique, so
+    // this length is A[v]'s, not a clique's, and feeding it to the counter would corrupt the peak.
     mRun[v].adjacencySize = 0;
     mRun[v].incidenceSize = 0;
     mMark[v]          = GONE;
+}
+
+void QuotientGraphCompacted::killClique(std::int32_t c) {
+    mNumLiveCliqueMembers -= mRun[c].adjacencySize;
+    mRun[c].adjacencySize = 0;
 }
 
 
@@ -760,7 +788,8 @@ std::vector<std::int32_t> orderMmd3CImpl(const std::vector<std::size_t>&  colPtr
     }
 
     if (arenaEntries != nullptr) *arenaEntries = qg.arenaEntries();
-    gMmd3CCompactions = qg.compactions();
+    gMmd3CCompactions  = qg.compactions();
+    gPeakCliqueMembers = qg.numPeakCliqueMembers();   // see src/QuotientGraph.cpp
     return qg.orderAscending(pivots);   // genmmd's mmdnum. See the ledger, entry 6.
 }
 

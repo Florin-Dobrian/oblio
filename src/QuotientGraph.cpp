@@ -313,11 +313,19 @@ void QuotientGraph::beginElimination(std::int32_t pivot) {
     const std::int32_t* absorbedCliques = mSource.data() + mRun[pivot].sourcePtr + mRun[pivot].adjacencySize;
     const std::uint32_t absorbedSize    = mRun[pivot].incidenceSize;
     for (std::uint32_t i = 0; i < absorbedSize; ++i)
-        mRun[absorbedCliques[i]].adjacencySize = 0;   // dead, its block left behind
+        killClique(absorbedCliques[i]);              // dead, its block left behind
 
     // Both readers of the pivot's own run are past, so the run becomes the clique's descriptor.
     mRun[pivot].sourcePtr     = cliqueStart;
     mRun[pivot].adjacencySize = cliqueLen;
+
+    // A CLIQUE IS BORN HERE AND NOWHERE ELSE, which is what makes the peak countable. See
+    // `numPeakCliqueMembers`.
+    mNumLiveCliqueMembers += cliqueLen;
+    mNumPeakCliqueMembers  = std::max(mNumPeakCliqueMembers, mNumLiveCliqueMembers);
+#ifndef NDEBUG
+    mCliqueOwners.push_back(pivot);
+#endif
 
     // Stamp the new clique. THE ABSORBED CLIQUES ARE NOT STAMPED: the loop above has just set
     // `mRun[c].adjacencySize = 0` for every one of them, and a dead clique is exactly a clique of
@@ -680,9 +688,51 @@ const std::vector<std::int32_t>& QuotientGraph::massEliminate(std::int32_t pivot
         std::uint32_t       kept        = 0;
         for (std::uint32_t k = 0; k < membersSize; ++k)
             if (mWeight[members[k]] != 0) members[kept++] = members[k];
-        mRun[pivot].adjacencySize = kept;
+        trimClique(pivot, kept);         // a shrink is a partial death; see numPeakCliqueMembers
     }
     return merged;
+}
+
+// THE SAME COMPACTION, ONE PASS LATER AND FOR THE OTHER REASON. `massEliminate` above drops the
+// members it merged into the pivot; this drops the members supervariable DETECTION absorbed into
+// each other, which happens after it. `AMD_2` needs one place for both because its detection sits
+// inside the scan, so its RESTORE DEGREE LISTS pass sees every casualty at once and writes the
+// survivors back with `Iw [p++] = i`, then `Len [me] = p - pme1`. Ours needs two because detection
+// is a pass of its own.
+//
+// WITHOUT THIS THE ABSORBED STAY IN THE CLIQUE FOR THE REST OF THE RUN. No permutation moves,
+// every later walk skipping them on the `nv > 0` test, but they are visited, once per walk of that
+// clique for as long as it lives, which on a grid is many.
+//
+// NO CURSOR TO PULL BACK, unlike `AMD_2`'s `if (elenme != 0) pfree = p` and unlike `Amd3B`'s. The
+// arena's length is the vector's own and the clique need not be its last block, so the trimmed
+// tail is left as a hole like every other dead entry here. This is the arena's whole bargain:
+// nothing is reclaimed, so nothing has to be reclaimable.
+void QuotientGraph::trimClique(std::int32_t pivot, std::uint32_t kept) {
+    mNumLiveCliqueMembers -= mRun[pivot].adjacencySize - kept;   // the trimmed tail is not live
+    mRun[pivot].adjacencySize = kept;
+}
+
+// A DEAD CLIQUE IS EXACTLY A CLIQUE OF SIZE ZERO, which every reader here already relies on: the
+// prune's incidence compaction asks `cliqueSize(c) != 0` and needs no tag and no second pass. So
+// death is one store, and the only reason it is a function is that the peak has to see it.
+//
+// ONLY FOR A VERTEX THAT ACTUALLY FORMED ONE. A clique is born in `beginElimination` and nowhere
+// else, so `adjacencySize` means a clique's length only for a vertex that has been a pivot; for
+// any other it is still A[v]'s length. `merge` therefore does NOT call this, and says so.
+bool QuotientGraph::cliqueCountBalances() const {
+#ifdef NDEBUG
+    return true;
+#else
+    std::size_t live = 0;
+    for (std::int32_t c : mCliqueOwners) live += mRun[c].adjacencySize;
+    return live == mNumLiveCliqueMembers;
+#endif
+}
+
+void QuotientGraph::killClique(std::int32_t c) {
+    mNumLiveCliqueMembers -= mRun[c].adjacencySize;
+    mRun[c].adjacencySize = 0;
 }
 
 void QuotientGraph::merge(std::int32_t u, std::int32_t v) {
@@ -691,6 +741,8 @@ void QuotientGraph::merge(std::int32_t u, std::int32_t v) {
     mWeight[u] += mWeight[v];
     mWeight[v] = 0;
 
+    // NOT `killClique`. v is a live supervariable being absorbed, and it never formed a clique, so
+    // this length is A[v]'s and not a clique's; feeding it to the counter would corrupt the peak.
     mRun[v].adjacencySize = 0;
     mRun[v].incidenceSize = 0;
     mMark[v]          = GONE;
@@ -700,7 +752,7 @@ void QuotientGraph::absorb(const std::vector<std::int32_t>& cliques,
                            const std::int32_t* vertices, std::uint32_t vertexCount) {
     if (cliques.empty()) return;
 
-    for (std::int32_t c : cliques) mRun[c].adjacencySize = 0;   // dead; the compaction reads the size
+    for (std::int32_t c : cliques) killClique(c);   // dead; the prune reads the size
 
     for (std::uint32_t k = 0; k < vertexCount; ++k) {  // I[u] - dead, compacted in place
         const std::int32_t u         = vertices[k];

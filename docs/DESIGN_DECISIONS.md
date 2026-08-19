@@ -65,6 +65,110 @@ be real, which requires Hermitian. Once that is on the table, the design collaps
 **Cholesky is `CC^H`, always, and in real that *is* `CC^T`.** No option, no flag, no forbidden
 combination to reject. The answer was not hard. Asking the right question was.
 
+## 2026-08-18: flat and chunked, and the four quotient graph classes
+
+**The words.** A SEGMENT is the logical unit of storage: one vertex's run of `A[u]` and `I[u]`, or
+one clique's members. It exists identically under every scheme here. What differs is the
+ALLOCATION holding it, and that is what the pair of names is for:
+
+- **FLAT**, one array holds every segment end to end, each segment carved out of it.
+- **CHUNKED**, each segment is its own allocation.
+
+Both grow; only chunked can hand memory back. The distinction is the one NumFactor draws today with
+`Static` and `Dynamic`, and those words are wrong for it: NumFactor's flat case really is static,
+the symbolic factor fixing the size before anything is written, while NEITHER clique store has that
+property. Both evolve. So flat and chunked will eventually replace static and dynamic there too.
+Not yet, and not in this entry.
+
+**Two words considered and declined.** `segmented` as the opposite of flat, because a segment is
+what BOTH schemes hold, so the name would describe the thing they share; "the segments in the flat
+space" beside "the segmented space" is a sentence a reader stumbles on. And `blocked`, because a
+block is already the dense submatrix in NumFactor and `UpdateBlock` is a class.
+
+**Saying flat or chunked implies C IS SEPARATE from A and I.** When it is not said, the store is
+unified and always flat, since a unified store is one array by construction.
+
+### The four classes
+
+```
+QuotientGraphFlat        C separate, flat        today's, shared by six drivers
+QuotientGraphChunked     C separate, chunked     not built
+QuotientGraphCompacted   C unified, compacting   private copies in Amd3B.cpp and Mmd3C.cpp
+QuotientGraphChained     C unified, chaining     private copy in Mmd3B.cpp
+```
+
+**All four are meant to ship**, as NumFactor's two do, so eventually none is unqualified and
+today's `QuotientGraph` becomes `QuotientGraphFlat`. That rename waits until the chunked one is
+actually being added, since it touches six drivers and a great deal of prose and is worth doing
+once.
+
+**The private copies stop being private and become these classes**, in this order, one at a time:
+documentation first, then `QuotientGraphChained`, then `QuotientGraphCompacted`.
+
+**Chained and compacted are separate classes rather than one with a policy flag.** They share a
+storage shape, one array sized at nnz, and differ in what happens when a clique will not fit. But
+chaining also changes the READ path: every walk of a clique pays a link test, forever, where a
+compacted walk is a straight run. A runtime flag would put that branch in the hottest loop in the
+ordering.
+
+### What blocks `QuotientGraphCompacted`, and it is a decision rather than work
+
+`Amd3B` and `Mmd3C` both hold a copy called `QuotientGraphA` and THEY HAVE DIVERGED. `Amd3B`'s
+carries the run flip, the rotation, positions and the mid-walk collector; `Mmd3C`'s carries none of
+it. One class cannot serve both as they stand: the flipped run leaves no free slot for `Mmd3C`'s
+back-of-list convention, which is exactly why the flip stopped at `Amd3B`. Three ways out, none
+taken yet:
+
+- `Mmd3C` adopts the rotation, and its permutation moves, so its fill column stops being comparable
+  to `MMD3`'s and its digest baseline has to be re-recorded.
+- The class carries both conventions, costing a shift or a spare word per vertex on the mmd path
+  and putting back a branch the flip removed.
+- Promote the amd side alone, with `Mmd3C` joining once the convention is decided.
+
+## 2026-08-18: the layout program, two axes and what Oblio ships on each
+
+**The decision.** Oblio's shipping ordering uses the FREE MEMORY layout with no reclamation
+machinery at all. The constrained layouts, compaction and chaining, stay private for now and are
+built as alternatives to be tightened one at a time.
+
+**The frame this sits in, and it is two axes rather than one.** How much space beyond the pattern
+are we willing to spend, and how much bookkeeping are we willing to run given that space. They
+trade against each other, and the ends are not symmetric:
+
+- **Free memory, no machinery.** Append every clique and reclaim nothing. Simplest to write,
+  fastest per operation, and the one Oblio ships. Its cost is CUMULATIVE rather than peak: nothing
+  is reclaimed, so the arena grows by every clique ever built and not by the largest set alive at
+  once. Measured at 0.94x nnz(A) in 2D and 1.45x in 3D.
+- **Bounded headroom, compaction.** The collector is IMPLEMENTED AND RARELY RUN. At `AMD_2`'s
+  twenty per cent it fires about once for a whole ordering, and it degrades to zero elbow room
+  rather than failing: `src/Amd3B.cpp` sized to exactly `sum(Len)` completes with 3 to 14 sweeps
+  from 3 to 200 a side and the same permutation. There is no guarantee it will not be needed, so it
+  has to be ready; there is every expectation it will not be needed often. That asymmetry is what
+  makes it worth writing.
+- **Zero extra memory, chaining.** Considered ONLY here. Its cost is a link test on every read,
+  paid whether the space is tight or not, so headroom buys it nothing, where headroom makes a sweep
+  rarer. Both ladders currently rank the chained layout slowest.
+
+**Why a constrained mode is worth having when the free one is simpler.** Prediction. A run under a
+memory bound either completes or reports what it would have needed, which is information about
+whether the factorization is feasible at all. The free version can only fail later and larger: if
+the arena does not fit then the factor would not have fitted either, so failing now or failing then
+is the same failure carrying less information.
+
+**Algorithms are never forbidden by layouts, only priced.** Any minimum-degree variant runs on any
+of these layouts; enough indirection always expresses it. What a layout removes is a cheap
+IMPLEMENTATION of some step, and the algorithm is then reached by a more expensive route. So the
+coupling that remains is a price, and the engineering question is whether it is worth paying rather
+than whether it is possible. The worked case is in experiments/ordering/README.md: the
+incidence-first run leaves no free slot for appending a clique at the back of `I[u]`, which a
+shift, a copy aside, or one spare word per vertex would each supply, and which `AMD_2` instead
+sidesteps by rotating the clique to the FRONT for nothing, changing the convention and the tie
+breaking with it.
+
+**What this does not license.** Building every cell of the cross product. The layouts are three and
+the algorithms are two, and the point of the private layers is to price the axes, not to fill a
+matrix. Chaining with headroom is the cell explicitly not worth building.
+
 ## 2026-08-17: a one dimensional size may go signed, but only to buy an encoding
 
 The 2026-08-11 entry narrowed four `QuotientGraph` arrays to `std::uint32_t` and named `mWeight`

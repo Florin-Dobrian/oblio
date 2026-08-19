@@ -1,5 +1,6 @@
 #include "oblio/Amd3.h"
 
+#include <cassert>
 #include <algorithm>
 #include <limits>
 #include <utility>
@@ -557,20 +558,30 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
                 // does exactly this, `W [Iw [p]] = wflg` over the whole of i's list, variables and
                 // elements alike, both living in one id space so one array holds a mark for either.
                 // See the declaration of `stamp` for the interleave with the tag protocol.
-                const std::int32_t other = ++stamp;
-                std::uint32_t sizeU = 0;       // list entries, so at most deg(u)
-                const std::int32_t* adjacencyU = qg.adjacency(u);
-                for (std::uint32_t a = 0; a < qg.adjacencySize(u); ++a) {
-                    const std::int32_t x = adjacencyU[a];
-                    if (!qg.eliminated(x)) { w[x] = other; ++sizeU; }
-                }
+                // NO LIVENESS TEST, AND THE LENGTHS REJECT BEFORE THE LIST IS TOUCHED, which is
+                // Amd.cpp's `for (p = Pe[i]+1 ; p <= Pe[i]+ln-1 ; p++) W [Iw[p]] = wflg` and its
+                // `ok = (Len [j] == ln) && (Elen [j] == eln)`. Its lists never hold dead entries
+                // and neither do ours after the prune, with ONE exception: a vertex the hash
+                // absorbed EARLIER IN THIS SAME LOOP is still listed by its neighbors. Amd.cpp
+                // stamps it like any other member and compares stored lengths, so both sides of a
+                // comparison count it and the answer is consistent. Counting live entries instead
+                // is also consistent, but it is a different quantity, it costs a test per entry,
+                // and it cannot reject a candidate until its whole list has been walked.
+                //
+                // TWO LOOPS RATHER THAN Amd.cpp's ONE, and that is the layout rather than a
+                // choice. Its run is elements then variables with the new element at the front, so
+                // the whole list minus the first entry is one span. Ours is A[u] then I[u] with the
+                // new clique at the front of I[u], so the entry to skip is in the middle. `Amd3B`,
+                // which carries `AMD_2`'s order, does get the single loop.
+                const std::int32_t  other      = ++stamp;
+                const std::uint32_t adjacencyU = qg.adjacencySize(u);
+                const std::uint32_t incidenceU = qg.incidenceSize(u);
+                const std::int32_t* runU       = qg.adjacency(u);
+                for (std::uint32_t a = 0; a < adjacencyU; ++a) w[runU[a]] = other;
                 // Index 1: the new clique is at the front of every I[u] and is shared by every
                 // member of C[pivot], so it can never discriminate. Ledger entry 6.
-                const std::int32_t* incidenceU = qg.incidence(u);
-                for (std::uint32_t i = 1; i < qg.incidenceSize(u); ++i) {
-                    w[incidenceU[i]] = other;
-                    ++sizeU;
-                }
+                const std::int32_t* incidenceRunU = qg.incidence(u);
+                for (std::uint32_t i = 1; i < incidenceU; ++i) w[incidenceRunU[i]] = other;
 
                 for (std::int32_t v = buckets.chain(u); v != NIL; v = buckets.chain(v)) {
                     if (qg.eliminated(v)) continue;
@@ -580,23 +591,19 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
                     // against the stamp of u laid down once above. Both walks short-circuit on the
                     // first mismatch, which is what made the comparison cheap and the stamping the
                     // thing that had to move: see experiments/ordering/AMD3.md, iteration 15.
-                    std::uint32_t sizeV = 0;   // list entries, so at most deg(v)
-                    bool        same  = true;
+                    if (qg.adjacencySize(v) != adjacencyU) continue;
+                    if (qg.incidenceSize(v) != incidenceU) continue;
+
+                    bool                same       = true;
                     const std::int32_t* adjacencyV = qg.adjacency(v);
-                    for (std::uint32_t a = 0; a < qg.adjacencySize(v) && same; ++a) {
-                        const std::int32_t x = adjacencyV[a];
-                        if (qg.eliminated(x)) continue;
-                        ++sizeV;
-                        if (w[x] != other) same = false;
-                    }
+                    for (std::uint32_t a = 0; a < adjacencyU && same; ++a)
+                        if (w[adjacencyV[a]] != other) same = false;
                     if (same) {
                         const std::int32_t* incidenceV = qg.incidence(v);
-                        for (std::uint32_t i = 1; i < qg.incidenceSize(v) && same; ++i) {
-                            ++sizeV;
+                        for (std::uint32_t i = 1; i < incidenceU && same; ++i)
                             if (w[incidenceV[i]] != other) same = false;
-                        }
                     }
-                    if (!same || sizeU != sizeV) continue;
+                    if (!same) continue;
 
                     // The TARGET is a live vertex and never the pivot, which is the whole
                     // difference from mass elimination. Both draw from C[p], the clique this
@@ -651,6 +658,12 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
         // after supervariable detection, so a vertex that absorbed another subtracts the combined
         // weight. `degme` and `numLeft` were settled before the hash and are the same for
         // everyone, so this is one addition and two comparisons per survivor.
+        // AND THE CLIQUE IS TRIMMED AS THIS PASS WALKS IT, which is Amd.cpp's `Iw [p++] = i` under
+        // RESTORE DEGREE LISTS: the survivors are written back over the front of the clique and
+        // what detection absorbed falls off the end. One store on a walk this pass makes anyway,
+        // and without it those vertices are visited by every later walk of this clique.
+        std::int32_t* cliqueOut = qg.clique(pivot);
+        std::uint32_t kept      = 0;
         for (std::uint32_t k = 0; k < pivotCliqueSize; ++k) {
             const std::int32_t u = pivotClique[k];
             if (qg.eliminated(u)) continue;         // absorbed by the hash a moment ago
@@ -684,7 +697,9 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
             // within half a percent in both families. A port and a simplification, not a speed
             // fix. See benchmarks/ordering/README.md (2026-08-09).
             minDegree = std::min(minDegree, filed);
+            cliqueOut[kept++] = u;
         }
+        qg.trimClique(pivot, kept);
 
         // The whole array is invalidated in ONE ADDITION rather than by walking the touched list and
         // zeroing each entry. After scan 1 no entry exceeds wflg + lemax, so advancing past that
@@ -698,6 +713,18 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
         wflg  = stamp + 1;
     }
 
+    // EVERY CLIQUE IS DEAD BY NOW, every vertex having been eliminated, so the live count must
+    // have come back to zero. It is the whole check on the counter: births and deaths balance
+    // or they do not, and nothing else in the suite would notice if they did not.
+    // THE COUNTER CROSS-CHECKED AGAINST A RECOMPUTATION, which the driver can do exactly because
+    // it holds the pivot list and a clique's owner is a pivot. Births and deaths are spread over
+    // three call sites and nothing else in the suite would notice if they stopped balancing.
+    //
+    // IT IS NOT ZERO AT THE END, and that is correct rather than a leak. A clique dies when a
+    // member of it becomes a pivot, and at the close of a run the last cliques have had every
+    // member MASS ELIMINATED into the pivot instead, so no one is left to absorb them. A handful
+    // of entries survive, 1 to 3 on grids from 2 to 5 a side.
+    assert(qg.cliqueCountBalances() && "clique births and deaths do not balance");
     if (arenaEntries != nullptr) *arenaEntries = qg.arenaEntries();
     return qg.order(pivots);
 }

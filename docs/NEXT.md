@@ -21,58 +21,74 @@ amd ladder       Amd3           Amd3C   NOT BUILT  Amd3B
 Production keeps a separate append-only clique arena with no constraint and is not required to
 match anything. `Amd3B` and `Mmd3C` must match `AMD_2` exactly. `Mmd3B` must match genmmd exactly.
 
-## Where faithfulness actually stands, 2026-08-17
+## Where faithfulness actually stands, 2026-08-18
 
-**`Amd3B` and `Mmd3C` against `AMD_2`: three divergences found, two closed, one open.**
+**`Amd3B` against `AMD_2`: the storage is closed, and so are both schedule items found by the
+audit.** Done in this order, each verified alone, and no permutation moved at any point:
 
-- CLOSED, in-place construction, `AMD_2`'s `if (elenme == 0)`: a pivot with no elements has a reach
-  that is a subset of `A[pivot]`, so the clique is compacted where it stands and the pool is never
-  touched. 62 to 68 percent of eliminations on grids. Compactions fell from 4 per run to 1 on
-  squares and 2 on cubes in both files, and `AMD3B / AMD3` from 0.929 to 0.885.
-- CLOSED, the reclaim, `AMD_2`'s `if (elenme != 0) pfree = p`: the cursor is pulled back after the
-  clique is trimmed. Rests on the clique still being the last block in the pool, which is now an
-  `assert` checked on all 73 digest grids.
-- **OPEN, and the hard one: WHEN THE COLLECTOR RUNS.** `AMD_2` tests per entry inside the
-  construction and, when it collects mid-element, carries the half-built element along. We test
-  once before the walk for a worst-case reach of n. It is one-directional, we collect where `AMD_2`
-  would not and never the reverse, and it currently costs 1 or 2 compactions per run.
+- CLOSED, in-place construction, `AMD_2`'s `if (elenme == 0)`.
+- CLOSED, the reclaim, `AMD_2`'s `if (elenme != 0) pfree = p`.
+- CLOSED, THE RUN ORDER: incidence first, adjacency behind it, which is `AMD_2`'s and the reverse
+  of production's. This is what made the rest expressible, a consumed part now being a PREFIX. It
+  also let the new clique go in by `AMD_2`'s three-move rotation instead of by holding a vertex
+  back and swapping afterwards, and it retired two flags this layout cannot serve two values of,
+  the list order and the reverse incidence walk.
+- CLOSED, THE WALK IN POSITIONS off a base hoisted once. The pool never reallocates, so a
+  collection invalidates a block's OFFSET and never the array's base; a position survives one and a
+  pointer does not. The 277 ms this was feared to cost did not appear: it is the same instruction
+  either way.
+- CLOSED, WHEN THE COLLECTOR RUNS. Per entry, truncating both lists and carrying the half-built
+  clique, so `beginElimination` no longer reserves for a worst-case reach of n.
+- CLOSED, THE ELBOW ROOM: `nzaat + nzaat/5 + n` off the OFF-DIAGONAL count, which is `AMD_2`'s
+  `iwlen` exactly. It had been computed from `nnz` with the diagonal and ran about 1.2n large.
+  Compaction counts now read 1 against 1 from 8 to 800 a side, at the same headroom.
+- CLOSED, THE CLIQUE TRIM AFTER DETECTION, `AMD_2`'s `Iw [p++] = i` in RESTORE DEGREE LISTS. The
+  hash-absorbed had been staying in the clique for the rest of the run.
+- CLOSED, DETECTION'S STAMP AND REJECT. One blind loop over the run from index 1, and a reject on
+  the two stored lengths before the candidate's list is touched.
+
+**Verified by varying the headroom, which is stronger than the digest alone.** At the shipped
+reserve the collector never runs on grids, so the mid-walk path would go untested. Cut to `nzaat`
+with no elbow room at all it fires on nearly every large pivot, 3 to 14 compactions from 3 to 200 a
+side, and every permutation is byte identical, clean under ASan and UBSan. That also confirms
+`AMD_2`'s own claim that it runs with no elbow room, only slowly.
 
 **`Mmd3B` against genmmd: clique storage faithful, vertex list NOT.** The links, the chain
 following, the terminator rule and the unchecked first loop all match `mmdelm` line for line. But
 genmmd keeps ONE MIXED LIST per vertex, variables and elements together, told apart by the sign of
 `fwd`, where we keep two sublists in a run with explicit lengths.
 
-## Closing the last `AMD_2` divergence: three steps, and none works alone
+**`Mmd3C` has NOT followed `Amd3B`.** It is mmd on `AMD_2`'s layout and it uses the plain list
+convention, which the flipped run cannot serve: with the incidence part at the front there is no
+way to append the new clique behind it without a free slot or a shift, which is why `AMD_2` inserts
+by rotation. That needs a decision before the C cell can be brought level, and until it is, the
+`MMD3C` column is measuring the old layout.
 
-**1. Flip the physical order of the run to incidence then adjacency.** `AMD_2` stores elements
-first, then variables, which is what makes its mid-walk truncation possible: `Pe[me] = p;
-Len[me] -= knt1` drops the consumed elements from the FRONT and leaves the remainder contiguous.
-Ours is `A[u]` then `I[u]` at every site, so the consumed part of `I[pivot]` sits in the middle with
-`A[pivot]` in front of it and there is no start to advance. `mVendoredListOrder` does NOT do this;
-it changes walk order and the prune's placement, not the physical layout. This step touches the
-descriptor, both prunes, every walk and every accessor, in `Amd3B`, `Mmd3C` and the shared class
-they are extracted from.
+## The one thing left in `Amd3B`, and it is a trade rather than a defect
 
-**2. Rewrite the pool walks in INDEX arithmetic.** `AMD_2` walks in indices and can resume after the
-collector moves every block; our walks hold `const std::int32_t*` into the pool and cannot. The
-pointers were a measured choice, one hoisted out of a loop header being worth 277 ms of an 8.53 s
-run, so this step gives that back and must be re-measured rather than assumed free.
+**Our prune has `AMD_2`'s scan 1 fused into it, and that is what forces the separate `absorb`
+visit.** `AMD_2` makes two passes over the new clique: scan 1 walks element lists only and computes
+`W[e] = |Le \ Lme|`, then scan 2 walks each list once and does the compaction, the degree, the hash
+key, the absorption and the mass-elimination test inline. Because absorption cannot be decided
+until all of scan 1 is done, and ours is fused into the prune, we cannot absorb in the walk that
+rewrites the list and have to revisit it afterwards.
 
-**3. Teach the collector to carry a partially built element.** `AMD_2` sweeps to `pend = pme1 - 1`,
-then moves `[pme1, pfree)` down explicitly, sets `pme1 = p1` and restores `pj` and `p` from the
-truncated descriptors.
+So the fusion saves a pass and costs a pass, and which way it comes out is a measurement rather
+than an argument. It is also the last thing standing between `Amd3B` and a pass-for-pass copy, so
+the `AMD / AMD3B` column is priced against a schedule that differs in exactly this one place.
 
-Without 1 there is nothing to truncate; without 2 the walk cannot resume; without 3 the half-built
-clique is lost. **Do them in that order**, since 1 is the one that unblocks the others and is
-independently verifiable by the digest.
+Two smaller notes attached to it. The slide in `absorb` is already gone, the incidence part being
+compacted rightward so the adjacency never moves, so what remains is the VISIT and not the copy.
+And un-fusing would also let the bound live where `AMD_2` puts it, in `Degree[i]` rather than in
+`w[u]`, which would retire the second stamp counter.
 
-## Closing the genmmd divergence in `Mmd3B`
+**Do not start this without deciding it is wanted.** It reverses a deliberate change of 2026-08-10
+and it lands in the hottest loop in the file.
 
-One mixed list per vertex instead of two sublists. Not started, and it is a separate piece of work
-from the `AMD_2` one, though step 1 above is a near neighbor of it: both are about how a vertex's
-own list is laid out.
+## What was done since commit 5ea68cc
 
-## What was done since commit 5ea68cc, all uncommitted
+**The first two bullets are committed as `c21f447`; everything from the 2026-08-18 section
+above is uncommitted on top of it.**
 
 - **`src/Mmd3C.cpp` and `include/oblio/Mmd3C.h` REBUILT.** The old file was mmd on the production
   arena, a transitional vehicle that had served its purpose; this one is mmd on `AMD_2`'s pool,

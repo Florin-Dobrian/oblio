@@ -34,7 +34,8 @@
 // storage and starts being about whatever drifted. That is the same obligation Mmd3B carries, and
 // Mmd3B was found to have broken it on 2026-08-17.
 //
-// THE COPY IS MECHANICAL WHERE IT CAN BE. QuotientGraphC and BucketsC are include/oblio/
+// THE COPY IS MECHANICAL WHERE IT CAN BE. QuotientGraphCompacted and BucketsCompacted are
+// include/oblio/
 // QuotientGraph.h and src/QuotientGraph.cpp with whole-line comments removed and the members no mmd
 // driver calls pruned; the driver is src/Mmd3.cpp. tmp/make_mmd3c.py generated it, and regenerating
 // from CURRENT sources beats restoring a stale copy, which reintroduces a divergence instead of
@@ -57,12 +58,12 @@ std::size_t gMmd3CCompactions = 0;
 
 namespace {
 
-class BucketsC {
+class BucketsCompacted {
 public:
     static constexpr std::int32_t UNFILED    = 0;
     static constexpr std::int32_t OUTMATCHED = -2147483647 - 1;   // INT32_MIN; no degree reaches it
 
-    explicit BucketsC(std::size_t size)
+    explicit BucketsCompacted(std::size_t size)
         : mHead(size + 1, NIL), mNext(size, NIL), mPrev(size, UNFILED) {}
 
     void file(std::uint32_t degree, std::int32_t u) {
@@ -110,8 +111,8 @@ private:
     std::vector<std::int32_t> mPrev;   // mPrev[u], toward the head
 };
 
-struct TaggedScanC {
-    BucketsC*                          buckets;
+struct TaggedScanCompacted {
+    BucketsCompacted*                          buckets;
     std::vector<std::int32_t>&        w;             // per clique, Amd.cpp's tagged W
     const std::vector<std::uint32_t>& degree;
     std::vector<std::int32_t>&        touchedCliques;// the cliques this step reached, once each
@@ -119,9 +120,9 @@ struct TaggedScanC {
     std::int32_t                      modulus;       // the driver's bucket count, n + 1
 };
 
-class QuotientGraphC {
+class QuotientGraphCompacted {
 public:
-    QuotientGraphC(const std::vector<std::size_t>&  colPtr,
+    QuotientGraphCompacted(const std::vector<std::size_t>&  colPtr,
                   const std::vector<std::int32_t>& rowIdx);
 
     std::size_t size() const           { return mRun.size(); }
@@ -240,7 +241,7 @@ private:
     std::int32_t              mTag = 0;
 };
 
-QuotientGraphC::QuotientGraphC(const std::vector<std::size_t>&  colPtr,
+QuotientGraphCompacted::QuotientGraphCompacted(const std::vector<std::size_t>&  colPtr,
                              const std::vector<std::int32_t>& rowIdx)
     : mRun(colPtr.empty() ? 0 : colPtr.size() - 1),
       mMark(mRun.size(), NIL) {
@@ -283,7 +284,7 @@ QuotientGraphC::QuotientGraphC(const std::vector<std::size_t>&  colPtr,
 // A DEAD BLOCK IS ONE WITH NO LENGTH. Both kinds are covered by one test: a vertex merged away has
 // both list lengths zeroed, and an absorbed clique has its adjacencySize zeroed by
 // beginElimination.
-void QuotientGraphC::garbageCollect() {
+void QuotientGraphCompacted::garbageCollect() {
     ++mCompactions;
     const std::int32_t n = static_cast<std::int32_t>(mRun.size());
 
@@ -327,7 +328,7 @@ void QuotientGraphC::garbageCollect() {
 // THE GONE TEST SURVIVES HERE, unlike in Amd3B, and for the reason it survives everywhere on this
 // branch: `number()` leaves a prepass vertex at weight one and in every neighbour's adjacency, so
 // a positive weight does not mean live in an ADJACENCY list. This walk reads nothing else.
-std::uint32_t QuotientGraphC::reachableSetInPlace(std::int32_t u) {
+std::uint32_t QuotientGraphCompacted::reachableSetInPlace(std::int32_t u) {
     // THE PIVOT IS NEGATED HERE, as the appending walk does at its own head. It is not needed to
     // keep u out of its own list, which has no self loop, but massEliminate restores the SIGN of
     // every member and of the pivot, so a pivot left positive comes out of the restore negative
@@ -349,7 +350,7 @@ std::uint32_t QuotientGraphC::reachableSetInPlace(std::int32_t u) {
 // made room for a whole reach, so the cursor cannot run out inside the walk; and the reach lands
 // exactly where the clique is to live, so there is no copy from a scratch into place. Production
 // appends to its arena and needs a capacity check per pivot for the same guarantee.
-void QuotientGraphC::reachableSet(std::int32_t u) {
+void QuotientGraphCompacted::reachableSet(std::int32_t u) {
     ++mTag;
     mWeight[u] = -mWeight[u];              // never its own neighbor
     const VertexRun&    run           = mRun[u];          // one fetch; see the member
@@ -400,7 +401,7 @@ void QuotientGraphC::reachableSet(std::int32_t u) {
 
 
 
-std::uint32_t QuotientGraphC::reachableWeight(std::int32_t u) {
+std::uint32_t QuotientGraphCompacted::reachableWeight(std::int32_t u) {
     ++mTag;
     std::uint32_t reached = 0;   // a sum over DISTINCT vertices, so bounded by n; see the header
     mMark[u] = mTag;
@@ -425,12 +426,12 @@ std::uint32_t QuotientGraphC::reachableWeight(std::int32_t u) {
     return reached;
 }
 
-void QuotientGraphC::number(std::int32_t u) {
+void QuotientGraphCompacted::number(std::int32_t u) {
     mHasNumbered = true;
     mMark[u]     = GONE;
 }
 
-void QuotientGraphC::beginElimination(std::int32_t pivot) {
+void QuotientGraphCompacted::beginElimination(std::int32_t pivot) {
     // TWO WAYS TO BUILD THE CLIQUE, and which one applies is `AMD_2`'s `elenme == 0`. With no
     // elements the reach is a subset of A[pivot] and is compacted where it stands; otherwise it is
     // assembled at the free cursor. The pool is touched only in the second case.
@@ -473,7 +474,7 @@ void QuotientGraphC::beginElimination(std::int32_t pivot) {
     mCliqueWeight = cliqueWeight;
 }
 
-const std::vector<std::int32_t>& QuotientGraphC::eliminate(std::int32_t pivot) {
+const std::vector<std::int32_t>& QuotientGraphCompacted::eliminate(std::int32_t pivot) {
     beginElimination(pivot);
     const std::int32_t* reached     = mSource.data() + mRun[pivot].sourcePtr;
     const std::uint32_t reachedSize = mRun[pivot].adjacencySize;
@@ -512,7 +513,7 @@ const std::vector<std::int32_t>& QuotientGraphC::eliminate(std::int32_t pivot) {
 }
 
 
-const std::vector<std::int32_t>& QuotientGraphC::finishElimination(std::int32_t pivot) {
+const std::vector<std::int32_t>& QuotientGraphCompacted::finishElimination(std::int32_t pivot) {
     if (mLateMassElimination) {
         mMerged.clear();
     } else {
@@ -524,7 +525,7 @@ const std::vector<std::int32_t>& QuotientGraphC::finishElimination(std::int32_t 
     return mMerged;
 }
 
-const std::vector<std::int32_t>& QuotientGraphC::massEliminate(std::int32_t pivot) {
+const std::vector<std::int32_t>& QuotientGraphCompacted::massEliminate(std::int32_t pivot) {
     std::vector<std::int32_t>& merged = mMerged;   // scratch, kept for its capacity
     merged.clear();
     const std::int32_t* reached     = mSource.data() + mRun[pivot].sourcePtr;
@@ -570,7 +571,7 @@ const std::vector<std::int32_t>& QuotientGraphC::massEliminate(std::int32_t pivo
     return merged;
 }
 
-void QuotientGraphC::merge(std::int32_t u, std::int32_t v) {
+void QuotientGraphCompacted::merge(std::int32_t u, std::int32_t v) {
     mSuperNext[mSuperLast[u]] = v;                 // append v's chain, order preserved
     mSuperLast[u]             = mSuperLast[v];
     mWeight[u] += mWeight[v];
@@ -582,7 +583,7 @@ void QuotientGraphC::merge(std::int32_t u, std::int32_t v) {
 }
 
 
-std::vector<std::int32_t> QuotientGraphC::orderAscending(
+std::vector<std::int32_t> QuotientGraphCompacted::orderAscending(
         const std::vector<std::int32_t>& pivots) const {
     const std::size_t n = size();
     std::vector<std::int32_t> order(n);
@@ -617,13 +618,13 @@ std::vector<std::int32_t> orderMmd3CImpl(const std::vector<std::size_t>&  colPtr
     const std::size_t size = colPtr.size() - 1;
     if (size == 0) return std::vector<std::int32_t>();
 
-    QuotientGraphC qg(colPtr, rowIdx);
+    QuotientGraphCompacted qg(colPtr, rowIdx);
     qg.setReverseIncidence(true);
     std::vector<std::int32_t> pivots;
     pivots.reserve(size);
     std::uint32_t numEliminated = 0;
 
-    BucketsC buckets(size);
+    BucketsCompacted buckets(size);
     std::uint32_t minDegree = static_cast<std::uint32_t>(size);
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u) {
         const std::uint32_t degree = std::max<std::uint32_t>(qg.adjacencySize(u), 1);

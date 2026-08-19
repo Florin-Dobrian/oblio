@@ -1,5 +1,6 @@
 #include "oblio/Mmd3.h"
 
+#include <cassert>
 #include <algorithm>
 #include <cstdint>
 
@@ -238,6 +239,17 @@ std::vector<std::int32_t> orderMmd3Impl(const std::vector<std::size_t>&  colPtr,
 
     }
 
+    // THE COUNTER CROSS-CHECKED AGAINST A RECOMPUTATION, which the driver can do exactly because
+    // it holds the pivot list and a clique's owner is a pivot. Births and deaths are spread over
+    // four call sites in the shared class and nothing else in the suite would notice if they
+    // stopped balancing.
+    //
+    // NOT AN ASSERT THAT IT IS ZERO, which is what this said first and which is wrong even though
+    // it passes here. A clique dies when a member of it becomes a pivot, and at the close of a run
+    // the last cliques can have had every member MASS ELIMINATED into the pivot instead, leaving
+    // no one to absorb them; the amd side leaves 1 to 3 entries on small grids. Holding on these
+    // graphs would have made it a trap rather than a check.
+    assert(qg.cliqueCountBalances() && "clique births and deaths do not balance");
     if (arenaEntries != nullptr) *arenaEntries = qg.arenaEntries();
     return qg.orderAscending(pivots);   // genmmd's mmdnum. See the ledger, entry 6.
 }

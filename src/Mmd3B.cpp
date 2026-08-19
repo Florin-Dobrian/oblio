@@ -33,8 +33,8 @@
 // 1.15 to 1.38x genmmd where Mmd3 reads 1.02 to 1.19x. On 16.61M instructions against 14.22M and
 // 123510 D1 read misses against 119331. So the second arena buys speed and costs the guarantee.
 //
-// IT CARRIES A PRIVATE COPY OF QuotientGraph, named QuotientGraphB, so the storage can be changed
-// without touching the class six drivers share. THE COST IS EVERY SHARED FOLD LANDING TWICE, and it
+// IT CARRIES A PRIVATE COPY OF QuotientGraph, named QuotientGraphChained, so the storage can be
+// changed without touching the class six drivers share. THE COST IS EVERY SHARED FOLD LANDING TWICE, and it
 // is accepted on purpose; `make digest` catches a copy that has stopped reproducing its original in
 // half a second, which is what makes carrying it tolerable.
 //
@@ -66,7 +66,7 @@
 namespace Oblio {
 namespace {
 
-class BucketsB {
+class BucketsChained {
 public:
     // The heads are indexed by DEGREE and the links by VERTEX, which are not the same range. A
     // degree is at most size - 1 while a branch is filing degrees, but MMD's convention files a
@@ -113,7 +113,7 @@ public:
     static constexpr std::int32_t UNFILED    = 0;
     static constexpr std::int32_t OUTMATCHED = -2147483647 - 1;   // INT32_MIN, no degree reaches it
 
-    explicit BucketsB(std::size_t size)
+    explicit BucketsChained(std::size_t size)
         : mHead(size + 1, NIL), mNext(size, NIL), mPrev(size, UNFILED) {}
 
     // buckets[degree].add(u), at the head. The head is the only O(1) end of a singly reachable
@@ -207,7 +207,7 @@ private:
 //
 // `tag` is the only member that moves, and the driver sets it before each elimination, exactly as
 // it would before its own scan. The rest are bound once and reused for the whole ordering.
-struct ApproximateScanB {
+struct ApproximateScanChained {
     std::vector<std::uint32_t>&       explicitPart;  // per vertex, sum of weight over the pruned A[u]
     std::vector<std::uint32_t>&       outside;       // per clique, |C[c] - C[p]| weighted
     const std::vector<std::uint32_t>& cliqueDegree;  // per clique, |C[c]| weighted
@@ -241,7 +241,7 @@ struct ApproximateScanB {
 // of its own. Two extra arrays of size n across the phase boundary cost 12 percent in 2D at 400 a
 // side when this fusion was first built, which is the footprint trade REPORT.md names and the
 // same one that sank the 2026-08-08 key fusion.
-struct TaggedScanB {
+struct TaggedScanChained {
     std::vector<std::uint32_t>&       explicitPart;  // per vertex, sum of weight over the pruned A[u]
     std::vector<std::int32_t>&        key;           // per vertex, the whole hash key, reduced
     std::vector<std::int32_t>&        w;             // per clique, Amd.cpp's tagged W
@@ -254,7 +254,7 @@ struct TaggedScanB {
 // The quotient graph itself: the three lists above, the liveness flags, and the supervariable
 // members that mass elimination grows. A driver owns one of these, picks a pivot, calls
 // eliminate, and refreshes whatever the elimination reached.
-class QuotientGraphB {
+class QuotientGraphChained {
 public:
     // Built straight from A's pattern. A is stored with both triangles, so a column's rows are
     // already its neighbors, and the only conversion is dropping the diagonal, which is a self
@@ -262,7 +262,7 @@ public:
     // triangles, a structurally present diagonal) hold by construction, which is why nothing here
     // symmetrizes, deduplicates or sorts. See the pass-5 discussion in
     // experiments/ordering/README.md.
-    QuotientGraphB(const std::vector<std::size_t>&  colPtr,
+    QuotientGraphChained(const std::vector<std::size_t>&  colPtr,
                   const std::vector<std::int32_t>& rowIdx);
 
     std::size_t size() const           { return (mRun.size() - 1); }
@@ -462,13 +462,13 @@ public:
     // before mass elimination could change any of them, which is safe because the prune has
     // already removed every member of C[p] from A[u] and mass elimination merges only members of
     // C[p]. Neither would survive reordering the phases.
-    const std::vector<std::int32_t>& eliminate(std::int32_t pivot, ApproximateScanB& scan);
+    const std::vector<std::int32_t>& eliminate(std::int32_t pivot, ApproximateScanChained& scan);
 
     // The same fusion for the tagged-W encoding, which is the one `Amd3` carries. Everything the
     // overload above says about why the fold is sound applies here unchanged; only the three-facts
     // array differs. It also fills the hash key's adjacency half, which that overload has no need
     // of because its callers keep a separate walk of A[u].
-    const std::vector<std::int32_t>& eliminate(std::int32_t pivot, TaggedScanB& scan);
+    const std::vector<std::int32_t>& eliminate(std::int32_t pivot, TaggedScanChained& scan);
 
 
     // Fold v into u, the two having been found indistinguishable from EACH OTHER rather than
@@ -695,7 +695,7 @@ private:
 };
 
 
-QuotientGraphB::QuotientGraphB(const std::vector<std::size_t>&  colPtr,
+QuotientGraphChained::QuotientGraphChained(const std::vector<std::size_t>&  colPtr,
                              const std::vector<std::int32_t>& rowIdx)
     : mRun(colPtr.empty() ? 1 : colPtr.size()),
       mMark(2 * (mRun.size() - 1), NIL) {
@@ -731,7 +731,7 @@ QuotientGraphB::QuotientGraphB(const std::vector<std::size_t>&  colPtr,
     for (std::int32_t u = 0; u < size; ++u) mSuperLast[u] = u;
 }
 
-std::uint32_t QuotientGraphB::reachableWeight(std::int32_t u) {
+std::uint32_t QuotientGraphChained::reachableWeight(std::int32_t u) {
     ++mTag;
     std::uint32_t reached = 0;   // a sum over DISTINCT vertices, so bounded by n; see the header
     mMark[u] = mTag;
@@ -756,12 +756,12 @@ std::uint32_t QuotientGraphB::reachableWeight(std::int32_t u) {
     return reached;
 }
 
-void QuotientGraphB::number(std::int32_t u) {
+void QuotientGraphChained::number(std::int32_t u) {
     mHasNumbered = true;     // see the member: what makes the GONE test worth asking
     mMark[u]     = GONE;     // a numbered vertex lingers in lists; GONE is what filters it
 }
 
-void QuotientGraphB::beginElimination(std::int32_t pivot, std::int32_t& absorbed) {
+void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int32_t& absorbed) {
     // The reach is written STRAIGHT INTO THE ARENA, with no scratch and no copy. C[pivot] is the
     // reach, so the block the walk fills is already the clique's own block; there was never a
     // reason for the set to exist anywhere else first.
@@ -906,7 +906,7 @@ void QuotientGraphB::beginElimination(std::int32_t pivot, std::int32_t& absorbed
     for (const std::int32_t c : mAbsorbed) mMark[cliqueBase + static_cast<std::size_t>(c)] = absorbed;
 }
 
-const std::vector<std::int32_t>& QuotientGraphB::eliminate(std::int32_t pivot) {
+const std::vector<std::int32_t>& QuotientGraphChained::eliminate(std::int32_t pivot) {
     std::int32_t absorbed = NIL;
     beginElimination(pivot, absorbed);
     const std::size_t cliqueBase = mRun.size() - 1;
@@ -1002,7 +1002,7 @@ const std::vector<std::int32_t>& QuotientGraphB::eliminate(std::int32_t pivot) {
 // other walk of A[u] to accumulate. Everything the header says about why the fold is sound holds
 // unchanged: the scan runs over the untrimmed C[p], and the weights over A[u] are read before mass
 // elimination could move any of them.
-const std::vector<std::int32_t>& QuotientGraphB::finishElimination(std::int32_t pivot) {
+const std::vector<std::int32_t>& QuotientGraphChained::finishElimination(std::int32_t pivot) {
     // Under mLateMassElimination the merge is the caller's, run after it has absorbed, so this
     // hands back an empty list and C[pivot] stays reach(pivot) exactly. See the setter.
     if (mLateMassElimination) {
@@ -1027,7 +1027,7 @@ const std::vector<std::int32_t>& QuotientGraphB::finishElimination(std::int32_t 
 // It runs from finishElimination by default and from the driver under mLateMassElimination, and
 // the body is the same either way: what moves is when the question is asked, since aggressive
 // absorption is what makes this cheap test agree with the true one. experiments/ordering/AMD3.md, entry 3.
-const std::vector<std::int32_t>& QuotientGraphB::massEliminate(std::int32_t pivot) {
+const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std::int32_t pivot) {
     std::vector<std::int32_t>& merged = mMerged;   // scratch, kept for its capacity
     merged.clear();
     // THE SIGNS COME BACK HERE, IN A PASS THAT ALREADY EXISTS, mirroring QuotientGraph. The walk
@@ -1111,7 +1111,7 @@ const std::vector<std::int32_t>& QuotientGraphB::massEliminate(std::int32_t pivo
     return merged;
 }
 
-void QuotientGraphB::merge(std::int32_t u, std::int32_t v) {
+void QuotientGraphChained::merge(std::int32_t u, std::int32_t v) {
     mSuperNext[mSuperLast[u]] = v;                 // append v's chain, order preserved
     mSuperLast[u]             = mSuperLast[v];
     mWeight[u] += mWeight[v];
@@ -1142,7 +1142,7 @@ void QuotientGraphB::merge(std::int32_t u, std::int32_t v) {
 // The obvious version, written first, allocated four arrays of size n and made six passes; it
 // cost 244 ms of a 4.94 s profile where mmdint and mmdnum together cost 116 ms, which was the
 // whole reason to come back to it. See experiments/ordering/mmd3.py, ledger entry 6.
-std::vector<std::int32_t> QuotientGraphB::orderAscending(
+std::vector<std::int32_t> QuotientGraphChained::orderAscending(
         const std::vector<std::int32_t>& pivots) const {
     const std::size_t n = size();
     std::vector<std::int32_t> order(n);
@@ -1177,7 +1177,7 @@ std::vector<std::int32_t> orderMmd3B(const std::vector<std::size_t>&  colPtr,
     const std::size_t size = colPtr.size() - 1;
     if (size == 0) return std::vector<std::int32_t>();
 
-    QuotientGraphB qg(colPtr, rowIdx);
+    QuotientGraphChained qg(colPtr, rowIdx);
     // The fourth walk, and the deepest: it fixes the order of C[pivot], hence the content order of
     // every list built from it. The other three are below. All four mirror genmmd holding a linked
     // list pushed at the head and read from the head, `list[nb] = h; h = nb`, where we append to a
@@ -1188,8 +1188,8 @@ std::vector<std::int32_t> orderMmd3B(const std::vector<std::size_t>&  colPtr,
     pivots.reserve(size);
     std::uint32_t numEliminated = 0;
 
-    // NO `degrees` ARRAY AND NO `outmatched` ARRAY. Both live in BucketsB::mPrev now, on genmmd's
-    // `bwd` encoding; see the class. The filed value was never the degree anyway (mmdint files a
+    // NO `degrees` ARRAY AND NO `outmatched` ARRAY. Both live in BucketsChained::mPrev now, on
+    // genmmd's `bwd` encoding; see the class. The filed value was never the degree anyway (mmdint files a
     // degree-0 vertex under 1 and the refresh files under degree plus one), and the only reader
     // that needed it kept was `unfile`, which now recovers the bucket from the link itself.
     //
@@ -1197,7 +1197,7 @@ std::vector<std::int32_t> orderMmd3B(const std::vector<std::size_t>&  colPtr,
     // list, which existed only to be walked once for this; genmmd instead does `if(dg<*mdeg)
     // *mdeg=dg` at the moment it files, `private/Mmd.cpp` line 164, so the value is maintained
     // where it is produced and the list has nothing left to do.
-    BucketsB buckets(size);
+    BucketsChained buckets(size);
     std::uint32_t minDegree = static_cast<std::uint32_t>(size);
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u) {
         const std::uint32_t degree = std::max<std::uint32_t>(qg.adjacencySize(u), 1);
@@ -1269,7 +1269,7 @@ std::vector<std::int32_t> orderMmd3B(const std::vector<std::size_t>&  colPtr,
             for (std::int32_t u : merged) buckets.unfile(u);
 
             qg.forEachMember(pivot, [&](std::int32_t u) {
-                buckets.evict(u);                   // mmdelm's bwd[rn] = 0; see BucketsB
+                buckets.evict(u);                   // mmdelm's bwd[rn] = 0; see BucketsChained
             });
 
             if (numEliminated >= size) break;       // genmmd: nothing left to update

@@ -267,6 +267,36 @@ public:
     // Mmd3B or Amd3B ever answer the same question they must answer it with the peak or the column
     // will be comparing three different things.
     std::size_t arenaEntries() const   { return mCliqueArena.size(); }
+
+    // MEMBERS, NOT ENTRIES, AND THAT IS THE WHOLE DISTINCTION FROM `arenaEntries` ABOVE. An entry
+    // is a SLOT the arena has handed out and never takes back; a member is a vertex actually in a
+    // live clique at this instant. Both are counts of `std::int32_t` and both compare against
+    // nnz(A), so the words have to do the separating: `arenaEntries` is CUMULATIVE and grows by
+    // every clique ever built, while these two rise and fall.
+    //
+    // THE PEAK IS THE NUMBER A DYNAMIC C WOULD NEED, holding each clique in its own allocation and
+    // freeing it on death: the most it would ever ask for at one instant. It is the PAYLOAD figure
+    // only. A real implementation also pays a header per clique, allocator rounding, and capacity
+    // above size, none of which is counted here.
+    //
+    // IT IS A LIVENESS QUESTION, NOT A PLACEMENT ONE, which is why it is exact under every layout
+    // in this tree and not only under this one: add on birth, subtract on death, keep the maximum.
+    // The maximum is taken at BIRTH ALONE, deaths and shrinks being the only other events and
+    // neither able to raise the total. A compacting layout's own high water mark is a different
+    // and less useful number, being the array's rather than the live set's.
+    std::size_t numPeakCliqueMembers() const { return mNumPeakCliqueMembers; }
+    std::size_t numLiveCliqueMembers() const { return mNumLiveCliqueMembers; }
+
+    // THE COUNTER CHECKED AGAINST A RECOMPUTATION, debug builds only. Births and deaths are spread
+    // over four sites and nothing else in the suite would notice if they stopped balancing; the
+    // fourth site, `massEliminate` shortening the pivot's own clique, was missed on the first
+    // attempt and this is what found it.
+    //
+    // IT LIVES HERE RATHER THAN IN THE DRIVERS because only this class knows which vertices ever
+    // formed a clique. Summing over a driver's pivot list looks equivalent and is not: `Mmd3`
+    // pushes prepass vertices onto that list, and for those `cliqueSize` still reports A[p]'s
+    // length. That was the second wrong version of this check.
+    bool cliqueCountBalances() const;
     // GONE, which is genmmd's `marker[v] = maxint` exactly: one value reserved above every tag
     // makes the stamp array answer "is v dead" on the load it was making anyway, so no array is
     // spent on liveness at any walk site. AMD_2 does the same with `W[e] = 0` for a dead clique.
@@ -305,6 +335,18 @@ public:
         return mCliqueArena.data() + mRun[c].sourcePtr;
     }
     std::uint32_t cliqueSize(std::int32_t c) const { return mRun[c].adjacencySize; }
+
+    // WRITABLE, for the restore pass alone, which trims the clique as it walks it. See
+    // `trimClique` in the .cpp for why that pass and not a pass of its own. Same lifetime rule as
+    // the const overload above.
+    std::int32_t* clique(std::int32_t c) { return mCliqueArena.data() + mRun[c].sourcePtr; }
+    void trimClique(std::int32_t pivot, std::uint32_t kept);
+
+    // THE ONE PLACE A CLIQUE DIES, and the reason it is one place is the counter above. Death has
+    // three causes here: absorbed into the new clique, absorbed aggressively once its external
+    // degree reaches zero, and merged away with its owner. All three used to write
+    // `mRun[c].adjacencySize = 0` where they stood, which is correct and uncountable.
+    void killClique(std::int32_t c);
 
     // |C[pivot]| WEIGHTED, which every amd driver needs and all four used to compute for
     // themselves in a pass of their own, one scattered weight load per member per pivot. It is
@@ -636,6 +678,15 @@ private:
     // worth stating where a later reader might be tempted to consolidate them for locality: the
     // consolidation is what creates the hazard. See docs/DESIGN_DECISIONS.md (2026-08-16, later).
     std::vector<std::int32_t>  mCliqueArena;  // every C[c] ever formed, end to end
+
+    // See `numPeakCliqueMembers`. Maintained by `killClique`, by `trimClique`, and by the one
+    // place a clique is born, which is why all three are funnelled rather than written where they
+    // happen.
+    std::size_t mNumLiveCliqueMembers = 0;
+    std::size_t mNumPeakCliqueMembers = 0;
+#ifndef NDEBUG
+    std::vector<std::int32_t> mCliqueOwners;   // every vertex that ever formed one; see the check
+#endif
 
     // The supervariable a vertex stands for, as a chain rather than a list per vertex. A list
     // meant one allocation per vertex before anything had happened, n of them for a structure

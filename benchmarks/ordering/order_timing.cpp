@@ -536,11 +536,21 @@ int main(int argc, char** argv) {
     // branch's growth having turned out to be a memory-behaviour question; see
     // docs/DESIGN_DECISIONS.md (2026-08-16).
     //
-    // 1024 AND 1600 EXTEND BOTH SERIES BY ONE, 2026-08-16, and they were added for a specific
-    // reason rather than for range: at 800 a side our working set crosses the last level and the
+    // 1025 AND 1601 EXTEND BOTH SERIES BY ONE, 2026-08-16, and they were added for a specific
+    // reason rather than for range: at 801 a side our working set crosses the last level and the
     // vendored routine's does not, so the top row was the only one where the two codes were on
     // opposite sides of a threshold. Two more rows put both codes over it, which is what a slope
-    // fitted through them needs. n reaches 1048576 and 2560000, nnz(A) 5238784 and 12793600.
+    // fitted through them needs. n reaches 1050625 and 2563201, nnz(A) about 5.2M and 12.8M.
+    //
+    // BOTH SERIES ARE NOW OFF THE POWER-OF-TWO LADDER, 2026-08-18, and what that costs is worth
+    // stating. The interleaving was originally `32 64 128 256 512 1024` against
+    // `50 100 200 400 800 1600` for a reason: a power-of-two side aligns every array length, so a
+    // trend measured on such a ladder alone cannot be told apart from an addressing artifact, and
+    // the second series separated them. That diagnostic is GONE. What is gained is that no row's
+    // denominator carries the artifact any more, the vendored routine being the code that suffers
+    // it worst; what is lost is the ability to SEE one from this table. If an addressing question
+    // comes back, the way to ask it is to put the old sides back for a run rather than to read
+    // these rows harder.
     //
     // THE TOP ROW IS NOT FREE. At 800 a side n is 640000 and the clique arena approaches nnz(L),
     // tens of millions of entries, and every method's fill column builds a symbolic factor of that
@@ -552,12 +562,10 @@ int main(int argc, char** argv) {
     // The DEFAULT `run2d` list is unchanged at four sides. It exists to be quick; this ladder
     // exists to be read for a trend, and they are different jobs.
 
-    // THE CUBIC SCALING LADDER IS TWO INTERLEAVED SERIES TOO, 2026-08-16, `10 20 40 80` and
-    // `8 16 32 64`, each quadrupling n and offset from the other by about 2x, for the reason the
-    // square ladder above gives: a power-of-two side aligns every array length, and only a second
-    // series that does not can tell an addressing effect apart from a real trend. On the square
-    // ladder that distinction immediately earned itself, the amd branch's growth turning out to
-    // live in ONE of the two series.
+    // THE CUBIC SCALING LADDER IS TWO INTERLEAVED SERIES TOO, 2026-08-16, `11 21 41 81` and
+    // `9 17 33 65`, each quadrupling n and offset from the other by about 2x. Both were on the
+    // power-of-two ladder or beside it until 2026-08-18; see the square ladder's note above for
+    // what moving them off it gained and what it gave up.
     //
     // IT NO LONGER STOPS SHORTER THAN THE SQUARE ONE, and the old reason it did is worth keeping
     // because it still governs how the two tables are read. Fill grows far faster here: a 26 cube
@@ -565,42 +573,48 @@ int main(int argc, char** argv) {
     // sides are not equal work and a column read across the two families is meaningless. What
     // changed is only that the machine can now afford the top rows.
     //
-    // FOUR POINTS EACH AFTER 8 AND 80 WENT IN, which is what a per-series slope needs; three was
-    // thin. 8 cubed is n = 512, small enough that the row measures startup as much as ordering, and
-    // it is there to anchor the low end of the power-of-two series rather than to be read on its
-    // own. 80 cubed is n = 512000 and nnz(A) 3545600, which is within 11 percent of the 800 square's
-    // 3196800: the two ladders now meet at the top on input size, which is the more meaningful
-    // axis than n.
+    // FOUR POINTS EACH AFTER THE LOW AND HIGH ENDS WENT IN, which is what a per-series slope
+    // needs; three was thin. 9 cubed is n = 729, small enough that the row measures startup as much
+    // as ordering, and it is there to anchor the low end of its series rather than to be read on
+    // its own. 81 cubed is n = 531441, which meets the 801 square's input size to within about a
+    // tenth: the two ladders meet at the top on input size, which is the more meaningful axis
+    // than n.
     //
-    // WHAT THE TOP ROW COSTS, measured rather than guessed. At 64 a side n is 262144 and nnz(L) is
-    // 247 million for AMD1 and 283 million for MMD1, which are the largest objects either table has
-    // ever built; the clique arena is of the same order. It fits in 4 GB. The amd branch's whole
-    // ladder runs in seconds. THE MMD BRANCH DOES NOT: `MMD1` reads about 4.6x genmmd and takes
-    // seconds per ordering at that row, so `scale-mmd-3d` is minutes rather than seconds and almost
-    // all of it is that one column. That is a property of MMD1, the batch idea without any of the
-    // mechanisms genmmd puts around it, and it is what the column is there to show.
+    // WHAT THE TOP ROW COSTS, measured rather than guessed. At 65 a side n is about 275000 and
+    // nnz(L) a few hundred million for AMD1 and for MMD1, which are the largest objects either
+    // table has ever built; the clique arena is of the same order. It fits in 4 GB. The amd
+    // branch's whole ladder runs in seconds. THE MMD BRANCH DOES NOT: `MMD1` reads about 4.6x
+    // genmmd and takes seconds per ordering at that row, so `scale-mmd-3d` is minutes rather than
+    // seconds, and almost all of it is that one column. That is a property of MMD1, the batch
+    // idea without any of the mechanisms genmmd puts around it, and it is what the column shows.
     // THE 6 CUBE IS IN THE DEFAULT LIST FOR ONE REASON, and it is not scale. It is the largest size
     // at which `AMD` and `AMDraw` disagree, 3265 against 3266, so it is the only row that OBSERVES
     // the postorder's effect on fill rather than merely being able to. Everything above 6 a side
     // agrees, and a pair of columns that always match is a pair nobody reads. It was found by hand
     // when the cubic builder went in, which is exactly the way a standing check should not have to
     // be discovered. n = 216, so it costs nothing.
-    // 199 AND 201 BRACKET 200, and they are a probe rather than a rung: n moves one percent across
-    // the three, so a real trend is flat over them and an artifact is not. They stay until the
-    // artifact is gone.
+    // EVERY SIDE IS ODD AND OFF THE POWER-OF-TWO LADDER, 2026-08-18. The list used to be 32, 64,
+    // 128, 256, 512, 1024 and 8, 16, 32, 64 a side, so n was a power of two on most rows, which is
+    // exactly the shape that makes `AMD_1`'s six arrays land in the same cache sets at every index
+    // and puts a self-aliasing artifact in the DENOMINATOR of every ratio on those rows. Adding one
+    // to each costs nothing in coverage and takes the artifact out of the table.
     //
-    // WHAT THEY ESTABLISHED, 2026-08-17. `MMD3C` reads about 1.33x `MMD3` at 200 a side and 1.03x
-    // to 1.10x at 199 and 201, while `MMD3` itself is flat across all three. So it is a
-    // SINGULARITY AT ONE n, not a band, and the two codes compute the same permutation, which
-    // rules out anything algorithmic. A cache line of padding on every size-n vector moved it
-    // nothing, and timing the same function at two positions in the run reproduced it at both, so
-    // data placement and heap history are out too.
+    // THE 199 / 200 / 201 BRACKET IS GONE WITH IT. It was a probe rather than a rung, three sizes
+    // one percent apart so that a real trend would be flat over them and an artifact would not, and
+    // it did its job: the `MMD3C` singularity at exactly 200 a side was shown to be data placement
+    // rather than anything algorithmic, and it did not survive that file's rebuild. 201 stays,
+    // being the rung 200 would have become.
+    //
+    // The 6 cube stays at 6 rather than moving to 7. It is the largest size at which `AMD` and
+    // `AMDraw` disagree, 3265 against 3266, so it is the only row that OBSERVES the postorder's
+    // effect on fill rather than merely being able to, and n = 216 is not a power of two so it is
+    // not what the renumbering above is escaping.
     std::vector<int> sides;
-    if (cubic) sides = branchOnly ? std::vector<int>{8, 10, 16, 20, 32, 40, 64, 80}
-                                  : std::vector<int>{6, 12, 16, 20, 26};
-    else       sides = branchOnly ? std::vector<int>{32, 50, 64, 100, 128, 199, 200, 201, 256, 400,
-                                                    512, 800, 1024, 1600}
-                                  : std::vector<int>{32, 64, 100, 140};
+    if (cubic) sides = branchOnly ? std::vector<int>{9, 11, 17, 21, 33, 41, 65, 81}
+                                  : std::vector<int>{6, 13, 17, 21, 27};
+    else       sides = branchOnly ? std::vector<int>{33, 51, 65, 101, 129, 201, 257, 401,
+                                                    513, 801, 1025, 1601}
+                                  : std::vector<int>{33, 65, 101, 141};
     if (argc > firstSide) {
         sides.clear();
         for (int k = firstSide; k < argc; ++k) sides.push_back(std::atoi(argv[k]));

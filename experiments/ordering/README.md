@@ -1915,10 +1915,20 @@ if (elenme == 0)   pme1 = Pe[me];    in the pivot's OWN space
 else               pme1 = pfree;     appended at the tail
 ```
 
-The first is vertex-id placement, and it applies when the pivot belongs to no element yet, which
-is an early-run condition. Everything after is appended in creation order, the same as ours. So
-AMD does not have genmmd's placement property, and its compaction does not restore it: the sweep
-copies live blocks toward the front preserving their address order, which is creation order.
+**THE BRANCH IS A TEST, AND IT IS NOT A FIT TEST.** It asks whether the PIVOT belongs to any
+element, and nothing is measured against anything: no length is compared, and the clique's size is
+not known when the choice is made. It behaves like a fit test only because of what the condition
+implies. With no elements, `reach(me)` is drawn from `A[me]` alone and so cannot be larger than it,
+which makes the fit a guarantee rather than a check. **A real fit test would keep more cliques in
+place**, since a pivot WITH elements often has a reach that would fit in its own segment and is
+sent to the tail regardless. `AMD_2` is deliberately the more conservative of the two, and `Amd3B`
+copies the code rather than the behavior it approximates.
+
+The first case is vertex-id placement, and it applies when the pivot belongs to no element yet,
+which is an early-run condition: measured 62 to 68 per cent of eliminations on grids. Everything
+after is appended in creation order, the same as ours. So AMD does not have genmmd's placement
+property, and its compaction does not restore it: the sweep copies live blocks toward the front
+preserving their address order, which is creation order.
 
 When `pfree` reaches `iwlen`, it garbage-collects rather than chaining:
 
@@ -1936,6 +1946,21 @@ and still in ascending address order, and the partially built element is moved l
 elimination can continue where it left off. `Info[AMD_NCMPA]` counts them, and the figure recorded
 elsewhere in this tree is ONE for a whole 140 by 140 run: the 20 per cent slack absorbs nearly
 everything, so the sweep is a rare event rather than a per-step cost.
+
+**SO THE ORIGINAL SEGMENTS DO MOVE, and this is the point of the pass rather than a side effect.**
+Between collections nothing shifts: a run is rewritten in place by the prune and only ever shrinks.
+At a collection every live block slides down, `A[u]` and `I[u]` runs included, and every `Pe` is
+rewritten to where its block landed. genmmd never does this to a segment at any time, which is one
+of the two real differences between the schemes.
+
+**AND THAT IS THE ONLY WAY THE FREE AREA IS REFILLED.** The space is already free before the sweep
+runs, in the gaps left by shortened runs and abandoned blocks; it is unusable because a clique must
+be contiguous and the gaps are scattered. The sweep does not create space, it GATHERS space that
+already exists into one usable run at the top. Which is why the scheme works with no elbow room at
+all: the pool starts full, the first pivot has no elements and so builds in place, and by the time
+anything needs the tail there is dead space to gather. Confirmed by intervention rather than by
+argument, `src/Amd3B.cpp` sized to exactly `nzaat`: 3 to 14 collections from 3 to 200 a side, every
+permutation byte identical to the run with the 20 per cent slack.
 
 **The two schemes trade the same way as a linked list against a vector.** genmmd never copies and
 never over-allocates, and pays a branch on every entry read forever. AMD reads a flat block with no
@@ -6169,6 +6194,29 @@ A quotient graph has to put C[c] somewhere, and the three codes in this tree ans
 With the array encodings finally equal across all six drivers, the difference between a driver and
 its B or C sibling is the layout alone, so the columns can be read as the price of a layout.
 
+**THE WHOLE THING IN THREE LINES, and the rest of the section is the detail behind them.** Written
+2026-08-18, and each line says where the cliques sit, what is paid, and how much space it takes:
+
+```
+genmmd   the original space only, nothing ever shifted        pays in chaining        no extra space
+AMD_2    the original space where the pivot allows, else a    pays in compaction      extra space,
+         free area; everything shifts at a compaction         but rarely              which is what
+                                                                                      makes it rare
+ours     a region of its own, nothing ever shifted            pays nothing            unbounded
+```
+
+**Placement follows from that, and only `AMD_2` is a mixture.** genmmd is vertex-ANCHORED rather
+than uniformly vertex-ordered: a clique starts in its own pivot's segment and, when it does not fit,
+continues into the segments of the cliques it absorbed, which sit at other ids. About a third
+overflow on grids, so a third are scattered across the ids they came from. `AMD_2` puts 62 to 68 per
+cent at the pivot's own id and the rest in elimination order at the cursor. Ours is uniformly
+elimination order. **So a locality claim about `AMD_2` has to say which population it is about**,
+where the same claim about either of the others does not.
+
+**And the extra space is a knob rather than a constant.** At `AMD_2`'s 20 per cent the collector
+runs about once for a whole ordering; at about 1.25 nnz it runs on nearly every pivot. The cliff
+between those is measured below, and the space beneath it is what genmmd buys by chaining.
+
 **THE CLASSIFICATION THAT MAKES SENSE OF THEM IS ONE AXIS, NOT THREE SCHEMES.** Storage is
 constrained or it is not, and bookkeeping is what a constraint costs:
 
@@ -6181,6 +6229,93 @@ constrained or it is not, and bookkeeping is what a constraint costs:
 Chaining and compaction are then the same kind of thing at two points on that axis rather than two
 different taxes to be compared. That framing is Florin's and it is better than the one this section
 first carried, which treated them as rival mechanisms; the measurement below is what settled it.
+
+### The axis is really two, and they trade against each other, 2026-08-18
+
+**MEMORY AND MACHINERY, AND MORE OF ONE BUYS LESS OF THE OTHER.** The one-axis statement above is
+the diagonal of a two-axis picture: how much space beyond the pattern are we willing to spend, and
+how much bookkeeping are we willing to run given that space. The extremes name themselves.
+
+- **No extra space at all.** The machinery has to be constant, because every clique must be fitted
+  into ground already occupied. genmmd chains; `AMD_2` compacts. These are the only two answers
+  either code gives, and they are the expensive end by construction.
+- **Space is free.** No machinery is worth writing. Append and never look back, which is what ours
+  does. There is nothing to reclaim because nothing needs reclaiming.
+- **Between them**, and this is where compaction earns its keep: with real but bounded headroom the
+  collector is IMPLEMENTED AND RARELY RUN. At `AMD_2`'s twenty per cent it fires about once for a
+  whole ordering, and the elbow-room measurement below shows it degrading gracefully to `sum(Len)`
+  rather than failing. There is no guarantee it will not be needed, so it must be ready; there is
+  every expectation it will not be needed often.
+
+**Chaining does not have a middle.** Its cost is a link test on EVERY READ, paid whether or not the
+space is tight, so extra headroom buys it nothing. Compaction's cost is a sweep that extra headroom
+makes rarer. So chaining is worth considering only at zero extra memory, and compaction across the
+whole range from zero upward. That is a pragmatic narrowing rather than a claim that chaining
+cannot work with slack.
+
+**What the constrained end is FOR, given that the free end is simpler.** Prediction. A run under a
+memory bound either completes or reports what it would have needed, which says something useful
+about whether the factorization is feasible at all. The free-memory version can only fail later and
+larger: if the arena does not fit, the factor would not have fitted either, so failing now or
+failing then is the same failure with less information.
+
+### An algorithm is never forbidden by a layout, only priced
+
+**A LAYOUT CONSTRAINS IMPLEMENTATIONS, NEVER ALGORITHMS.** Any minimum-degree variant can be run on
+any of these layouts; enough indirection will always express it. What a layout can do is make a
+particular implementation of a step unavailable, and then the algorithm is reached by a more
+expensive route instead. The coupling that remains is a PRICE, not a prohibition, and the pragmatic
+question is whether it is worth paying.
+
+The case that made this concrete, 2026-08-18. With the run laid out incidence-first, `AMD_2`'s way,
+there is no free slot in which to append a new clique at the BACK of `I[u]`, which is genmmd's
+convention. That does not forbid the convention: a shift, a copy aside, or one spare word per vertex
+each deliver it. `AMD_2` declines all three and inserts by ROTATION instead,
+`Iw[pn] = Iw[p3]; Iw[p3] = Iw[p1]; Iw[p1] = me`, which puts the clique at the FRONT and costs
+nothing. So the convention changed to suit the layout, and the tie-breaking changed with it. That is
+the shape of every such coupling here: the layout did not decide what could be computed, it decided
+what was cheap, and the cheap thing was taken.
+
+**Which is why `Mmd3C` has not followed `Amd3B`** through the run-order flip. It is mmd on
+`AMD_2`'s layout and it uses the back-of-list convention, so following would mean either paying for
+one of the three routes above or changing the convention and moving the permutation. Neither is
+wrong; the choice has simply not been made.
+
+### What puts each scheme where it sits, and it is ONE question
+
+**MAY A CLIQUE BE SPLIT?** Everything else follows from the answer, and the three sections above
+describe the consequences without ever naming the cause. Written out 2026-08-18.
+
+**genmmd says yes.** A clique may run across several blocks, joined by a negative link at each
+block's end, so it can be laid into the dead block of the pivot that formed it and continue into
+the blocks of the cliques it absorbed. **Every dead block is therefore usable for every clique**,
+which is what buys the exact `nnz` bound. The price is that no walk of a clique is a straight run:
+the link test is paid on every read, forever.
+
+**`AMD_2` says no.** A clique is one contiguous block, so a dead block is usable only when the
+whole clique fits inside it. Exactly one case qualifies, and it is a property of the PIVOT rather
+than of the space: with `I[pivot]` empty the reach is a subset of `A[pivot]`, so the clique is
+compacted where `A[pivot]` already sits. Every other clique goes to a free area past the runs.
+**So the contiguity requirement is what forces the collector**: with chaining unavailable, dead
+space in the middle cannot be reached at all, and the only way to get it back is to move
+everything, ORIGINAL SEGMENTS INCLUDED. The elbow room and the sweep are consequences of the
+constraint, not a scheme chosen beside it.
+
+**Ours says no, and does not try the dead block either.** Every clique is appended to a region of
+its own, so no original space is reused and the region grows toward nnz(L).
+
+Two things follow that are worth having in one place:
+
+- **`AMD_2` cannot chain, so it must collect.** These are not two designs that happened to be
+  paired. Given contiguity, a collector is the only remaining answer, which is why the headroom
+  cliff below is a property of the constraint rather than a tuning accident.
+- **`AMD_2`'s cliques live in TWO POPULATIONS.** Roughly two thirds sit at the pivot's original
+  address, which is where the vertices that read them next already are, and one third sits at the
+  cursor in elimination order. genmmd's are uniformly at vertex-id placement and ours are uniformly
+  in elimination order, so `AMD_2` is the only one of the three whose locality is a mixture, and
+  any locality argument about it has to say which population it is about. The share is measured:
+  62 to 68 per cent in place on grids, rising with n, because the qualifying condition is an
+  early-run one and most pivots are eliminated early.
 
 ```
                      extra space      what it pays instead        does that cost grow?

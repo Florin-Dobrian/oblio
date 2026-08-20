@@ -170,6 +170,61 @@ of this codebase would have to look it up.
 Two existing gaps, left as they are for now: `OBLIO_NOTES_FROM_POLYGLOT.md` uses NRVO three times
 and `DESIGN_DECISIONS.md` uses RAII once, neither expanded anywhere.
 
+## A code comment says what the code does. Everything else goes in a document
+
+**A comment states what the code does and what a reader must not break. Why it is that way, what
+it was before, what alternatives were tried, and what any of it measured all belong in a document.**
+The documents carry a date, a machine, a build and a method, and a later dated entry supersedes
+them where a reader will see it. A comment carries none of that: it is a claim about one afternoon,
+sitting in a file nobody re-reads to check whether it still holds, and the next reader cannot
+falsify it because they have no idea what produced it. It is not a weak version of a document
+entry; it is noise wearing a document's clothes.
+
+**FOUR KINDS THAT DO NOT BELONG, and the fourth is the one that keeps coming back:**
+
+- **Measurements.** Times, ratios, speedups, instruction counts, cache figures, compaction counts,
+  allocation sizes, percentages of anything including how often a branch is taken, the size of the
+  input a bug was found on, how long a run took. "Measured at n = ...", "reads 1 from 8 to 401 a
+  side", "worth about 5 per cent".
+- **History.** What the code was before, what commit changed it, what the previous arrangement
+  cost. A version-control system already holds this and holds it accurately.
+- **Alternatives tried and rejected.** The version that was built and reverted, the approach that
+  turned out slower, the design that was considered and dropped.
+- **Justification for the arrangement.** Why this file is laid out this way, why the class sits
+  where it does, what the choice buys. This is the one that looks harmless because it contains no
+  numbers, and it is the same defect: it is an argument about a decision, and arguments about
+  decisions live in `docs/DESIGN_DECISIONS.md`.
+
+**WHAT IS OFTEN HIDING BEHIND ALL FOUR IS AN INVARIANT, AND THAT DOES BELONG IN THE CODE.** The
+useful content of "the collector fires once per ordering at the shipped headroom" is that the
+mid-walk path is not exercised by an ordinary run, and a reader of that code needs to know it. The
+useful content of "we made these header-only so the comparison is fair" is that every out-of-class
+definition must be `inline` or the next one added will not link. Write the property, drop the
+argument, and let the dated entry hold the reasoning:
+
+```
+// Every out-of-class definition below is `inline`, and so is any variable defined here: several
+// translation units include this. See docs/CODING_RULES.md.
+```
+
+not
+
+```
+// A driver has to be in the same translation unit as its quotient graph or a comparison against
+// the vendored routine is not apples to apples, both vendored files being single units...
+```
+
+**TWO TESTS, and a comment has to pass both:**
+
+- **Would it have to change if someone reran the benchmark on different hardware, or if the
+  decision were revisited?** Then it is a measurement or an argument, and it goes in a document.
+- **Does it tell a reader something they need in order not to break the code?** If not, it does
+  not earn its place regardless of whether it is true.
+
+**And the reference goes the other way.** A comment may point at `docs/DESIGN_DECISIONS.md` for
+the reasoning, which is a free reference by the rule below, and must still read completely without
+it.
+
 ## References, and why the rule differs by artifact
 
 Only one case is restricted: **a reference from a coding artifact to another coding artifact.**

@@ -1,14 +1,23 @@
-# NEXT: both branches match their references on all 246 real matrices; build the shared class
+# NEXT: the three quotient graphs are shared and header-only; re-measure, then decide
 
-**CURRENT AS OF `1bb8da3` PLUS THE UNCOMMITTED WORK BELOW, 2026-08-19.** Everything from here down
+**CURRENT AS OF `af829bb` PLUS THE UNCOMMITTED WORK BELOW, 2026-08-19.** Everything from here down
 to "What was done since commit 5ea68cc" is recent; that section and everything after it is older,
 and several of its items are closed and marked where they are.
 
-**WHERE TO START: "Promoting the private classes" below**, and read its FIRST subsection before
-the rest of it. The three decisions are made and the work is a merge. But the split inventory in
-that section was derived by diffing two private copies that had drifted apart, and the shared class
-already serves both branches on one layout with flags, so the split may largely dissolve. One
-experiment decides it and that subsection names it.
+**WHERE TO START: "The inlining bias" below.** It is short and it invalidates figures quoted
+elsewhere in this file and in `benchmarks/matrices/ORDERING.md`. Read it with the caution the
+section before it carries: the account of what translation units cost does not predict its own
+results, and one movement it cannot explain is on the record.
+
+**UNCOMMITTED IN THE TREE:** `include/oblio/QuotientGraphCompacted.h` is new and header-only;
+`include/oblio/QuotientGraphChained.h` is new and header-only too; `src/QuotientGraph.cpp` is
+DELETED, its bodies folded into its own header the same way; `src/Amd3.cpp`, `src/Amd3B.cpp`,
+`src/Mmd3.cpp`, `src/Mmd3B.cpp`, `src/Mmd3C.cpp`, `include/oblio/OrderEngine.h`,
+`experiments/ordering/Makefile`, `Makefile` and `CMakeLists.txt` are modified.
+
+`Mmd3C` was brought level with `Amd3B` on storage before any of that, in four steps: the elbow room
+off `nzaat`, `cliqueCountBalances`, the walk in positions and cursors, and the mid-walk collector
+with its absorbed capture and contraction report.
 
 What got done and is now behind us:
 
@@ -20,7 +29,8 @@ What got done and is now behind us:
   in `test_order` and in both benchmark tables. It found two defects in `Amd3B`'s collector that
   nothing else in the tree could see.
 - The layout question is measured: `AMD_2`'s compacted pool beats our arena by five per cent,
-  genmmd's chaining loses to it by 56.
+  genmmd's chaining loses to it by 56. **BOTH FIGURES WERE TAKEN IN THE MIXED BUILD ARRANGEMENT;
+  see "The inlining bias" below before quoting either.**
 
 ## The point of the B and C layers, restated because it was being traded away
 
@@ -358,135 +368,65 @@ set is `QuotientGraphFlat`, `QuotientGraphChunked`, `QuotientGraphCompacted` and
 to `QuotientGraphA` and `QuotientGraphC`, so regenerating either file undoes this. They also carry
 sandbox paths from a previous session. Fix both before running them.
 
-## Promoting the private classes: the design is settled, the merge is the work
+## The shared class is built and both drivers are on it, 2026-08-19: CLOSED
 
-The plan was documentation, then `QuotientGraphChained`, then `QuotientGraphCompacted`. The
-documentation is done. **The order has since reversed: `QuotientGraphCompacted` is the one with a
-settled design and is what the next session should build.** `QuotientGraphChained` is still on a
-bucket question and can wait.
+`QuotientGraphCompacted` lives in `include/oblio/QuotientGraphCompacted.h`, header-only, and
+serves `Amd3B` and `Mmd3C`. Eight suffixed pairs, `eliminate`
+gone, `merge` shared through `markGone`, the mark array on demand. See
+docs/DESIGN_DECISIONS.md (2026-08-19) for the inventory and the reasoning; the six-way split this
+section used to describe was derived from copies that had drifted and is superseded.
 
-**`QuotientGraphChained` is blocked on a bucket question.** `BucketsChained` has diverged from the
-shared `Buckets` in BOTH directions, not merely been pruned. It lacks the four amd-only hash
-accessors and `restore`, which is pruning; it ADDS `evict`, an `unfile` and a reset to `UNFILED` in
-one call, which is `mmdelm`'s `bwd[rn] = 0` and which production spells as two calls at
-`Mmd3.cpp:115`; and its `refile` does not take or write the `degrees` vector. Three ways out:
+**The bucket question that blocked `QuotientGraphChained` is answered and it needed no decision.**
+`BucketsCompacted` and `TaggedScanCompacted` were production's types verbatim and are deleted.
+`BucketsChained` is production's `Buckets` too: its `evict(u)` is `unfile(u); restore(u);`, which
+`src/Mmd3.cpp` already writes at lines 114 and 115. So promoting the chained graph needs no second
+bucket class and no new method.
 
-- Add `evict` to the shared `Buckets` and have `Mmd3` use it, since it is the clearer spelling of
-  what that driver already does in two calls. Then one bucket class serves both.
-- Promote `BucketsChained` as its own public class, and keep two bucket classes aligned forever.
-- Leave the chained graph private until the bucket question is settled.
+## The translation-unit alignment is done, 2026-08-19: CLOSED
 
-**`QuotientGraphCompacted` IS NO LONGER BLOCKED. The design is settled and the next session builds
-it**, 2026-08-19. What follows replaces the three options that stood here, which were written
-before the question was tested.
+All five ordering drivers now compile their quotient graph into their own translation unit, the
+three graph classes being header-only. `BucketsChained` went the way of the other two copies, and
+two dead `eliminate` declarations went with the chained class: overloads taking the amd branch's
+scans, never defined and never called.
 
-### READ THIS BEFORE THE PLAN BELOW: the split may be smaller than it looks
+**WHAT IT BOUGHT AND WHAT IT DID NOT.** Our own drivers can now be compared with each other, which
+they could not before: `MMD3C / MMD3` is 0.92 to 0.98 and `AMD3B / AMD3` is 0.82 to 0.84, both
+sides built alike. It did NOT make anything comparable to `MMD` or `AMD`, and the three-point gain
+predicted there never appeared.
 
-**The shared class already serves both branches on ONE layout, with flags.** `Amd3` sets
-`setVendoredListOrder(true)`, `Mmd3` sets `setReverseIncidence(true)`, both reproduce their
-references, and both live on the same adjacency-first storage. So two vendored conventions coexist
-in one body today and have for some time.
+**AND ONE UNEXPLAINED RESULT, worth knowing before trusting any of this.** `Mmd3B` did not change
+translation unit at all, only where its class's source sits, and it slowed by 4 to 7 per cent.
+See docs/DESIGN_DECISIONS.md (2026-08-19).
 
-**Which means the inventory below was derived from the wrong comparison.** It came from diffing
-`Amd3B` against `Mmd3C`: two copies that were taken into private namespaces and then evolved apart
-for months with no one reconciling them. `Amd3B` dropped the flags, hardcoded `AMD_2`'s layout and
-grew a mid-walk collector; `Mmd3C` kept the flags and grew neither. MUCH OF WHAT IS CATALOGUED
-BELOW AS "the vendored codes disagree" MAY SIMPLY BE THAT DRIFT.
+## The inlining bias, and the numbers that need re-measuring, 2026-08-19
 
-Two things have to be told apart, and the plan below conflates them:
+A class in an anonymous namespace inside its driver's file is inlined into the pivot loop; a class
+in its own `.cpp` is not, and on alpamayo that is worth about 5 per cent. Every ratio published
+before today between a private layer and a production one was taken in that mixed arrangement.
+Full account and the three-row table in docs/DESIGN_DECISIONS.md (2026-08-19).
 
-- **The conventions genuinely differ**, and that is proven: four walk variants over `AMD_2`'s
-  insertion, none reproducing genmmd past a 5-squared grid. But the shared class ALREADY handles
-  them, with two flags, on one layout.
-- **The layout, incidence-first against adjacency-first, is `Amd3B`'s own choice** for the
-  three-move rotation. Neither reference forces it: `Amd3` matches `AMD_2` exactly on
-  adjacency-first, using the held-vertex trick instead.
+**WHAT THIS MEANS FOR THE NUMBERS ON RECORD:**
 
-**So the question to ask first is not how to split the class.** It is whether the compacting class
-needs a layout the shared one does not already have. The only reason to think so is the MID-WALK
-COLLECTOR, which requires that what remains of the pivot's run stay contiguous. That is satisfied
-for mmd on adjacency-first, as established below. WHETHER IT IS SATISFIED FOR AMD'S CLIQUES-FIRST
-WALK ON ADJACENCY-FIRST STORAGE IS UNTESTED, and it is the one experiment that decides whether any
-split is needed at all.
+- `MMD3C / MMD3` is 0.92 to 0.95 on large grids, not 0.90. Corrected, both fair arrangements agree.
+- **`AMD3B / AMD3` at 0.95 on the 246 predates the alignment and has NOT been re-measured.**
+  It is now a both-split build, so a plain re-run of `benchmarks/matrices` gives the fair figure.
+  Until then it should not be quoted. `benchmarks/matrices/ORDERING.md` and the header note in
+  `src/Mmd3C.cpp` both still carry mixed-build figures.
+- `MMD3B / MMD3` at 1.14 to 1.25 is UNDERSTATED, `Mmd3B` still being private. Chaining loses while
+  holding the advantage, so that conclusion is safe.
+- `AMD3 / AMD` and `MMD3 / MMD` overstate our gap by roughly three points, permanently: both
+  vendored files are single translation units with everything `static` inside. That is a real cost
+  of our arrangement, not an error to correct away, and belongs beside the number rather than
+  folded into it.
 
-If it holds, the merge is small: take `Mmd3C`'s class, add the pool and the collector, set the
-flags, and the six splits below reduce to what the shared class does already. If it does not, the
-plan below stands.
+**INSTRUMENTS:** `tmp/unity_mmd3c.cpp` and `tmp/unity_mmd3.cpp`, two include lines each, built by
+excluding the sources they subsume. `tmp/` is gitignored. The compile line is in the session log
+and should move into `benchmarks/ordering/README.md`.
 
-### What the experiments established
-
-**The two vendored codes disagree on two conventions, and neither is free to move.** Where the new
-clique is written into I[u]: `AMD_2` puts it first, genmmd appends it last. And the order
-`reachableSet` walks a vertex's two halves: `AMD_2` takes the cliques then the adjacency, forwards;
-genmmd takes the adjacency then the cliques in REVERSE, because `mmdelm` pushes elements onto a
-stack and pops them. Both decide the order members enter C[pivot], hence bucket order, hence which
-of several equal-degree vertices is picked. Change either and the permutation moves, and each
-driver exists to reproduce its reference's exactly.
-
-**Front insertion cannot reproduce genmmd, and that was tested rather than argued.** Four walk
-variants over `AMD_2`'s insertion, cliques-first or adjacency-first crossed with incidence forward
-or reversed, and none matches beyond a 5-squared grid. So THERE IS NO SHARED LAYOUT: the flipped
-run, incidence before adjacency, is `AMD_2`'s alone.
-
-**But the flip is NOT what the mid-walk collector needs**, which was the reason it looked mandatory.
-The collector needs only that what remains of the pivot's run stay contiguous. Amd walks cliques
-first, so the flip makes the consumed part a prefix. Mmd walks the adjacency first and then the
-incidence REVERSED, so the consumed part of A[u] is a prefix and the consumed part of I[u] is a
-suffix, and the remainder is contiguous in both phases with no flip at all. `Mmd3C` can have the
-collector on its own A-then-I layout.
-
-### The shape IF a split turns out to be needed, and the three decisions Florin made
-
-The rule is that a method splits ONLY where the two vendored codes disagree, and that a split is
-spelled with a branch suffix so each body can be read against `AMD_2` or `mmdelm` directly. The
-count of splits is not a constraint; contorting shared code to avoid one is worse than having one.
-
-```
-split      reachableSetAmd / reachableSetMmd        walk order and direction
-           pruneAmd / pruneMmd                      where the new clique lands in I[u]
-           eliminatedAmd / eliminatedMmd            zero weight against mark GONE
-           adjacencyAmd / adjacencyMmd              and the two incidence accessors: the
-                                                    layout lives here and, we think, only here
-           beginElimination, probably               for the absorbed-clique pointer alone
-           the truncation in the collector          which of the two size fields shortens
-shared     the pool, the free cursor, elbow room, garbageCollect's sweep, reachableSetInPlace,
-           massEliminate, merge, killClique, finishElimination, the descriptors, the weights,
-           the supervariable chains, the counters
-gone       `eliminate`, the wrapper. Each driver calls beginElimination, its own prune, then
-           finishElimination, so the sequence is visible at the call site
-per-driver `order` against `orderAscending`, and the amd-only and mmd-only methods, each
-           already distinct by name and needing no suffix
-```
-
-**Decision 1, `eliminated()`: keep both.** `Amd3B` reads a zero weight, `Mmd3C` reads `GONE`, and
-the mark cannot simply go: a vertex numbered by the mmd prepass is NOT eliminated in the
-quotient-graph sense and keeps its weight, so only a tag can hide it. Pragmatic for now, worth
-revisiting.
-
-**Decision 2, `mMark`: allocated on demand.** The member exists for both, and only the mmd driver
-asks for it, so amd pays a pointer rather than an n-array and `Amd3B`'s footprint claim stays true.
-**`mHasNumbered` BECOMES LOAD-BEARING** by this decision, not merely an optimisation: it is the
-short circuit that keeps an empty array safe in the shared bodies that carry the
-`mHasNumbered && mMark[v] == GONE` guard. That must be said at its declaration.
-
-**Decision 3, `eliminate`'s signature: the wrapper goes.** `Amd3B` takes a `TaggedScanCompacted&`
-and `Mmd3C` takes nothing, because amd's prune computes the degree bound and the hash key in the
-same pass and mmd's does neither. With the prune split out as its own method the difference lands
-where it belongs and no dummy parameter is invented.
-
-### The one thing still unverified, and it gates the estimate
-
-**That the shared bodies can be written through the accessors.** If `adjacency(u)` and
-`incidence(u)` are the only places that know where the two halves sit, everything else is
-layout-agnostic and the split above is complete. Several shared bodies do RAW POINTER ARITHMETIC
-today rather than going through them, and converting those is the actual work. This claim is from
-reading signatures and a few bodies, not from attempting the merge, and it is the softest part of
-the plan. Check it first.
-
-**And `beginElimination` splitting is the biggest loss of the six**, because it holds the placement
-rule that is genuinely common to both: build in place when the incidence list is empty, otherwise
-at the free cursor, compact when the cursor runs out. Prefer factoring the two layout-dependent
-lines out and keeping the rule shared over duplicating it.
+**AND A STANDING KNOB:** `-DOBLIO_PAD_ORDERING` staggers the padding of every size-n allocation in
+`QuotientGraphCompacted` by whole 16 KiB pages, capacity only, so nothing computed changes. It is
+the data-placement intervention from 2026-08-17 made repeatable. Run against the merge, it was a
+null, which is how placement was ruled out.
 
 ## The ladders moved off the power-of-two sides, 2026-08-18
 

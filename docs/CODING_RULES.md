@@ -65,12 +65,47 @@ softer layer: conventions for consistency, not correctness.
   `sortIdx`. Loop-local variables go the other way and abbreviate freely (`sfp`, `sp`, `lk`),
   because there they are read a hundred times and written once.
 
+- **The quotient graphs are header-only: `QuotientGraph`, `QuotientGraphCompacted` and, when
+  it is promoted, `QuotientGraphChained` keep their bodies in their headers.** Two reasons, and
+  neither is about how the code reads:
+
+  - **Every driver should be in the same translation unit as its quotient graph, so that our
+    drivers can be compared with each other.** A driver calling out of its own unit reloads the
+    pool's and the run array's bases around every call and spills the pivot loop's registers.
+    Until 2026-08-19 our drivers were split between the two arrangements, so a ratio between two
+    of them was biased toward whichever happened to be in its own unit. Uniformity is what fixes
+    that. It does NOT make a comparison against `AMD_2` or `genmmd` apples to apples: those are
+    single units too, but they differ from us in other ways nobody has enumerated, and predicting
+    that our ratios against them would improve turned out to be wrong.
+  - **It is also faster where it ships**, so this is not a bench-only arrangement.
+
+  It measurably does not cost compile time here, which is what made it available: the flat
+  class's header was already most of its weight in inline accessors, and folding the bodies in
+  removes a translation unit that cost more than it adds. That is a fact about these three
+  classes rather than a general licence, so this rule names them and stops there.
+
+  Four mechanics, each of which the linker will find if missed rather than the compiler:
+
+  - **`inline` on EVERY out-of-class definition**, the constructor included. A pattern matching
+    `Type Class::method(` misses `Class::Class(`, there being no return type.
+  - **`inline` on any variable defined in the file**, not only functions. A counter that was a
+    definition in the source becomes `inline std::size_t` in the header.
+  - **No anonymous namespace.** A file included by several units would give each its own copy,
+    and an inline member calling into a per-unit copy is an ODR violation. Use a named
+    `detail` namespace with `inline` on its members.
+  - **`throw` still stays out**, per the rule further down: a throwing body in a widely
+    included header degrades codegen of unrelated hot loops in the same unit.
+
+  The measurement behind it is in `docs/DESIGN_DECISIONS.md`.
+
 - **Definition order follows declaration order.** The `.cpp` defines functions in the same
   order the header declares them. The header is the table of contents; the source is the
   book, and they should agree. A reader who has found something in the header knows where
   to look for it, and a diff that reorders one without the other is a review hazard for no
   gain. This is a convention, not a correctness rule, which is exactly why nothing enforces
-  it and it drifts unless stated.
+  it and it drifts unless stated. **Where a class is header-only the two halves sit in one
+  file and the rule reads the same way:** all declarations first, all bodies below, in the
+  same order.
 - **Keep an overload set together, in both files.** Declare the members of an overload set
   adjacently in the header and define them adjacently in the `.cpp`, and do not bunch all
   the adapters in one place and all the implementations in another. An overload pair is one

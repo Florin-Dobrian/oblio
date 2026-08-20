@@ -381,7 +381,7 @@ extern \"C\" void mmd_order64(std::int32_t n, const std::int32_t colPtr[], const
 amd_raw.cpp: ../../private/Amd.cpp ../../tools/hook_amd.py
 	@python3 ../../tools/hook_amd.py $< $@
 
-amdorder_cpp: amdorder.cpp graphs.h $(VENDOR_SRCS) amd_raw.cpp ../../src/Amd3.cpp ../../src/QuotientGraph.cpp ../../src/Types.cpp \
+amdorder_cpp: amdorder.cpp graphs.h $(VENDOR_SRCS) amd_raw.cpp ../../src/Amd3.cpp ../../include/oblio/QuotientGraph.h ../../src/Types.cpp \
               ../../src/Permutation.cpp ../../src/ElmForestEngine.cpp ../../src/SymFactorEngine.cpp ../../src/SparseMatrix.cpp
 	$(CXX) -std=c++17 -O3 -DNDEBUG -w -I../../include $(filter-out %.h,$^) -o $@
 
@@ -395,7 +395,7 @@ amdorder: amdorder_cpp
 # they check and not for that difference, which is written down in both drivers instead: naming one
 # for how it works and the other for what it checks made a matched pair read as two different kinds
 # of thing. This target was `raworder` until 2026-08-09 for exactly that reason.
-mmdorder_cpp: mmdorder.cpp graphs.h $(VENDOR_SRCS) ../../src/Mmd3.cpp ../../src/QuotientGraph.cpp ../../src/Types.cpp
+mmdorder_cpp: mmdorder.cpp graphs.h $(VENDOR_SRCS) ../../src/Mmd3.cpp ../../include/oblio/QuotientGraph.h ../../src/Types.cpp
 	$(CXX) -std=c++17 -O3 -DNDEBUG -w -I../../include $(filter-out %.h,$^) -o $@
 
 mmdorder: mmdorder_cpp
@@ -411,7 +411,7 @@ mmdorder: mmdorder_cpp
 # driver says so and exits clean. That is deliberate: a check that fails because nobody has
 # downloaded 300 MB of matrices would be turned off within a week.
 mmdmatrices_cpp: mmdmatrices.cpp ../../benchmarks/matrices/MatrixMarket.h $(VENDOR_SRCS) \
-                 ../../src/Mmd3.cpp ../../src/QuotientGraph.cpp ../../src/Types.cpp \
+                 ../../src/Mmd3.cpp ../../include/oblio/QuotientGraph.h ../../src/Types.cpp \
                  ../../src/SparseMatrix.cpp ../../src/Permutation.cpp \
                  ../../src/ElmForestEngine.cpp
 	$(CXX) -std=c++17 -O3 -DNDEBUG -w -I../../include $(filter-out %.h,$^) -o $@

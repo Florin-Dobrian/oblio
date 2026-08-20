@@ -811,7 +811,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
     // member MASS ELIMINATED into the pivot instead, so no one is left to absorb them. A handful
     // of entries survive, 1 to 3 on grids from 2 to 5 a side.
     assert(qg.cliqueCountBalances() && "clique births and deaths do not balance");
-    gPeakCliqueMembers = qg.numPeakCliqueMembers();   // see QuotientGraph.cpp
+    gPeakCliqueMembers = qg.numPeakCliqueMembers();   // see include/oblio/QuotientGraph.h
     if (arenaEntries != nullptr) *arenaEntries = qg.arenaEntries();
     // THE ROWS THE DENSE RULE SET ASIDE GO LAST, in index order, which is where `AMD_2`'s output
     // assembly puts them. They were collected in an ascending pass, so appending the vector is

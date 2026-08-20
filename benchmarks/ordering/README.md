@@ -8,6 +8,34 @@
 > permutation and every nnz(L) is identical. The tables are left as they stand because a dated
 > measurement is a record of a run. `docs/DESIGN_DECISIONS.md` (2026-08-15) has the account.
 
+> **AND AGAIN, 2026-08-19, FOR A DIFFERENT REASON.** Every ratio here between a driver holding its
+> quotient graph in its own translation unit and one calling into a separate `.cpp` is biased
+> toward the first by about 5 percent on alpamayo, the class being inlined into its pivot loop.
+> Our drivers were split between the two arrangements until that date and are now uniform, so
+> ratios BETWEEN OUR OWN DRIVERS taken before it should be re-measured.
+>
+> **The ratios against `MMD` and `AMD` are a separate matter and were not fixed by that work.**
+> They were expected to improve by about three points and did not move, so translation units are
+> not what the vendored gap is made of. Those routines differ from ours in ways nobody has
+> enumerated, and a ratio against a reference is a figure to watch rather than one to reason from.
+> `docs/DESIGN_DECISIONS.md` (2026-08-19) has the three-row table and the one result the account
+> fails to explain.
+>
+> **To take a comparison with neither side favored**, compile each class into its driver's file.
+> `tmp/unity_mmd3c.cpp` and `tmp/unity_mmd3.cpp` are two include lines each; after a normal
+> `make scale2d`, so that `amd_raw.cpp`, `amd_timed.cpp`, `Amd.o` and `Mmd.o` exist:
+>
+> ```
+> c++ -std=c++17 -O3 -DNDEBUG -Wall -Wextra -I../../include -DOBLIO_BLAS_UNDERSCORE \
+>   -DOBLIO_VENDORED_ORDERINGS -DOBLIO_AMD_RAW -DOBLIO_AMD_TIMED order_timing.cpp \
+>   $(ls ../../src/*.cpp | grep -vE '(Mmd3C|QuotientGraphCompacted|Mmd3|QuotientGraph)\.cpp') \
+>   ../../tmp/unity_mmd3.cpp ../../tmp/unity_mmd3c.cpp amd_raw.cpp amd_timed.cpp Amd.o Mmd.o \
+>   -framework Accelerate -o order_timing_unity2
+> ```
+>
+> `Mmd1` and `Mmd2` read the out-of-line `QuotientGraph` in that binary while `Mmd3` reads its own
+> inlined copy, so their columns are not controls in such a run.
+
 What each ordering method costs: wall time to produce the permutation, and nnz(L) under it. Six
 methods, two lineages: the vendored MMD and AMD against Oblio's own MMD1, MMD2, AMD1 and AMD2.
 

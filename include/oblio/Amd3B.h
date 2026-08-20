@@ -25,6 +25,10 @@
 
 namespace Oblio {
 
+// How often the pool had to be compacted during the last ordering. `AMD_2` reports the same figure
+// as Info[AMD_NCMPA]; `Mmd3C` publishes `gMmd3CCompactions` for its half. See src/Amd3B.cpp.
+extern std::size_t gAmd3BCompactions;
+
 // The elimination order, over the original vertices.
 //
 // It takes A's pattern, which is all an ordering reads, and builds its own quotient graph from it.

@@ -65,7 +65,191 @@ be real, which requires Hermitian. Once that is on the table, the design collaps
 **Cholesky is `CC^H`, always, and in real that *is* `CC^T`.** No option, no flag, no forbidden
 combination to reject. The answer was not hard. Asking the right question was.
 
-## 2026-08-19: a shared class splits where the vendored codes disagree, and nowhere else
+## 2026-08-19: the quotient graphs are header-only, which removes ONE asymmetry and not all of them
+
+**`QuotientGraph` and `QuotientGraphCompacted` now keep their bodies in their headers**, and
+`QuotientGraphChained` will be written that way when `Mmd3B` is promoted. `src/QuotientGraph.cpp`
+and `src/QuotientGraphCompacted.cpp` are deleted.
+
+**THE REASON IS THE ENTRY ABOVE.** A driver calling out of its own translation unit reloads the
+arena's and the run array's bases around every call and spills the pivot loop's registers, and both
+vendored routines are single units with everything `static` inside them, so they never pay it. Our
+drivers were split between the two arrangements, which made even OUR OWN ratios incomparable. That
+is what this fixes, and it is not a bench-only arrangement: the same inlining is what ships.
+
+**IT DOES NOT MAKE A COMPARISON AGAINST A VENDORED ROUTINE APPLES TO APPLES, and this entry
+originally claimed that it did.** One named asymmetry is removed. Others were never enumerated and
+several are plainly still there: what a compiler can prove about a raw `Int*` against a
+`std::vector`, exceptions being possible in one and not the other, allocator calls, how many
+distinct arrays are live at once, and `-w` on the vendored compile line. Any of them could be worth
+more than the one we removed. The honest scope is:
+
+- **`MMD3C / MMD3` and `AMD3B / AMD3` are worth something.** They compare two of our own drivers
+  built the same way and differing in one deliberate respect, the clique layout.
+- **`MMD3 / MMD` and `AMD3 / AMD` are not apples to apples**, and today's work did not make them
+  so. They remain a useful figure to watch and a poor figure to reason from.
+
+**IT DOES NOT COST COMPILE TIME HERE**, which is what made it available at all. Serial compile of
+the whole library, sandbox, three arrangements:
+
+```
+as it was                    20.30 s   27 files
+compacted header-only        20.24 s   26 files
+both header-only             20.67 s   25 files
+```
+
+The flat class's header was already 780 lines of inline accessors, so its ten includers were
+parsing most of the weight already, and the bodies add less than the removed unit cost. That is a
+fact about these classes, not a general licence.
+
+**FOUR MECHANICS, AND THE LINKER FINDS EACH ONE RATHER THAN THE COMPILER.** `inline` on every
+out-of-class definition, the constructor included, which a pattern matching `Type Class::method(`
+will miss. `inline` on any variable defined in the file, which caught `gPeakCliqueMembers`. No
+anonymous namespace, since a file included by several units gives each its own copy and an inline
+member calling into a per-unit copy is an ODR violation; the compacted file's became a named
+`detail` namespace. And `throw` still stays out, per the earlier in-header-throw finding.
+
+**AND ONE THING THE BUILD FOUND:** `experiments/ordering/Makefile` named `src/QuotientGraph.cpp` in
+three rules, as both prerequisite and compile input. The header takes its place, and
+`$(filter-out %.h,$^)` already keeps it off the command line. The generators in `tmp/` read that
+source too, and are obsolete now that the class is shared.
+
+**AND ONE RESULT THE ACCOUNT ABOVE DOES NOT EXPLAIN.** `Mmd3B` was moved last, from a class in an
+anonymous namespace inside the driver's file to a header included by that same file. Same
+translation unit before and after, same code, nothing the model says should matter. `MMD3B` then
+read 267.65 ms at 1601 squared against 249.50 in the run before, 108.99 against 103.63 at 1025 and
+54.17 against 51.80 at 801: four to seven per cent slower, which is MORE than `Mmd3C` moved when
+its translation unit genuinely changed. Candidates are internal linkage buying something beyond
+same-unit visibility, a shifted binary layout, or a bad run, and no measurement distinguishes them.
+
+**Recorded rather than explained, deliberately.** Three accounts of movements of this size were
+offered during the day and all three were wrong: the boundary costing 4.6 per cent, which was
+measured against a baseline that also lacked the collector; LTO recovering it, which was instruction
+counts on the wrong machine; and the vendored gap narrowing by three points, which never appeared on
+alpamayo. A fourth guess is not worth more than the admission.
+
+---
+
+## 2026-08-19: a private class in one file is a fine instrument and a bad baseline
+
+**Every performance ratio in this tree between a private layer and a production one was biased,
+and always in the same direction.** A class in an anonymous namespace inside its driver's file is
+in the same translation unit as the pivot loop: the compiler inlines it, keeps the pool's and the
+run array's bases in registers across the whole loop, and specializes it to the call sites it can
+see. A class in its own `.cpp` is an opaque call that takes `this`, so the bases are reloaded
+around every call and the loop's registers are spilled. The gift is worth about 5 per cent on
+alpamayo.
+
+**MEASURED THREE WAYS, `MMD3C / MMD3` on grids:**
+
+```
+                     801^2   1025^2   1601^2    65^3    81^3
+mixed: only MMD3C     0.89     0.91     0.90    0.91    0.86
+  in its driver's TU
+both split            0.98     0.94     0.94    0.97    0.92
+both unified          0.90     0.93     0.92    0.98    0.91
+```
+
+The two fair rows agree within the harness floor. The mixed row is the outlier, and it is the
+arrangement every number published before today was taken in.
+
+**SO THE POOL BEATS OUR ARENA ON THE MMD BRANCH BY 5 TO 8 PER CENT, NOT 10.** The instruments are
+`tmp/unity_mmd3c.cpp` and `tmp/unity_mmd3.cpp`, two include lines each, built by excluding the
+sources they subsume; the recipe is in `benchmarks/ordering/README.md`.
+
+**THE VENDORED ROUTINES ARE SINGLE UNITS PERMANENTLY.** `private/Amd.cpp` is 2507 lines with
+`AMD_2` and nine other routines `static` inside it; `private/Mmd.cpp` is the same around `genmmd`.
+Predicting from this that our ratios against them would improve by about three points once our own
+drivers were single units too was WRONG: `MMD3 / MMD` read 1.05 before and after, and `AMD3 / AMD`
+did not move either. Whatever the vendored gap is made of, this was not it, and a ratio against a
+reference remains something to watch rather than to reason from.
+
+**AND `MMD3B` STILL HAS IT**, being the last private layer. Chaining reads 1.14 to 1.25x `MMD3`
+WITH the advantage, so that conclusion is safe and understated. Correcting it makes chaining worse.
+
+**HOW THIS WAS GOT WRONG TWICE, WHICH IS THE REASON THIS ENTRY IS LONG.** First attribution: the
+merged class is 4.6 per cent more instructions than `git archive HEAD`, so the boundary costs 4.6
+per cent. The baseline also lacked the mid-walk collector and the `nzaat` elbow room, so four
+changes were being read as one. Second: instruction counts under cachegrind said LTO recovers all
+but 0.6 per cent, so LTO answers it. That was x86 and GCC and it counted work; alpamayo is a
+different ISA and a different compiler and the question was time, where LTO recovered about half.
+Both stories fell to one intervention, which was to put the class back in the driver's file and
+change nothing else. **A cross-machine proxy for a timing question is not evidence.**
+
+---
+
+## 2026-08-19: `Buckets` and `TaggedScan` never needed copies, and neither does the chained bucket
+
+**`BucketsCompacted` was `Oblio::Buckets` verbatim in both private files**, down to the comments,
+and `TaggedScanCompacted` was `Oblio::TaggedScan` with one field's type renamed. Nothing in either
+depends on how cliques are stored: the buckets are three link arrays over vertices, the scan is a
+bundle of references the driver assembles. They were copied because `make_amd3b.py` and
+`make_mmd3c.py` rename every type they carry across, not because anything needed a copy. Both are
+deleted and the shared types used directly, 106 lines.
+
+**`BucketsChained` is the same class too**, which retires the open question that had blocked
+promoting `QuotientGraphChained`. Its whole divergence from production's:
+
+- it lacks `restore` and the four hash accessors, which is pruning, and unused members cost nothing;
+- its `refile` drops the `degrees` argument, so the caller passes it, one line;
+- it adds `evict(u)`, which is `unfile(u); mPrev[u] = UNFILED;` and therefore differs from `unfile`
+  only for an outmatched vertex. That is `unfile(u); restore(u);` in production's spelling, which is
+  literally what `src/Mmd3.cpp` already writes at lines 114 and 115.
+
+So the three-way choice recorded in `NEXT.md`, add `evict` to the shared class, promote a second
+bucket class, or leave the chained graph private, is answered by none of them. The shared class
+already expresses it and the mmd driver already uses that expression.
+
+**THE GENERAL LESSON IS THE ONE FROM THE DRIFT ENTRY, ARRIVED AT FROM THE OTHER SIDE.** A generated
+private copy renames everything it touches, so a type that never needed copying looks like a
+divergence for as long as nobody diffs it. Two of the three "private classes" in the promotion plan
+were not private classes at all.
+
+---
+
+## 2026-08-19: the compacted quotient graph becomes one class with eight suffixed pairs
+
+**`Amd3B` and `Mmd3C` now share `QuotientGraphCompacted`**, promoted to
+`include/oblio/QuotientGraphCompacted.h`, header-only. The drivers fall
+from 1282 and 926 lines to 456 and 295 against a 933-line class and a 366-line header, so about 500
+lines of duplication are gone.
+
+**THE LAYOUT IS NOT A CLASS-WIDE PROPERTY AND THE SPLIT IS BY SUFFIX.** The storage scheme is one
+thing and was already identical in both copies: one pool sized with elbow room, one free cursor,
+`VertexRun` as a position and two lengths, `AMD_2`'s collection with the FLIP trick. What differs
+is which half of a run comes first, which is produced by the prune, read by two accessors and the
+walk, and truncated by the collector, and nothing else. Neither constructor lays it down; the sweep
+does not know it. So each algorithm keeps its own half-order and pays no shift.
+
+```
+eliminatedAmd / eliminatedMmd                     zero weight against a tag
+adjacencyAmd / adjacencyMmd, incidence twins      which half comes first
+beginEliminationAmd / beginEliminationMmd         the two lines that name a walk
+pruneAmd / pruneMmd                               where the new clique lands in I[u]
+finishEliminationAmd / finishEliminationMmd       which mass elimination it calls
+massEliminateAmd / massEliminateMmd               when the negated weights are restored
+reachableSetAmd / reachableSetMmd                 walk order and direction
+reachableSetInPlaceAmd / reachableSetInPlaceMmd   the prepass reject
+```
+
+**WHAT STAYED SHARED AND WHY IT COULD.** `merge`, `killClique`, `trimClique`, `absorb`,
+`garbageCollect`, the descriptors, the counters, the supervariable chains. `merge` survived through
+`markGone`, one private line storing `GONE` when the array exists and doing nothing when it does
+not, which is also what makes the mark array on demand work: the amd branch carries an empty vector
+rather than n int32. `beginElimination`'s absorbed-clique pointer dissolved into the branch
+accessor, and `massEliminate`'s `mSource[sourcePtr] == pivot` test turned out correct under both
+layouts because the conjunct before it establishes the other half is empty.
+
+**`eliminate` IS GONE.** Amd's prune takes a `TaggedScan` and mmd's takes nothing, so one wrapper
+would have carried a parameter one branch ignores. Each driver spells the three steps.
+
+**THE MERGE INTRODUCED EXACTLY ONE BUG AND THE RIGHT THING CAUGHT IT.** Hoisting the pivot's weight
+negation into `beginEliminationMmd` without removing it from the two mmd walks negates twice, which
+reads as a vertex not yet taken. `cliqueCountBalances` failed on a 3 by 3 grid in the first build.
+That check had been added to both files earlier the same day, deliberately before the collector
+rather than after it.
+
+---
 
 **The decision.** `QuotientGraphCompacted` will be one public class serving both `Amd3B` and
 `Mmd3C`. Where the two vendored codes disagree, the class carries TWO METHODS with a branch suffix,

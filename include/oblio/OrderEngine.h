@@ -28,7 +28,7 @@
 //
 // Two lineages sit behind those names. MMD and AMD are vendored, self-contained codes
 // operating on raw int CSC arrays (src/Mmd.cpp, src/Amd.cpp). MMD1 and AMD1 are ours,
-// built over the shared quotient graph in src/QuotientGraph.cpp, and each carries the
+// built over the shared quotient graph in include/oblio/QuotientGraph.h, and each carries the
 // base algorithm without its vendored counterpart's later refinements, so they order
 // differently and are not drop-in replacements. Either way this engine is the seam that
 // reads the matrix structure and fills the Permutation. Returns true on success.

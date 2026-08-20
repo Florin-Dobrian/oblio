@@ -46,6 +46,7 @@
 #include "oblio/ElmForestEngine.h"
 #include "oblio/Mmd3.h"
 #include "oblio/Mmd3B.h"
+#include "oblio/Mmd3C.h"
 #include "oblio/Permutation.h"
 #include "oblio/QuotientGraph.h"
 #include "oblio/SparseMatrix.h"
@@ -255,17 +256,28 @@ void run(const std::string& path, const Options& options) {
     // of which the digest, the vendored acceptance checks, `test_order` or the sanitizers could
     // see. Order and fill compare the ANSWER; a B layer exists to differ in MECHANISM while
     // agreeing on the answer, so until this check there was nothing watching the thing it varies.
-    double      sibMs = 0.0;
+    // TWO SIBLINGS ON THE MMD BRANCH, ONE ON THE AMD BRANCH, and every one of them gets all three
+    // checks. `Mmd3C` is the mmd algorithm on `AMD_2`'s compacting pool, the second layout this
+    // branch has, so it belongs beside `Mmd3B` rather than instead of it. There is no `Amd3C`.
+    double      sibMs[2] = {0.0, 0.0};
+    std::size_t nCmp[2]  = {0, 0};
+    const int   sibCount = amd ? 1 : 2;
     std::string extra;
-    {
-        const char* tag = amd ? "AMD3B" : "MMD3B";
+    for (int si = 0; si < sibCount; ++si) {
+        const char* tag = amd ? "AMD3B" : (si == 0 ? "MMD3B" : "MMD3C");
         auto sibling = [&] {
-            return amd ? orderAmd3B(colPtr, rowIdx) : orderMmd3B(colPtr, rowIdx);
+            if (amd) return orderAmd3B(colPtr, rowIdx);
+            return si == 0 ? orderMmd3B(colPtr, rowIdx) : orderMmd3C(colPtr, rowIdx);
         };
-        sibMs = bestOf([&] { const auto p = sibling(); (void) p; }, repeats);
+        sibMs[si] = bestOf([&] { const auto p = sibling(); (void) p; }, repeats);
         gPeakCliqueMembers = 0;
         const std::vector<std::int32_t> sibOrder = sibling();
         const std::size_t sibPC = gPeakCliqueMembers;
+        // HOW OFTEN THE POOL HAD TO BE COMPACTED, for the two siblings that have one. Both size it
+        // to `nzaat + nzaat/5 + n`, which is `AMD_2`'s `iwlen`, so the figure is directly against
+        // that routine's Info[AMD_NCMPA] below. `Mmd3B` chains and never compacts, so it has none.
+        if (amd)          nCmp[si] = gAmd3BCompactions;
+        else if (si == 1) nCmp[si] = gMmd3CCompactions;
         if (sibOrder != order)                extra += std::string("  ") + tag + " order differs";
         else if (fillOf(A, sibOrder) != nnzL) extra += std::string("  ") + tag + " fill differs";
         if (sibPC != pC)                      extra += std::string("  ") + tag + " pC differs";
@@ -282,12 +294,21 @@ void run(const std::string& path, const Options& options) {
     toVendored(A, ap, ai);
     const int n = static_cast<int>(size);
     std::vector<int> perm(n), invp(n);
-    double vendored = 0.0;
+    double      vendored    = 0.0;
+    std::size_t vendoredCmp = 0;
     if (amd) {
         // THE CLOCK IS ON `amd_order` WHOLE and everything else comes from the raw copy; see the
         // note beside the declarations. The raw copy is called once, outside the timed loop.
         vendored = bestOf(
             [&] { amd_order(n, ap.data(), ai.data(), perm.data(), nullptr, nullptr); }, repeats);
+        // AND THE REFERENCE'S OWN COUNT, one untimed call with an Info array. Info[AMD_NCMPA] is
+        // the same quantity `Amd3B` reports, over a workspace of the same size, so the two are
+        // comparable entry for entry.
+        {
+            double info[20] = {0.0};
+            amd_order(n, ap.data(), ai.data(), perm.data(), nullptr, info);
+            vendoredCmp = static_cast<std::size_t>(info[8]);          // AMD_NCMPA
+        }
         gRawOrder.clear();
         amd_order_raw(n, ap.data(), ai.data(), perm.data(), nullptr, nullptr);
     } else {
@@ -326,18 +347,23 @@ void run(const std::string& path, const Options& options) {
     std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %11zu %13zu %8s %8s %7s %9.3f %9.3f %8s",
                 name.c_str(), size, m, tril, 2 * m, cC, pC, nnzL, cTril, cFill, pOverC,
                 vendored, ours, ratio);
-    {
+    for (int si = 0; si < sibCount; ++si) {
         char sibRatio[16] = "-";
-        if (vendored >= 0.01 && sibMs >= 0.01)
-            std::snprintf(sibRatio, sizeof sibRatio, "%.2fx", sibMs / vendored);
-        std::printf(" %9.3f %9s", sibMs, sibRatio);
+        if (vendored >= 0.01 && sibMs[si] >= 0.01)
+            std::snprintf(sibRatio, sizeof sibRatio, "%.2fx", sibMs[si] / vendored);
+        std::printf(" %9.3f %9s", sibMs[si], sibRatio);
     }
+    // The compaction counts last: the reference's, then the compacting sibling's. On the mmd side
+    // the reference is genmmd, which chains and has no such figure, so only ours is printed.
+    if (amd) std::printf(" %8zu %8zu", vendoredCmp, nCmp[0]);
+    else     std::printf(" %8s %8zu", "-", nCmp[1]);
     std::printf("%s\n", note.c_str());
 #else
     std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %11zu %13zu %8s %8s %7s %9s %9.3f %8s",
                 name.c_str(), size, m, tril, 2 * m, cC, pC, nnzL, cTril, cFill, pOverC,
                 "-", ours, "-");
-    std::printf(" %9.3f %9s", sibMs, "-");
+    for (int si = 0; si < sibCount; ++si) std::printf(" %9.3f %9s", sibMs[si], "-");
+    std::printf(" %8s %8zu", "-", amd ? nCmp[0] : nCmp[1]);
     std::printf("%s  vendored needs private/\n", extra.c_str());
 #endif
 }
@@ -424,14 +450,17 @@ int main(int argc, char** argv) {
     // factorization will need and no clique scheme is worth building for it whatever pC/cC says.
     // Where the arena is half the factor, and this set has those too, it decides.
     //
-    // The timing half is still genmmd against Mmd3 alone. The amd ladder belongs here too and is
-    // not in yet.
+    // Each branch's siblings follow its own columns: `Mmd3B` and `Mmd3C` on the mmd side, `Amd3B`
+    // on the amd side. Only their times are printed; their order, fill and pC are checked against
+    // the branch driver's and a mismatch is flagged at the end of the row.
     std::printf("  %-38s %8s %10s %11s %11s %11s %11s %13s %8s %8s %7s %9s %9s %8s",
                 "matrix", "n", "m", "tril(A)", "A+I", "cC", "pC", "nnz(L)", "cC/tril", "cC/nnzL",
                 "pC/cC", amd ? "AMD ms" : "MMD ms", amd ? "AMD3 ms" : "MMD3 ms",
                 amd ? "AMD3/AMD" : "MMD3/MMD");
     std::printf(" %9s %9s", amd ? "AMD3B ms" : "MMD3B ms",
                 amd ? "AMD3B/AMD" : "MMD3B/MMD");
+    if (!amd) std::printf(" %9s %9s", "MMD3C ms", "MMD3C/MMD");
+    std::printf(" %8s %8s", amd ? "AMD cmp" : "-", amd ? "AMD3B cmp" : "MMD3C cmp");
     std::printf("\n");
 
     for (const std::string& path : paths) run(path, options);

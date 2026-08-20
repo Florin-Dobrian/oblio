@@ -63,7 +63,6 @@ add_library(oblio STATIC
     src/NumFactorStatic.cpp
     src/OrderEngine.cpp
     src/Permutation.cpp
-    src/QuotientGraph.cpp
     src/SolveEngine.cpp
     src/SparseMatrix.cpp
     src/SymFactorEngine.cpp

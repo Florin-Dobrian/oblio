@@ -147,7 +147,7 @@ std::vector<std::int32_t> orderAmd1(const std::vector<std::size_t>&  colPtr,
             // which is the smallest place it could have been put.
             // Every length is hoisted out of its condition. These read as free accessors and
             // are not: the loops store, so the compiler cannot prove the store does not alias the
-            // size, and the bound is re-loaded per element. `incidenceSize` alone measured 300 ms
+            // size, and the bound is re-loaded per clique. `incidenceSize` alone measured 300 ms
             // of this driver's 6.31 s on alpamayo, walked once per member of C[p].
             const std::int32_t* incidence     = qg.incidence(u);
             const std::uint32_t incidenceSize = qg.incidenceSize(u);

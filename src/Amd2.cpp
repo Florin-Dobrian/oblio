@@ -47,7 +47,7 @@ std::vector<std::int32_t> orderAmd2(const std::vector<std::size_t>&  colPtr,
     // NO MEMBERSHIP SCRATCH OF ITS OWN, 2026-08-17. Supervariable detection used to stamp into a
     // `mark` of 2n, vertices low and clique ids biased by a stride, and it now stamps into
     // `w`, which is `AMD_2`'s `W [Iw [p]] = wflg` over the whole of i's list, variables and
-    // elements alike, both living in one id space so one array holds a mark for either. That is
+    // cliques alike, both living in one id space so one array holds a mark for either. That is
     // 2n int32 and a tag counter gone. Same change as `Amd3` took the same day.
     //
     // IT INTERLEAVES WITH THE TAG PROTOCOL rather than clobbering it; see `stamp` beside `wflg`.
@@ -165,7 +165,7 @@ std::vector<std::int32_t> orderAmd2(const std::vector<std::size_t>&  colPtr,
         // are, so the one query that used it is gone. The amd2 prototype still carries the stamp,
         // inherited from amd1 and dead there for the same reason.
         // |C[p]| weighted, off the eliminator rather than from a pass of our own. AMD_2
-        // accumulates `degme += nvi` while building the element and this is that; the pass this
+        // accumulates `degme += nvi` while building the clique and this is that; the pass this
         // replaces cost one scattered weight load per member per pivot, which is about 6 in 2D
         // and 13 on cubes.
         const std::uint32_t degme = qg.cliqueWeight();

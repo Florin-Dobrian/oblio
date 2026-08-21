@@ -569,7 +569,7 @@ def amd4_minimum_degree(G, alpha=10.0, aggressive=True):
     # reaches. Amd.cpp keeps the same two in Pe and Elen.
     parent = [-1] * n
     front_size = [0] * n
-    is_element = [False] * n
+    is_clique = [False] * n
     num_hash_merges = 0                        # pairs found by the hash
     # THE STANDING WITNESS FOR LEDGER ENTRY 8, and it is here for the reason `tag sweeps` and
     # `bound below exact` are: to make a claim checkable rather than to measure anything. The
@@ -669,7 +669,7 @@ def amd4_minimum_degree(G, alpha=10.0, aggressive=True):
             A, I, C, mark, tag, eliminated, pivot)
         num_eliminations += 1
         num_clique_entries += len(C[pivot])
-        is_element[pivot] = True
+        is_clique[pivot] = True
         for c in absorbed_cliques:             # the absorbed become children of it
             parent[c] = pivot
         degree = len(neighbors)
@@ -992,11 +992,11 @@ def amd4_minimum_degree(G, alpha=10.0, aggressive=True):
     child = [-1] * n
     sibling = [-1] * n
     for e in range(n - 1, -1, -1):             # downward, so the lists end ascending
-        if is_element[e] and parent[e] != -1:
+        if is_clique[e] and parent[e] != -1:
             sibling[e] = child[parent[e]]
             child[parent[e]] = e
     for e in range(n):
-        if not is_element[e] or child[e] == -1:
+        if not is_clique[e] or child[e] == -1:
             continue
         biggest = -1                           # the last maximal one, as Amd.cpp scans
         biggest_previous = -1
@@ -1020,7 +1020,7 @@ def amd4_minimum_degree(G, alpha=10.0, aggressive=True):
 
     postorder = []
     for root in range(n):                      # roots in index order, as Amd.cpp
-        if not is_element[root] or parent[root] != -1:
+        if not is_clique[root] or parent[root] != -1:
             continue
         stack = [root]
         while stack:                           # explicit stack, no recursion

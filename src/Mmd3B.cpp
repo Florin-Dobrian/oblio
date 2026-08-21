@@ -26,7 +26,7 @@
 // conversation with Alex Pothen: given a machine you know whether A fits, but you cannot know
 // whether L fits, nnz(L) depending on the ordering being computed. So a method that stays within
 // `O(n + m)` carries a guarantee no amount of speed substitutes for: IF THE INPUT FITS, THE ANSWER
-// IS REACHABLE. genmmd's chaining and AMD_2's garbage collection are that guarantee bought
+// IS REACHABLE. genmmd's chaining and AMD_2's compaction are that guarantee bought
 // deliberately, not frugality for its own sake. Our arena is the right default for a known shape on
 // a known machine solved repeatedly; this is the right one when whether an answer exists is the
 // open question. See docs/DESIGN_DECISIONS.md (2026-08-16).
@@ -43,7 +43,7 @@
 //
 // WHAT THIS FILE CANNOT ANSWER, stated because it was briefly assumed to, 2026-08-16. It prices our
 // arena against GENMMD's dead-segment scheme. It says nothing about `AMD_2`'s, which is a different
-// thing again: one workspace that is compacted and reused, with an element taking over the slots of
+// thing again: one workspace that is compacted and reused, with a clique taking over the slots of
 // the variable that formed it. The amd branch has no equivalent of this file, so the arena has
 // never been compared against that storage at all. When the vendored AMD turned out to zigzag on a
 // power-of-two scaling ladder while three other codes did not, storage was the first suspect and
@@ -145,9 +145,9 @@ std::vector<std::int32_t> orderMmd3B(const std::vector<std::size_t>&  colPtr,
     // emptying it; the prepass now reads each successor before unfiling and needs no list at all.
     // A `touched` list with a `touchedRound` stamp beside it went the same way on 2026-08-15,
     // having been filled once per clique member per pivot and never read on this layer.
-    std::vector<std::int32_t> batch, elementMembers, q2h, qxh;
+    std::vector<std::int32_t> batch, cliqueMembers, q2h, qxh;
 
-    // NO DRIVER MARK ARRAY. The two levels this refresh needs, one surviving a whole element and
+    // NO DRIVER MARK ARRAY. The two levels this refresh needs, one surviving a whole clique and
     // one fresh per vertex, are two tags rather than two arrays, and they go into the graph's own
     // stamp array through advanceTag/mark/setMark. That is genmmd's `marker` exactly: `mmdelm`
     // stamps it at level `tag` and `mmdupd` at level `mt = tag + md0`, one array between them.
@@ -158,7 +158,7 @@ std::vector<std::int32_t> orderMmd3B(const std::vector<std::size_t>&  colPtr,
     // Bucket 1 holds the isolated and the degree-1 vertices together, by the convention above.
     // Number them and leave the bucket empty. Nothing is eliminated in the quotient-graph sense.
     //
-    // ONE PASS AND NO LIST. This was a collect loop into `prepassVertices` followed by a walk of
+    // ONE PASS AND NO LIST. This was a compact loop into `prepassVertices` followed by a walk of
     // it, and the list existed only because unfiling a vertex while walking the bucket destroys
     // the link the walk is standing on. Reading the successor BEFORE the unfile removes the need,
     // which is what genmmd does at `private/Mmd.cpp`:
@@ -213,28 +213,28 @@ std::vector<std::int32_t> orderMmd3B(const std::vector<std::size_t>&  colPtr,
             if (delta < 0) break;
         }
 
-        // ---- one refresh, walked element by element -----------------------------
-        // The driver's element list, genmmd's `list[mn] = ehead; ehead = mn`, so the LAST pivot of
-        // a batch is the FIRST element refreshed.
+        // ---- one refresh, walked clique by clique -----------------------------
+        // The driver's clique list, genmmd's `list[mn] = ehead; ehead = mn`, so the LAST pivot of
+        // a batch is the FIRST clique refreshed.
         for (auto ee = batch.rbegin(); ee != batch.rend(); ++ee) {
-            const std::int32_t element = *ee;
-            elementMembers.clear();
-            qg.forEachMember(element, [&](std::int32_t v) {
-                if (!qg.eliminated(v)) elementMembers.push_back(v);
+            const std::int32_t clique = *ee;
+            cliqueMembers.clear();
+            qg.forEachMember(clique, [&](std::int32_t v) {
+                if (!qg.eliminated(v)) cliqueMembers.push_back(v);
             });
 
-            const std::int32_t elementTag = qg.advanceTag();   // marked once for the element
-            for (std::int32_t v : elementMembers) qg.setMark(v, elementTag);
+            const std::int32_t cliqueTag = qg.advanceTag();   // marked once for the clique
+            for (std::int32_t v : cliqueMembers) qg.setMark(v, cliqueTag);
             std::uint32_t dg0 = 0;
-            for (std::int32_t v : elementMembers) dg0 += qg.weight(v);
+            for (std::int32_t v : cliqueMembers) dg0 += qg.weight(v);
 
-            // reach(u) has |A[u]| + |I[u]| sources once the new element is counted, so one other
-            // source means everything u reaches is in this element plus that one place. dg0
-            // already counts the element, and the other source is walked directly, so no union is
+            // reach(u) has |A[u]| + |I[u]| sources once the new clique is counted, so one other
+            // source means everything u reaches is in this clique plus that one place. dg0
+            // already counts the clique, and the other source is walked directly, so no union is
             // formed at all.
             q2h.clear();
             qxh.clear();
-            for (std::int32_t u : elementMembers) {
+            for (std::int32_t u : cliqueMembers) {
                 if (buckets.filed(u) || buckets.outmatched(u)) continue;   // done, or withheld
                 const std::uint32_t otherSources = qg.adjacencySize(u) + qg.incidenceSize(u) - 1;
                 (otherSources == 1 ? q2h : qxh).push_back(u);
@@ -255,16 +255,16 @@ std::vector<std::int32_t> orderMmd3B(const std::vector<std::size_t>&  colPtr,
                 std::uint32_t degree = dg0;
 
                 // NO LOOPS. A q2h vertex has exactly TWO sources and one of them is the new
-                // element, by the test that put it on this list, so the other one is unique and
+                // clique, by the test that put it on this list, so the other one is unique and
                 // can be indexed. genmmd does the same and does it in three lines: it reads the
-                // first entry of the segment, steps past it if that is the element, and branches
+                // first entry of the segment, steps past it if that is the clique, and branches
                 // once on whether what remains is a variable or a clique,
                 //
                 //     is=xadj[en]; nb=adjncy[is]; if(nb==el) nb=adjncy[is+1]; lk=nb;
                 //     if(fwd[nb]>=0){ dg+=qsize[nb]; goto n2100; }
                 //
                 // What stood here was two loops, each re-reading its bound through an accessor on
-                // every iteration and one of them testing `c == element` per entry, to find a
+                // every iteration and one of them testing `c == clique` per entry, to find a
                 // single entry already known to be there. The comment defending that said the
                 // loops were short enough not to be worth hoisting, which was true and beside the
                 // point: the loops themselves are what genmmd does not have. This pass measured
@@ -273,25 +273,25 @@ std::vector<std::int32_t> orderMmd3B(const std::vector<std::size_t>&  colPtr,
                 // Our lists are split where genmmd's interleave, so the case analysis reads off
                 // the two lengths rather than off a sign: `incidenceSize` is at least 1, the prune
                 // having appended the pivot, so the two sources are either one variable and the
-                // element, or two cliques of which one is the element.
+                // clique, or two cliques of which one is the clique.
                 if (qg.adjacencySize(u) == 1) {                    // a variable, genmmd's fwd >= 0
                     const std::int32_t v = qg.adjacency(u)[0];
                     // ONE LOAD FOR BOTH QUESTIONS. `vertexTag` is the newest tag drawn, so
                     // anything at or above it is either this pass's own stamp or GONE, and both
                     // mean skip.
                     const std::int32_t m = qg.mark(v);
-                    if (m < vertexTag && m != elementTag) {        // not seen, not dead, not dg0's
+                    if (m < vertexTag && m != cliqueTag) {        // not seen, not dead, not dg0's
                         qg.setMark(v, vertexTag);
                         degree += qg.weight(v);
                     }
                 } else {                                           // two cliques; take the other
                     const std::int32_t* incidence = qg.incidence(u);
-                    const std::int32_t  c = (incidence[0] == element) ? incidence[1] : incidence[0];
+                    const std::int32_t  c = (incidence[0] == clique) ? incidence[1] : incidence[0];
                     qg.forEachMember(c, [&](std::int32_t v) {
                         const std::int32_t m = qg.mark(v);
                         if (v == u || m >= vertexTag) return;      // seen this pass, or dead
-                        if (m == elementTag) {
-                            // v is in the new element and in this same other source, so it sees
+                        if (m == cliqueTag) {
+                            // v is in the new clique and in this same other source, so it sees
                             // at least what u sees.
                             if (buckets.filed(v) || buckets.outmatched(v)) return;
                             if (qg.adjacencySize(v) + qg.incidenceSize(v) - 1 == 1) {

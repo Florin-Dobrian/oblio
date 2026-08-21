@@ -152,7 +152,7 @@ not a defensible state.
 
 **The situation.** Three walks reversed, 4 of 7, and graph2, graph3 and graph4 all still diverged.
 
-**What was tried, and it looked like progress.** Sorting `element_members` ascending reached **5 of
+**What was tried, and it looked like progress.** Sorting `clique_members` ascending reached **5 of
 7**. Sorting descending gave 2 of 7.
 
 **Why it was REJECTED.** genmmd never sorts. It walks `adjncy` in whatever order `mmdelm`'s

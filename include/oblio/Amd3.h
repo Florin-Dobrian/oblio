@@ -41,7 +41,7 @@
 //
 // AND IT IS A HEURISTIC ONE, which Amd.cpp says itself and which is the stronger half of the
 // argument: mass elimination combined with the approximate degree can merge nodes of lower exact
-// degree than the pivot, so an element need not be a fundamental supernode and its diagonal block
+// degree than the pivot, so a clique need not be a fundamental supernode and its diagonal block
 // can carry zeros. Its own header therefore states that the assembly tree "is not guaranteed to be
 // the precise supernodal elimination tree" and that its postordering "is not guaranteed to be a
 // precise postordering" of it. So it is not that we reach the same result by a better route. Theirs

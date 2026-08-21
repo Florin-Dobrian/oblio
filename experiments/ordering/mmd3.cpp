@@ -149,7 +149,7 @@
 // The two-source case is answered without a union. Everything the vertex reaches is
 // either inside the element, already counted in dg0, or comes from that one other
 // source, so the walk adds only what the other source contributes. Two mark levels
-// keep that straight, as mmdupd's mt and *tag do: elementTag says "already in
+// keep that straight, as mmdupd's mt and *tag do: cliqueTag says "already in
 // dg0" and survives the whole element, while vertexTag is fresh per vertex, so one
 // two-source vertex cannot hide a neighbor from the next.
 //
@@ -1046,9 +1046,9 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
         // second stamp array it needs both go. genmmd makes the same trade, chaining
         // its new elements in `list` and building no vertex set at all.
         std::vector<std::int32_t> refreshedVertices;
-        std::vector<std::int32_t> elementMembers, twoSourceQueue, manySourceQueue;
+        std::vector<std::int32_t> cliqueMembers, twoSourceQueue, manySourceQueue;
         // The second site, before the refresh, and OUTSIDE the element loop rather
-        // than inside it. elementTag is stamped once per element and read all the
+        // than inside it. cliqueTag is stamped once per element and read all the
         // way through that element's two-source walk, where it decides both the merge
         // and the outmatched case, with vertexTag fresh per vertex nested inside it.
         // Two levels live at once, which is mmdupd's mt against its tag, so a sweep
@@ -1062,14 +1062,14 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
         // batch is the FIRST element refreshed. See mmd3Neighbors.
         for (auto ee = batch.rbegin(); ee != batch.rend(); ++ee) {
             const std::int32_t element = *ee;
-            elementMembers.clear();
+            cliqueMembers.clear();
             for (std::int32_t u : C[element])
-                if (!eliminated[u]) elementMembers.push_back(u);
+                if (!eliminated[u]) cliqueMembers.push_back(u);
             ++tag;                              // dg0's members, marked once
-            const std::int32_t elementTag = tag;
-            for (std::int32_t v : elementMembers) mark[v] = elementTag;
+            const std::int32_t cliqueTag = tag;
+            for (std::int32_t v : cliqueMembers) mark[v] = cliqueTag;
             std::uint32_t dg0 = 0;
-            for (std::int32_t v : elementMembers) dg0 += superMembers[v].size();
+            for (std::int32_t v : cliqueMembers) dg0 += superMembers[v].size();
 
             // Set view of the split. reach(u) has |A[u]| + |I[u]| sources once the
             // new element is counted, so |A[u]| + |I[u]| - 1 == 1 says everything u
@@ -1078,7 +1078,7 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
             // other source is walked directly.
             twoSourceQueue.clear();
             manySourceQueue.clear();
-            for (std::int32_t u : elementMembers) {
+            for (std::int32_t u : cliqueMembers) {
                 if (buckets.filed(u) || outmatched[u]) continue;  // done, or withheld
                 std::uint32_t otherSources = A[u].size() + I[u].size() - 1;
                 (otherSources == 1 ? twoSourceQueue : manySourceQueue).push_back(u);
@@ -1091,7 +1091,7 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
                                                                // by an earlier two-source
                 // Everything u reaches is in the element or comes from its one
                 // other source. dg0 counts the element, minus u itself. Two mark
-                // levels, as mmdupd has: elementTag says "already in dg0" and
+                // levels, as mmdupd has: cliqueTag says "already in dg0" and
                 // survives the whole element, while vertexTag is fresh per vertex,
                 // so one two-source vertex cannot hide a neighbor from the next.
                 ++tag;
@@ -1106,7 +1106,7 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
                 std::uint32_t degree = dg0;
                 for (std::int32_t v : A[u]) {
                     if (eliminated[v] || mark[v] == vertexTag) continue;
-                    if (mark[v] == elementTag) continue;        // already in dg0
+                    if (mark[v] == cliqueTag) continue;        // already in dg0
                     mark[v] = vertexTag;
                     degree += superMembers[v].size();
                 }
@@ -1114,7 +1114,7 @@ std::vector<std::int32_t> mmd3MinimumDegree(const AdjacencyGraph& G, std::int32_
                     if (c == element) continue;
                     for (std::int32_t v : C[c]) {
                         if (v == u || eliminated[v] || mark[v] == vertexTag) continue;
-                        if (mark[v] == elementTag) {
+                        if (mark[v] == cliqueTag) {
                             // v is in the new element AND in this same other
                             // source, so it sees at least what u sees.
                             if (buckets.filed(v) || outmatched[v]) continue;

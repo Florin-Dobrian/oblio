@@ -181,7 +181,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
     // The old shape kept THREE facts about a clique in three places: `mark[c]` says whether this step has
     // seen it, `outside[c]` carries |C[c] - C[p]|, and a clique is dead when it has been stripped
     // from the incidence lists. Its scan 1 therefore loads and stores `mark[c]` AND loads and
-    // stores `outside[c]` for every incidence element, two cache lines per element, and clears
+    // stores `outside[c]` for every incidence clique, two cache lines per clique, and clears
     // `outside` over the touched list at the end of every step.
     //
     // Amd.cpp keeps all three in ONE array, with a tag:
@@ -210,7 +210,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
     std::vector<std::int32_t> w(size, 1);       // every clique alive and unseen, Amd.cpp's W
     std::int32_t wflg  = 2;                     // the tag, Amd.cpp's wflg
     // SUPERVARIABLE DETECTION STAMPS INTO `w`, which is `AMD_2`'s `W [Iw [p]] = wflg` over the
-    // whole of i's list, variables and elements alike, both living in one id space. It replaces a
+    // whole of i's list, variables and cliques alike, both living in one id space. It replaces a
     // 2n `mMark`, so this driver no longer asks for clique marks at all.
     //
     // IT HAS TO INTERLEAVE WITH THE TAG PROTOCOL, not clobber it. `stamp` starts above the values
@@ -323,7 +323,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
         // the merge will take belongs to no clique but the new one and so cannot appear in any
         // touched clique's member list either way.
         // |C[p]| weighted, off the eliminator rather than from a pass of our own. AMD_2
-        // accumulates `degme += nvi` while building the element and this is that. The second
+        // accumulates `degme += nvi` while building the clique and this is that. The second
         // computation below is NOT removable: it runs after mass elimination has trimmed the
         // clique, which is ledger entry 7, and this one is deliberately over the untrimmed one.
         std::uint32_t degme = qg.cliqueWeight();
@@ -341,7 +341,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
         // cliqueDegree[c] supplies the first term and the members of C[p] supply the second,
         // since c is in I[u] exactly when u is in C[c]. So the scan walks the incidence lists of
         // the new clique's members and pays sum |I[u]|, where walking the member lists of every
-        // touched clique pays sum |C[c]|. Measured on a 100x100 grid, 74281 elements against
+        // touched clique pays sum |C[c]|. Measured on a 100x100 grid, 74281 cliques against
         // 272646, which is most of the reason this branch used to run three times slower than the
         // vendored routine. `Amd.cpp` does the same thing at `we = Degree[e] + wnvi`, then
         // `we -= nvi`, and it is the amd2 layer's pass 3.
@@ -360,7 +360,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
         // MASS ELIMINATION, and it runs HERE rather than inside the eliminator. Absorption is what
         // makes the cheap structural test agree with the true one: a clique whose members all lie
         // inside C[p] contributes nothing to what u can reach, yet its presence in I[u] makes the
-        // test fail. Amd.cpp says so itself, making the same test in its scan 2 over an element
+        // test fail. Amd.cpp says so itself, making the same test in its scan 2 over a clique
         // list absorption has already compacted: with aggressive absorption, `deg == 0` is
         // identical to `Elen[i] == 1 && p3 == pn`. Asking first, as every other driver here does,
         // declines merges the vendored routine makes. experiments/ordering/AMD3.md, ledger entry 3.
@@ -470,8 +470,8 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
             //
             // EVERY ENTRY OF I[u] IS TAKEN, the pivot included, where the bound skips it. The two
             // rules differ and both are Amd.cpp's: its scan 2 accumulates `hval += e` over the
-            // element list it is compacting, which by then holds the new element, while the degree
-            // term for the new element is added in a later pass. Fusing the walks does not fuse
+            // clique list it is compacting, which by then holds the new clique, while the degree
+            // term for the new clique is added in a later pass. Fusing the walks does not fuse
             // the rules.
             for (std::uint32_t i = 0; i < incidenceSize; ++i) {
                 const std::int32_t c = incidence[i];
@@ -625,7 +625,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
                 // short-circuit, so every pair pays a full list of random writes even though
                 // entry 6 got the comparison itself down to 1.08 iterations. Measured on a 140x140
                 // grid: 639083 stamp writes before against 290473 after, with 263032 compare
-                // iterations either way. We were stamping 2.4 times more elements than we compared.
+                // iterations either way. We were stamping 2.4 times more cliques than we compared.
                 //
                 // WHY IT CAN BE HOISTED, and why it took a day to see. The stamping carried
                 // `w != u` and the walk carried `w == v`, exclusions that look pair-dependent and
@@ -643,7 +643,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
                 // it. Amd.cpp merges j into i the same way round.
                 // THE STAMP GOES INTO `w`, which is what retires the clique half of mMark. Amd.cpp
                 // does exactly this, `W [Iw [p]] = wflg` over the whole of i's list, variables and
-                // elements alike, both living in one id space so one array holds a mark for either.
+                // cliques alike, both living in one id space so one array holds a mark for either.
                 // See the declaration of `stamp` for the interleave with the tag protocol.
                 // NO LIVENESS TEST, AND THE LENGTHS REJECT BEFORE THE LIST IS TOUCHED, which is
                 // Amd.cpp's `for (p = Pe[i]+1 ; p <= Pe[i]+ln-1 ; p++) W [Iw[p]] = wflg` and its
@@ -656,7 +656,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
                 // and it cannot reject a candidate until its whole list has been walked.
                 //
                 // TWO LOOPS RATHER THAN Amd.cpp's ONE, and that is the layout rather than a
-                // choice. Its run is elements then variables with the new element at the front, so
+                // choice. Its run is cliques then variables with the new clique at the front, so
                 // the whole list minus the first entry is one span. Ours is A[u] then I[u] with the
                 // new clique at the front of I[u], so the entry to skip is in the middle. `Amd3B`,
                 // which carries `AMD_2`'s order, does get the single loop.

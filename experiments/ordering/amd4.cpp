@@ -736,7 +736,7 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
     // reaches. Amd.cpp keeps the same two in Pe and Elen.
     std::vector<std::int32_t> parent(n, NIL);
     std::vector<std::size_t> frontSize(n, 0);
-    std::vector<bool> isElement(n, false);
+    std::vector<bool> isClique(n, false);
     std::size_t numHashMerges = 0;                // pairs found by the hash
     // THE STANDING WITNESS FOR LEDGER ENTRY 8, and it is here for the reason `tag sweeps` and
     // `bound below exact` are: to make a claim checkable rather than to measure anything. The key
@@ -848,7 +848,7 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
             amd4Eliminate(A, I, C, eliminated, mark, tag, pivot);
         ++numEliminations;
         numCliqueEntries += C[pivot].size();
-        isElement[pivot] = true;
+        isClique[pivot] = true;
         for (std::int32_t c : absorbedCliques) parent[c] = pivot;   // its children
         std::uint32_t degree = neighbors.size();
         pivots.push_back(pivot);
@@ -1216,12 +1216,12 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
     // subtree is traversed last and the stack of pending updates stays small.
     std::vector<std::int32_t> child(n, NIL), sibling(n, NIL);
     for (std::int32_t e = static_cast<std::int32_t>(n) - 1; e >= 0; --e)
-        if (isElement[e] && parent[e] != NIL) {   // downward, so lists end ascending
+        if (isClique[e] && parent[e] != NIL) {   // downward, so lists end ascending
             sibling[e] = child[parent[e]];
             child[parent[e]] = e;
         }
     for (std::int32_t e = 0; e < static_cast<std::int32_t>(n); ++e) {
-        if (!isElement[e] || child[e] == NIL) continue;
+        if (!isClique[e] || child[e] == NIL) continue;
         std::int32_t biggest = NIL, biggestPrevious = NIL, previous = NIL;
         std::size_t largest = 0;
         bool haveBiggest = false;
@@ -1244,7 +1244,7 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
 
     std::vector<std::int32_t> postorder, stack;
     for (std::int32_t root = 0; root < static_cast<std::int32_t>(n); ++root) {
-        if (!isElement[root] || parent[root] != NIL) continue;   // roots in order
+        if (!isClique[root] || parent[root] != NIL) continue;   // roots in order
         stack.push_back(root);
         while (!stack.empty()) {                  // explicit stack, no recursion
             const std::int32_t e = stack.back();

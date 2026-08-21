@@ -61,8 +61,9 @@ inside those quotations, so that an explanation still matches the source it expl
 else, including our own comments and identifiers, it is clique. The rule is in
 `docs/WRITING_RULES.md`.
 
-Two of our own identifiers still break it, `element_tag` and `elementTag` in the mmd2 twins, and
-they are queued for the next code sweep.
+Our own identifiers all follow it as of 2026-08-20, when `element_tag`, `elementTag`,
+`element_members`, `elementMembers`, `is_element` and `isElement` were renamed in the mmd2, mmd3
+and amd4 twins, alongside the same sweep through the production drivers.
 
 ## What the layers show
 
@@ -1441,7 +1442,7 @@ across the `C[pivot]`
 compaction, so the guard goes before the call and never inside. Several other regions hold a stamp
 across a span the same way, and each was found by reading rather than assumed:
 
-- `mmd2`'s refresh stamps `element_tag` once per element and reads it throughout that element's
+- `mmd2`'s refresh stamps `clique_tag` once per element and reads it throughout that element's
   q2h walk, where it decides both the pair merge and the outmatched case, with `vertex_tag` fresh
   per vertex nested inside it. Two levels live at once, which is `mmdupd`'s `mt` against its `tag`.
 - the amd bound pass stamps `in_clique` and still reads it inside the `outside[c]` loop, with
@@ -1635,7 +1636,7 @@ already trimmed of the merged vertices. Rounded, its row is md3's.
 from md3. The other two are in the degree refresh, and they are the first case in the family where
 TWO TAG LEVELS ARE LIVE AT ONCE:
 
-- `elementTag`, stamped once per element of the batch and read all the way through that element's
+- `cliqueTag`, stamped once per element of the batch and read all the way through that element's
   q2h walk, where it decides both the pair merge and the outmatched case;
 - `vertexTag`, fresh per vertex and nested inside it, so one q2h vertex cannot hide a neighbor
   from the next.
@@ -1734,6 +1735,601 @@ degrees are updated often, which is exactly what batching gives up. That is meas
 than assumed, and the measurement is in the delta section. So md1 through md5 is one chain, and
 the fork at the top into mmd, which stays exact, and amd, which goes approximate and does not
 batch, is a real division rather than a filing convention.
+
+## What the 1996 AMD paper covers: the degree bound in full, the layout in one paragraph
+
+The paper is Amestoy, Davis and Duff, *An Approximate Minimum Degree Ordering Algorithm*, SIAM J.
+Matrix Analysis & Applications 17(4), 886 to 905, and there is a copy in the project. It is worth
+knowing what it does and does not settle, because several things this ladder treats as `AMD_2`
+implementation detail are in fact in the paper, and several things it treats as published are not.
+
+Quotations below use the paper's vocabulary, so *element* is its word for our clique and Lp is the
+clique the pivot p forms. See "One word, before anything else" above.
+
+**WHAT THE PAPER IS ABOUT.** The approximate degree bound, its derivation, the proof that
+d <= dhat <= dtilde, and the measurements. Sections 4 and 5 develop the bound and Algorithm 2
+computes |Le \ Lp|; section 6 is thirty pages of results across four codes. Supervariable
+detection by hash is there too, with the hash function written out and the mod (n - 1) term. That
+is the paper's subject and it occupies almost all of it.
+
+**WHAT IT SAYS ABOUT STORAGE IS ONE PARAGRAPH**, in section 5 on page 17, immediately after the
+algorithm is stated. It is credited to MA27 rather than presented as new: the data structure is
+"the quotient graph data structure used in the MA27 minimum degree algorithm". In order, that
+paragraph gives:
+
+- the sets A are stored first, followed by a small amount of elbow room;
+- when Lp is formed it goes into the elbow room, **or in place of Ap when |Ep| = 0**;
+- garbage collection occurs if the elbow room is exhausted;
+- during it, the space for Ai and Ei is reduced to exactly |Ai| + |Ei| per supervariable, the space
+  for Ae and Ee of every element is fully reclaimed, and so is Le of any absorbed element;
+- each collection takes time proportional to the size of the workspace, normally theta(|A|);
+- **"In practice, elbow room of size n is sufficient."**
+
+**So two things we had been reading as `AMD_2`'s own choices are the published design.** The
+in-place branch, which our drivers spell `elenme == 0` and which takes 62 to 68 per cent of
+eliminations on a grid, is in that paragraph. So is the size-n elbow room, which is the `n` term in
+`iwlen = nzaat + nzaat/5 + n` and which the code enforces as a floor while treating the `nzaat/5`
+as a recommendation.
+
+**AND WHAT IS NOT IN THE PAPER IS EVERYTHING ABOUT HOW THE COLLECTION RUNS.** No FLIP encoding, no
+parking of a displaced head, no two-pass sweep, no carrying of a half-built clique. The paragraph
+says what the space looks like before and after and says nothing about the mechanism between. All
+of that is `AMD_2`, and porting it was reading code rather than reading the paper.
+
+Nor is the run order in the paper: that I[u] comes before A[u], that the new clique goes to the
+FRONT of I[u], or the three-move rotation that puts it there. Those decide which of several
+equal-degree vertices is picked, so they decide the permutation, and the paper is silent on all
+three.
+
+### The complexity bound rests on an assumption about compaction
+
+Page 18 states the bound and then names two conditions it rests on: few or no hash collisions in
+supervariable detection, and **a constant number of garbage collections**. The authors say the
+assumptions seem to hold in practice and that the asymptotic time would be higher otherwise.
+
+That is a testable claim rather than a theorem, and the `AMD cmp` column in
+`benchmarks/matrices/ORDERING.md` is the test, over 246 matrices the authors did not have.
+
+Their own measurement is on page 23, with elbow room of size n: usually one collection, at most two
+for AMD and at most three for the other codes, the sentence finishing across the table on page 25
+by crediting the difference to aggressive absorption reducing the memory required. They also state
+flatly that "garbage collection has little effect on the ordering time obtained".
+
+Ours agrees on the shape and disagrees on the tail: a median of one, 122 of 246 never compacting at
+all, but a maximum of ten rather than two. The matrices that do it are interior-point and social
+graphs, classes that did not exist in the 1996 test set.
+
+### Chaining gets half a sentence, and no measurement
+
+The one place the paper mentions the other layout is page 25, comparing codes, where MMD is
+described as storing the element patterns "in a fragmented manner" and requiring no elbow room.
+That is chaining, named accurately and passed over. Nothing follows about what the fragmentation
+costs, and nothing could, since the tables that follow compare whole codes and confound the layout
+with the algorithm.
+
+**That gap is what `Mmd3B` exists to fill.** Same algorithm, same encodings, same C++, chained
+storage against ours, which is the comparison the paper's own tables cannot make. The result is in
+`benchmarks/matrices/ORDERING.md`.
+
+## The whole inventory: three families of mechanism, and which branch has what
+
+Minimum degree spends nearly all its time refreshing degrees after a pivot. Everything either
+branch adds beyond the naive algorithm attacks that cost, and every one of those additions falls
+into one of three families. The families are worth having because they answer "is that all of
+them?" structurally rather than by enumeration.
+
+| family | operates on | mechanisms |
+|---|---|---|
+| detecting indistinguishability | vertex identity | mass elimination, q2h, hash, pre-compression |
+| removing redundancy | cliques | natural absorption, aggressive absorption |
+| scheduling the work | the refresh itself | multiple elimination, incomplete update, the bound |
+
+Nothing in either code sits outside those three. "Two axes, and where the chain runs through them"
+above places the same material on the representation and exactness axes and follows the ladder
+through it; this section is the flat inventory.
+
+### Family 1: detecting indistinguishability
+
+Two vertices are INDISTINGUISHABLE when each sees exactly what the other sees plus the other
+itself, `reach(u) + {u} == reach(v) + {v}`. Eliminating one right after the other then creates no
+fill whatever, so they can be taken as a single pivot, a SUPERVARIABLE. The md3 section below
+derives it.
+
+**Four mechanisms find such pairs, and they differ only in AGAINST WHOM and WHEN.**
+
+| mechanism | against whom | when | who has it |
+|---|---|---|---|
+| mass elimination | the pivot, which is leaving now | at every elimination | everyone from md3 up |
+| q2h | another live reached vertex | during the refresh | mmd2, mmd3 |
+| hash | another live vertex in `C[p]` | after the prune | amd2, amd3, MA27 |
+| pre-compression | another vertex in the ORIGINAL A | once, before elimination | Ashcraft, CMMD |
+
+**Only mass elimination produces pivots directly**, its partner being the vertex leaving in the
+same breath. The other three build supervariables that are eliminated together later, so they
+change the answer only through the degrees they alter, which is why coarser is not automatically
+better.
+
+The two live-vertex routes are the ones that differ by branch, and "Two ways a vertex disappears"
+below has that comparison; "Supervariable detection in production" has the mechanism for each.
+
+### Family 2: removing redundancy
+
+Nothing here is about vertex identity. A clique that can never contribute again is pure cost in
+every incidence list that names it, and both mechanisms delete such cliques.
+
+| mechanism | what dies | who has it |
+|---|---|---|
+| natural absorption | every clique in `I[pivot]`, inside `C[pivot]` by construction | everyone |
+| aggressive absorption | any clique wholly inside `C[pivot]`, touched or not | amd, MA27 |
+
+### Family 3: scheduling the work
+
+Nothing here merges or deletes anything. These decide how much degree computation is done and when.
+
+| mechanism | what it decides | who has it |
+|---|---|---|
+| the approximate bound | how expensive ONE refresh is | amd, and it is amd's whole idea |
+| multiple elimination | how many pivots go before a refresh | mmd |
+| incomplete update | which reached vertices that refresh bothers with | mmd |
+
+**The two branches take opposite answers within this family, and that is the headline difference.**
+
+**MMD REFRESHES LESS OFTEN, AND REFRESHES FEWER.** It keeps the degree EXACT and attacks the cost
+from two directions. Both come from Liu, *Modification of the minimum-degree algorithm by
+multiple elimination*, ACM TOMS 11 (1985), 141 to 153, which the AMD paper cites as [25]:
+
+- **Multiple elimination.** A whole independent set of minimum-degree pivots goes in one batch, and
+  the refresh that follows is amortised over all of them. The Multiple in Multiple Minimum Degree.
+- **Incomplete degree update.** Within the refresh, a reached vertex whose reach lies inside
+  another reached vertex's cannot be the strict minimum before that one is eliminated, so its
+  degree is not computed AT ALL. It is withheld rather than refiled, and put back only when a later
+  elimination reaches it.
+
+**AMD MAKES EACH REFRESH CHEAPER INSTEAD.** It eliminates one pivot at a time, refreshes every
+vertex of `C[p]`, and replaces the exact degree with a bound computed by decomposition, so a clique
+is never opened and never walked. The approximation is the whole of the idea and everything else
+follows from it.
+
+The two are mutually exclusive in practice: batching needs exact degrees to know the set is
+independent, and the bound is cheap precisely because it does not open the cliques a batch would
+have to.
+
+### When each one runs, and why the order is forced
+
+The families say what each mechanism operates on. They say nothing about when it can run, and that
+is decided by something else: what has to have been computed already.
+
+**Everything except pre-compression happens inside a single pivot's step.** The order within that
+step differs between the branches:
+
+```
+amd3, one iteration            mmd3, one iteration
+----------------------------   ----------------------------
+form C[p], NATURAL ABSORPTION  form C[p], NATURAL ABSORPTION
+prune: the bound               prune
+  AGGRESSIVE ABSORPTION        MASS ELIMINATION
+MASS ELIMINATION               refresh over C[p]
+hash detection: PAIRWISE         Q2H PAIRWISE
+trim                             OUTMATCHING
+```
+
+**Each position is forced by a prerequisite, and naming them is more useful than the timeline.**
+
+- **Natural absorption** needs only `I[pivot]`, which is in hand before anything, so it goes first
+  and could not go later: the walk that builds `C[p]` consumes that list.
+- **Aggressive absorption** needs `|C[c] - C[p]|` for every clique the new one touched, and that is
+  exactly what the bound's walk produces. It cannot run before that walk and there is no reason to
+  wait after it.
+- **Mass elimination** needs the pruned lists, its test being that nothing explicit is left and the
+  only clique is the new one.
+- **q2h and hash** need the pruned state of `C[p]` too, and amd's additionally needs the keys the
+  bound pass accumulated.
+- **Pre-compression** needs only `A`. That is why it can run once before everything, and also why
+  it can only ever find pairs that were alike in `A` already.
+
+**And one ordering is a correctness constraint rather than a convenience.** Amd's mass elimination
+runs in the driver, after aggressive absorption, and not inside the eliminator where every other
+driver here puts it. Absorption is what makes the cheap structural test agree with the true one: a
+clique whose members all lie inside `C[p]` contributes nothing to what `u` can reach, yet its
+presence in `I[u]` makes the test fail. `Amd.cpp` relies on the same thing, making the test in its
+scan 2 over a clique list absorption has already compacted. Asking first declines merges the
+vendored routine makes; see `AMD3.md`, ledger entry 3.
+
+### The families are not independent of each other
+
+They are separable as ideas and coupled through one object, the REACH SET.
+
+Family 3's choice decides whether the reach set is ever formed, and that decides what families 1
+and 2 can afford. An exact degree materializes it, so q2h merging and outmatching fall out of a
+walk that was happening anyway. A bound decomposes it and never forms it, so amd must go looking
+for its pairs, which is what the hash is for, and cannot outmatch at all.
+
+**Aggressive absorption is the exception that shows the coupling is not a rule.** It looks like a
+consequence of the bound, and it is not: MA27 does it with true degrees. See its subsection below.
+
+### Incomplete update is outmatching, and it is not the batch
+
+The two are easy to conflate because both are Liu's and both defer work, but they are independent.
+Multiple elimination decides HOW MANY pivots go before a refresh; incomplete update decides WHICH
+of the reached vertices that refresh bothers with. You could batch and still refresh every reached
+vertex, and you could outmatch one pivot at a time.
+
+**The eviction during a batch is the first, not the second.** A reached vertex is unfiled so it
+cannot be picked again before its degree is known, and it is refiled at the end of the round. That
+is bookkeeping for the batch.
+
+**Outmatching is the second, and it is stronger than deferral.** If `reach(v)` is contained in
+`reach(u) + {u}`, then `v` cannot be the strict minimum before `u` goes, so its degree is not
+computed for that round at all; if it stays outmatched across several rounds it is not computed for
+those either. genmmd writes `bwd[nd] = -maxint` and our `Buckets` spells it `outmatch`, with
+`restore`, `mmdelm`'s `bwd[rn] = 0`, putting it back.
+
+**And that is what the qxh list is for.** The reached vertices divide in two: `q2h`, cheap enough
+to decide exactly and where pairwise merging happens, and `qxh`, where outmatching happens instead.
+Both lists exist because of this split, not because of the batch.
+
+### Amd has no incomplete update, and hashing is not the reason
+
+It has none: no amd driver calls `outmatch`, and neither does `mmd1`, the mechanism arriving with
+`mmd2` alongside the q2h and qxh split.
+
+**Two reasons, and the second is the same root cause as q2h.** The bound is cheap, so there is
+little to be saved by skipping one; and detecting that `v` is outmatched needs `reach(v)` and
+`reach(u)` compared, which amd never forms. It has bounds, not reaches. The same wall that stops
+amd deciding a q2h merge stops it deciding an outmatch, and for the same reason: a bound never
+opens a clique.
+
+So hashing is not what displaces incomplete update. Hashing replaces the q2h half of the split;
+nothing replaces the qxh half, because amd computes every vertex of `C[p]` every time and is fast
+enough not to mind.
+
+### Natural absorption, which both branches have and neither calls by that name
+
+When `C[pivot]` is formed, every clique in `I[pivot]` is inside it by construction and can never
+contribute again. Page 6 of the 1996 paper: the elements adjacent to the pivot are absorbed into
+the new element and deleted, and reference to them is replaced by reference to the new one. In our
+code it is the `killClique` loop in `beginElimination`, and every driver on both branches runs it.
+
+**Mmd has this and nothing else.** Its cliques die only when a pivot touches them.
+
+### Aggressive absorption, which amd has and mmd does not
+
+Page 17 states it: on top of the natural absorption of the elements in Ep, any element whose
+external subset is empty, |Le \ Lp| = 0, is absorbed into p as well, **even if e is not adjacent to
+p**. That last clause is the whole of it.
+
+A clique that lies wholly inside the new one is dead whether or not the pivot ever touched it, so
+it could never have appeared in `I[pivot]` and natural absorption cannot reach it. The paper's
+worked example is a 4-by-4 where element 2 absorbs element 1 although a12 is zero.
+
+**Amd gets the test for nothing, which is not the same as being the only one able to do it.**
+`|Le \ Lp|` is exactly what Algorithm 2 computes for every clique the new one touched, so for amd
+the test is a comparison against zero on a quantity already in hand. An exact-degree algorithm that
+walks a clique's members can also see that all of them are already in the new clique; it just has
+to be looking. **MA27 does aggressive absorption with true degrees**, so the mechanism is not tied
+to the bound. genmmd simply does not do it.
+
+**The paper's stated purpose is the BOUND, not space.** It "improves the degree bounds by reducing
+|E|", and the results confirm it: aggressive absorption tends to give slightly lower fill-in, since
+reducing |E| improves the accuracy of the bound. Space is a side effect, mentioned in a parenthesis.
+Our own code makes the same point from the other end: it pays twice over, shortening the lists the
+bound walks and the lists a later scan walks.
+
+**Its frequency is wildly matrix-dependent and the paper says so plainly**: for many matrices it
+rarely occurs, but in some cases up to half of the elements are aggressively absorbed.
+
+**Our grid ladders are at the very bottom of that range.** `amd2` fires aggressive absorption ONCE
+across the whole test set, against the hash's 2488. Grids do not produce contained cliques, so
+nothing in this directory can see the rule work. That is the same shape as the dense-row finding:
+a mechanism invisible to every synthetic ladder here and material on real matrices.
+
+### MA27 is a third point in the design space, and it separates the families
+
+The paper compares against two other codes, and the second is the useful one for seeing which
+mechanisms travel together. Page 25: MA27 uses the true degree and the same data structures as AMD,
+detects supervariables whenever two variables adjacent to the current pivot have the same structure
+in the quotient graph, uses the true degree AS the hash function, and does aggressive absorption.
+Neither AMD nor MA27 uses multiple elimination or incomplete update.
+
+| | degree | pairwise merging | aggressive absorption | multiple elim | incomplete update |
+|---|---|---|---|---|---|
+| MMD | exact | q2h, no hash | no | yes | yes |
+| MA27 | exact | hash, keyed on the degree | yes | no | no |
+| AMD | bound | hash | yes | no | no |
+
+Reading it by family: all three differ in family 3, MMD alone has both of Liu's techniques and AMD
+alone has the bound; MA27 and AMD agree in families 1 and 2 despite disagreeing in 3.
+
+**So the axes are independent, and MA27 is the proof.** Hash detection and aggressive absorption
+work with exact degrees; they are not consequences of approximating. And multiple elimination and
+incomplete update are not consequences of exactness either, since MA27 has exact degrees and
+neither technique. MMD and AMD differ on five things at once, which is what makes a two-code
+comparison hard to attribute; MA27 sits between them and holds three of the five fixed.
+
+**MA27's hash is the true degree itself**, which is a nice economy: a quantity it already maintains,
+used as the filter, with the exact comparison behind it as in AMD. AMD needs a separate key because
+its degree is a bound and two vertices with equal bounds need not be alike.
+
+### What each branch is missing, and whether it could have it
+
+Two questions rather than one, and they have different answers.
+
+#### Amd: neither of Liu's two techniques
+
+Neither of Liu's two techniques is in AMD, and they are not equally out of reach.
+
+**Multiple elimination looks available.** AMD forms `C[p]` in full when it eliminates, so after the
+first pivot it knows exactly which vertices were reached; any minimum-bound vertex outside that set
+has an unchanged bound and can be eliminated in the same round. Nothing about the bound blocks it.
+Whether it would pay is a different question, since AMD's refresh is already cheap and the batch's
+value is amortising an expensive one.
+
+**Incomplete update does not look available**, for the reason two subsections above: outmatching
+needs a containment between two reach sets and amd has bounds rather than reaches. No filter
+rescues it either, since a hash finds candidates for EQUALITY and outmatching is a CONTAINMENT
+test, and containment is not decidable from a key.
+
+**IT NEEDS THE REACH SETS, NOT THE EXACT DEGREES, and the difference is worth keeping straight.**
+The two travel together because forming the reach set is the expensive part of an exact update and
+the degree is a count taken on the way past, so anything in a position to outmatch is already
+paying for exactness. But the implication runs one way only:
+
+- **Reach sets without outmatching happens**, and MA27 is the example sitting in the table above:
+  true degrees, so the sets are there, and it still does not do incomplete update.
+- **Outmatching without reach sets does not**, and that is amd's position. The bound is computed by
+  decomposition precisely so that no clique is ever opened, so no reach set is ever formed, so
+  there is nothing to compare.
+
+So "incomplete update needs exact degrees" is the wrong statement of it. What it needs is the sets,
+and exactness is what you get for free once you have them.
+
+**WHICH MAKES IT SELF-DEFEATING FOR AMD RATHER THAN MERELY UNAVAILABLE.** The reach set is the
+expensive object, and not building it is the entire saving: the bound decomposes |reach(u)| into
+|A[u] \ Lp| plus a sum of |Le \ Lp| taken by subtraction from a maintained clique degree, so no
+clique is opened and no set is materialized. Adding outmatching means building the very thing the
+bound exists to avoid, after which the bound has nothing left to buy. That road arrives back at
+MMD by a longer route.
+
+**And it is what separates the two techniques cleanly.** Multiple elimination needs the SET OF
+REACHED VERTICES, which is `C[p]` and which amd forms anyway. Incomplete update needs THEIR REACH
+SETS, which amd forms for nobody. One is portable and the other is not, and the difference is one
+word.
+
+That also reads the paper's sentence correctly. "Neither AMD nor MA27 take advantage of multiple
+elimination or incomplete update" is one statement covering two different situations: for AMD it is
+structural, and for MA27 it is a choice, MA27 having true degrees and therefore the sets and simply
+not using them that way.
+
+#### Mmd: aggressive absorption, and it would be a cost play rather than a quality one
+
+**It is available**, and MA27 is the existence proof: true degrees and aggressive absorption at
+once. Nothing about exactness forbids it, and any algorithm that walks a clique's members can see
+that all of them lie in the new clique.
+
+**But the reason to want it is not amd's reason.** For amd the argument is quality: a shorter
+incidence list makes the bound tighter, which is the paper's stated purpose and shows up as
+slightly lower fill. That mechanism does not exist for mmd. An exact degree is exact whatever
+`I[u]` holds, since the cliques absorption removes have all their members in `C[p]` already and so
+change no reach set. **Mmd's degrees would be identical, its pivots would be identical, and its
+fill would be identical.** What it would buy is shorter lists to walk and fewer entries to store.
+
+**That makes the prediction sharp, which is the good part.** Less work and a byte-identical
+permutation, which `make digest` checks directly, so a wrong implementation announces itself at
+once. One caveat: removing cliques from `I[u]` changes the order members are visited in during the
+refresh, hence the order vertices enter the buckets, hence which of several equal-degree vertices
+is picked. Identical degrees do not quite give an identical permutation.
+
+**Two complications specific to mmd, and neither is fatal.**
+
+- **Outmatching means incomplete information.** The refresh skips outmatched vertices, so a clique
+  reachable only through one of them is never walked that round and its containment is never
+  tested. Amd walks every vertex of `C[p]` every time and has no such hole.
+- **A batch has several new cliques, not one.** Aggressive absorption is defined against `C[p]`;
+  under multiple elimination there are several, so the test becomes containment in any of them, or
+  in their union, and that is a decision rather than a transcription.
+
+As with hashing, it could not be `Mmd3`, which reproduces genmmd exactly. It would be a new layer
+with its own twin.
+
+Both halves of this subsection are reasoning rather than measurement, and are recorded as
+directions rather than plans.
+
+### By driver
+
+Grouped by family: detection first, then redundancy, then scheduling.
+
+| | mass elim | pairwise | natural abs | aggressive | bound | batch | incomplete |
+|---|---|---|---|---|---|---|---|
+| `md3` | yes | no | yes | no | no | no | no |
+| `mmd1` | yes | no | yes | no | no | yes | no |
+| `mmd2`, `mmd3` | yes | q2h | yes | no | no | yes | qxh |
+| `amd1` | yes | no | yes | no | yes | no | no |
+| `amd2`, `amd3` | yes | hash | yes | yes | yes | no | no |
+
+Every driver has mass elimination and natural absorption, which is the two families' shared floor;
+everything else is a branch or a layer.
+
+`amd1` is the layer that isolates the bound: it has the approximation and none of the mechanisms
+that ride along with it, which is why it is the control the two-mechanism cost is measured against.
+
+## Two ways a vertex disappears: mass elimination and pairwise merging
+
+Both branches fold vertices into other vertices, in two distinct operations that are easy to
+conflate because both end with one vertex carrying another's weight. They are not the same
+operation, they fire at different moments, and the branches implement the second one completely
+differently. "Supervariable detection in production" below has the mechanism for each; this section
+is the level above it, which is what the two operations ARE and which layer has which.
+
+### The two operations
+
+**MASS ELIMINATION merges into the pivot being eliminated in the same breath.** A vertex whose
+reach is exactly the new clique is indistinguishable from the pivot, so it can be eliminated next
+at no fill, and both leave the graph together. The test is cheap and local: nothing explicit left
+and no clique but the new one, `|A[u]| == 0 && I[u] == {pivot}`.
+
+**PAIRWISE MERGING merges two vertices that are indistinguishable FROM EACH OTHER**, neither of
+them the pivot, and the survivor stays LIVE and carries the other's weight onward. That is the
+difference that matters downstream: `QuotientGraph::merge` therefore does not call `killClique`,
+the absorbed vertex never having formed a clique, and the absorbed vertex is left where it lies at
+weight zero rather than purged from every clique that names it.
+
+### Which layer has which
+
+| layer | mass elimination | pairwise merging |
+|---|---|---|
+| `md3` and up, `mmd1` | yes | no |
+| `mmd2`, `mmd3` | yes | yes, by the q2h test |
+| `amd1` | yes | no |
+| `amd2`, `amd3` | yes | yes, by hash |
+
+**So `mmd1` and `amd1` are the two layers with mass elimination and nothing else**, and pairwise
+merging arrives with the second layer on both branches. It arrives by two different routes.
+
+### The routes differ, and q2h is a subset of what the hash can find
+
+`mmd` decides by the q2h test, `|A[v]| + |I[v]| - 1 == 1`, which costs nothing because it is a
+by-product of a union it has to compute anyway. `amd` decides by hashing the vertices of `C[p]` and
+comparing exactly within a bucket, which costs a key per vertex and a comparison per colliding
+pair.
+
+**The population each can reach is not the same.** q2h catches pairs where both vertices have
+exactly two sources and both sources coincide; the hash catches any indistinguishable pair in
+`C[p]`, whatever is left of either. So the hash finds strictly more, and the reason is not that MMD
+is being cleverer but that it is not asking: an exact degree opens every clique, so the pairs fall
+out of a walk it was making regardless, while a bound never opens one and has to go looking.
+
+### The paper's third route: pre-compression, and where it comes from
+
+The 1996 paper reports a third arrangement, and it is the SAME HASH FUNCTION used differently
+rather than a different idea. Page 18 says Ashcraft applies it as "a preprocessing step on the
+entire matrix", dropping the mod (n - 1) term and sorting in O(|V| log |V|) rather than filing into
+|V| hash buckets, where the paper's own use is during the ordering and over the variables adjacent
+to the current pivot only.
+
+Three axes separate the two:
+
+| | pre-compression | detection during ordering |
+|---|---|---|
+| when | once, before elimination | repeatedly, at every pivot |
+| over what | the whole matrix | `C[p]` only |
+| what it finds | identical rows of the ORIGINAL A | any pair, including ones cliques created |
+
+**The motivation is structural engineering**, and it is worth knowing because it explains why the
+idea exists at all: those matrices tend to have many rows of identical nonzero pattern, several
+degrees of freedom sharing a node, so the initial supervariables are there in A before anything is
+eliminated. Ashcraft found that detecting them up front significantly improves MMD's total ordering
+time. The authors built CMMD, "compressed" MMD, to measure it.
+
+**Pre-compression does almost nothing for AMD**, and the paper says why in one clause: AMD "finds
+these supervariables when their degrees are first updated". Detection during the ordering already
+covers the initial case, so compressing first buys nothing, and they report that AMD on compressed
+matrices plus the cost of compressing was never faster than plain AMD.
+
+### More detection is not better fill, and that is measured rather than argued
+
+The intuition is that a strictly larger population found means a better ordering. Three
+measurements say otherwise.
+
+**The paper's own**: "AMD, MMD, and CMMD find orderings of about the same quality." Three schemes
+with very different detection reach, comparable fill.
+
+**Ours, on grids**: `amd2` carries both the hash and aggressive absorption, fires the hash 2488
+times across the test set against aggressive absorption's 1, and still fills 7 percent worse and
+orders 65 percent slower than `amd1`, which has neither.
+
+**And the reason, which is stated elsewhere in this file and belongs here too:** a supervariable is
+a COMMITMENT to eliminate its members consecutively. The commitment is fill-free by construction,
+but it removes choices the picker would otherwise have had. Coarser is a smaller search space, not
+a better one.
+
+**So the value of stronger detection is in TIME rather than fill**, which is exactly what Ashcraft
+reported: fewer, larger supervariables mean fewer pivots and fewer degree updates. Any future
+experiment here should be posed as a timing question, with pivot count and `pC` beside it, and
+should expect fill to move in both directions across a set.
+
+### If an mmd layer with hashing is ever built
+
+Two constraints, so that it is not attempted inside an existing driver.
+
+**It cannot be `Mmd3`.** That driver reproduces genmmd's permutation exactly and the differential
+depends on it; coarser supervariables change pivot choice. It would be a new layer with its own
+twin.
+
+**And the port is not the interesting part.** amd's hash key is accumulated inside the bound's
+walks, `hval += e` and `hval += j` in scan 2, which is what makes it affordable there. mmd has no
+bound walk to fuse it into, so a naive version pays the whole key accumulation as a pass of its
+own, and a measurement of that would be measuring the pass rather than the idea.
+
+## The two prepasses: which drivers have one, and why they are not the same idea
+
+Both branches number some vertices before the main loop starts, and it is easy to read that as one
+feature appearing twice. It is not. The two prepasses take different vertices, for different
+reasons, and only one of them uses `number`.
+
+**WHICH DRIVERS HAVE WHICH.**
+
+| driver | prepass | what it takes |
+|---|---|---|
+| `Mmd1` | none | files everything |
+| `Mmd2`, `Mmd3`, `Mmd3B`, `Mmd3C` | mmd's | the degree-1 bucket, degree 0 with it via the floor |
+| `Amd1`, `Amd2` | none | files everything |
+| `Amd3`, `Amd3B` | amd's | degree 0, plus dense rows set aside |
+
+**Within each branch the code is identical.** The four mmd drivers run the same eight lines, the
+same after comments are stripped; `Amd3` and `Amd3B` run the same filing loop, likewise. So the
+question is only ever mmd's against amd's.
+
+### mmd's: the degree-1 bucket, and the floor is what makes it cover degree 0 too
+
+The loop is genmmd's, over `head[1]` before the main loop: take the successor before unfiling
+invalidates it, unfile, `number`, push the pivot, count it. It is described in full in "Pass 1: the
+prepass" below, at the twin level.
+
+**The floor is the part that is easy to miss.** `mmdint` files a degree-0 vertex under degree 1,
+`if (dg == 0) dg = 1`, and our drivers spell it `std::max(qg.adjacencySize(u), 1)`. So isolated and
+degree-1 vertices sit in the same bucket and are numbered together, and mmd needs one rule where
+amd needs two.
+
+### amd's: degree 0 and dense rows, riding inside the filing loop
+
+`AMD_2` numbers a degree-zero vertex where it stands during initialization, in the same ascending
+pass that files everything else, and sets aside any row whose degree exceeds `max(16, 10*sqrt(n))`.
+Ours does both in one loop for the same reason: it is one pass either way, and neither vertex is
+ever filed.
+
+### Three differences that are not cosmetic
+
+**They take different vertices, and the difference is real rather than a convention.** A degree-1
+vertex has a neighbor, so numbering it leaves that neighbor holding a stale degree; a degree-0
+vertex has nothing to leave stale. That is why mmd's prepass is a concession bought for speed,
+measured below, and amd's costs nothing at all.
+
+**Only mmd's calls `number`, and amd's deliberately does not.** `number` exists for a vertex that
+is numbered while still being NAMED by its neighbors: it marks the vertex GONE and sets
+`mHasNumbered`, and that flag then puts a test in every walk for the rest of the run. A degree-zero
+vertex is in nobody's adjacency, so no walk can reach it and there is nothing to mark. `AMD_2`
+writes `W [i] = 0` here for the same non-reason and keeps `Nv [i] = 1`. Not filing it is the whole
+of what has to happen.
+
+**Only amd's moves the live count.** That is `nel++` in `AMD_2` and `nleft = n - nel` at the degree
+bound: the bound caps on `numLeft - weight(u)`, so leaving a numbered empty row in the count would
+make the cap one too large per empty row. Mmd has no such bound and needs no such adjustment.
+
+### Both exist because the permutation differed, not the fill
+
+Neither prepass changes what gets filled. What it changes is which permutation comes out, and in
+both cases the reference's answer was the one we were failing to reproduce.
+
+On the mmd side the prepass IS genmmd's, so having it is a condition of the differential existing
+at all. On the amd side, without it a degree-zero vertex was filed at degree zero and popped from
+the head, so those vertices came out LIFO where `AMD_2` gives them ascending: a pure diagonal gave
+`4 3 2 1 0` against `0 1 2 3 4`. Twelve matrices in `benchmarks/matrices` are entirely of that kind
+and every one of them differed for that reason alone.
+
+**The dense-row rule is the same shape of finding and a larger one.** Grids have no vertex anywhere
+near `max(16, 10*sqrt(n))`, so no digest and no scaling ladder in this directory can see the rule
+at all; it took real matrices to expose it, and it accounts for most of the remaining differences
+against `AMD_2` on social and power-law graphs.
 
 ## The vendored storage scheme, and what it is worth
 
@@ -3777,7 +4373,7 @@ iterates it to do anything.
 members with the clique's tag, which made a second q2h vertex in the same clique skip them as
 already counted and report a degree too small. `mmdupd` avoids this with two levels: members of
 the new clique carry `mt`, above every tag used in the iteration, while each vertex gets a fresh
-`(*tag)++` for its own walk. Ours does the same with `element_tag` and `vertex_tag`, testing both.
+`(*tag)++` for its own walk. Ours does the same with `clique_tag` and `vertex_tag`, testing both.
 
 **The check on this pass, and the check that was wrong.** Every degree the shortcut produces must
 equal the full union, and it does, on 307 graphs. My first attempt at that check called
@@ -5997,7 +6593,7 @@ What it CAN conclude is narrower, and the code says exactly when. Our own `Mmd2.
 of computing `reach(u)`:
 
 ```cpp
-if (mark[v] == elementTag) {                                   // v is in the new element too
+if (mark[v] == cliqueTag) {                                   // v is in the new element too
     if (qg.adjacencySize(v) + qg.incidenceSize(v) - 1 == 1)    // and v has no OTHER source
         qg.merge(u, v);                                        // identical reach
     else

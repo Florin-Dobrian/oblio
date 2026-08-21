@@ -9,8 +9,8 @@
 #include <cstdint>
 #include <vector>
 
-// Mmd3C.cpp - Mmd3 on AMD_2'S CLIQUE LAYOUT: one pooled workspace with a free cursor and a garbage
-// collection, where production keeps a separate append-only arena in elimination order.
+// Mmd3C.cpp - Mmd3 on AMD_2'S CLIQUE LAYOUT: one pooled workspace with a free cursor and a
+// compaction, where production keeps a separate append-only arena in elimination order.
 //
 // IT IS A CELL OF THE LAYOUT MATRIX, and the matrix is why it exists. Two algorithms and three
 // clique layouts give six cells; with only the diagonal filled, every reading confounds the layout
@@ -56,7 +56,7 @@
 // THE STORAGE IS COMPLETE AS OF 2026-08-19, in four steps, each verified alone and none of which
 // moved a permutation: the elbow room off `nzaat` rather than off `nnz` with the diagonal, the
 // clique-count recomputation, the walk converted to positions and cursors, and the mid-walk
-// collector with the absorbed-clique capture and the contraction report that go with it. The line
+// compactor with the absorbed-clique capture and the contraction report that go with it. The line
 // this replaces said the storage had not landed and the file was a verbatim copy of Mmd3, which is
 // how it was first committed and stopped being true well before then.
 
@@ -75,7 +75,7 @@ namespace Oblio {
 // whatever capacity the allocator had handed back, so it ran about a fifth large and was not a
 // stated figure at all.
 //
-// AND IT IS WHY THE COLLECTOR HAS TO BE TESTED BY SHRINKING THE POOL. At the shipped room it fires
+// AND IT IS WHY THE COMPACTOR HAS TO BE TESTED BY SHRINKING THE POOL. At the shipped room it fires
 // once per ordering, so the mid-walk path is nearly untested by any normal run; sized to exactly
 // `nzaat` it fires 8 to 13 times over the same sizes and every permutation is byte identical.
 std::size_t gMmd3CCompactions = 0;
@@ -136,7 +136,7 @@ std::vector<std::int32_t> orderMmd3CImpl(const std::vector<std::size_t>&  colPtr
         minDegree = std::min(minDegree, degree);
     }
 
-    std::vector<std::int32_t> batch, elementMembers, q2h, qxh;
+    std::vector<std::int32_t> batch, cliqueMembers, q2h, qxh;
 
     for (std::int32_t u = buckets.head(1); u != NIL; ) {
         const std::int32_t next = buckets.next(u);   // before the unfile invalidates it
@@ -190,22 +190,22 @@ std::vector<std::int32_t> orderMmd3CImpl(const std::vector<std::size_t>&  colPtr
         }
 
         for (auto ee = batch.rbegin(); ee != batch.rend(); ++ee) {
-            const std::int32_t element = *ee;
-            const std::int32_t* members     = qg.clique(element);
-            const std::uint32_t membersSize = qg.cliqueSize(element);
+            const std::int32_t clique = *ee;
+            const std::int32_t* members     = qg.clique(clique);
+            const std::uint32_t membersSize = qg.cliqueSize(clique);
 
-            elementMembers.clear();
+            cliqueMembers.clear();
             for (std::uint32_t k = 0; k < membersSize; ++k)
-                if (!qg.eliminatedMmd(members[k])) elementMembers.push_back(members[k]);
+                if (!qg.eliminatedMmd(members[k])) cliqueMembers.push_back(members[k]);
 
-            const std::int32_t elementTag = qg.advanceTag();   // marked once for the element
-            for (std::int32_t v : elementMembers) qg.setMark(v, elementTag);
+            const std::int32_t cliqueTag = qg.advanceTag();   // marked once for the clique
+            for (std::int32_t v : cliqueMembers) qg.setMark(v, cliqueTag);
             std::uint32_t dg0 = 0;
-            for (std::int32_t v : elementMembers) dg0 += qg.weight(v);
+            for (std::int32_t v : cliqueMembers) dg0 += qg.weight(v);
 
             q2h.clear();
             qxh.clear();
-            for (std::int32_t u : elementMembers) {
+            for (std::int32_t u : cliqueMembers) {
                 if (buckets.filed(u) || buckets.outmatched(u)) continue;   // done, or withheld
                 const std::uint32_t otherSources = qg.adjacencySize(u) + qg.incidenceSize(u) - 1;
                 (otherSources == 1 ? q2h : qxh).push_back(u);
@@ -222,21 +222,21 @@ std::vector<std::int32_t> orderMmd3CImpl(const std::vector<std::size_t>&  colPtr
                     const std::int32_t v = adjacency[a];
                     const std::int32_t m = qg.mark(v);
                     if (m >= vertexTag) continue;                  // seen this pass, or dead
-                    if (m == elementTag) continue;                 // already counted in dg0
+                    if (m == cliqueTag) continue;                 // already counted in dg0
                     qg.setMark(v, vertexTag);
                     degree += qg.weight(v);
                 }
                 const std::int32_t* incidence = qg.incidenceMmd(u);
                 for (std::uint32_t i = 0; i < qg.incidenceSize(u); ++i) {
                     const std::int32_t c = incidence[i];
-                    if (c == element) continue;
+                    if (c == clique) continue;
                     const std::int32_t* other     = qg.clique(c);
                     const std::uint32_t otherSize = qg.cliqueSize(c);
                     for (std::uint32_t k = 0; k < otherSize; ++k) {
                         const std::int32_t v = other[k];
                         const std::int32_t m = qg.mark(v);
                         if (v == u || m >= vertexTag) continue;    // seen this pass, or dead
-                        if (m == elementTag) {
+                        if (m == cliqueTag) {
                             if (buckets.filed(v) || buckets.outmatched(v)) continue;
                             if (qg.adjacencySize(v) + qg.incidenceSize(v) - 1 == 1) {
                                 qg.merge(u, v);      // identical reach: u absorbs it

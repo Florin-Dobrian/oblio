@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-// Amd3B.cpp - Amd3 on AMD_2'S CLIQUE STORAGE: one pool with a free cursor and a garbage collection.
+// Amd3B.cpp - Amd3 on AMD_2'S CLIQUE STORAGE: one pool with a free cursor and a compaction.
 //
 // WHAT IT IS FOR, AND IT IS TWO THINGS. Both are permanent; this file is not an experiment awaiting
 // a verdict and its old stop condition is withdrawn. It is the amd counterpart of Mmd3B, which says
@@ -57,7 +57,7 @@
 // SECOND, IT IS THE PREDICTABLE-SPACE VERSION OF AMD3. From a conversation with Alex Pothen: given
 // a machine you know whether A fits, but you cannot know whether L fits, nnz(L) depending on the
 // ordering being computed. So a method that stays within `O(n + m)` carries a guarantee no amount
-// of speed substitutes for: IF THE INPUT FITS, THE ANSWER IS REACHABLE. The garbage collection
+// of speed substitutes for: IF THE INPUT FITS, THE ANSWER IS REACHABLE. The compaction
 // below is that guarantee bought deliberately, not frugality. Our arena is the right default for a
 // known shape on a known machine solved repeatedly; this is the right one when whether an answer
 // exists is the open question. See docs/DESIGN_DECISIONS.md (2026-08-16).
@@ -87,11 +87,11 @@
 //      also lets the new clique go in by `AMD_2`'s three-move rotation instead of by holding a
 //      vertex back and swapping afterwards, which takes a test out of the adjacency loop.
 //   2  THE WALK IS IN POSITIONS, off a base hoisted once. The pool never reallocates, so a
-//      collection invalidates a block's OFFSET and never the array's base; a position therefore
+//      compaction invalidates a block's OFFSET and never the array's base; a position therefore
 //      survives one and a pointer does not. Same cost, and it is how `AMD_2` walks.
-//   3  THE COLLECTOR RUNS PER ENTRY and carries the half-built clique, so `beginElimination` no
+//   3  THE COMPACTOR RUNS PER ENTRY and carries the half-built clique, so `beginElimination` no
 //      longer reserves room for a worst-case reach of n before the walk. That reservation was the
-//      last divergence and it was one-directional: we collected where `AMD_2` would not.
+//      last divergence and it was one-directional: we compacted where `AMD_2` would not.
 //
 // TWO THINGS WENT WITH THEM, both flags this layout cannot serve two values of and neither ever
 // set here: the list order and the reverse incidence walk. See the notes where each setter was.
@@ -100,7 +100,7 @@
 // rather than caused it. See the note there.
 //
 // VERIFIED BY VARYING THE HEADROOM, which is a better check than the digest alone. At the shipped
-// reserve the collector never runs on grids, so the mid-walk path would go untested; cut to
+// reserve the compactor never runs on grids, so the mid-walk path would go untested; cut to
 // `sum(Len)` with no elbow room at all it fires on nearly every large pivot, 3 to 14 compactions
 // from 3 to 200 a side, and every permutation is byte identical to the shipped-headroom one, clean
 // under ASan and UBSan. That also confirms `AMD_2`'s own claim that it runs with no elbow room,
@@ -338,7 +338,7 @@ std::vector<std::int32_t> orderAmd3B(const std::vector<std::size_t>&  colPtr,
                 if (qg.eliminatedAmd(u)) continue;
 
                 // THE STAMP GOES INTO `w`, WHICH RETIRES mMark. Amd.cpp does exactly this,
-                // `W [Iw [p]] = wflg` over the whole of i's list, variables and elements alike,
+                // `W [Iw [p]] = wflg` over the whole of i's list, variables and cliques alike,
                 // because both live in one id space and one array can hold a mark for either.
                 //
                 // ONE LOOP OVER THE RUN, FROM THE SECOND ENTRY, AND NO LIVENESS TEST, which is
@@ -439,13 +439,13 @@ std::vector<std::int32_t> orderAmd3B(const std::vector<std::size_t>&  colPtr,
     // survive. `Amd3` asserts the same thing on the same grounds.
     assert(qg.cliqueCountBalances() && "clique births and deaths do not balance");
 
-    // How often the pool actually needed collecting. `AMD_2` reports the same figure as
+    // How often the pool actually needed compacting. `AMD_2` reports the same figure as
     // Info[AMD_NCMPA] and its complexity bound assumes it stays constant; this is where that
     // assumption can be checked for OUR storage rather than for its.
     gAmd3BCompactions  = qg.compactions();
     gPeakCliqueMembers = qg.numPeakCliqueMembers();   // see include/oblio/QuotientGraph.h
     // THE ROWS THE DENSE RULE SET ASIDE GO LAST, in index order, which is where `AMD_2`'s output
-    // assembly puts them. They were collected in an ascending pass, so appending the vector is
+    // assembly puts them. They were compacted in an ascending pass, so appending the vector is
     // that order; each stands only for itself, having been set aside before it could absorb
     // anything, so `order` expands a chain of one.
     pivots.insert(pivots.end(), denseRows.begin(), denseRows.end());

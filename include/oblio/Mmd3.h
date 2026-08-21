@@ -17,8 +17,8 @@
 //   under its degree plus one, so the bucket a vertex sits in is not its degree. Every comparison
 //   and every walk uses the filed value.
 //
-//   THE ELEMENT-BY-ELEMENT REFRESH. mmdupd walks the elements the round created rather than the
-//   vertices they reached, and computes dg0 once per element: the weight of that element, which
+//   THE CLIQUE-BY-CLIQUE REFRESH. mmdupd walks the cliques the round created rather than the
+//   vertices they reached, and computes dg0 once per clique: the weight of that clique, which
 //   every member reaches in full. A member with exactly one other source is answered from dg0
 //   plus that source, without forming a union at all. That is the q2h path, and on grids it takes
 //   36 to 44 percent of all refreshes.

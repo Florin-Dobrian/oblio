@@ -6,7 +6,7 @@
 // each refresh cheap. Everything below that fork is here.
 //
 // The idea, in one line: an elimination does not create fill edges, it creates a CLIQUE, and a
-// clique of d vertices is a d-element list rather than d(d-1)/2 edges. So the neighbor relation
+// clique of d vertices is a d-clique list rather than d(d-1)/2 edges. So the neighbor relation
 // splits in two, and the true neighborhood is their union, formed on demand and never stored:
 //
 //     A[u]     the vertices u is still explicitly adjacent to
@@ -179,7 +179,7 @@ private:
     std::vector<std::int32_t> mHead;   // mHead[d], the first live vertex of degree d
     std::vector<std::int32_t> mNext;   // mNext[u], toward the tail
     std::vector<std::int32_t> mPrev;   // mPrev[u], toward the head
-    // A byte per vertex, not std::vector<bool>. That specialization packs one bit per element, and
+    // A byte per vertex, not std::vector<bool>. That specialization packs one bit per clique, and
     // what it costs here is CONSTRUCTION rather than access: a vector of n false is built through
     // the bit-reference machinery word by word, where a vector of n zero bytes is a memset. Both
     // this flag and the graph's own arrays are built once per ordering, so a workload that
@@ -317,7 +317,7 @@ public:
     // NOT the weight. `mWeight[v] != 0` is a PARTIAL flag on both sides: `number()` leaves a
     // prepass vertex at weight one deliberately, so its neighbors' degrees still count it, and
     // genmmd's prepass leaves `qsize` at one for the same reason. genmmd uses `qsize[nd] != 0`
-    // only inside element walks, where a prepass vertex cannot appear because the mark has
+    // only inside clique walks, where a prepass vertex cannot appear because the mark has
     // already kept it out of every clique. Used as the universal test it lets a numbered vertex
     // back into a reachable set: 201 entries for 200 vertices on a random mmd2 pattern, tried and
     // reverted on 2026-08-08.
@@ -365,7 +365,7 @@ public:
     // themselves in a pass of their own, one scattered weight load per member per pivot. It is
     // accumulated in `beginElimination`'s stamping walk instead, which has the member in hand
     // already, so the pass is gone and nothing is added. AMD_2 does the same, `degme += nvi`
-    // inside the loops that build the element, at its lines 1492 and 1636.
+    // inside the loops that build the clique, at its lines 1492 and 1636.
     //
     // MEASURED AT ZERO, and that is the point of saying so here. CPU Counters before and after,
     // same session: useful cycles unchanged within half a percent in both families, AMD3 still
@@ -471,7 +471,7 @@ public:
     // Why the two are one call rather than two loops. An approximate degree decomposes reach(u)
     // instead of forming it, so its driver walks exactly the lists the prune has just walked:
     // A[u] to sum the weights of what survived, I[u] to subtract this vertex's weight from each
-    // clique's outside count. Run afterwards, that is a second and third visit to every element,
+    // clique's outside count. Run afterwards, that is a second and third visit to every clique,
     // which is where AMD1 spends what the vendored routine does not: 483677 element visits against
     // 216662 on a 100x100 grid. Folded in, A[u] is visited once and I[u] twice, which is what
     // `amd_2`'s two scans cost.
@@ -520,7 +520,7 @@ public:
     // lands in the permutation; `AMD_2` appends the set at the end.
     void setAside(std::int32_t u);
 
-    // Walk I[u] from the back in reachableSet(), matching genmmd's element stack. A tie-break
+    // Walk I[u] from the back in reachableSet(), matching genmmd's clique stack. A tie-break
     // convention and nothing else: it changes which permutation comes out, never which sets are
     // computed. See the member's note.
     void setReverseIncidence(bool on) { mReverseIncidence = on; }
@@ -531,7 +531,7 @@ public:
     // permutation comes out and never which sets are computed. Used by Amd3 alone.
     //
     //   reachableSet   walks the CLIQUES before the explicit adjacency, since AMD_2's
-    //                  `for (knt1 = 1; knt1 <= elenme + 1; knt1++)` takes the elements of me and
+    //                  `for (knt1 = 1; knt1 <= elenme + 1; knt1++)` takes the cliques of me and
     //                  the supervariables only on its last pass. genmmd is the other way round,
     //                  which is why the md ladder is laid out as it is.
     //   the prune      puts the new clique at the FRONT of I[u] rather than appending, with the
@@ -663,13 +663,13 @@ private:
     // WHY IT IS SOUND. A clique id IS the id of the pivot that formed it, and that vertex's own
     // A[c] and I[c] are read for the last time inside `beginElimination` and never again, so the
     // three words describing its run are free from that moment. This is what `AMD_2` does with
-    // `Pe` and `Len`: an element takes over the slots of the variable it came from, which is why
-    // it allocates nothing for elements at all. The one crossing is still there, the arena's new
+    // `Pe` and `Len`: a clique takes over the slots of the variable it came from, which is why
+    // it allocates nothing for cliques at all. The one crossing is still there, the arena's new
     // length less the block's start written as a count, and it is still in `beginElimination`.
     //
     // WHAT IT WAS WORTH, and it was not the storage. Before this, every clique visit in a walk
     // probed two separate n-arrays at a dead pivot's id, scattered across the whole id space, once
-    // per element of every I[u]. Now one 16-byte run gives both, on a line the walk is already
+    // per clique of every I[u]. Now one 16-byte run gives both, on a line the walk is already
     // touching. Measured on alpamayo with Amd3B: the amd branch's 2D ratio against the vendored
     // routine had been RISING with n, 1.11x at 32 a side to 1.49x at 400, and it went FLAT at
     // 1.38x from 100 a side up. A differential had already shown the two codes doing the same
@@ -741,9 +741,9 @@ private:
 
     std::vector<std::int32_t> mMerged;   // scratch for the vertices an elimination merges away
 
-    // Which end of I[u] reachableSet() walks from. genmmd threads its element list through an
+    // Which end of I[u] reachableSet() walks from. genmmd threads its clique list through an
     // integer array and pushes at the head, `list[nb] = el; el = nb`, then reads from the head, so
-    // the element seen LAST is expanded FIRST; we hold a vector and append. Same set either way and
+    // the clique seen LAST is expanded FIRST; we hold a vector and append. Same set either way and
     // the same cost, but the order decides C[pivot]'s order, hence which of two equal-degree
     // candidates a later iteration finds first, and minimum degree is settled by exactly that.
     // Off by default, so every existing driver is unaffected; Mmd3 turns it on. See
@@ -767,7 +767,7 @@ private:
     // and liveness, `mMark[v] != GONE` survives in the adjacency walk and in both prunes for one
     // case alone: a prepass vertex keeps a positive weight and sits in every neighbor's adjacency,
     // so a positive weight does not mean live THERE. Amd cannot produce such a vertex, so without
-    // this flag its three drivers pay a second scattered load per adjacency element for a
+    // this flag its three drivers pay a second scattered load per adjacency clique for a
     // condition that can never hold. `mHasNumbered &&` short circuits before the load, and the
     // branch is perfectly predicted, being constant for the whole run.
     //
@@ -899,12 +899,12 @@ inline void QuotientGraph::reachableSet(std::int32_t u, std::vector<std::int32_t
     // positive weight does not mean live there. It cannot appear in a CLIQUE: the prepass completes
     // before the first elimination, so no clique existed when it was numbered, and every clique
     // since is built from a reach that skipped it. genmmd reaches the same arrangement, using
-    // `qsize != 0` inside element walks only and `marker` everywhere else.
+    // `qsize != 0` inside clique walks only and `marker` everywhere else.
     ++mTag;
     mWeight[u] = -mWeight[u];              // never its own neighbor
     // The bounds are hoisted, all of them. Each is a load from a member vector, and the bodies
     // below store through mMark, which the compiler cannot prove does not alias the sizes, so a
-    // bound left in the condition is re-loaded once per element. Measured at 300 ms of AMD1's
+    // bound left in the condition is re-loaded once per clique. Measured at 300 ms of AMD1's
     // 6.31 s on alpamayo, in the one accessor that reads as though it were free.
     const VertexRun&    run           = mRun[u];          // one fetch; see the member
     const std::int32_t* source        = mSource.data() + run.sourcePtr;
@@ -917,8 +917,8 @@ inline void QuotientGraph::reachableSet(std::int32_t u, std::vector<std::int32_t
     const bool reverse  = mReverseIncidence;
     const bool amdOrder = mVendoredListOrder;
 
-    // Which source is walked first. genmmd expands the variables and then the elements, which is
-    // how the whole md ladder is laid out; AMD_2 takes the elements first and the supervariables
+    // Which source is walked first. genmmd expands the variables and then the cliques, which is
+    // how the whole md ladder is laid out; AMD_2 takes the cliques first and the supervariables
     // only on its last pass. Same set either way, and the order decides C[pivot]'s content order,
     // hence which of two equal-degree candidates a later iteration finds first.
     if (amdOrder) {
@@ -977,7 +977,7 @@ inline std::uint32_t QuotientGraph::reachableSize(std::int32_t u) {
     mMark[u] = mTag;
     // The bounds are hoisted, all of them. Each is a load from a member vector, and the bodies
     // below store through mMark, which the compiler cannot prove does not alias the sizes, so a
-    // bound left in the condition is re-loaded once per element. Measured at 300 ms of AMD1's
+    // bound left in the condition is re-loaded once per clique. Measured at 300 ms of AMD1's
     // 6.31 s on alpamayo, in the one accessor that reads as though it were free.
     const VertexRun&    run           = mRun[u];          // one fetch; see the member
     const std::int32_t* source        = mSource.data() + run.sourcePtr;
@@ -1006,7 +1006,7 @@ inline std::uint32_t QuotientGraph::reachableWeight(std::int32_t u) {
     mMark[u] = mTag;
     // The bounds are hoisted, all of them. Each is a load from a member vector, and the bodies
     // below store through mMark, which the compiler cannot prove does not alias the sizes, so a
-    // bound left in the condition is re-loaded once per element. Measured at 300 ms of AMD1's
+    // bound left in the condition is re-loaded once per clique. Measured at 300 ms of AMD1's
     // 6.31 s on alpamayo, in the one accessor that reads as though it were free.
     const VertexRun&    run           = mRun[u];          // one fetch; see the member
     const std::int32_t* source        = mSource.data() + run.sourcePtr;
@@ -1081,7 +1081,7 @@ inline void QuotientGraph::beginElimination(std::int32_t pivot) {
     // one of the six drivers, on 2D grids as well as 3D, so it is the shared class's and not any
     // driver's.
     //
-    // The remedy is to make the arena unable to move rather than to re-fetch per element, which
+    // The remedy is to make the arena unable to move rather than to re-fetch per clique, which
     // would put a load in the innermost loop of the whole ordering for a hazard that occurs once
     // per elimination at most. A reach is at most `size()` entries, so room for one is room for
     // the whole walk, and the growth stays geometric so nothing is given back to the doubling this
@@ -1269,7 +1269,7 @@ inline const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pi
     // `w[c]` in the driver; elimination-time absorption, which is I[pivot], happens inside
     // `beginElimination` and used to be recorded only as a zero size. So the prune could test
     // neither alone and tested the size, an array it reads for nothing else, once per incidence
-    // element on every reached vertex. `AMD_2` writes both deaths into W, `Pe[e] = FLIP(me)` with
+    // clique on every reached vertex. `AMD_2` writes both deaths into W, `Pe[e] = FLIP(me)` with
     // `W[e] = 0`, and its scan tests `we != 0` off the load it already needs for the value.
     //
     // Done HERE rather than inside beginElimination, which is the only reason it is a separate
@@ -1288,7 +1288,7 @@ inline const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pi
     const std::uint32_t reachedSize = mRun[pivot].adjacencySize;
 
     // EVERY MEMBER OF C[pivot] LEAVES THE DEGREE LISTS HERE, which is AMD_2's "remove variable i
-    // from degree list" inside CONSTRUCT NEW ELEMENT. Not bookkeeping moved earlier for its own
+    // from degree list" inside CONSTRUCT NEW CLIQUE. Not bookkeeping moved earlier for its own
     // sake: it is what frees each member's mPrev and mNext, so the hash key and the hash chain can
     // live there for the rest of the step and no hashNext array is needed. The driver files them
     // again in its bound pass, where the new degree is known, so no vertex is out of the lists
@@ -1308,7 +1308,7 @@ inline const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pi
     for (std::uint32_t ri = 0; ri < reachedSize; ++ri) {
         const std::int32_t u       = reached[ri];
         // NEGATED, BECAUSE u IS A MEMBER OF C[pivot] AND SO READS NEGATIVE. This is Amd.cpp's
-        // `nvi = -Nv [i]` under CONSTRUCT NEW ELEMENT, and the sign is the whole of it: `wnvi`
+        // `nvi = -Nv [i]` under CONSTRUCT NEW CLIQUE, and the sign is the whole of it: `wnvi`
         // below is `wflg - nvi` and comes out wrong by twice the weight if the magnitude is not
         // taken. The cast that used to sit here is gone, `mWeight` being signed since 2026-08-17;
         // its own comment called it a signedness cast rather than a narrowing one, which was the
@@ -1366,7 +1366,7 @@ inline const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pi
         // The key is accumulated either way, one add per surviving neighbour, and STORED only
         // where the driver asked for the bucket arrangement. Accumulating unconditionally keeps
         // the inner loop branch-free; the cost to a driver that computes its own key is that one
-        // add, against a test per element if it were guarded.
+        // add, against a test per clique if it were guarded.
         if (scan.buckets != nullptr)
             scan.buckets->setKey(u, static_cast<std::int32_t>(key));   // the ADJACENCY half
 
@@ -1453,7 +1453,7 @@ inline const std::vector<std::int32_t>& QuotientGraph::massEliminate(std::int32_
         mWeight[u] = -mWeight[u];                          // live again, and positive
         // Under mVendoredListOrder the new clique sits at the FRONT of I[u] rather than the back,
         // so the single remaining entry is at the head of the incidence run either way: with A[u]
-        // empty the run starts with I[u], and with one element there is only one position. The
+        // empty the run starts with I[u], and with one clique there is only one position. The
         // test therefore needs no branch on the flag.
         if (mRun[u].adjacencySize == 0 && mRun[u].incidenceSize == 1 &&
             mSource[mRun[u].sourcePtr] == pivot) {         // A[u] empty, so I[u] starts at the run
@@ -1570,7 +1570,7 @@ inline void QuotientGraph::absorb(const std::vector<std::int32_t>& cliques,
         // THE ROTATION HAS TO BE REDONE WHEN ITS SUBJECT DIES, 2026-08-18, and this is the whole
         // of the correction. Both codes end I[u] as `[pivot][entries 1..k][entry 0]`, the first
         // entry moved to the back. `AMD_2` performs that rotation inside scan 2, where an
-        // aggressively absorbed element has ALREADY been dropped, so `entry 0` is the first
+        // aggressively absorbed clique has ALREADY been dropped, so `entry 0` is the first
         // SURVIVOR of this step's absorption. Our prune rotates first and absorbs afterwards, so
         // when the entry it parked at the back is one this pass then removes, the two lists come
         // out in different orders.

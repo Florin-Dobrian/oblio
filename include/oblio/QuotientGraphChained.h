@@ -57,7 +57,7 @@ public:
     // NOT the weight: `mWeight[v] != 0` is a PARTIAL flag on both sides. `number()` leaves a
     // prepass vertex at weight one deliberately, so its neighbors' degrees still count it, and
     // genmmd's prepass leaves `qsize` at one for the same reason; it uses `qsize[nd] != 0` only
-    // inside element walks, where a prepass vertex cannot appear because the mark kept it out of
+    // inside clique walks, where a prepass vertex cannot appear because the mark kept it out of
     // every clique. Used as the universal test it lets a numbered vertex back into a reachable
     // set, which is 201 entries for 200 vertices on a random mmd2 pattern.
     //
@@ -123,7 +123,7 @@ public:
     // themselves in a pass of their own, one scattered weight load per member per pivot. It is
     // accumulated in `beginElimination`'s stamping walk instead, which has the member in hand
     // already, so the pass is gone and nothing is added. AMD_2 does the same, `degme += nvi`
-    // inside the loops that build the element, at its lines 1492 and 1636.
+    // inside the loops that build the clique, at its lines 1492 and 1636.
     //
     // MEASURED AT ZERO, and that is the point of saying so here. CPU Counters before and after,
     // same session: useful cycles unchanged within half a percent in both families, AMD3 still
@@ -264,7 +264,7 @@ public:
     // alone; every walk skips a numbered vertex from here on.
     void number(std::int32_t u);
 
-    // Walk I[u] from the back in reachableSet(), matching genmmd's element stack. A tie-break
+    // Walk I[u] from the back in reachableSet(), matching genmmd's clique stack. A tie-break
     // convention and nothing else: it changes which permutation comes out, never which sets are
     // computed. See the member's note.
     void setReverseIncidence(bool on) { mReverseIncidence = on; }
@@ -275,7 +275,7 @@ public:
     // permutation comes out and never which sets are computed. Used by Amd3 alone.
     //
     //   reachableSet   walks the CLIQUES before the explicit adjacency, since AMD_2's
-    //                  `for (knt1 = 1; knt1 <= elenme + 1; knt1++)` takes the elements of me and
+    //                  `for (knt1 = 1; knt1 <= elenme + 1; knt1++)` takes the cliques of me and
     //                  the supervariables only on its last pass. genmmd is the other way round,
     //                  which is why the md ladder is laid out as it is.
     //   the prune      puts the new clique at the FRONT of I[u] rather than appending, with the
@@ -437,9 +437,9 @@ private:
 
     std::vector<std::int32_t> mMerged;   // scratch for the vertices an elimination merges away
 
-    // Which end of I[u] reachableSet() walks from. genmmd threads its element list through an
+    // Which end of I[u] reachableSet() walks from. genmmd threads its clique list through an
     // integer array and pushes at the head, `list[nb] = el; el = nb`, then reads from the head, so
-    // the element seen LAST is expanded FIRST; we hold a vector and append. Same set either way and
+    // the clique seen LAST is expanded FIRST; we hold a vector and append. Same set either way and
     // the same cost, but the order decides C[pivot]'s order, hence which of two equal-degree
     // candidates a later iteration finds first, and minimum degree is settled by exactly that.
     // Off by default, so every existing driver is unaffected; Mmd3 turns it on. See
@@ -518,7 +518,7 @@ inline std::uint32_t QuotientGraphChained::reachableWeight(std::int32_t u) {
     mMark[u] = mTag;
     // The bounds are hoisted, all of them. Each is a load from a member vector, and the bodies
     // below store through mMark, which the compiler cannot prove does not alias the sizes, so a
-    // bound left in the condition is re-loaded once per element. Measured at 300 ms of AMD1's
+    // bound left in the condition is re-loaded once per clique. Measured at 300 ms of AMD1's
     // 6.31 s on alpamayo, in the one accessor that reads as though it were free.
     const std::int32_t* source        = mSource.data() + mRun[u].sourcePtr;
     const std::uint32_t adjacencySize = mRun[u].adjacencySize;
@@ -572,7 +572,7 @@ inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int3
     // one of the six drivers, on 2D grids as well as 3D, so it is the shared class's and not any
     // driver's.
     //
-    // The remedy is to make the arena unable to move rather than to re-fetch per element, which
+    // The remedy is to make the arena unable to move rather than to re-fetch per clique, which
     // would put a load in the innermost loop of the whole ordering for a hazard that occurs once
     // per elimination at most. A reach is at most `size()` entries, so room for one is room for
     // the whole walk, and the growth stays geometric so nothing is given back to the doubling this
@@ -685,7 +685,7 @@ inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int3
     //
     // What kept the pass alive was the weighted clique size accumulated beside it. That value has
     // NO READER in this file: `cliqueWeight()` exists for the amd drivers on the shared class, and
-    // this one carries the mmd driver alone, whose refresh computes `dg0` itself from the element
+    // this one carries the mmd driver alone, whose refresh computes `dg0` itself from the clique
     // members. So the accumulation goes with the walk rather than moving into the emit.
     //
     // The pivot reads negative from the negation above, so it reads as a member of its own
@@ -839,7 +839,7 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std:
         mWeight[u] = -mWeight[u];                          // live again, and positive
         // Under mVendoredListOrder the new clique sits at the FRONT of I[u] rather than the back,
         // so the single remaining entry is at the head of the incidence run either way: with A[u]
-        // empty the run starts with I[u], and with one element there is only one position. The
+        // empty the run starts with I[u], and with one clique there is only one position. The
         // test therefore needs no branch on the flag.
         if (mRun[u].adjacencySize == 0 && mRun[u].incidenceSize == 1 &&
             mSource[mRun[u].sourcePtr] == pivot) {         // A[u] empty, so I[u] starts at the run
@@ -864,7 +864,7 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std:
     //
     // EVERY READER ALREADY SKIPS THE DEAD, which is what makes the removal a deletion:
     // `reachableSet` tests `nv > 0`, genmmd's own test; the reach count tests the mark, and GONE
-    // outranks any tag; the driver's element walk tests `eliminated`; its pair test rejects on
+    // outranks any tag; the driver's clique walk tests `eliminated`; its pair test rejects on
     // `m >= vertexTag`. The one loop with no test is the eviction over C[pivot], which is
     // `mmdelm`'s `bwd[rn] = 0` and which genmmd likewise runs over the uncompacted list;
     // the unfile-and-restore pair is idempotent, so a merged vertex is evicted harmlessly.

@@ -39,9 +39,9 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
     // emptying it; the prepass now reads each successor before unfiling and needs no list at all.
     // A `touched` list with a `touchedRound` stamp beside it went the same way on 2026-08-15,
     // having been filled once per clique member per pivot and never read on this layer.
-    std::vector<std::int32_t> batch, elementMembers, q2h, qxh;
+    std::vector<std::int32_t> batch, cliqueMembers, q2h, qxh;
 
-    // NO DRIVER MARK ARRAY. The two levels this refresh needs, one surviving a whole element and
+    // NO DRIVER MARK ARRAY. The two levels this refresh needs, one surviving a whole clique and
     // one fresh per vertex, are two tags rather than two arrays, and they go into the graph's own
     // stamp array through advanceTag/mark/setMark. That is genmmd's `marker` exactly: `mmdelm`
     // stamps it at level `tag` and `mmdupd` at level `mt = tag + md0`, one array between them.
@@ -109,27 +109,27 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
             if (delta < 0) break;
         }
 
-        // ---- one refresh, walked element by element -----------------------------
-        for (std::int32_t element : batch) {
-            const std::int32_t* members     = qg.clique(element);
-            const std::uint32_t membersSize = qg.cliqueSize(element);
+        // ---- one refresh, walked clique by clique -----------------------------
+        for (std::int32_t clique : batch) {
+            const std::int32_t* members     = qg.clique(clique);
+            const std::uint32_t membersSize = qg.cliqueSize(clique);
 
-            elementMembers.clear();
+            cliqueMembers.clear();
             for (std::uint32_t k = 0; k < membersSize; ++k)
-                if (!qg.eliminated(members[k])) elementMembers.push_back(members[k]);
+                if (!qg.eliminated(members[k])) cliqueMembers.push_back(members[k]);
 
-            const std::int32_t elementTag = qg.advanceTag();   // marked once for the element
-            for (std::int32_t v : elementMembers) qg.setMark(v, elementTag);
+            const std::int32_t cliqueTag = qg.advanceTag();   // marked once for the clique
+            for (std::int32_t v : cliqueMembers) qg.setMark(v, cliqueTag);
             std::uint32_t dg0 = 0;
-            for (std::int32_t v : elementMembers) dg0 += qg.weight(v);
+            for (std::int32_t v : cliqueMembers) dg0 += qg.weight(v);
 
-            // reach(u) has |A[u]| + |I[u]| sources once the new element is counted, so one other
-            // source means everything u reaches is in this element plus that one place. dg0
-            // already counts the element, and the other source is walked directly, so no union is
+            // reach(u) has |A[u]| + |I[u]| sources once the new clique is counted, so one other
+            // source means everything u reaches is in this clique plus that one place. dg0
+            // already counts the clique, and the other source is walked directly, so no union is
             // formed at all.
             q2h.clear();
             qxh.clear();
-            for (std::int32_t u : elementMembers) {
+            for (std::int32_t u : cliqueMembers) {
                 if (buckets.filed(u) || buckets.outmatched(u)) continue;   // done, or withheld
                 const std::uint32_t otherSources = qg.adjacencySize(u) + qg.incidenceSize(u) - 1;
                 (otherSources == 1 ? q2h : qxh).push_back(u);
@@ -150,7 +150,7 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
 
                 // Not hoisted, deliberately. A q2h vertex has adjacencySize + incidenceSize == 2
                 // by the test that put it on this list, so these two loops run over at most two
-                // elements between them and a length loaded up front is overhead rather than a
+                // cliques between them and a length loaded up front is overhead rather than a
                 // saving. Hoist where a loop is long; leave it where the loop is short or exits
                 // early. Measured both ways.
                 const std::int32_t* adjacency = qg.adjacency(u);
@@ -161,22 +161,22 @@ std::vector<std::int32_t> orderMmd2(const std::vector<std::size_t>&  colPtr,
                     // mean skip. This was `qg.eliminated(v) || mark[v] == vertexTag`, two arrays.
                     const std::int32_t m = qg.mark(v);
                     if (m >= vertexTag) continue;                  // seen this pass, or dead
-                    if (m == elementTag) continue;                 // already counted in dg0
+                    if (m == cliqueTag) continue;                 // already counted in dg0
                     qg.setMark(v, vertexTag);
                     degree += qg.weight(v);
                 }
                 const std::int32_t* incidence = qg.incidence(u);
                 for (std::uint32_t i = 0; i < qg.incidenceSize(u); ++i) {
                     const std::int32_t c = incidence[i];
-                    if (c == element) continue;
+                    if (c == clique) continue;
                     const std::int32_t* other     = qg.clique(c);
                     const std::uint32_t otherSize = qg.cliqueSize(c);
                     for (std::uint32_t k = 0; k < otherSize; ++k) {
                         const std::int32_t v = other[k];
                         const std::int32_t m = qg.mark(v);
                         if (v == u || m >= vertexTag) continue;    // seen this pass, or dead
-                        if (m == elementTag) {
-                            // v is in the new element and in this same other source, so it sees
+                        if (m == cliqueTag) {
+                            // v is in the new clique and in this same other source, so it sees
                             // at least what u sees.
                             if (buckets.filed(v) || buckets.outmatched(v)) continue;
                             if (qg.adjacencySize(v) + qg.incidenceSize(v) - 1 == 1) {

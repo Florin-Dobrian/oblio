@@ -1,7 +1,7 @@
 #pragma once
 
-// Mmd3C.h - Mmd3 on AMD_2'S CLIQUE LAYOUT, one pooled workspace with a free cursor and a garbage
-// collection, over a private copy of the quotient graph.
+// Mmd3C.h - Mmd3 on AMD_2'S CLIQUE LAYOUT, one pooled workspace with a free cursor and a
+// compaction, over a private copy of the quotient graph.
 //
 // A CELL OF THE LAYOUT MATRIX. B is a driver on its own branch's vendored layout, C is a driver on
 // the other branch's, so this is the mmd counterpart of Amd3B and pairs with it down a column. It
@@ -14,7 +14,7 @@
 // benchmarks/ordering catches a drift; `make mmdorder` in experiments/ordering says correct.
 //
 // It is otherwise Mmd3, whose header describes the ordering itself: the prepass, the filing
-// convention, the element-by-element refresh and its q2h path, and pairwise merging with outmatched
+// convention, the clique-by-clique refresh and its q2h path, and pairwise merging with outmatched
 // marking. That description is authoritative there and is not repeated here.
 
 #include "oblio/QuotientGraph.h"

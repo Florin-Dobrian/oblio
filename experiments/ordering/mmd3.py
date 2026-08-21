@@ -758,7 +758,7 @@ def mmd3_minimum_degree(G, delta=0):
         # chaining its new elements in `list` and building no vertex set at all.
         refreshed_vertices = []
         # The second site, before the refresh, and OUTSIDE the element loop rather
-        # than inside it. element_tag is stamped once per element and read all the
+        # than inside it. clique_tag is stamped once per element and read all the
         # way through that element's two-source walk, where it decides both the merge
         # and the outmatched case, with vertex_tag fresh per vertex nested inside
         # it. Two levels live at once, which is mmdupd's mt against its tag, so a
@@ -770,12 +770,12 @@ def mmd3_minimum_degree(G, delta=0):
         # The driver's element list, `list[mn] = ehead; ehead = mn`, so the LAST pivot
         # of a batch is the FIRST element refreshed. See mmd3_neighbors.
         for element in reversed(batch):
-            element_members = [u for u in C[element] if not eliminated[u]]
+            clique_members = [u for u in C[element] if not eliminated[u]]
             tag += 1                            # dg0's members, marked once
-            element_tag = tag
-            for v in element_members:
-                mark[v] = element_tag
-            dg0 = sum(len(super_members[v]) for v in element_members)
+            clique_tag = tag
+            for v in clique_members:
+                mark[v] = clique_tag
+            dg0 = sum(len(super_members[v]) for v in clique_members)
 
             # Set view of the split. reach(u) has |A[u]| + |I[u]| sources once the
             # new element is counted, so |A[u]| + |I[u]| - 1 == 1 says everything u
@@ -783,7 +783,7 @@ def mmd3_minimum_degree(G, delta=0):
             # a union is not needed for: dg0 already counts the element, and the one
             # other source is walked directly.
             two_source_queue, many_source_queue = [], []
-            for u in element_members:
+            for u in clique_members:
                 if filed[u] or outmatched[u]:   # already refreshed this iteration, or
                     continue                    # withheld as outmatched
                 other_sources = len(A[u]) + len(I[u]) - 1
@@ -795,7 +795,7 @@ def mmd3_minimum_degree(G, delta=0):
                     continue                         # earlier two-source vertex
                 # Everything u reaches is in the element or comes from its one
                 # other source. dg0 counts the element, minus u itself. Two mark
-                # levels, as mmdupd has: element_tag says "already in dg0" and
+                # levels, as mmdupd has: clique_tag says "already in dg0" and
                 # survives the whole element, while vertex_tag is fresh per vertex,
                 # so one two-source vertex cannot hide a neighbor from the next.
                 tag += 1
@@ -811,7 +811,7 @@ def mmd3_minimum_degree(G, delta=0):
                 for v in A[u]:
                     if eliminated[v] or mark[v] == vertex_tag:
                         continue
-                    if mark[v] == element_tag:
+                    if mark[v] == clique_tag:
                         continue                # already in dg0
                     mark[v] = vertex_tag
                     degree += len(super_members[v])
@@ -821,7 +821,7 @@ def mmd3_minimum_degree(G, delta=0):
                     for v in C[c]:
                         if v == u or eliminated[v] or mark[v] == vertex_tag:
                             continue
-                        if mark[v] == element_tag:
+                        if mark[v] == clique_tag:
                             # v is in the new element AND in this same other
                             # source, so it sees at least what u sees.
                             if filed[v] or outmatched[v]:

@@ -1,6 +1,6 @@
 #pragma once
 
-// Amd3B.h - Amd3 on AMD_2's clique storage: one pool with a free cursor and a garbage collection.
+// Amd3B.h - Amd3 on AMD_2's clique storage: one pool with a free cursor and a compaction.
 // PERMANENT, and for two reasons. It is the ALIGNMENT VEHICLE for a differential against AMD_2,
 // holding cliques the way AMD_2 does so that whatever still differs is either layout or an
 // improvement to carry back into our own ladder; and it is the PREDICTABLE-SPACE version of AMD3,
@@ -12,7 +12,7 @@
 // It is otherwise Amd3 exactly. Every design note for that layer is in Amd3.h and is authoritative
 // there. The one difference is where cliques live: Amd3 keeps them in a separate append-only arena
 // in elimination order, and this keeps them in the same pool as the adjacency and incidence lists,
-// with a free cursor and a garbage collection, which is what `AMD_2` does with `Iw`.
+// with a free cursor and a compaction, which is what `AMD_2` does with `Iw`.
 //
 // It is the amd counterpart of Mmd3B, which prices our arena against genmmd's dead-segment scheme.
 // AMD_2's is a third design and had never been compared against.

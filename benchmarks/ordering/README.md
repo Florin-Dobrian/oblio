@@ -8,6 +8,16 @@
 > permutation and every nnz(L) is identical. The tables are left as they stand because a dated
 > measurement is a record of a run. `docs/DESIGN_DECISIONS.md` (2026-08-15) has the account.
 
+> **AND THE COLUMNS CHANGED ON 2026-08-21.** `MMD1`, `MMD2`, `AMD1` and `AMD2` were retired to
+> `retired/`, so their columns are gone from the tables this document describes and their rows here
+> are a record of drivers no longer in the build. The ladder itself is intact as prototypes in
+> `experiments/ordering/`; see `retired/README.md`. `make digest` went from nine drivers to five,
+> 365 digests where it recorded 657.
+>
+> **`AMD3` also got 6 to 12 per cent faster on large grids the same day**, largest at 1601 squared,
+> from no longer allocating an n-int32 mark array it never read. Confirmed across two runs with the
+> vendored `AMD` control unmoved. Every `AMD3` time below predates that.
+
 > **AND AGAIN, 2026-08-19, FOR A DIFFERENT REASON.** Every ratio here between a driver holding its
 > quotient graph in its own translation unit and one calling into a separate `.cpp` is biased
 > toward the first by about 5 percent on alpamayo, the class being inlined into its pivot loop.

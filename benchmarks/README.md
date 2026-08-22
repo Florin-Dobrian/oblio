@@ -1,5 +1,10 @@
 # Benchmarks
 
+> **SUPERSEDED IN PART, 2026-08-21.** `MMD1`, `MMD2`, `AMD1` and `AMD2` were retired to
+> `retired/` and are out of the build, so their rows here are a record of drivers that no longer
+> exist in production. The ladder is intact as prototypes in `experiments/ordering/`; see
+> `retired/README.md`.
+
 Timing and profiling work, one self-contained folder per subject.
 
 - **`ordering/`** measures one phase against itself: what each ordering method costs and how much

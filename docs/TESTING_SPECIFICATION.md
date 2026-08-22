@@ -25,8 +25,13 @@ below: it catches an example that crashes, that returns a failure, or that has q
 being built, and says nothing about whether the numbers it prints are right. The stronger version,
 checking deterministic output, is open in docs/TODO.md and is awkward while residuals are in the
 output, since those legitimately differ in the last bits across BLAS
-implementations. Totals today: **279 assertions across 8 suites** with the vendored orderings
-present, **265 without**.
+implementations. Totals today: **251 assertions across 8 suites** with the vendored orderings
+present, **237 without**.
+
+**RETIRED 2026-08-21: MMD1, MMD2, AMD1 AND AMD2.** Those four drivers are in `retired/`, out of the
+build and out of the `Ordering` enum, which is now five values. Sixteen validity assertions in
+`test_order` went with them and twelve more across the other suites, taking the totals from 279 and
+265 to the figures above. Both were read off a run. See `retired/README.md`.
 
 **CORRECTED 2026-08-17, AND THE SAME FAILURE AS THE ONE RECORDED BELOW.** This file said 283 and
 269, `README.md` and `CLAUDE.md` said the same, `test_order.cpp`'s own header comment said a third
@@ -45,17 +50,17 @@ run the suites and count, which takes one command.
 **The count depends on the build, and that is deliberate.** The vendored MMD and AMD live in
 `private/`, which is not published, and both builds detect rather than require it. Fourteen
 assertions in `test_order` check those two routines and compile only when they are there, so that
-suite reports 87 or 73. Nothing else varies: every other suite asserts the same thing either way,
+suite reports 59 or 45. Nothing else varies: every other suite asserts the same thing either way,
 everything they use being ours. The one place the difference shows outside `test_order` is the
 ordering sweep in `test_pipeline`, which expects every ordering the build has rather than a fixed
-number. That sweep covers seven orderings without `private/` and nine with it, having dropped
-AMD1B and AMD2B on 2026-08-15 when they left the enum.
+number. That sweep covers three orderings without `private/` and five with it, having dropped
+AMD1B and AMD2B on 2026-08-15 and MMD1, MMD2, AMD1 and AMD2 on 2026-08-21 when they left the enum.
 
 | suite | assertions | what it establishes |
 |---|---|---|
 | `smoke` | 5 | the tree builds and the basic objects work |
 | `test_permutation` | 11 | the index map and its composition |
-| `test_order` | 87 / 73 | the orderings are valid, and each non-enum layer reproduces its original (73 without `private/`) |
+| `test_order` | 59 / 45 | the orderings are valid, and each non-enum layer reproduces its original (73 without `private/`) |
 | `test_forest` | 29 | elimination forest, supernodes, amalgamation, multifrontal child order |
 | `test_symfactor` | 29 | supernodal index sets against a dense oracle |
 | `test_numfactor` | 18 | the numeric factor, by oracle and by reconstruction |
@@ -180,11 +185,11 @@ inverse it gives the identity, it is order sensitive in both directions, it is n
 identity on either side is neutral, and a size mismatch is refused. A random sweep of 500 checks
 composition against direct application and the inverse against the identity.
 
-### test_order, 87 assertions (14 of them the vendored pair's, and optional)
+### test_order, 59 assertions (14 of them the vendored pair's, and optional)
 
-Seven matrices, each checked for structural symmetry and then ordered by all eight enum methods and
-checked for validity as a permutation: AMD, AMD1, AMD2, AMD3, MMD, MMD1, MMD2 and MMD3. Matrices: a
-6x6 arrow, tridiagonals at n = 1, 2, 10 and 100, a 5x5 diagonal, and a complex arrow.
+Seven matrices, each checked for structural symmetry and then ordered by all four non-trivial enum
+methods and checked for validity as a permutation: AMD, AMD3, MMD and MMD3. Matrices: a 6x6 arrow,
+tridiagonals at n = 1, 2, 10 and 100, a 5x5 diagonal, and a complex arrow.
 
 **Three further layers are reached as FREE FUNCTIONS and are the strongest oracle in this suite**,
 because each must reproduce its original ENTRY FOR ENTRY. Every other pair of orderings here can
@@ -195,8 +200,8 @@ permutation is a requirement and any difference is a defect in one of the two.
 | layer | is | permanent |
 |---|---|---|
 | `MMD3B` | MMD3 on genmmd's dead-segment clique storage | yes |
-| `AMD3B` | AMD3 on AMD_2's pooled storage with garbage collection | yes |
-| `MMD3C` | MMD3 on the production layout, over a private quotient graph | no, transitional |
+| `AMD3B` | AMD3 on AMD_2's compacted storage | yes |
+| `MMD3C` | MMD3 on AMD_2's compacted storage | yes |
 
 None is in the `Ordering` enum, so none is reached by `test_pipeline`'s sweep, and none has a
 prototype in `experiments/ordering` or appears in its `PORTED` list. **This suite and `make digest`
@@ -212,17 +217,17 @@ is trivial: the diagonal is n isolated vertices where every degree is zero and n
 the complex arrow exercises the structural overloads through a second instantiation.
 
 `AMD1B` and `AMD2B` were two more such layers until 2026-08-16, when the fused schedule they carried
-measured identical and faster and moved into `AMD1` and `AMD2`. Their 14 sameness assertions and 14
+measured identical and faster and moved into their originals. Their 14 sameness assertions and 14
 validity ones went with them, which is the drift corrected at the top of this file.
 
-The AMD2 pair is the more valuable of the two, though it was the easier to add. AMD2 carries an
-absorption pass that kills cliques and a hash pass that folds one live vertex into another, so it
-has more places to go quietly wrong than AMD1 does, and an identity check guards all of them at
-once.
+**AND THE ENUM LOST FOUR MEMBERS ON 2026-08-21.** `MMD1`, `MMD2`, `AMD1` and `AMD2` were retired to
+`retired/`, taking sixteen validity assertions from this suite. What they were and why they went is
+in `retired/README.md`; the short version is that the flat quotient graph was serving six drivers
+across three list-order conventions, and the third one blocked aligning the two that ship.
 
 The distinction the suffixes carry is worth restating here because the test depends on it: a
-trailing digit means a different ordering (AMD2 has mechanisms AMD1 lacks), a trailing B means the
-same ordering computed differently.
+trailing digit means a different ordering, a trailing B or C means the same ordering computed over
+a different clique store.
 
 The orderings are checked for *validity*, not against 0.9's output, and not for quality. Nothing
 asserts that any method reduces fill, ours included: each is a new ordering rather

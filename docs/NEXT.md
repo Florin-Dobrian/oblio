@@ -1,8 +1,22 @@
-# NEXT: the ordering vocabulary and the quotient graphs are settled; measure, then decide
+# NEXT: the two quotient graphs are aligned; nested dissection and the chunked store are open
 
-**CURRENT AS OF `97f4bc6`, 2026-08-21, AND THE TREE IS CLEAN.** Everything from here down to "What
-was done since commit 5ea68cc" is recent; that section and everything after it is older, and
-several of its items are closed and marked where they are.
+**CURRENT AS OF 2026-08-21, AND THE TREE IS CLEAN.** Everything from here down to "What was done
+since commit 5ea68cc" is recent; that section and everything after it is older, and several of its
+items are closed and marked where they are.
+
+**WHAT THE LAST THREE COMMITS DID.** `19efe5f`: the three quotient graphs became shared and
+header-only, so every ordering driver compiles its graph into its own translation unit; the
+real-matrix tables gained compaction counts and `MMD3C`; `benchmarks/matrices/ORDERING.md` was
+regenerated from a fresh run of all 246. `97f4bc6`: the vocabulary sweep, element to clique and
+garbage collection to compaction throughout our own code and the twins, plus four new sections in
+`experiments/ordering/README.md` reading the 1996 AMD paper against what we have built. `1da85c5`:
+five alignment items between the flat and compacted classes, all closed, and the retirement of
+`MMD1`, `MMD2`, `AMD1` and `AMD2` to `retired/`.
+
+**THE ORDERING SUBSYSTEM IS IN A SETTLED STATE.** Five enum orderings, `MMD3` and `AMD3` each
+reproducing its reference exactly; three non-enum layers on the two vendored clique stores; two
+quotient graph classes differing in three driver calls on the mmd side and nine on the amd side,
+`docs/QUOTIENT_GRAPH_USAGE.md` having the ledger. What is open is below and none of it is cleanup.
 
 **WHERE TO START: "The inlining bias" below.** It is short and it invalidates figures quoted
 elsewhere in this file and in `benchmarks/matrices/ORDERING.md`. Read it with the caution the

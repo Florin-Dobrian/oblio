@@ -305,10 +305,11 @@ include/oblio/      , public headers (declarations only)
   Permutation.h     , bidirectional index map (oldToNew / newToOld)
   OrderEngine.h     , fill-reducing ordering, MMD and AMD behind one enum
   QuotientGraph.h   , the representation Oblio's own orderings run on, and its degree buckets
-  Mmd1.h  Mmd2.h    , Oblio's own MMD orderings
-  Amd1.h  Amd2.h    , Oblio's own AMD orderings
-  Mmd3B.h  Amd3B.h  , MMD3 and AMD3 on the two VENDORED clique storage schemes, genmmd's dead
-                      segments and AMD_2's pooled workspace with garbage collection. Both keep the
+  Mmd3.h  Amd3.h    , Oblio's own MMD and AMD orderings, each reproducing its reference's
+                      permutation exactly
+  QuotientGraphCompacted.h  , AMD_2's clique store: one compacted workspace with a free cursor
+  QuotientGraphChained.h    , genmmd's: cliques threaded through the runs they came from
+  Mmd3B.h  Mmd3C.h  Amd3B.h , MMD3 and AMD3 on those two VENDORED clique stores. Both keep the
                       ordering inside O(n + m); ours does not. NOT in the Ordering enum: each is
                       the same ordering computed differently and must reproduce its original
                       exactly, so each is reached as a free function
@@ -329,9 +330,9 @@ src/                , method bodies + explicit instantiations (flat layout)
                       One .cpp per header, plus the vendored orderings, which have none:
   Amd.cpp           , AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
   Mmd.cpp           , MMD ordering (Sparspak/Liu, via Oblio 0.9)
-tests/              , test suites (279 assertions; see docs/TESTING_SPECIFICATION.md)
+tests/              , test suites (251 assertions; see docs/TESTING_SPECIFICATION.md)
   smoke.cpp                    5,  quick end-to-end sanity
-  test_order.cpp              87,  the eight enum orderings, and each of the three non-enum
+  test_order.cpp              59,  the four enum orderings, and each of the three non-enum
                                    layers against its original entry for entry
   test_permutation.cpp        11,  permutation maps
   test_forest.cpp             29,  elimination forest and supernodes
@@ -365,11 +366,12 @@ experiments/        , frozen design studies, each answering one question with a 
 ```
 
 The ordering enum also carries Natural, the identity, and our own minimum-degree implementations
-under the names MMD1, MMD2, MMD3, AMD1, AMD2 and AMD3. Those are work in progress; see
-`experiments/ordering/`. Two further layers exist and are deliberately NOT offered through the enum:
-MMD3B and AMD3B compute MMD3's and AMD3's permutations on the two VENDORED clique storage schemes.
-Each must reproduce its original entry for entry, which is what makes it useful, and each is reached
-as a free function.
+under the names MMD3 and AMD3, each of which reproduces its reference's permutation exactly. The
+earlier ladder layers, MMD1, MMD2, AMD1 and AMD2, were retired on 2026-08-21 and are in `retired/`;
+the ladder itself lives as working prototypes in `experiments/ordering/`. Three further layers exist
+and are deliberately NOT offered through the enum: MMD3B, MMD3C and AMD3B compute MMD3's and AMD3's
+permutations on the two VENDORED clique stores. Each must reproduce its original entry for entry,
+which is what makes it useful, and each is reached as a free function.
 
 **They are kept on purpose rather than pending a verdict.** Both vendored schemes hold the whole
 ordering within `O(n + m)`, and ours does not: given a machine you know whether A fits, but nnz(L)
@@ -377,17 +379,15 @@ depends on the ordering being computed, so only a method that stays in A's space
 the answer is reachable at all. Ours is the right default for a known shape on a known machine
 solved repeatedly; theirs is the right one when that is the open question. See
 `docs/DESIGN_DECISIONS.md` (2026-08-16). AMD1B and AMD2B were two more until 2026-08-16, when the
-fused schedule they carried measured identical and faster and moved into AMD1 and AMD2. MMD3 is the default: it reproduces the vendored MMD's permutation
+fused schedule they carried measured identical and faster and moved into their originals. MMD3 is the default: it reproduces the vendored MMD's permutation
 exactly, so it behaves as a reference implementation with decades of use behind it rather than as
 a tie-break of our own. AMD3 is its counterpart on the other branch and reproduces the vendored
 AMD's, up to the postorder that routine applies and Oblio does not want, since ElmForest orders
-the supernodal tree later with better information. It is NOT the default: with the filing defect
-its alignment uncovered now fixed, AMD2 fills less than the vendored routine on grids and AMD3
-therefore fills more, which is a reason to keep both. On speed the two have separated since: after
-two fusions on 2026-08-10, the hash key into the bound pass and the first scan into the prune, AMD3
-is faster than both AMD1 and AMD2 at every cubic size measured, and on cubic grids it now overlaps
-the vendored routine's own timing range at moderate sizes, rising to about 1.2x at 32 a side. So the trade is AMD2 fills a little less and AMD3
-is faster and reproduces a permutation with decades of use behind it.
+the supernodal tree later with better information. It is NOT the default, which is MMD3, and the
+reason is not speed: on the 246 matrices in `benchmarks/matrices` the amd branch is 21.8 times
+faster than the mmd one for 1.6 per cent more fill. It is that a default should be an ordering that
+is always there, and reproducing a reference with decades of use behind it is the better bet on the
+cases nobody has run. See `benchmarks/matrices/ORDERING.md`.
 
 ## History
 
@@ -441,7 +441,7 @@ Done:
 - [x] Namespaced headers (`include/oblio/`), explicit instantiation throughout
 - [x] Validated against Oblio 0.9 as oracle; end-to-end residual at machine precision
 - [x] `DirectSolver<Val>`, the top-level analyze / factor / solve driver
-- [x] 279 assertions across 8 suites
+- [x] 251 assertions across 8 suites
 - [x] Dynamic LDL, threshold 1x1 / 2x2 pivots: all three traversals, delayed columns and all, at
       machine precision. Non-root supernodes follow Ashcraft, Grimes and Lewis (1998) Figure 3.4
       with the Figure 3.3 acceptance test; roots, which cannot delay, use bounded Bunch-Kaufman

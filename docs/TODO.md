@@ -105,10 +105,18 @@ rather than one at a time. Trigger: before anyone outside this effort runs the s
 
 ### Replace the vendored orderings with Oblio's own
 
-`OrderEngine` offers two lineages. MMD and AMD are vendored; MMD1, AMD1 and AMD2 are ours, built
-from the matching prototypes over the shared `QuotientGraph`. The intent is to keep both lineages
-while ours develop, and to deprecate the vendored pair only once they can replace it. Nothing is
-deprecated yet and the vendored routines remain the default.
+**LARGELY DONE AS OF 2026-08-21.** This section is now a record of how it went rather than a
+plan.
+`MMD3` and `AMD3` each reproduce their reference's permutation exactly on every matrix the
+benchmarks cover, `MMD3` is the default, and the earlier ladder layers this section discusses,
+`MMD1`, `MMD2`, `AMD1` and `AMD2`, were retired to `retired/`. The steps below are kept because
+each names a mechanism and says what it was for; read them as history. What remains open is in
+`docs/NEXT.md`.
+
+`OrderEngine` offers two lineages. MMD and AMD are vendored; MMD1, AMD1 and AMD2 were ours, built
+from the matching prototypes over the shared `QuotientGraph`. The intent was to keep both lineages
+while ours developed, and to deprecate the vendored pair only once they could replace it. The
+vendored routines are the default for neither lineage now: `MMD3` is.
 
 What ours do not yet have, and each is a step rather than a question:
 

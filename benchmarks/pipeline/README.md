@@ -8,6 +8,11 @@
 > permutation and every nnz(L) is identical. The tables are left as they stand because a dated
 > measurement is a record of a run. `docs/DESIGN_DECISIONS.md` (2026-08-15) has the account.
 
+> **AND THE COLUMNS CHANGED ON 2026-08-21.** `MMD1`, `MMD2`, `AMD1` and `AMD2` were retired to
+> `retired/` and are out of the build, so their rows here are a record of drivers that no longer
+> exist in production. The ladder is intact as prototypes in `experiments/ordering/`; see
+> `retired/README.md`.
+
 Two drivers on grid Laplacians, asking two questions.
 
 **`pipeline_timing_cpp`: where a solve's time goes** at a few fixed sizes. Ordering, the rest of

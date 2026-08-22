@@ -65,6 +65,104 @@ be real, which requires Hermitian. Once that is on the table, the design collaps
 **Cholesky is `CC^H`, always, and in real that *is* `CC^T`.** No option, no flag, no forbidden
 combination to reject. The answer was not hard. Asking the right question was.
 
+## 2026-08-21: aligning the flat and compacted quotient graphs, and what the alignment cost
+
+**THE TEST THAT ORGANIZED IT.** A difference between mmd and amd is expected and is usually a
+vendored routine's. A difference between the flat class and the compacted one should be traceable
+to arena against pool, and where it is not, it is an accident of how the two were written. The
+compacted class is the flat one with positions into a different layout and should not differ from
+it at an algorithmic level. `docs/QUOTIENT_GRAPH_USAGE.md` carries the tables, the ledger and the
+baseline; this entry records what was learned.
+
+**FIVE ITEMS, ALL CLOSED, and three of them turned out to be something other than what they looked
+like.**
+
+- **`arenaEntries`.** `Amd3B` was the only driver without the `Impl`-plus-two-overloads shape. An
+  oversight, closed by giving it one.
+- **`restoreWeight`.** Looked like a placement preference and was a RULE nobody had stated: whoever
+  runs mass elimination restores the negated weights, the eliminator when it runs eagerly and the
+  driver when it runs late. `AMD_2` is the late case, `nvi = -Nv [i]` at line 1872 with the weights
+  still negative and the restore at 2083 under RESTORE DEGREE LISTS. The discriminator is
+  `mLateMassElimination`, which already existed and already meant exactly this, so BOTH classes
+  ended with one `massEliminate` and the compacted class LOST two suffixed pairs.
+- **The `eliminate` wrapper.** The compacted class gained the overloaded pair the flat class had.
+  Three lines each; the value is that the order of the three steps lives in the class.
+- **`eliminated`.** The flat class read a tag for both branches and allocated the array always; it
+  now reads a zero weight on amd and the tag on mmd, as the compacted class does. `Amd3` stopped
+  allocating n int32 it never read and got 6 to 12 per cent faster on large grids, confirmed over
+  two runs with the vendored control unmoved.
+- **`setVendoredListOrder`.** The flag is deleted and the flat class names the branch instead.
+
+**THE FIRST ATTEMPT AT THE SECOND ITEM SEGFAULTED `Amd2`, AND THAT IS WHAT FOUND THE RULE.**
+Splitting the flat `massEliminate` by branch broke it under ASan, because `Amd1` and `Amd2` are amd
+drivers that mass-eliminate EAGERLY and need the restore. So amd-against-mmd was the wrong axis and
+eager-against-late was the right one. The tree was reverted to the pre-attempt state and redone.
+
+**THE FOURTH ITEM NEEDED A CHECK RATHER THAN A RENAME**, because the two predicates are not
+equivalent: they differ on a vertex `number` retired, which is mmd's alone, and on a PIVOT, which is
+retired with its weight intact since that weight is the supervariable's. So the amd predicate is
+correct only if the amd driver never asks about a pivot. That was established by asserting the two
+agree on every call `Amd3` makes and running it over the digest's 73 grids at `-O0`, cubes to 33 a
+side, random patterns at degree 6, 12 and 40, a star, a diagonal and a dense block that fires the
+dense-row rule. No disagreement anywhere.
+
+**AND THE FIFTH WAS BLOCKED BY SOMETHING THE LEDGER COULD NOT SEE.** The flat class was serving SIX
+drivers across THREE list-order conventions: `Amd3` on `AMD_2`'s cliques-first order, `Mmd3` on
+genmmd's reversed incidence walk, and `Amd1`, `Amd2`, `Mmd1` and `Mmd2` on a third that is ours and
+predates both. A two-way split had nothing to offer those four, and moving them onto either
+vendored convention would have changed their permutations. Retiring them is what unblocked it; see
+below.
+
+**WHERE THE PAIRS ENDED UP**, by call sequence over the drivers' `qg.` calls:
+
+```
+                  before    after
+Mmd3 vs Mmd3C       18        3     all three compactions against arenaEntries
+Amd3 vs Amd3B       25        9     one compactions, plus two adjacencyAmd calls in
+                                    the hash-detection block and a reordering
+```
+
+**Every step left every permutation unmoved**, checked at each one by the digest, `test_order`,
+both alignment checks and the sanitizers. The grid ladder was rerun after each and stayed inside
+the harness floor, which the `MMD3B` control put at 4 to 7 per cent for a cross-run comparison.
+
+**ONE THING THAT WAS NOT ON THE LIST AND SHOULD BE NAMED.** The accessors were suffixed in all
+three classes, so a driver and its counterpart read the same. In the flat and chained classes the
+two halves are IDENTICAL bodies, each having one physical layout; only the compacted class's
+genuinely differ, since it reproduces `AMD_2`'s run order and genmmd's. That is four names over two
+bodies in two of the three classes, taken deliberately for the diffability.
+
+---
+
+## 2026-08-21: retiring MMD1, MMD2, AMD1 and AMD2
+
+Moved to `retired/`, out of the build and out of the `Ordering` enum, which is now five values:
+`Natural`, `MMD`, `MMD3`, `AMD`, `AMD3`. The account is in `retired/README.md`; what belongs here is
+why, and what it cost.
+
+**WHY.** The flat quotient graph was serving six drivers across three list-order conventions, and
+the third convention is ours rather than either vendored routine's. Its existence blocked aligning
+the two that ship: the class had to select a convention with a flag where the compacted class names
+the branch. With these four gone the flat class sees two conventions and the flag is deleted.
+
+**WHAT THEY WERE, and it was not that they were wrong.** Each carried a base algorithm without its
+reference's later refinements, so each ordered differently and none was a drop-in replacement.
+They were the ladder that produced `MMD3` and `AMD3`.
+
+**WHAT IT COST.** Four enumerators. Sixteen validity assertions in `test_order` and twelve more
+across the other suites, taking `make test` from 279 to 251 and the published build from 265 to
+237. The digest went from nine drivers to five, 365 digests where it recorded 657. And in
+`experiments/ordering`, the `PORTED` list went from six layers to two, so the check that
+"production still says what the prototype says" is gone for those four; the prototypes themselves
+are untouched and still check against their Python twins.
+
+**WHY NOT DELETED.** They may be useful again: the question they would answer is what each
+mechanism costs in isolation, which is currently answered on grids only. `1da85c5` is the last
+commit where they compile, and they depend on things now removed, so they are a record rather than
+code to resurrect unchanged.
+
+---
+
 ## 2026-08-21: reading the 1996 AMD paper against what we built, and a taxonomy that came out of it
 
 The paper is in the project as a zip of per-page text and images rather than a PDF, which is why

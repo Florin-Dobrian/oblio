@@ -171,7 +171,7 @@ include them, or use the Makefile, which detects the directory itself.
 nobody else can. To build as they do, put `OBLIO_PUBLIC=1` in front of any make command:
 
 ```
-make test                          # this machine: 279 assertions
+make test                          # this machine: 251 assertions
 OBLIO_PUBLIC=1 make test           # everyone else:  265
 ```
 
@@ -208,7 +208,7 @@ cd /tmp/oblio-clone
 make test
 ```
 
-Expect `265/265 assertions across 8 suites, 8 examples run`, against 279 in the working tree. Then
+Expect `237/237 assertions across 8 suites, 8 examples run`, against 251 in the working tree. Then
 
 ```
 cd -
@@ -216,8 +216,10 @@ rm -rf /tmp/oblio-clone
 ```
 
 Run 2026-08-04 on alpamayo, after making the vendored orderings private: 252 in the tree, 238 in
-the clone, as expected. The counts are now 279 and 265, with `MMD3`, `AMD3`, the amd alignment work
-and the uniform coverage of the three non-enum layers; the figures above are the current ones.
+the clone, as expected. The counts are now 251 and 237: they grew to 279 and 265 with `MMD3`,
+`AMD3`, the amd alignment work and the uniform coverage of the three non-enum layers, then fell on
+2026-08-21 when `MMD1`, `MMD2`, `AMD1` and `AMD2` were retired to `retired/` and took 28 assertions
+with them.
 
 **They did not only grow, and this file was wrong about them until 2026-08-17.** It said 283 and
 269 while the suite ran 261 and 247, because retiring `AMD1B` and `AMD2B` on 2026-08-15 took 28

@@ -162,8 +162,9 @@ names it explicitly.
 
 Note that `src/*.cpp` no longer picks up the vendored orderings: they live in `private/`, which is
 gitignored. A by-hand command line like the one above therefore builds without them, and
-`Ordering::MMD` and `Ordering::AMD` refuse. Add `private/*.cpp` and `-DOBLIO_VENDORED_ORDERINGS` to
-include them, or use the Makefile, which detects the directory itself.
+`Ordering::MmdVendored` and `Ordering::AmdVendored` refuse. Add `private/*.cpp` and
+`-DOBLIO_VENDORED_ORDERINGS` to include them, or use the Makefile, which detects the directory
+itself.
 
 ### Building the way everyone else does
 

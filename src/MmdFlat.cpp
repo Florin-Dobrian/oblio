@@ -1,4 +1,4 @@
-#include "oblio/Mmd3.h"
+#include "oblio/MmdFlat.h"
 
 #include <cassert>
 #include <algorithm>
@@ -8,7 +8,7 @@ namespace Oblio {
 namespace {
 
 // THE BODY, WITH ONE OPTIONAL OUT-PARAMETER. The public forms are an overload pair rather than one
-// function with another default argument; see Mmd3.h for why the type must not change.
+// function with another default argument; see MmdFlat.h for why the type must not change.
 std::vector<std::int32_t> orderMmd3Impl(const std::vector<std::size_t>&  colPtr,
                                         const std::vector<std::int32_t>& rowIdx,
                                         std::int32_t delta,
@@ -72,7 +72,7 @@ std::vector<std::int32_t> orderMmd3Impl(const std::vector<std::size_t>&  colPtr,
     //
     // It matters most where it looks least worth doing. On a matrix with no off-diagonal entries
     // every vertex goes through here and nothing else runs, so this loop IS the ordering:
-    // Boeing/bcsstm39, n = 46772 and nnz(A) = 46772, is one of the rows where MMD3 reads worst
+    // Boeing/bcsstm39, n = 46772 and nnz(A) = 46772, is one of the rows where MmdFlat reads worst
     // against genmmd. See benchmarks/matrices, `make ordering`.
     for (std::int32_t u = buckets.head(1); u != NIL; ) {
         const std::int32_t next = buckets.next(u);   // before the unfile invalidates it
@@ -260,7 +260,7 @@ std::vector<std::int32_t> orderMmd3Impl(const std::vector<std::size_t>&  colPtr,
 
 } // namespace
 
-std::vector<std::int32_t> orderMmd3(const std::vector<std::size_t>&  colPtr,
+std::vector<std::int32_t> orderMmdFlat(const std::vector<std::size_t>&  colPtr,
                                     const std::vector<std::int32_t>& rowIdx,
                                     std::int32_t delta) {
     return orderMmd3Impl(colPtr, rowIdx, delta, nullptr);
@@ -269,7 +269,7 @@ std::vector<std::int32_t> orderMmd3(const std::vector<std::size_t>&  colPtr,
 // The same ordering, reporting how many entries the clique arena ended up holding. A SIZE, not a
 // capacity, and for this scheme also the peak, the arena never shrinking. `benchmarks/matrices`
 // prints it beside nnz(L); see QuotientGraph::arenaEntries.
-std::vector<std::int32_t> orderMmd3(const std::vector<std::size_t>&  colPtr,
+std::vector<std::int32_t> orderMmdFlat(const std::vector<std::size_t>&  colPtr,
                                     const std::vector<std::int32_t>& rowIdx,
                                     std::int32_t delta,
                                     std::size_t& arenaEntries) {

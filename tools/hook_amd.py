@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate a hooked copy of the vendored AMD, in one of two modes.
 
-    python3 tools/hook_amd.py private/Amd.cpp <out>.cpp                 the RAW ORDER
-    python3 tools/hook_amd.py private/Amd.cpp <out>.cpp --mode=timed    the PHASE TIMES
+    python3 tools/hook_amd.py private/AmdVendored.cpp <out>.cpp                 the RAW ORDER
+    python3 tools/hook_amd.py private/AmdVendored.cpp <out>.cpp --mode=timed    the PHASE TIMES
 
 Both are additive: neither changes what the routine computes, and each is checked against the
 unhooked routine by its consumer before any number is read off it.
@@ -23,8 +23,8 @@ WHY THE SECOND MODE IS NEEDED AT ALL. Every ratio this tree quotes for an orderi
 pattern of A+A' because AMD takes a one-sided matrix; ours arrives full-symmetric with the diagonal
 present, which is what a `SparseMatrix` holds. `AMD_postorder` relabels the assembly tree, which
 `ElmForestEngine` redoes later with real front and update sizes on the exact supernodal tree. So a
-figure like `AMD3 1.82x` is measured against a denominator carrying work we deliberately do not do,
-and `benchmarks/ordering/README.md` has recorded one estimate of that, 8 percent at 140 a side,
+figure like `AmdFlat 1.82x` is measured against a denominator carrying work we deliberately do
+not do, and `benchmarks/ordering/README.md` has recorded one estimate of that, 8 percent at 140 a side,
 without ever measuring it per size. This is the instrument that measures it per size.
 
 WHY THE PHASES ARE TIMED RATHER THAN THE POSTORDER REMOVED, which is the first thing to reach for
@@ -45,7 +45,7 @@ THE PHASES, and what each is:
                                                             WE DO NOT DO THIS.
 
 `build + core` is the comparable region: it is the vendored routine turning a caller's pattern into
-its working structure and then ordering it, which is what `orderAmd3` does from `QuotientGraph`'s
+its working structure and then ordering it, which is what `orderAmdFlat` does from `QuotientGraph`'s
 constructor to its last pivot.
 
 WHERE THIS LIVES, AND WHY NOT IN THE STUDY THAT FIRST NEEDED IT. It was written for
@@ -61,8 +61,9 @@ does not cross the boundary at all.
 WHY A GENERATOR AND NOT A CHECKED-IN COPY. `private/` holds the vendored routine as SuiteSparse
 ships it, and its whole value is being exactly that. A copy carrying our edits would be a third
 thing, drifting from the original with nothing to notice, and a test comparing against a stale
-oracle is worse than no test. So the copy is generated from whatever `private/Amd.cpp` currently
-says, gitignored, and removed by `make clean` -- the same arrangement as the int64 copies the width
+oracle is worse than no test. So the copy is generated from whatever `private/AmdVendored.cpp`
+currently says, gitignored, and removed by `make clean` -- the same arrangement as the int64
+copies the width
 study uses.
 
 WHAT THE HOOK IS FOR. `AMD_2` does not emit the elimination order. `amd_order` returns `Perm`,

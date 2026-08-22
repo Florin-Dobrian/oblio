@@ -65,7 +65,98 @@ be real, which requires Hermitian. Once that is on the table, the design collaps
 **Cholesky is `CC^H`, always, and in real that *is* `CC^T`.** No option, no flag, no forbidden
 combination to reject. The answer was not hard. Asking the right question was.
 
-## 2026-08-21: aligning the flat and compacted quotient graphs, and what the alignment cost
+## 2026-08-21: naming the ordering drivers by branch and store
+
+**THE OLD SUFFIXES NAME A RELATIONSHIP RATHER THAN A THING, WHICH IS THE DEFECT.** `B` reads "this
+driver's own branch's vendored layout" and `C` reads "the other branch's," so a letter means a
+different store depending on which branch wears it:
+
+```
+Amd3B    amd on AMD_2's pool         compacted
+Mmd3B    mmd on genmmd's segments    chained      same letter, different store
+Mmd3C    mmd on AMD_2's pool         compacted    same store as Amd3B, different letter
+Amd3C    planned, amd on genmmd's    chained
+```
+
+The two drivers on ONE store share no letter and the two sharing a letter have no store in common.
+Nothing about the scheme is recoverable without the sentence that defines it.
+
+**THE SCHEME: A DRIVER IS ITS BRANCH PLUS THE STORE IT RUNS ON**, and the store words are the four
+quotient graph class names from the 2026-08-18 entry, so the name maps one to one onto a class and
+needs no gloss. `AmdCompacted` runs on `QuotientGraphCompacted`.
+
+```
+old                       new
+MMD  / AMD                MmdVendored   AmdVendored
+Mmd3 / Amd3               MmdFlat       AmdFlat
+Mmd3C / Amd3B             MmdCompacted  AmdCompacted
+Mmd3B / (Amd3C planned)   MmdChained    AmdChained
+(not built)               MmdChunked    AmdChunked
+```
+
+**The trailing digit goes and loses nothing.** It was the variant axis, `Mmd1`, `Mmd2`, `Mmd3`, and
+with 1 and 2 retired one variant remains. `retired/` keeps the old names untouched, renaming retired
+code being churn, so `retired/README.md` carries the map.
+
+**`Vendored` is the tree's existing word**, the build macro being `OBLIO_VENDORED_ORDERINGS`. It
+also separates two things `AMD` was carrying at once: the vendored routine and the algorithm. Only
+the first is renamed. `AMD` in prose meaning approximate minimum degree, the 1996 paper, or the amd
+branch stays exactly as it is, which is why this cannot be done by substitution.
+
+### Two homes, because it is two things
+
+The GENERATIVE part is a rule and lives here: branch plus store, store words from the four classes.
+It fixes what the next driver is called without anyone deciding again.
+
+The TAGS are a lookup table of five with no derivation rule, and they live in the legend of the one
+table that uses them, `benchmarks/matrices/ORDERING.md`'s "What the columns mean", beside `cC`,
+`pC` and `tril(A)`, which are the same kind of thing. **Full words in prose and in the aggregate
+tables; tags in the per-matrix stdout table only.**
+
+```
+Vnd   Flt   Com   Chn   Chk
+```
+
+**They are a list rather than a recipe** and that is deliberate: first-three-letters would give
+`Cha` for chained and `Chu` for chunked, so `Com` is a prefix and the other four are consonant
+skeletons. The compaction column stays `cmp`; `Com cmp` reads, where `Cmp cmp` did not, which is
+the whole reason compacted got the prefix and not the skeleton.
+
+**NEITHER GOES IN `CODING_RULES.md`.** That file states rules holding across the tree and names
+subsystems only as illustrations. A table of five ordering drivers would be the only thing in it
+about one subsystem rather than about C++.
+
+### Four alternatives declined
+
+**Single letters.** THREE OF THE FOUR STORE WORDS BEGIN WITH C, compacted, chained and chunked.
+Giving `C` to one and inventing letters for the other two is precisely the memorized table the
+scheme exists to remove.
+
+**Two letters, `Ve Fl Co Ch Ck`.** `Ch` is the natural prefix of chained AND chunked, and `Ck` is
+the only tag in the set that is not a readable contraction of its word. It also buys nothing: three
+letters already fit every field in the per-matrix table, the widest being `Com/Vnd` and `Com cmp`
+at 7 in an `%8s`, so the printed row does not move by one character either way. The row width is
+set by the numeric fields.
+
+**A short uppercase tag for the aggregate tables.** Not needed, because those tables are already
+scoped by branch: `ORDERING.md` prints an `**mmd**` table and an `**amd**` table, so inside either
+the prefix is redundant and `Compacted / Flat` reads with no legend at all. That is an ellipsis the
+table header licenses rather than an abbreviation. Cross-branch tables, of which there are two,
+take the full name.
+
+**Keeping the uppercase prose form.** `MMD3` was uppercase because it is an acronym. `MmdVendored`
+is not, and `MMDVENDORED` in a ratio is unreadable. One name everywhere is the property that made
+the full-word scheme worth taking.
+
+### Order of work
+
+Documentation first, then one stage at a time, which is the order the 2026-08-18 entry used for the
+classes themselves. Stage one is `MmdVendored` and `AmdVendored`: two enum values, `orderMMD` and
+`orderAMD`, about 52 `Ordering::` sites, six display strings, two sentences in `README.md` and
+`CLAUDE.md`, and the aggregate tables in `ORDERING.md`. The per-matrix `printf` headers move with
+the tags in a later stage, and historical entries in this file keep the names their runs were
+published under.
+
 
 **THE TEST THAT ORGANIZED IT.** A difference between mmd and amd is expected and is usually a
 vendored routine's. A difference between the flat class and the compacted one should be traceable
@@ -116,11 +207,22 @@ below.
 **WHERE THE PAIRS ENDED UP**, by call sequence over the drivers' `qg.` calls:
 
 ```
-                  before    after
-Mmd3 vs Mmd3C       18        3     all three compactions against arenaEntries
-Amd3 vs Amd3B       25        9     one compactions, plus two adjacencyAmd calls in
-                                    the hash-detection block and a reordering
+                  before    after   corrected
+Mmd3 vs Mmd3C       18        3         0
+Amd3 vs Amd3B       25        9         2     two adjacencyAmd calls in the hash-detection
+                                              block, plus the order of two adjacent rejects
 ```
+
+**THE `after` COLUMN IS WRONG, corrected the same day.** The extraction that produced it read
+`qg.<method>` out of the sources without stripping comments, so prose naming a method counted as a
+call. All three mmd differences were comment text, `qg.mark(v)`, `qg.weight(v)` and
+`qg.eliminatedMmd(v)` in `Mmd3.cpp`, and one of the nine amd ones was `qg.cliqueBase()` in the
+comment recording its removal. `compactions` is excluded from every column, being layout.
+
+**So the mmd pair's call sequences are IDENTICAL and the amd pair's differ in one place**, which is
+better than this entry claimed rather than worse. The lesson is small and cheap: an instrument that
+reads source text has to know what is code, and this one was believed because its answer was
+plausible. `docs/QUOTIENT_GRAPH_USAGE.md` carries the corrected figures and what remains.
 
 **Every step left every permutation unmoved**, checked at each one by the digest, `test_order`,
 both alignment checks and the sanitizers. The grid ladder was rerun after each and stayed inside

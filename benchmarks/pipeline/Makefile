@@ -54,7 +54,7 @@ endif
 # The two vendored ordering codes are separate for two reasons: they are not ours to clean up, so
 # they compile with warnings off exactly as the root Makefile does it, and they are not published,
 # so they live in ../../private and are optional. Absent, this benchmark still builds and any row
-# that asks for Ordering::MMD or Ordering::AMD reports a refusal.
+# that asks for Ordering::MmdVendored or Ordering::AmdVendored reports a refusal.
 OBLIO_SRCS  = $(wildcard ../../src/*.cpp)
 
 # The headers are prerequisites too, not just the sources. Without them a change to
@@ -66,7 +66,7 @@ OBLIO_HDRS  = $(wildcard ../../include/oblio/*.h)
 ifdef OBLIO_PUBLIC
   VENDOR_SRCS =
 else
-  VENDOR_SRCS = $(wildcard ../../private/Amd.cpp ../../private/Mmd.cpp)
+  VENDOR_SRCS = $(wildcard ../../private/AmdVendored.cpp ../../private/MmdVendored.cpp)
 endif
 # Which configuration this directory is built in. The two differ by a macro, so a binary from one
 # is wrong for the other and no timestamp would say so. The $(shell) deletes the stamp when the

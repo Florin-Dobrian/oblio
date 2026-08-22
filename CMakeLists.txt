@@ -35,7 +35,7 @@ unset(CMAKE_REQUIRED_LIBRARIES)
 # added below only when that directory exists.
 #
 # THIS LIST HAD DRIFTED BADLY AND WAS REPAIRED 2026-08-17. It named src/Amd1B.cpp and
-# src/Amd2B.cpp, which were deleted on 2026-08-16, and omitted src/Mmd3.cpp, which is the DEFAULT
+# src/Amd2B.cpp, which were deleted on 2026-08-16, and omitted src/MmdFlat.cpp, which is the DEFAULT
 # ordering, along with Mmd3B, Amd3B and Mmd3C. So this build had been failing to configure for a
 # day and nobody noticed, the Makefile being what the development loop runs.
 #
@@ -45,12 +45,12 @@ unset(CMAKE_REQUIRED_LIBRARIES)
 # CMake is the release path, so running it occasionally is the only thing that catches this; see
 # README.md, "Which to use".
 add_library(oblio STATIC
-    src/Amd3.cpp
+    src/AmdFlat.cpp
     src/Amd3B.cpp
     src/BlasLapack.cpp
     src/DirectSolver.cpp
     src/ElmForestEngine.cpp
-    src/Mmd3.cpp
+    src/MmdFlat.cpp
     src/Mmd3B.cpp
     src/Mmd3C.cpp
     src/MultiplyEngine.cpp
@@ -70,12 +70,13 @@ add_library(oblio STATIC
 
 # Users #include the "oblio/..." headers (namespaced). PUBLIC so tests/examples
 # that link oblio inherit the include path, so no separate global include is needed.
-# The vendored orderings, optional. Present, Ordering::MMD and Ordering::AMD work; absent, the
-# library still builds and those two enumerators refuse. Detected rather than configured, so a
+# The vendored orderings, optional. Present, Ordering::MmdVendored and Ordering::AmdVendored
+# work; absent, the library still builds and those two enumerators refuse. Detected rather than
+# configured, so a
 # tree that has the directory needs no flag and a clone needs no edit. Warnings are off for these
 # two files only, since they are copied verbatim and not maintained here.
-file(GLOB OBLIO_VENDOR_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/private/Amd.cpp
-                            ${CMAKE_CURRENT_SOURCE_DIR}/private/Mmd.cpp)
+file(GLOB OBLIO_VENDOR_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/private/AmdVendored.cpp
+                            ${CMAKE_CURRENT_SOURCE_DIR}/private/MmdVendored.cpp)
 if(OBLIO_VENDOR_SRCS)
     target_sources(oblio PRIVATE ${OBLIO_VENDOR_SRCS})
     set_source_files_properties(${OBLIO_VENDOR_SRCS} PROPERTIES COMPILE_OPTIONS "-w")

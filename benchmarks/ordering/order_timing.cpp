@@ -37,7 +37,7 @@
 #include "oblio/Permutation.h"
 #include "oblio/Mmd3B.h"
 #include "oblio/Mmd3C.h"
-#include "oblio/Amd3.h"
+#include "oblio/AmdFlat.h"
 #include "oblio/Amd3B.h"
 #include "oblio/OrderEngine.h"
 
@@ -71,11 +71,11 @@ using namespace Oblio;
 
 // THE HOOKED VENDORED AMD, which is an extra COLUMN and not a change to any existing one. The
 // `AMD` column is `amd_order` exactly as SuiteSparse ships it, which is what a caller selecting
-// `Ordering::AMD` gets, and it stays that. `AMDraw` is the same routine with an additive hook that
-// reports the order AMD_2 would emit if it stopped at the end of its main loop, before
+// `Ordering::AmdVendored` gets, and it stays that. `AMDraw` is the same routine with an additive
+// hook that reports the order AMD_2 would emit if it stopped at the end of its main loop, before
 // AMD_postorder relabels it.
 //
-// WHY THE COLUMN EARNS ITS PLACE. AMD3 reproduces that raw order and deliberately does not
+// WHY THE COLUMN EARNS ITS PLACE. AmdFlat reproduces that raw order and deliberately does not
 // postorder, so `AMD` is the wrong thing for it to sit against: the two are different permutations
 // and their fill need not agree. It usually does, on every 2D grid and from 7 a side up in 3D, and
 // it differs by one to three entries at 4^3, 5^3 and 6^3, because a postorder of AMD's ASSEMBLY
@@ -88,9 +88,9 @@ using namespace Oblio;
 // gitignored and removed by `make clean`, so no edited copy of vendored code can drift from the
 // original unnoticed. The tool lives at the root rather than in experiments/ordering because
 // benchmarks may not depend on a frozen study's contents; see ../README.md.
-// Present only where private/ is, exactly as `Ordering::AMD` itself is: the Makefile defines
-// OBLIO_AMD_RAW alongside OBLIO_VENDORED_ORDERINGS, and the column leaves the table with the
-// vendored ones in a published build.
+// Present only where private/ is, exactly as `Ordering::AmdVendored` itself is: the Makefile
+// defines OBLIO_AMD_RAW alongside OBLIO_VENDORED_ORDERINGS, and the column leaves the table
+// with the vendored ones in a published build.
 #ifdef OBLIO_AMD_RAW
 static std::vector<int> gRaw;
 extern "C" int amd_order_raw(int n, const int* Ap, const int* Ai, int* P,
@@ -107,8 +107,8 @@ extern "C" void pbRawOrder(const int* raw, int n) { gRaw.assign(raw, raw + n); }
 // no counterpart on our side: `AMD_aat` forms the pattern of A+A' because AMD takes a one-sided
 // matrix, where ours arrives full-symmetric with the diagonal present, and `AMD_postorder` relabels
 // the assembly tree, which `ElmForestEngine` redoes later on the exact supernodal tree with real
-// front and update sizes. So `AMD3 1.82x` is measured against a denominator that includes work we
-// deliberately do not do. This file has carried one estimate of that since 2026-08-01, 8 percent at
+// front and update sizes. So `AmdFlat 1.82x` is measured against a denominator that includes work
+// we deliberately do not do. This file has carried one estimate of that since 2026-08-01, 8 percent at
 // 140 a side, taken from a single profile and never measured per size. `make phases2d` measures it,
 // and the question it settles is not only the size of the correction but whether it is FLAT in n:
 // the amd branch's 2D ratio grows from 1.25x to 1.82x across the ladder, and part of that would be
@@ -116,7 +116,7 @@ extern "C" void pbRawOrder(const int* raw, int n) { gRaw.assign(raw, raw + n); }
 //
 // The five phases and the comparable region are set out in tools/hook_amd.py. In brief,
 // `build + core` is the vendored routine turning a caller's pattern into its working structure and
-// then ordering it, which is what `orderAmd3` does from `QuotientGraph`'s constructor onward.
+// then ordering it, which is what `orderAmdFlat` does from `QuotientGraph`'s constructor onward.
 //
 // IT IS CHECKED BEFORE IT IS READ, on the rule this tree keeps rediscovering: an instrument that
 // silently declines to measure is worse than one that is absent. The copy must return the shipped
@@ -220,11 +220,11 @@ static constexpr double targetMs = 300.0;
 // it an enumerator in `Ordering` would put a benchmark's oracle into the library's public enum and
 // into every switch over it. So the identity is local to this file.
 //
-// `MMD3B` is local for the same reason and is PERMANENT, 2026-08-16. It is MMD3 on genmmd's
+// `MMD3B` is local for the same reason and is PERMANENT, 2026-08-16. It is MmdFlat on genmmd's
 // dead-segment clique storage, carried in src/Mmd3B.cpp with its own private copy of QuotientGraph.
 // That storage keeps the ordering inside `O(n + m)`, so the answer is reachable whenever the input
 // fits, which our arena cannot promise; it is a maintained alternative rather than an experiment
-// awaiting a verdict, and the columns here are how its price stays measured. It returns MMD3's
+// awaiting a verdict, and the columns here are how its price stays measured. It returns MmdFlat's
 // permutation by construction, so its fill column carries nothing and its TIME column is the price.
 // It is not in `Ordering`, not in the library's source list and not in the examples: it is reached
 // here as a free function, so nothing outside this directory builds it. See src/Mmd3B.cpp,
@@ -247,8 +247,8 @@ struct Method {
     // THE AMD B LAYERS ARE GONE, 2026-08-16. AMD1B and AMD2B were their originals on a fused
     // eliminator schedule, and the schedule won: permutation-identical and faster on both families
     // once the tagged W removed the array crossing that had been paying for it, so it moved into
-    // AMD1 and AMD2 and the files went. AMD3B, which carried the array folds, went with them, AMD3
-    // now being identical to it. See docs/DESIGN_DECISIONS.md (2026-08-16).
+    // AMD1 and AMD2 and the files went. AMD3B, which carried the array folds, went with them,
+    // AmdFlat now being identical to it. See docs/DESIGN_DECISIONS.md (2026-08-16).
     bool        mmd3b = false;
     OrderFn     fn = nullptr;    // a B layer reached directly; see below
 };
@@ -297,8 +297,8 @@ static Permutation rawPermutation(const SparseMatrix<double>& A) {
 // `rawPermutation`'s, with the ordering call swapped: `setNewToOld` completes the other direction
 // exactly as OrderEngine's loop does. This file's own note on measurement warns that a column
 // reached one way times differently from a column reached another, so what differs between this
-// path and MMD3's is the enum switch OrderEngine does before dispatching, one branch per call and
-// not per vertex.
+// path and MmdFlat's is the enum switch OrderEngine does before dispatching, one branch per call
+// and not per vertex.
 // The same shape as mmd3bPermutation below, for any B layer taken as a free function.
 static Permutation fnPermutation(const SparseMatrix<double>& A, OrderFn f) {
     Permutation P;
@@ -389,8 +389,8 @@ static double orderTime(const SparseMatrix<double>& A, Ordering method) {
 // eliminations through the same storage. Run once per row, before anything is timed.
 //
 // Control is `nullptr` here and in the timed loop below, which is what `OrderEngine` passes for
-// `Ordering::AMD`, so the phases describe the same call the `AMD` column measures. A driver that
-// set the dense threshold would be measuring a routine no column in this table runs.
+// `Ordering::AmdVendored`, so the phases describe the same call the `AMD` column measures. A
+// driver that set the dense threshold would be measuring a routine no column in this table runs.
 static bool timedAgreesWithShipped(const SparseMatrix<double>& A, std::string& why) {
     const int n = static_cast<int>(A.size());
     std::vector<int> ap, ai;
@@ -632,14 +632,14 @@ int main(int argc, char** argv) {
         std::printf("  core   AMD_2, entry to the end of its main loop\n");
         std::printf("  post   path compression, AMD_postorder, the output permutation\n");
         std::printf("                                                     WE DO NOT DO THIS\n");
-        std::printf("  comp   build + core, the region AMD3 is comparable against\n");
+        std::printf("  comp   build + core, the region AmdFlat is comparable against\n");
         std::printf("  other  the call's wall time less the five phases, which is the clock\n");
         std::printf("         reads themselves and should be near zero\n\n");
 
         std::printf("%-12s %8s %9s %9s %8s %8s %8s %8s %8s %8s %9s %7s %9s %9s %10s\n",
                     cubic ? "grid3d" : "grid", "n", "AMD ms", "AMDt ms",
                     "valid", "aat", "build", "core", "post", "other",
-                    "comp ms", "comp%", "AMD3 ms", "AMD3/AMD", "AMD3/comp");
+                    "comp ms", "comp%", "AmdFlat ms", "AmdFlat/AMD", "AmdFlat/comp");
 
         for (int side : sides) {
             const SparseMatrix<double> A = cubic ? grid3D(side) : grid2D(side);
@@ -659,9 +659,9 @@ int main(int argc, char** argv) {
                 continue;
             }
 
-            const double    amdMs  = orderTime(A, Ordering::AMD);
+            const double    amdMs  = orderTime(A, Ordering::AmdVendored);
             const AmdPhases ph     = amdPhases(A);
-            const double    amd3Ms = orderTime(A, Ordering::AMD3);
+            const double    amd3Ms = orderTime(A, Ordering::AmdFlat);
 
             const double sum   = ph.ms[0] + ph.ms[1] + ph.ms[2] + ph.ms[3] + ph.ms[4];
             const double other = ph.wall - sum;
@@ -683,44 +683,44 @@ int main(int argc, char** argv) {
     // difference between them is visible rather than something to compute. Its TIME IS NOT
     // REPORTED, and that is deliberate: the hooked copy carries the hook's own bookkeeping, a
     // vector per vertex reset per call and a push per member, so timing it would measure our
-    // instrumentation rather than AMD. Its fill is exact and is the column AMD3 must equal.
+    // instrumentation rather than AMD. Its fill is exact and is the column AmdFlat must equal.
     const std::vector<Method> allMethods = {
-        {"MMD",  Ordering::MMD},  {"MMD3", Ordering::MMD3},
-        {"MMD3B", Ordering::MMD3, false, true},
+        {"MMD",  Ordering::MmdVendored},  {"MmdFlat", Ordering::MmdFlat},
+        {"MMD3B", Ordering::MmdFlat, false, true},
         // MMD3C IS TRANSITIONAL, unlike every other row here, and its time column is currently
-        // MMD3's own: at this commit it is a verbatim copy, which is what makes it the error-bar
+        // MmdFlat's own: at this commit it is a verbatim copy, which is what makes it the error-bar
         // column docs/NEXT.md asks for, two readings of one code under identical conditions. Once
         // it carries the amd folds the column becomes the price of those. Expect the row to leave
         // when the file does. See src/Mmd3C.cpp.
-        {"MMD3C", Ordering::MMD3, false, false, mmd3cDefault},
-        {"AMD",  Ordering::AMD},
+        {"MMD3C", Ordering::MmdFlat, false, false, mmd3cDefault},
+        {"AMD",  Ordering::AmdVendored},
 #ifdef OBLIO_AMD_RAW
-        {"AMDraw", Ordering::AMD, true},
+        {"AMDraw", Ordering::AmdVendored, true},
 #endif
-        {"AMD3", Ordering::AMD3},
+        {"AmdFlat", Ordering::AmdFlat},
         // AMD3B JOINS THIS LIST 2026-08-17. It was in `amdMethods` alone, so `make scale-amd-2d`
         // and `scale-amd-3d` showed it while `run2d` and `run3d` did not, which is not a
         // distinction anything wanted: it is a permanent maintained alternative and its storage
         // price is a standing figure. MMD3B was in both lists all along.
-        {"AMD3B", Ordering::AMD3, false, false, orderAmd3B},
+        {"AMD3B", Ordering::AmdFlat, false, false, orderAmd3B},
     };
     // A SECOND MMD3C COLUMN SAT HERE ON 2026-08-17 and has been removed, having answered. It was
     // the same function under a second name, timed second where MMD3C is timed sixth, to separate
-    // the driver from its place in the run. Both read about 1.33x `MMD3` at 200 a side, 3.20 and
+    // the driver from its place in the run. Both read about 1.33x `MmdFlat` at 200 a side, 3.20 and
     // 3.28, so the effect follows the DRIVER: not heap history, not position. Worth knowing before
     // anyone adds such a control again, and the shape is worth reusing, one function under two
     // names being the only way to hold everything but position fixed.
     const std::vector<Method> mmdMethods = {
-        {"MMD",  Ordering::MMD},  {"MMD3", Ordering::MMD3},
-        {"MMD3B", Ordering::MMD3, false, true},
-        {"MMD3C", Ordering::MMD3, false, false, mmd3cDefault},
+        {"MMD",  Ordering::MmdVendored},  {"MmdFlat", Ordering::MmdFlat},
+        {"MMD3B", Ordering::MmdFlat, false, true},
+        {"MMD3C", Ordering::MmdFlat, false, false, mmd3cDefault},
     };
     // The vendored routine first, since the gap columns below take the first entry as the baseline.
     // The B variants are left out of the AMD list: they are their originals' permutations on a
     // different schedule, so their fill column carries no information and their time column
     // belongs to the question about the seam rather than to the question about the branch.
     //
-    // MMD3B IS AN EXCEPTION AND A PERMANENT ONE, 2026-08-16. Its fill column is MMD3's by
+    // MMD3B IS AN EXCEPTION AND A PERMANENT ONE, 2026-08-16. Its fill column is MmdFlat's by
     // construction and carries nothing, exactly as the rule says; its TIME column is the PRICE of
     // genmmd's dead-segment storage, which keeps the ordering inside `O(n + m)` where our arena
     // cannot. It is a maintained alternative, not an experiment, so it stays in these lists: the
@@ -739,22 +739,22 @@ int main(int argc, char** argv) {
     // aggressive absorption, so they are what says how much those two mechanisms are worth; when
     // that question comes up again, restore them.
     const std::vector<Method> amdMethods = {
-        {"AMD",  Ordering::AMD},
+        {"AMD",  Ordering::AmdVendored},
 #ifdef OBLIO_AMD_RAW
-        {"AMDraw", Ordering::AMD, true},
+        {"AMDraw", Ordering::AmdVendored, true},
 #endif
-        {"AMD3", Ordering::AMD3},
-        // AMD3B IS PERMANENT, exactly as MMD3B is on the mmd list, 2026-08-16. It is AMD3 on
+        {"AmdFlat", Ordering::AmdFlat},
+        // AMD3B IS PERMANENT, exactly as MMD3B is on the mmd list, 2026-08-16. It is AmdFlat on
         // AMD_2's clique storage, one pool with a free cursor and a garbage collection rather than
         // our separate append-only arena, which keeps the ordering inside `O(n + m)` where our
-        // arena cannot. Its fill column is AMD3's by construction and carries nothing.
+        // arena cannot. Its fill column is AmdFlat's by construction and carries nothing.
         //
         // It is also the ALIGNMENT VEHICLE for the differential against AMD_2, which is the other
         // half of why it is kept: holding cliques the way AMD_2 does is what lets a comparison
         // separate layout from everything else. Five array folds came out of that arrangement and
-        // are being ported to Amd3, which is why this column currently reads faster than AMD3's;
-        // the storage on its own measured as a wash. See src/Amd3B.cpp.
-        {"AMD3B", Ordering::AMD3, false, false, orderAmd3B},
+        // are being ported to AmdFlat, which is why this column currently reads faster than
+        // AmdFlat's; the storage on its own measured as a wash. See src/Amd3B.cpp.
+        {"AMD3B", Ordering::AmdFlat, false, false, orderAmd3B},
     };
     const auto& methods = mmdOnly ? mmdMethods : (amdOnly ? amdMethods : allMethods);
 
@@ -796,7 +796,7 @@ int main(int argc, char** argv) {
             // THE TWO BASELINES ARE NOT THE SAME COLUMN, and the split is the point of AMDraw.
             // Time is against the shipped routine, which is what a caller pays. Fill is against
             // the RAW order where that column exists, because fill is a property of a
-            // permutation and the raw order is the one the vendored ALGORITHM produces: AMD3
+            // permutation and the raw order is the one the vendored ALGORITHM produces: AmdFlat
             // reproduces it and does not postorder, so measured against it the gap is 0.0 percent
             // by construction at every size, and a reader can see that rather than infer it.
             // `AMD` then acquires a fill column of its own, which is exactly how much its

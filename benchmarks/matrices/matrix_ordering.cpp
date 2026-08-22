@@ -4,7 +4,7 @@
 // ordering column, and it is a different measurement for a different purpose: it prices ordering
 // against the rest of a solve, over four orderings and three traversals, on the 107 positive
 // definite matrices a factorization can actually be run on. This file asks the narrower question
-// the ordering work of 2026-08-15 raised, whether `Mmd3` reproduces genmmd's SPEED on real
+// the ordering work of 2026-08-15 raised, whether `MmdFlat` reproduces genmmd's SPEED on real
 // structure as `mmdmatrices` showed it reproduces genmmd's PERMUTATION, and that question wants a
 // different set: every matrix whose pattern can be read, positive definite or not, values or not.
 // 246 files rather than 107.
@@ -40,11 +40,11 @@
 
 #include "MatrixMarket.h"
 
-#include "oblio/Amd3.h"
+#include "oblio/AmdFlat.h"
 #include "oblio/Amd3B.h"
 #include "oblio/ElmForest.h"
 #include "oblio/ElmForestEngine.h"
-#include "oblio/Mmd3.h"
+#include "oblio/MmdFlat.h"
 #include "oblio/Mmd3B.h"
 #include "oblio/Mmd3C.h"
 #include "oblio/Permutation.h"
@@ -75,8 +75,8 @@ void mmd_order(int n, const int colPtr[], const int rowIdx[], int perm[], int in
 //                  BEFORE the postorder. NOT timed: it carries a vector per vertex, so it is an
 //                  oracle rather than a stopwatch.
 //
-// Everything but the clock therefore comes from the raw copy, because `Amd3` does no postorder and
-// so returns the pre-postorder order. Comparing against `amd_order`'s output would compare two
+// Everything but the clock therefore comes from the raw copy, because `AmdFlat` does no postorder
+// and so returns the pre-postorder order. Comparing against `amd_order`'s output would compare two
 // different permutations and report a fill difference that is the postorder's, not ours.
 extern "C" int amd_order(int n, const int* colPtr, const int* rowIdx, int* perm,
                          double* control, double* info);
@@ -210,14 +210,14 @@ void run(const std::string& path, const Options& options) {
     // count is given to both routines so neither gets a longer or shorter minimum than the other.
     const bool   amd = options.branch == Branch::Amd;
     const double one = amd
-        ? bestOf([&] { const auto p = orderAmd3(colPtr, rowIdx); (void) p; }, 1)
-        : bestOf([&] { const auto p = orderMmd3(colPtr, rowIdx); (void) p; }, 1);
+        ? bestOf([&] { const auto p = orderAmdFlat(colPtr, rowIdx); (void) p; }, 1)
+        : bestOf([&] { const auto p = orderMmdFlat(colPtr, rowIdx); (void) p; }, 1);
     const int repeats = options.repeats > 0 ? options.repeats
                                             : repeatsFor(one, options.targetMs);
 
     const double ours = amd
-        ? bestOf([&] { const auto p = orderAmd3(colPtr, rowIdx); (void) p; }, repeats)
-        : bestOf([&] { const auto p = orderMmd3(colPtr, rowIdx); (void) p; }, repeats);
+        ? bestOf([&] { const auto p = orderAmdFlat(colPtr, rowIdx); (void) p; }, repeats)
+        : bestOf([&] { const auto p = orderMmdFlat(colPtr, rowIdx); (void) p; }, repeats);
     // TWO CLIQUE FIGURES, AND THEY ANSWER DIFFERENT QUESTIONS.
     //
     //   cC   CUMULATIVE, from the ordering's own arena-reporting overload: every entry the arena
@@ -229,15 +229,15 @@ void run(const std::string& path, const Options& options) {
     //        moment, and PAYLOAD ONLY, with no per-clique header, no allocator rounding and no
     //        capacity above size.
     //
-    // pC IS A PROPERTY OF THE ALGORITHM, NOT OF THE LAYOUT. `Mmd3`, `Mmd3B` and `Mmd3C` return the
-    // same permutation, so they form the same cliques and lose the same members at the same
-    // moments; the figure is identical for all three, and the same holds for `Amd3` against
+    // pC IS A PROPERTY OF THE ALGORITHM, NOT OF THE LAYOUT. `MmdFlat`, `Mmd3B` and `Mmd3C` return
+    // the same permutation, so they form the same cliques and lose the same members at the same
+    // moments; the figure is identical for all three, and the same holds for `AmdFlat` against
     // `Amd3B`. Neither vendored routine can report one. Only cC is ours, and a chunked version
     // would show this same pC with a cC of nothing.
     std::size_t cC = 0;
     gPeakCliqueMembers = 0;
-    const std::vector<std::int32_t> order = amd ? orderAmd3(colPtr, rowIdx, cC)
-                                                : orderMmd3(colPtr, rowIdx, 0, cC);
+    const std::vector<std::int32_t> order = amd ? orderAmdFlat(colPtr, rowIdx, cC)
+                                                : orderMmdFlat(colPtr, rowIdx, 0, cC);
     const std::size_t pC   = gPeakCliqueMembers;
     const std::size_t nnzL = fillOf(A, order);
 
@@ -326,7 +326,7 @@ void run(const std::string& path, const Options& options) {
     // relabels its output through `AMD_postorder`, so the comparable object has to be
     // reconstructed upstream of it by the hooked copy. genmmd does no postorder at all, so
     // `mmd_order`'s own `perm` IS the elimination order, 0-based new-to-old exactly as
-    // `orderMmd3` returns it. Same reasoning as experiments/ordering's two checkers; see the
+    // `orderMmdFlat` returns it. Same reasoning as experiments/ordering's two checkers; see the
     // header of mmdorder.cpp there.
     const std::vector<int>& theirs = amd ? gRawOrder : perm;
     std::string note = extra;
@@ -372,12 +372,14 @@ void usage() {
     std::printf("the ordering step alone, a vendored routine against ours, on real matrices\n\n");
     std::printf("  ./matrix_ordering_cpp mmd|amd [--repeats=N] [--target-ms=X]\n");
     std::printf("                        [--max-n=N] [--max-nnz=N] <file.mtx> ...\n\n");
-    std::printf("  mmd  genmmd against Mmd3. They return the same permutation on every matrix\n");
+    std::printf("  mmd  genmmd against MmdFlat. They return the same permutation on every "
+                "matrix\n");
     std::printf("       here, checked per matrix below, so the fill column is both of theirs\n");
     std::printf("       and the only difference between them is time.\n");
-    std::printf("  amd  amd_order against Amd3. The CLOCK is on amd_order whole, what a caller\n");
+    std::printf("  amd  amd_order against AmdFlat. The CLOCK is on amd_order whole, what a "
+                "caller\n");
     std::printf("       pays; EVERYTHING ELSE comes from the hooked pre-postorder copy, because\n");
-    std::printf("       Amd3 does no postorder and returns that order.\n\n");
+    std::printf("       AmdFlat does no postorder and returns that order.\n\n");
     std::printf("  Each branch also times its B sibling, Mmd3B or Amd3B, and CHECKS its order,\n");
     std::printf("  fill and pC against the driver's rather than printing them. A mismatch is\n");
     std::printf("  flagged at the end of the row.\n");
@@ -421,16 +423,18 @@ int main(int argc, char** argv) {
 
     const bool amd = options.branch == Branch::Amd;
     if (amd) {
-        std::printf("the ordering step alone, amd_order against Amd3, on real matrices\n");
+        std::printf("the ordering step alone, amd_order against AmdFlat, on real matrices\n");
         std::printf("  (best of N after a warm-up, through the same helper. THE CLOCK IS ON\n");
         std::printf("   amd_order WHOLE, which is what a caller pays and includes AMD_aat and\n");
         std::printf("   AMD_postorder, neither of which we do; nnz(L) is both routines', from\n");
-        std::printf("   the hooked PRE-POSTORDER copy, Amd3 returning it. AMD3/AMD below 1 is\n");
+        std::printf("   the hooked PRE-POSTORDER copy, AmdFlat returning it. AmdFlat/AMD "
+                    "below 1 is\n");
         std::printf("   ours faster)\n\n");
     } else {
-        std::printf("the ordering step alone, genmmd against Mmd3, on real matrices\n");
+        std::printf("the ordering step alone, genmmd against MmdFlat, on real matrices\n");
         std::printf("  (best of N after a warm-up, both through the same helper; nnz(L) is both\n");
-        std::printf("   routines', the two returning the same permutation. MMD3/MMD below 1 is\n");
+        std::printf("   routines', the two returning the same permutation. MmdFlat/MMD "
+                    "below 1 is\n");
         std::printf("   ours faster)\n\n");
     }
     // THE SPACE COLUMNS COME FIRST because they are a property of the matrix and the ordering, not
@@ -455,8 +459,8 @@ int main(int argc, char** argv) {
     // the branch driver's and a mismatch is flagged at the end of the row.
     std::printf("  %-38s %8s %10s %11s %11s %11s %11s %13s %8s %8s %7s %9s %9s %8s",
                 "matrix", "n", "m", "tril(A)", "A+I", "cC", "pC", "nnz(L)", "cC/tril", "cC/nnzL",
-                "pC/cC", amd ? "AMD ms" : "MMD ms", amd ? "AMD3 ms" : "MMD3 ms",
-                amd ? "AMD3/AMD" : "MMD3/MMD");
+                "pC/cC", amd ? "AMD ms" : "MMD ms", amd ? "AmdFlat ms" : "MmdFlat ms",
+                amd ? "AmdFlat/AMD" : "MmdFlat/MMD");
     std::printf(" %9s %9s", amd ? "AMD3B ms" : "MMD3B ms",
                 amd ? "AMD3B/AMD" : "MMD3B/MMD");
     if (!amd) std::printf(" %9s %9s", "MMD3C ms", "MMD3C/MMD");

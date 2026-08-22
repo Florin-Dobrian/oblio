@@ -19,10 +19,10 @@
 //         ./production_cpp amd3
 //         ./production_cpp mmd3 3      just the third example
 
-#include "oblio/Amd3.h"
+#include "oblio/AmdFlat.h"
 #include "oblio/ElmForest.h"
 #include "oblio/ElmForestEngine.h"
-#include "oblio/Mmd3.h"
+#include "oblio/MmdFlat.h"
 #include "oblio/Permutation.h"
 #include "oblio/SparseMatrix.h"
 #include "oblio/SymFactor.h"
@@ -72,8 +72,8 @@ static void run(const std::string& layer, const std::string& name, const Graph& 
     std::vector<std::size_t>  colPtr;
     std::vector<std::int32_t> rowIdx;
     toCsc(graph, colPtr, rowIdx);
-    if (layer == "mmd3") printOrder(Oblio::orderMmd3(colPtr, rowIdx));
-    if (layer == "amd3") printOrder(Oblio::orderAmd3(colPtr, rowIdx));
+    if (layer == "mmd3") printOrder(Oblio::orderMmdFlat(colPtr, rowIdx));
+    if (layer == "amd3") printOrder(Oblio::orderAmdFlat(colPtr, rowIdx));
     std::cout << "\n";
 }
 

@@ -1,4 +1,4 @@
-// amdorder.cpp -- production Amd3 against the vendored AMD's RAW elimination order.
+// amdorder.cpp -- production AmdFlat against the vendored AMD's RAW elimination order.
 //
 // THE ACCEPTANCE TEST FOR THE AMD ALIGNMENT, and one of a pair with mmdorder.cpp. The two answer
 // the same question of the two branches, "does our layer still compute what the vendored routine
@@ -29,13 +29,13 @@
 // with an additive hook: two containers and four insertion points, no behavior change. Generated
 // rather than kept, so it can never be a stale copy of vendored code. What IS compared is the
 // pivot sequence together with the member order inside each supervariable, which is the whole
-// algorithm, and production Amd3 reproduces it entry for entry.
+// algorithm, and production AmdFlat reproduces it entry for entry.
 //
 // `make aligned` runs this and mmdorder.cpp together. See experiments/ordering/README.md, "The
 // comparison object for amd is the RAW ORDER", and tools/hook_amd.py for the three
 // numbering paths the hook has to cover.
 
-#include "oblio/Amd3.h"
+#include "oblio/AmdFlat.h"
 #include "oblio/ElmForest.h"
 #include "oblio/ElmForestEngine.h"
 #include "oblio/Permutation.h"
@@ -100,8 +100,8 @@ static void toCscNoDiagonal(const Graph& graph,
 // WHAT THIS COLUMN IS FOR, since it cannot fail on its own. Two identical permutations have
 // identical fill, so once the order comparison above passes, this one cannot do otherwise: it is
 // one fact stated twice. It is printed because the fill is the number every other document quotes
-// for AMD3, and a reader should be able to see it produced from the raw order rather than take it
-// on trust from a benchmark table.
+// for AmdFlat, and a reader should be able to see it produced from the raw order rather than take
+// it on trust from a benchmark table.
 //
 // It is also NOT the vendored AMD's published figure, and the difference is the point. That figure
 // is the fill of `amd_order`'s OUTPUT vector, which AMD_postorder has relabeled, and a postorder of
@@ -109,7 +109,7 @@ static void toCscNoDiagonal(const Graph& graph,
 // be the precise supernodal elimination tree, because mass elimination under an approximate degree
 // merges vertices that were never adjacent. Measured on 2026-08-09, the two agree on every 2D grid
 // and from 7 a side up in 3D, and differ by one to three entries at 4^3, 5^3 and 6^3. So what this
-// check reports is the RAW order's fill, which is what AMD3 computes, and nothing here compares
+// check reports is the RAW order's fill, which is what AmdFlat computes, and nothing here compares
 // against the postordered one.
 static std::size_t fillUnder(const std::vector<std::size_t>&  colPtr,
                              const std::vector<std::int32_t>& rowIdx,
@@ -135,7 +135,7 @@ static bool check(const std::string& name, const Graph& graph) {
     std::vector<std::size_t>  colPtr;
     std::vector<std::int32_t> rowIdx;
     toCsc(graph, colPtr, rowIdx);
-    const std::vector<std::int32_t> ours = Oblio::orderAmd3(colPtr, rowIdx);
+    const std::vector<std::int32_t> ours = Oblio::orderAmdFlat(colPtr, rowIdx);
 
     std::vector<int> ap, ai;
     toCscNoDiagonal(graph, ap, ai);
@@ -167,7 +167,7 @@ static bool check(const std::string& name, const Graph& graph) {
     // claim above costs one read. Without it a mis-set threshold shows up as a size mismatch to
     // be diagnosed, which is how the whole of the note above was found; with it, the instrument
     // says what went wrong instead of that something did. An instrument that silently declines
-    // to measure is worse than one that is absent (AMD3.md, iteration 12).
+    // to measure is worse than one that is absent (AmdFlat.md, iteration 12).
     if (info[AMD_NDENSE] != 0) {
         std::printf("  %-22s DENSE ROWS REMOVED: %d. The threshold is wrong, so the oracle\n"
                     "  %-22s ordered a different problem; this is not a divergence.\n",
@@ -203,7 +203,7 @@ static bool check(const std::string& name, const Graph& graph) {
 }
 
 int main(int argc, char** argv) {
-    std::printf("production Amd3 against the vendored AMD's raw elimination order\n");
+    std::printf("production AmdFlat against the vendored AMD's raw elimination order\n");
     std::printf("  (the pivot sequence AND the member order inside each supervariable;\n");
     std::printf("   NOT amd_order's output vector, which AMD_postorder has relabeled)\n\n");
 
@@ -220,8 +220,8 @@ int main(int argc, char** argv) {
         // FOUR SHAPES, not one shape at eleven sizes. Widening a square grid from 4 to 140
         // exercises scale and not mechanism, and a defect that only appears on a structure grids
         // do not produce passes every one of them. This is not hypothetical: the 2D-only version
-        // of this list was green while `Amd3` carried a stale clique degree that a 3D grid at 16
-        // a side finds, which is the defect fixed in Amd3.cpp on 2026-08-09.
+        // of this list was green while `AmdFlat` carried a stale clique degree that a 3D grid at 16
+        // a side finds, which is the defect fixed in AmdFlat.cpp on 2026-08-09.
         //
         // the seven examples   small and irregular, and where several ledger entries were found
         // 2D grids             regular structure at size

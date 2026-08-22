@@ -126,7 +126,7 @@ public:
     // inside the loops that build the clique, at its lines 1492 and 1636.
     //
     // MEASURED AT ZERO, and that is the point of saying so here. CPU Counters before and after,
-    // same session: useful cycles unchanged within half a percent in both families, AMD3 still
+    // same session: useful cycles unchanged within half a percent in both families, AmdFlat still
     // 1.61x the vendored routine on cubes and 1.56x in 2D. The 25 visits per pivot this removes on
     // cubes were contiguous walks over hot arrays and cost near nothing. It is kept as a faithful
     // port that removes two passes and a stale-value hazard, NOT as a speed fix, and it should not
@@ -138,19 +138,19 @@ public:
     // of thing that goes stale silently.
     //
     // Over the UNTRIMMED clique, which is what the drivers want: mass elimination runs after the
-    // absorption in Amd3, and the value that pass needs is the one before any trimming. Amd3
+    // absorption in AmdFlat, and the value that pass needs is the one before any trimming. AmdFlat
     // recomputes it afterwards over the trimmed clique, which is ledger entry 7 and stays.
     std::uint32_t cliqueWeight() const { return mCliqueWeight; }
 
     // PEAK LIVE CLIQUE MEMBERS, for the cross-driver check in tests/test_order.cpp and in
-    // benchmarks/matrices. `Mmd3`, `Mmd3B` and `Mmd3C` return the same permutation, so they form
+    // benchmarks/matrices. `MmdFlat`, `Mmd3B` and `Mmd3C` return the same permutation, so they form
     // the same cliques and lose the same members at the same moments; this figure MUST be equal
     // across the three however differently they store them. The digest says the outputs agree,
     // this says the work behind them agreed too, and on the amd side the same check found two
     // defects in a day.
     //
     // IT IS THE NOTIONAL COUNT, NOT THIS FILE'S STORED ONE, which is the odd part and is
-    // deliberate. `Mmd3` drops the mass-eliminated from C[pivot]; this file does not, `mmdelm`
+    // deliberate. `MmdFlat` drops the mass-eliminated from C[pivot]; this file does not, `mmdelm`
     // leaving them in place and skipping them on `qsize != 0`. So the size tracked here is one
     // the storage does not have: it is what the flat drivers hold, maintained so the comparison
     // is possible at all. Reading it as a description of the chained store is a mistake.
@@ -172,7 +172,7 @@ public:
     // immediately behind it, which is why the incidence lookup reads the adjacency's length. See
     // the note on the members below.
     // SUFFIXED, and this class has ONE branch so only the mmd half exists. The name is split all
-    // the same, so that `Mmd3B` reads like `Mmd3` and `Mmd3C`; see QuotientGraph.h.
+    // the same, so that `Mmd3B` reads like `MmdFlat` and `Mmd3C`; see QuotientGraph.h.
     const std::int32_t* adjacencyMmd(std::int32_t u) const {
         return mSource.data() + mRun[u].sourcePtr;
     }
@@ -274,7 +274,7 @@ public:
     // Lay the lists out the way AMD_2 does, which is the opposite of genmmd's on both counts.
     // Two conventions under one switch because they are one fact, that AMD's lists run the other
     // way round, and are only ever wanted together. Like the flag above, this changes which
-    // permutation comes out and never which sets are computed. Used by Amd3 alone.
+    // permutation comes out and never which sets are computed. Used by AmdFlat alone.
     //
     //   reachableSet   walks the CLIQUES before the explicit adjacency, since AMD_2's
     //                  `for (knt1 = 1; knt1 <= elenme + 1; knt1++)` takes the cliques of me and
@@ -285,7 +285,7 @@ public:
     //                  `Iw[pn] = Iw[p3]; Iw[p3] = Iw[p1]; Iw[p1] = me`. Our two lists share one
     //                  run exactly as its do, so the same three moves apply unchanged.
     //
-    // See experiments/ordering/AMD3.md, ledger entries 2 and 5.
+    // See experiments/ordering/AmdFlat.md, ledger entries 2 and 5.
     void setVendoredListOrder(bool on) { mVendoredListOrder = on; }
 
     // Stop eliminate() at the prune, leaving mass elimination to the caller. AMD_2 makes the same
@@ -296,8 +296,8 @@ public:
     // vertices AMD merges.
     //
     // With this on, eliminate() returns an EMPTY merged list and C[pivot] is reach(pivot) exactly,
-    // and the caller must call massEliminate() once it has absorbed. Used by Amd3 alone. See
-    // experiments/ordering/AMD3.md, ledger entry 3.
+    // and the caller must call massEliminate() once it has absorbed. Used by AmdFlat alone. See
+    // experiments/ordering/AmdFlat.md, ledger entry 3.
     void setLateMassElimination(bool on) { mLateMassElimination = on; }
 
     // The half eliminate() no longer does under the flag above: fold into the pivot's supervariable
@@ -326,7 +326,7 @@ public:
 
     // The same permutation with each supervariable's members in ASCENDING VERTEX INDEX rather
     // than merge order. Indistinguishable members, so the fill and the forest are unchanged;
-    // only the permutation is, and it is genmmd's. Used by Mmd3 alone. See the .cpp.
+    // only the permutation is, and it is genmmd's. Used by MmdFlat alone. See the .cpp.
     std::vector<std::int32_t> orderAscending(const std::vector<std::int32_t>& pivots) const;
 
 private:
@@ -427,8 +427,8 @@ private:
     // weight, negative means already taken into the clique being built, zero means dead, so one
     // load answers what two arrays answered. No range is lost, a weight being bounded by n.
     //
-    // IT IS HERE BECAUSE THIS FILE'S OBLIGATION IS TO STAY ENCODING-IDENTICAL TO Mmd3, not because
-    // it pays on its own: it measured a wash on the mmd side. Without it the time column stops
+    // IT IS HERE BECAUSE THIS FILE'S OBLIGATION IS TO STAY ENCODING-IDENTICAL TO MmdFlat, not
+    // because it pays on its own: it measured a wash on the mmd side. Without it the time column stops
     // being the price of genmmd's storage and becomes that plus four encoding folds, which is
     // exactly what this file exists not to be. See docs/CODING_RULES.md for when a size may go
     // signed and docs/DESIGN_DECISIONS.md (2026-08-17).
@@ -444,7 +444,7 @@ private:
     // the clique seen LAST is expanded FIRST; we hold a vector and append. Same set either way and
     // the same cost, but the order decides C[pivot]'s order, hence which of two equal-degree
     // candidates a later iteration finds first, and minimum degree is settled by exactly that.
-    // Off by default, so every existing driver is unaffected; Mmd3 turns it on. See
+    // Off by default, so every existing driver is unaffected; MmdFlat turns it on. See
     // experiments/ordering/mmd3.py, where the same four walks are reversed together.
     bool mReverseIncidence = false;
 
@@ -727,9 +727,9 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::eliminate(std::int
     // incidence writes the pivot before the rest, which yields AMD_2's order without a second
     // pass over anything. Holding one entry back costs a register; doing it afterwards costs a
     // rotate per list per reached vertex, which is a whole extra walk of the structure and was
-    // measured at about 50 percent of AMD3's run time before this was folded in. AMD_2 spends
+    // measured at about 50 percent of AmdFlat's run time before this was folded in. AMD_2 spends
     // three assignments on it for the same reason, letting the list's start shift rather than
-    // moving a list. See experiments/ordering/AMD3.md, ledger entry 5 and iteration 10.
+    // moving a list. See experiments/ordering/AmdFlat.md, ledger entry 5 and iteration 10.
     forEachMember(pivot, [&](std::int32_t u) {
         std::int32_t*     source        = mSource.data() + mRun[u].sourcePtr;
         // The two counters are one-dimensional COUNTS, positions in a list bounded by deg(u) and
@@ -825,7 +825,7 @@ QuotientGraphChained::finishElimination(std::int32_t pivot) {
 //
 // It runs from finishElimination by default and from the driver under mLateMassElimination, and
 // the body is the same either way: what moves is when the question is asked, since aggressive
-// absorption is what makes this cheap test agree with the true one. experiments/ordering/AMD3.md, entry 3.
+// absorption is what makes this cheap test agree with the true one. experiments/ordering/AmdFlat.md, entry 3.
 inline const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std::int32_t pivot) {
     std::vector<std::int32_t>& merged = mMerged;   // scratch, kept for its capacity
     merged.clear();
@@ -876,7 +876,7 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std:
     // report for the same ordering.
     // THE MERGED LEAVE THE LIVE COUNT even though they do NOT leave this file's storage: `mmdelm`
     // keeps them in the list and skips them on `qsize != 0`. Tracking the notional size is what
-    // makes the figure comparable with `Mmd3`, which does drop them. See numPeakCliqueMembers.
+    // makes the figure comparable with `MmdFlat`, which does drop them. See numPeakCliqueMembers.
     mCliqueLiveMembers[pivot] -= static_cast<std::uint32_t>(merged.size());
     mNumLiveCliqueMembers     -= merged.size();
 
@@ -894,9 +894,9 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std:
             // Amd2B, read the UNTRIMMED size where they had been computing the trimmed one, which
             // is a bound too large per vertex the merge took. That is the same shape as ledger
             // entry 7 and it was caught by `prototype and production agree` in
-            // experiments/ordering, with `make amdorder` and all 283 assertions passing: Amd3
+            // experiments/ordering, with `make amdorder` and all 283 assertions passing: AmdFlat
             // mass-eliminates late, so its own first read is legitimately of the untrimmed clique
-            // and every check that watches Amd3 stayed green.
+            // and every check that watches AmdFlat stayed green.
             mCliqueWeight -= static_cast<std::uint32_t>(mWeight[u]);
             mWeight[pivot] += mWeight[u];
             mWeight[u] = 0;

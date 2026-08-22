@@ -211,9 +211,24 @@ when the classes merged, because amd's prune takes a `TaggedScan` and mmd's take
 
 Each of these was checked rather than assumed.
 
-**`Amd3B` does not call `adjacencyAmd`.** The prune moved into the class when the two branches
-merged, so the driver no longer walks the adjacency itself. `Amd3` still does, through `eliminate`'s
-absence of a prune method.
+**`Amd3B` does not call `adjacencyAmd`.** SUPERVARIABLE DETECTION IS THE WHOLE OF IT, and this entry
+said something else until 2026-08-21: it blamed the prune moving into the class, which is not the
+reason and was probably true of an earlier arrangement. Both drivers reach the prune through one
+`eliminate` call today and neither walks an adjacency in it. `Amd3`'s only two `adjacencyAmd` calls
+in the file are in the hash block.
+
+What the layout decides there is where the entry to skip sits. Under `AMD_2`'s order the new clique
+is rotated to index 0, so the run minus its first entry is ONE SPAN and the walk is a single loop
+off the run's base, which under that order is the incidence accessor. The flat class puts the new
+clique at the front of `I[u]`, which is the MIDDLE of the run, so `Amd3` stamps in two loops and
+names both accessors. The same asymmetry gives `Amd3` a second `adjacencyAmd` on the candidate side.
+
+**Detection is the only operation in either driver that is blind to the kind of an entry**, which is
+why it is the only one the run order reaches. Everywhere else a clique id is looked up in the store
+and a vertex id is weighted, so the two halves are two lists and the order is an offset. Detection
+asks only whether two vertices name the same set, so the halves being one span is worth something.
+It is sound because the two id populations cannot collide inside one run: a clique's id is the pivot
+that formed it, and if that pivot were in `A[u]` then `u` was in its reach and the prune removed it.
 
 **`Mmd3C` does not call `massEliminate`.** Mmd is not late, so `finishElimination` calls it
 internally. `Amd3B` calls it from the driver because absorption has to run first; see
@@ -327,18 +342,51 @@ being ours and predating both vendored ones, so a two-way split had nothing to o
 same two the compacted class does.
 
 **And the accessors were suffixed in all three classes**, `adjacencyAmd` and `adjacencyMmd` with
-the incidence twins. In the flat and chained classes the two halves are IDENTICAL bodies, each
-having one physical layout; only the compacted class's differ, since it reproduces `AMD_2`'s run
-order and genmmd's. The names are split so that a driver and its counterpart read the same.
+the incidence twins. Only the compacted class's halves differ, since it reproduces `AMD_2`'s run
+order and genmmd's. The flat class has one physical layout, so its four names sit over two
+identical bodies; the chained class has one layout AND one driver, `Mmd3B`, so it carries the mmd
+half alone and there is nothing there to duplicate. **The names are split so that a driver and its
+counterpart read the same**, which is what they are bought for, the flat class having no layout
+difference of its own to record.
 
 **Every step must leave every permutation unmoved**, so `make digest` and the two alignment checks
 are the gate at each one, and the baseline below is the second gate.
 
 **ALL FIVE ARE CLOSED AS OF 2026-08-21.** What remains between the two classes is `compactions`
 against `arenaEntries`, which is layout, and two `adjacencyAmd` calls in `Amd3`'s hash-detection
-block that `Amd3B` does not make. By call sequence the mmd pair now differs in three calls of about
-forty and the amd pair in nine of about thirty-eight, where before this began they differed in
-eighteen and twenty-five.
+block that `Amd3B` does not make.
+
+**THE COUNTS THIS PARAGRAPH CARRIED WERE TOO HIGH, corrected 2026-08-21.** It said the mmd pair
+differs in three calls of about forty and the amd pair in nine of about thirty-eight. Both figures
+came from extracting `qg.<method>` from the sources without stripping comments first, so prose
+naming a method counted as a call:
+
+```
+                comments in    comments out
+Mmd3 vs Mmd3C        3 calls      0 calls
+Amd3 vs Amd3B        9 calls      2 calls
+```
+
+The three mmd differences are `qg.mark(v)`, `qg.weight(v)` and `qg.eliminatedMmd(v)` written into
+comments in `Mmd3.cpp` that `Mmd3C` does not carry, and one of the nine is `qg.cliqueBase()` named
+in the comment that records its removal. **Stripped of comments the mmd pair's call sequences are
+IDENTICAL apart from `compactions`, and the amd pair's differ only in the two `adjacencyAmd` calls
+named above and the order of two adjacent rejects.** So the sentence above the table was right and
+the arithmetic beside it was not.
+
+**One residual the tables do not show, and it is the tail.** Three of the four drivers publish
+their counters in the same order and `Mmd3C` does not:
+
+```
+Mmd3    balances, peak, arena
+Amd3    balances, peak, arena
+Amd3B   balances, compactions, peak, arena
+Mmd3C   balances, arena, compactions, peak
+```
+
+`Amd3B` is `Amd3` with one line inserted; `Mmd3C` is neither `Mmd3` with one line inserted nor a
+match for `Amd3B`. Nothing observable turns on it, which is exactly what the five closed items had
+in common.
 
 ### Baseline before alignment, 2026-08-21
 

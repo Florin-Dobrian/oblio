@@ -1,11 +1,11 @@
-// mmdmatrices.cpp -- production Mmd3 against genmmd's elimination order, on REAL MATRICES.
+// mmdmatrices.cpp -- production MmdFlat against genmmd's elimination order, on REAL MATRICES.
 //
 // The same assertion mmdorder.cpp makes, on different input, and the difference in input is the
 // whole point. mmdorder runs four shapes: seven hand-built examples, square grids, cubic grids and
 // random patterns. Every one of them is generated here, and a generated matrix has the structure
 // somebody chose to give it. Widening a grid exercises SCALE and never MECHANISM, which is a thing
 // this tree has already been caught by once: the 2D-only version of the amd check was green while
-// production Amd3 carried a stale clique degree that a 3D grid at 16 a side finds in a second.
+// production AmdFlat carried a stale clique degree that a 3D grid at 16 a side finds in a second.
 //
 // Real matrices bring structures nothing here generates. Disconnected components. Isolated
 // vertices. Rows adjacent to nearly everything, which is the dense-row pathology
@@ -15,10 +15,10 @@
 // AMD cleans in `amd_preprocess`.
 //
 // SO A DIVERGENCE HERE IS A FINDING, NOT A FAILURE OF THE EXERCISE. `docs/NEXT.md` item 6 records
-// that Amd3 and the vendored AMD already differ on fill on a minority of the 107-matrix
+// that AmdFlat and the vendored AMD already differ on fill on a minority of the 107-matrix
 // performance set, once by 4 percent, and calls it "a divergence the acceptance tests cannot see".
 // This is the check that would see it. The mmd branch is done first because it is the aligned one:
-// Mmd3 reproduces genmmd exactly on all 38 generated cases, so anything this finds is new.
+// MmdFlat reproduces genmmd exactly on all 38 generated cases, so anything this finds is new.
 //
 // WHY IT LIVES HERE AND NOT IN benchmarks/matrices, WHERE THE MATRICES ARE. An alignment check is
 // a VERDICT. docs/CODING_RULES.md states that `test` exists exactly where something can fail,
@@ -47,7 +47,7 @@
 // on request; see its banner note. They carry structure and no values, which is exactly an
 // ordering's input.
 
-#include "oblio/Mmd3.h"
+#include "oblio/MmdFlat.h"
 #include "oblio/ElmForest.h"
 #include "oblio/ElmForestEngine.h"
 #include "oblio/Permutation.h"
@@ -73,7 +73,7 @@ namespace {
 // matrix: genmmd's `int` arrays would refuse a pattern past 2^31 nonzeros, and the largest file in
 // the collection as fetched is 28.7 million, seventy times under that. What a cap buys is that one
 // matrix cannot quietly become the whole run, minimum degree paying for fill as it goes and
-// PARSEC/Si87H76 predicting 5.68 billion entries of it under MMD3.
+// PARSEC/Si87H76 predicting 5.68 billion entries of it under MmdFlat.
 //
 // THE DEFAULTS COVER THE COLLECTION AS FETCHED, which is the point: an alignment check should see
 // everything on disk, and the three matrices these once excluded, PARSEC/Ga41As41H72,
@@ -171,7 +171,7 @@ Outcome check(const std::string& path, const Options& options) {
     std::vector<std::size_t>  colPtr;
     std::vector<std::int32_t> rowIdx;
     toOurs(read.matrix, colPtr, rowIdx);
-    const std::vector<std::int32_t> ours = Oblio::orderMmd3(colPtr, rowIdx);
+    const std::vector<std::int32_t> ours = Oblio::orderMmdFlat(colPtr, rowIdx);
 
     std::vector<int> ap, ai;
     toVendored(read.matrix, ap, ai);
@@ -215,7 +215,7 @@ Outcome check(const std::string& path, const Options& options) {
 }
 
 void usage() {
-    std::printf("production Mmd3 against genmmd's elimination order, on real matrices\n\n");
+    std::printf("production MmdFlat against genmmd's elimination order, on real matrices\n\n");
     std::printf("  ./mmdmatrices_cpp [--max-n=N] [--max-nnz=N] <file.mtx> ...\n\n");
     std::printf("  The matrices are not in the repository. From benchmarks/matrices:\n");
     std::printf("      ./ssget.py list --max-nnz 500000 > candidates.txt\n");
@@ -251,7 +251,7 @@ int main(int argc, char** argv) {
 
     std::sort(paths.begin(), paths.end());
 
-    std::printf("production Mmd3 against genmmd's elimination order, on real matrices\n");
+    std::printf("production MmdFlat against genmmd's elimination order, on real matrices\n");
     std::printf("  (the permutation itself, entry for entry; see mmdorder.cpp for why the mmd\n");
     std::printf("   side needs no hook, and this file's header for what real structure adds)\n\n");
     // A matching row carries one fill, the two being equal by construction; a differing row

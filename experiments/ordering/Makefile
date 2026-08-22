@@ -10,10 +10,10 @@
 #:                     to int64_t and timing the two against each other. Needs private/.
 #:   make aligned      both acceptance tests below, which is the one word for "is either
 #:                     ordering still what the vendored routine computes". Needs private/.
-#:   make amdorder     production Amd3 against the vendored AMD's RAW elimination order, which is
+#:   make amdorder     production AmdFlat against the vendored AMD's RAW elimination order, which is
 #:                     the acceptance test for the amd alignment. Four shapes: the seven
 #:                     examples, 2D grids, 3D grids, random patterns. Needs private/.
-#:   make mmdorder     production Mmd3 against genmmd's elimination order, the same four shapes.
+#:   make mmdorder     production MmdFlat against genmmd's elimination order, the same four shapes.
 #:                     The mmd counterpart, and it needs no hook: genmmd emits that order and
 #:                     does no postorder. Needs private/.
 #:   make mmdmatrices  the same check on REAL matrices from the SuiteSparse collection, over
@@ -154,8 +154,9 @@ GRID_LAYERS = $(LAYERS)
 # The fill check runs Oblio's symbolic factorization, so the whole library is linked.
 #
 # No vendored code here. production.cpp calls Mmd1, Mmd2, Amd1 and Amd2 directly and never
-# OrderEngine, so nothing in this link reaches Ordering::MMD or Ordering::AMD, and the two vendored
-# files under ../../private are neither needed nor compiled. They used to be, but only because
+# OrderEngine, so nothing in this link reaches Ordering::MmdVendored or Ordering::AmdVendored,
+# and the two vendored files under ../../private are neither needed nor compiled. They used to be,
+# but only because
 # OrderEngine.cpp once declared their entry points unconditionally and the linker therefore
 # demanded them.
 PROD_SRCS   = $(wildcard ../../src/*.cpp)
@@ -175,7 +176,7 @@ PROD_HDRS   = $(wildcard ../../include/oblio/*.h)
 ifdef OBLIO_PUBLIC
   VENDOR_SRCS =
 else
-  VENDOR_SRCS = $(wildcard ../../private/Amd.cpp ../../private/Mmd.cpp)
+  VENDOR_SRCS = $(wildcard ../../private/AmdVendored.cpp ../../private/MmdVendored.cpp)
 endif
 
 .PHONY: all test production vendored width amdorder mmdorder mmdmatrices aligned clean help
@@ -312,7 +313,7 @@ vendored: vendored_cpp
 # program and timed against each other. Generated rather than committed: it is a mechanical
 # transform of a file that is not ours and not tracked, and a stale copy of private/ living in the
 # experiment would be worse than no copy at all.
-amd_int64.cpp: ../../private/Amd.cpp
+amd_int64.cpp: ../../private/AmdVendored.cpp
 	@sed -e 's/using Int = int32_t;/#include <vector>\nusing Int = int64_t;/' \
 	     -e 's/^extern "C" int amd_order(/extern "C" int amd_order64(/' $< > $@.tmp
 	@python3 -c "import sys;\
@@ -331,7 +332,7 @@ open('$@','w').write(s.replace(old,new))"
 # genmmd has no `using Int` line: it is plain `int` throughout, all of them the arithmetic type,
 # so its transform is a blanket rename to a typedef rather than a one-line change. Mechanical for
 # that file, and it would not be for one mixing widths.
-mmd_int64.cpp: ../../private/Mmd.cpp
+mmd_int64.cpp: ../../private/MmdVendored.cpp
 	@python3 -c "import re;\
 s=open('$<').read();\
 s=re.sub(r'\\bint\\b','MmdInt',s);\
@@ -353,7 +354,7 @@ extern \"C\" void mmd_order64(std::int32_t n, const std::int32_t colPtr[], const
 
 # ---- the two alignment checks -----------------------------------------------------------------
 #
-# `make amdorder` checks production Amd3 against the vendored AMD's RAW elimination order: the
+# `make amdorder` checks production AmdFlat against the vendored AMD's RAW elimination order: the
 # pivot sequence together with the member order inside each supervariable, which is the whole
 # algorithm. It is the acceptance test for the amd alignment and the README's method section
 # explains why it, and not amd_order's output vector, is the object to compare.
@@ -366,14 +367,15 @@ extern \"C\" void mmd_order64(std::int32_t n, const std::int32_t colPtr[], const
 # A hooked copy is GENERATED here rather than kept, exactly as the int64 copies above are, and for
 # the same reason: a checked-in copy of vendored code with our edits in it would drift from
 # private/ silently, and a test comparing against a stale oracle is worse than no test. Generated,
-# gitignored, removed by `make clean`, and rebuilt from whatever private/Amd.cpp currently says.
+# gitignored, removed by `make clean`, and rebuilt from whatever private/AmdVendored.cpp
+# currently says.
 #
 # The hook is additive: two containers and three lines, no behaviour change. PB_members[i]
 # accumulates what supervariable i stands for, growing at the hash merge; PB_raw takes a pivot's
 # members once per elimination, at FINALIZE THE NEW ELEMENT, before AMD_postorder ever runs.
 #
 # It runs FOUR SHAPES, not one shape at many sizes: the seven examples, 2D grids, 3D grids and
-# random patterns. The 2D-only version of this list was green while Amd3 carried a stale clique
+# random patterns. The 2D-only version of this list was green while AmdFlat carried a stale clique
 # degree that a 3D grid at 16 a side finds, which is what the widening is for. It takes under a
 # second, so there is no reason to run less of it.
 #
@@ -384,10 +386,10 @@ extern \"C\" void mmd_order64(std::int32_t n, const std::int32_t colPtr[], const
 # and refuses, while g++ accepts it silently and builds. So this breaks on macOS and passes on
 # Linux, which is the compiler asymmetry CLAUDE.md's Build section names, in the direction that
 # catches you out less often.
-amd_raw.cpp: ../../private/Amd.cpp ../../tools/hook_amd.py
+amd_raw.cpp: ../../private/AmdVendored.cpp ../../tools/hook_amd.py
 	@python3 ../../tools/hook_amd.py $< $@
 
-amdorder_cpp: amdorder.cpp graphs.h $(VENDOR_SRCS) amd_raw.cpp ../../src/Amd3.cpp ../../include/oblio/QuotientGraph.h ../../src/Types.cpp \
+amdorder_cpp: amdorder.cpp graphs.h $(VENDOR_SRCS) amd_raw.cpp ../../src/AmdFlat.cpp ../../include/oblio/QuotientGraph.h ../../src/Types.cpp \
               ../../src/Permutation.cpp ../../src/ElmForestEngine.cpp ../../src/SymFactorEngine.cpp ../../src/SparseMatrix.cpp
 	$(CXX) -std=c++17 -O3 -DNDEBUG -w -I../../include $(filter-out %.h,$^) -o $@
 
@@ -401,7 +403,7 @@ amdorder: amdorder_cpp
 # they check and not for that difference, which is written down in both drivers instead: naming one
 # for how it works and the other for what it checks made a matched pair read as two different kinds
 # of thing. This target was `raworder` until 2026-08-09 for exactly that reason.
-mmdorder_cpp: mmdorder.cpp graphs.h $(VENDOR_SRCS) ../../src/Mmd3.cpp ../../include/oblio/QuotientGraph.h ../../src/Types.cpp
+mmdorder_cpp: mmdorder.cpp graphs.h $(VENDOR_SRCS) ../../src/MmdFlat.cpp ../../include/oblio/QuotientGraph.h ../../src/Types.cpp
 	$(CXX) -std=c++17 -O3 -DNDEBUG -w -I../../include $(filter-out %.h,$^) -o $@
 
 mmdorder: mmdorder_cpp
@@ -417,7 +419,7 @@ mmdorder: mmdorder_cpp
 # driver says so and exits clean. That is deliberate: a check that fails because nobody has
 # downloaded 300 MB of matrices would be turned off within a week.
 mmdmatrices_cpp: mmdmatrices.cpp ../../benchmarks/matrices/MatrixMarket.h $(VENDOR_SRCS) \
-                 ../../src/Mmd3.cpp ../../include/oblio/QuotientGraph.h ../../src/Types.cpp \
+                 ../../src/MmdFlat.cpp ../../include/oblio/QuotientGraph.h ../../src/Types.cpp \
                  ../../src/SparseMatrix.cpp ../../src/Permutation.cpp \
                  ../../src/ElmForestEngine.cpp
 	$(CXX) -std=c++17 -O3 -DNDEBUG -w -I../../include $(filter-out %.h,$^) -o $@

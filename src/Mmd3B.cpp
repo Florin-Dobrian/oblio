@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-// Mmd3B.cpp - Mmd3 on GENMMD'S clique storage, everything else identical.
+// Mmd3B.cpp - MmdFlat on GENMMD'S clique storage, everything else identical.
 //
 // WHAT IT IS FOR, AND IT IS TWO THINGS. Both are permanent; this file is not an experiment awaiting
 // a verdict and its old stop condition is withdrawn.
@@ -18,12 +18,12 @@
 // LAYOUT, whose price is now measured, or an IMPROVEMENT, which is carried back into our own
 // ladder. That is not hypothetical: with storage held equal on the amd side, the same arrangement
 // surfaced five array folds that had nothing to do with layout at all, and they are being ported to
-// Amd3 and, where applicable, to Amd1 and Amd2. The 2n mark shape came out of this file the same
+// AmdFlat and, where applicable, to Amd1 and Amd2. The 2n mark shape came out of this file the same
 // way. A verdict on storage therefore does NOT retire it, storage never having been the only thing
 // it was for.
 //
-// SECOND, IT IS THE PREDICTABLE-SPACE VERSION OF MMD3, and that is worth having on its own. From a
-// conversation with Alex Pothen: given a machine you know whether A fits, but you cannot know
+// SECOND, IT IS THE PREDICTABLE-SPACE VERSION OF MmdFlat, and that is worth having on its own. From
+// a conversation with Alex Pothen: given a machine you know whether A fits, but you cannot know
 // whether L fits, nnz(L) depending on the ordering being computed. So a method that stays within
 // `O(n + m)` carries a guarantee no amount of speed substitutes for: IF THE INPUT FITS, THE ANSWER
 // IS REACHABLE. genmmd's chaining and AMD_2's compaction are that guarantee bought
@@ -31,8 +31,8 @@
 // a known machine solved repeatedly; this is the right one when whether an answer exists is the
 // open question. See docs/DESIGN_DECISIONS.md (2026-08-16).
 //
-// THE PRICE, measured: 4 to 10 percent slower than Mmd3 at every size on the square ladder, and
-// 1.15 to 1.38x genmmd where Mmd3 reads 1.02 to 1.19x. On 16.61M instructions against 14.22M and
+// THE PRICE, measured: 4 to 10 percent slower than MmdFlat at every size on the square ladder, and
+// 1.15 to 1.38x genmmd where MmdFlat reads 1.02 to 1.19x. On 16.61M instructions against 14.22M and
 // 123510 D1 read misses against 119331. So the second arena buys speed and costs the guarantee.
 //
 // IT CARRIES A PRIVATE COPY OF QuotientGraph, named QuotientGraphChained, so the storage can be
@@ -51,14 +51,14 @@
 // (2026-08-16, later).
 //
 // What it is NOT is a second implementation to be maintained for its own sake. Its obligation is
-// to stay encoding-identical to Mmd3: a fold that lands in QuotientGraph lands here too, or the
+// to stay encoding-identical to MmdFlat: a fold that lands in QuotientGraph lands here too, or the
 // comparison silently stops being about storage. See docs/DESIGN_DECISIONS.md (2026-08-15).
 //
 // THE COPY IS EXACT AS OF THIS COMMIT and the comments were not duplicated with it. Every design
 // note for these types lives in include/oblio/QuotientGraph.h and is authoritative there; reading
 // this file means reading it alongside this one. `Buckets` is that header's `Buckets` too,
 // which is why promoting `QuotientGraphChained` needs no second bucket class. Only the DIFFERENCES
-// are commented here, and at this commit there are none: Mmd3B must return Mmd3's permutation,
+// are commented here, and at this commit there are none: Mmd3B must return MmdFlat's permutation,
 // which is genmmd's, so `make mmdorder` and `make test` are the acceptance check unchanged.
 //
 // The scheme itself: see the section "The vendored storage scheme, and what it is worth" in
@@ -80,7 +80,7 @@ namespace {
 //
 // THE ONE METHOD IT ADDED WAS `evict`, which was `unfile` followed by resetting an outmatched
 // vertex to unfiled, so it is `unfile(u); restore(u);` in production's spelling and that is
-// what src/Mmd3.cpp already writes. Nothing had to be added to the shared class.
+// what src/MmdFlat.cpp already writes. Nothing had to be added to the shared class.
 
 
 // What an approximate-degree driver accumulates while the eliminator is already walking the lists,
@@ -167,8 +167,8 @@ std::vector<std::int32_t> orderMmd3B(const std::vector<std::size_t>&  colPtr,
     //
     // It matters most where it looks least worth doing. On a matrix with no off-diagonal entries
     // every vertex goes through here and nothing else runs, so this loop IS the ordering. Measured
-    // on Mmd3: 8.6 percent of a pure-diagonal ordering at n = 46772, and 0.2 percent of a 100x100
-    // grid. See benchmarks/matrices, `make ordering`.
+    // on MmdFlat: 8.6 percent of a pure-diagonal ordering at n = 46772, and 0.2 percent of a
+    // 100x100 grid. See benchmarks/matrices, `make ordering`.
     for (std::int32_t u = buckets.head(1); u != NIL; ) {
         const std::int32_t next = buckets.next(u);   // before the unfile invalidates it
         buckets.unfile(u);

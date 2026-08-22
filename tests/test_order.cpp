@@ -104,16 +104,16 @@ int main(){
       std::vector<double> v(ri.size(),1.0); SparseMatrix<double> A(6,cp,ri,v);
       reqSym(A,"arrow 6x6      : symmetric");
 #ifdef OBLIO_VENDORED_ORDERINGS
-      checkOrder(A,Ordering::AMD,"arrow 6x6      : AMD valid");
-      checkOrder(A,Ordering::MMD,"arrow 6x6      : MMD valid");
+      checkOrder(A,Ordering::AmdVendored,"arrow 6x6      : AMD valid");
+      checkOrder(A,Ordering::MmdVendored,"arrow 6x6      : MMD valid");
 #endif
-      checkOrder(A,Ordering::MMD3,"arrow 6x6      : MMD3 valid");
-      checkOrder(A,Ordering::AMD3,"arrow 6x6      : AMD3 valid");
+      checkOrder(A,Ordering::MmdFlat,"arrow 6x6      : MmdFlat valid");
+      checkOrder(A,Ordering::AmdFlat,"arrow 6x6      : AmdFlat valid");
       // THE THREE NON-ENUM LAYERS, each of which must reproduce its original entry for entry,
       // which is the whole of what makes it a measurement rather than a second ordering. Mmd3B is
-      // Mmd3 on genmmd's clique storage and Amd3B is Amd3 on AMD_2's, both permanent; Mmd3C is
-      // Mmd3 on the production layout and is transitional, carrying the amd folds onto the mmd
-      // side. The two AMD B layers that used to be checked here were retired on 2026-08-16 when
+      // MmdFlat on genmmd's clique storage and Amd3B is AmdFlat on AMD_2's, both permanent; Mmd3C
+      // is MmdFlat on the production layout and is transitional, carrying the amd folds onto
+      // the mmd side. The two AMD B layers that used to be checked here were retired on 2026-08-16 when
       // their schedule moved into their originals.
       //
       // Validity is asserted once per layer, here, and sameness on every matrix below. Sameness
@@ -122,55 +122,55 @@ int main(){
       checkOrderFn(A,mmd3bDefault,"arrow 6x6      : MMD3B valid");
       checkOrderFn(A,mmd3cDefault,"arrow 6x6      : MMD3C valid");
       checkOrderFn(A,orderAmd3B,  "arrow 6x6      : AMD3B valid");
-      checkSameOrderFn(A,Ordering::MMD3,mmd3bDefault,"arrow 6x6      : MMD3B == MMD3");
-      checkSameOrderFn(A,Ordering::MMD3,mmd3cDefault,"arrow 6x6      : MMD3C == MMD3");
-      checkSameOrderFn(A,Ordering::AMD3,orderAmd3B,  "arrow 6x6      : AMD3B == AMD3"); }
+      checkSameOrderFn(A,Ordering::MmdFlat,mmd3bDefault,"arrow 6x6      : MMD3B == MmdFlat");
+      checkSameOrderFn(A,Ordering::MmdFlat,mmd3cDefault,"arrow 6x6      : MMD3C == MmdFlat");
+      checkSameOrderFn(A,Ordering::AmdFlat,orderAmd3B,  "arrow 6x6      : AMD3B == AmdFlat"); }
     for(std::size_t size : {1u,2u,10u,100u}){ auto A=tridiagFull(size);
       reqSym(A,"tridiag n="+std::to_string(size)+" : symmetric");
 #ifdef OBLIO_VENDORED_ORDERINGS
-      checkOrder(A,Ordering::AMD,"tridiag n="+std::to_string(size)+" : AMD valid");
-      checkOrder(A,Ordering::MMD,"tridiag n="+std::to_string(size)+" : MMD valid");
+      checkOrder(A,Ordering::AmdVendored,"tridiag n="+std::to_string(size)+" : AMD valid");
+      checkOrder(A,Ordering::MmdVendored,"tridiag n="+std::to_string(size)+" : MMD valid");
 #endif
-      checkOrder(A,Ordering::MMD3,"tridiag n="+std::to_string(size)+" : MMD3 valid");
-      checkOrder(A,Ordering::AMD3,"tridiag n="+std::to_string(size)+" : AMD3 valid");
-      checkSameOrderFn(A,Ordering::MMD3,mmd3bDefault,
-                       "tridiag n="+std::to_string(size)+" : MMD3B == MMD3");
-      checkSameOrderFn(A,Ordering::MMD3,mmd3cDefault,
-                       "tridiag n="+std::to_string(size)+" : MMD3C == MMD3");
-      checkSameOrderFn(A,Ordering::AMD3,orderAmd3B,
-                       "tridiag n="+std::to_string(size)+" : AMD3B == AMD3"); }
+      checkOrder(A,Ordering::MmdFlat,"tridiag n="+std::to_string(size)+" : MmdFlat valid");
+      checkOrder(A,Ordering::AmdFlat,"tridiag n="+std::to_string(size)+" : AmdFlat valid");
+      checkSameOrderFn(A,Ordering::MmdFlat,mmd3bDefault,
+                       "tridiag n="+std::to_string(size)+" : MMD3B == MmdFlat");
+      checkSameOrderFn(A,Ordering::MmdFlat,mmd3cDefault,
+                       "tridiag n="+std::to_string(size)+" : MMD3C == MmdFlat");
+      checkSameOrderFn(A,Ordering::AmdFlat,orderAmd3B,
+                       "tridiag n="+std::to_string(size)+" : AMD3B == AmdFlat"); }
     { std::size_t size=5; std::vector<std::size_t> cp(size+1); std::vector<std::int32_t> ri(size); std::vector<double> v(size,1.0);
       for(std::size_t j=0;j<size;++j){cp[j]=j; ri[j]=static_cast<std::int32_t>(j);} cp[size]=size;
       SparseMatrix<double> A(size,cp,ri,v);
       reqSym(A,"diagonal 5x5   : symmetric");
 #ifdef OBLIO_VENDORED_ORDERINGS
-      checkOrder(A,Ordering::AMD,"diagonal 5x5   : AMD valid");
-      checkOrder(A,Ordering::MMD,"diagonal 5x5   : MMD valid");
+      checkOrder(A,Ordering::AmdVendored,"diagonal 5x5   : AMD valid");
+      checkOrder(A,Ordering::MmdVendored,"diagonal 5x5   : MMD valid");
 #endif
-      checkOrder(A,Ordering::MMD3,"diagonal 5x5   : MMD3 valid");
-      checkOrder(A,Ordering::AMD3,"diagonal 5x5   : AMD3 valid");
+      checkOrder(A,Ordering::MmdFlat,"diagonal 5x5   : MmdFlat valid");
+      checkOrder(A,Ordering::AmdFlat,"diagonal 5x5   : AmdFlat valid");
       // n ISOLATED VERTICES, where every degree is zero and nothing ever merges. None of the three
       // layers was checked on this shape until 2026-08-17, and it is the one the experiment's own
       // graphs cannot produce: all seven of them are connected and none is trivial.
-      checkSameOrderFn(A,Ordering::MMD3,mmd3bDefault,"diagonal 5x5   : MMD3B == MMD3");
-      checkSameOrderFn(A,Ordering::MMD3,mmd3cDefault,"diagonal 5x5   : MMD3C == MMD3");
-      checkSameOrderFn(A,Ordering::AMD3,orderAmd3B,  "diagonal 5x5   : AMD3B == AMD3"); }
+      checkSameOrderFn(A,Ordering::MmdFlat,mmd3bDefault,"diagonal 5x5   : MMD3B == MmdFlat");
+      checkSameOrderFn(A,Ordering::MmdFlat,mmd3cDefault,"diagonal 5x5   : MMD3C == MmdFlat");
+      checkSameOrderFn(A,Ordering::AmdFlat,orderAmd3B,  "diagonal 5x5   : AMD3B == AmdFlat"); }
     { std::vector<std::size_t> cp={0,6,8,10,12,14,16};
       std::vector<std::int32_t> ri={0,1,2,3,4,5, 0,1, 0,2, 0,3, 0,4, 0,5};
       std::vector<std::complex<double>> v(ri.size(),{1,0}); SparseMatrix<std::complex<double>> C(6,cp,ri,v);
       reqSym(C,"arrow complex  : symmetric");
 #ifdef OBLIO_VENDORED_ORDERINGS
-      checkOrder(C,Ordering::AMD,"arrow complex  : AMD valid");
-      checkOrder(C,Ordering::MMD,"arrow complex  : MMD valid");
+      checkOrder(C,Ordering::AmdVendored,"arrow complex  : AMD valid");
+      checkOrder(C,Ordering::MmdVendored,"arrow complex  : MMD valid");
 #endif
-      checkOrder(C,Ordering::MMD3,"arrow complex  : MMD3 valid");
-      checkOrder(C,Ordering::AMD3,"arrow complex  : AMD3 valid");
+      checkOrder(C,Ordering::MmdFlat,"arrow complex  : MmdFlat valid");
+      checkOrder(C,Ordering::AmdFlat,"arrow complex  : AmdFlat valid");
       // THE SECOND SCALAR TYPE. An ordering reads only the pattern, so the permutation must be the
       // real arrow's; what this exercises is the structural overloads through a second
       // instantiation of the templated helpers.
-      checkSameOrderFn(C,Ordering::MMD3,mmd3bDefault,"arrow complex  : MMD3B == MMD3");
-      checkSameOrderFn(C,Ordering::MMD3,mmd3cDefault,"arrow complex  : MMD3C == MMD3");
-      checkSameOrderFn(C,Ordering::AMD3,orderAmd3B,  "arrow complex  : AMD3B == AMD3"); }
+      checkSameOrderFn(C,Ordering::MmdFlat,mmd3bDefault,"arrow complex  : MMD3B == MmdFlat");
+      checkSameOrderFn(C,Ordering::MmdFlat,mmd3cDefault,"arrow complex  : MMD3C == MmdFlat");
+      checkSameOrderFn(C,Ordering::AmdFlat,orderAmd3B,  "arrow complex  : AMD3B == AmdFlat"); }
     std::cout<<"\nOrderEngine tests: "<<pass<<"/"<<(pass+fail)<<" passed\n";
     return fail==0?0:1;
 }

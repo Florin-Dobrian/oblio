@@ -293,10 +293,10 @@ Result measure(const SparseMatrix<Val>& A, Ordering ordering, Factorization fact
 // The four orderings, and the three traversals, in the order the tables print them.
 struct Named { Ordering method; const char* name; };
 const Named kOrderings[] = {
-    {Ordering::MMD,  "MMD"},
-    {Ordering::MMD3, "MMD3"},
-    {Ordering::AMD,  "AMD"},
-    {Ordering::AMD3, "AMD3"},
+    {Ordering::MmdVendored,  "MMD"},
+    {Ordering::MmdFlat, "MmdFlat"},
+    {Ordering::AmdVendored,  "AMD"},
+    {Ordering::AmdFlat, "AmdFlat"},
 };
 const int kNumOrderings = 4;
 

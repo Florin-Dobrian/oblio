@@ -59,7 +59,7 @@
 //        had just made a guaranteed                     element in the list
 //        match at position zero                         (me)"
 //     7  the stored clique degree    beginElimination,  `Degree [me] = degme`,  DEFECT
-//        not rewritten after mass    PRODUCTION Amd3    written TWICE, at its
+//        not rewritten after mass    PRODUCTION AmdFlat    written TWICE, at its
 //        elimination trimmed the     alone              lines 1676 and 1940
 //        clique
 //     8  the hash key's incidence    the hash pass,     `hval += e` and        COST
@@ -83,13 +83,13 @@
 // throughout. Against it on the same graphs, for the same merges, we tested 19.0
 // pairs per pivot at 140 a side where it tests 0.333, and 155.3 at 26 cubed where it
 // tests 0.484. Fixed on alpamayo, `AMD2` at 26 a side falls from 14.88 ms to 5.45
-// and `AMD3` from 12.30 to 5.83, with the vendored routine and `AMD1` unmoved.
+// and `AmdFlat` from 12.30 to 5.83, with the vendored routine and `AMD1` unmoved.
 // `hash pairs tested` is the standing witness and should stay near one per merge.
 // `docs/DESIGN_DECISIONS.md` (2026-08-09) has why five separate oracles were blind.
 //
 //
 // **Entry 4's nature said `convention` here until 2026-08-09, and it is a DEFECT.**
-// The README, `AMD3.md` and `docs/DESIGN_DECISIONS.md` have all said DEFECT since
+// The README, `AmdFlat.md` and `docs/DESIGN_DECISIONS.md` have all said DEFECT since
 // the day it was closed, and it is one by this ledger's own definition: it filed
 // every supervariable one bucket too high per vertex a hash merge absorbed, which
 // is wrong on its own terms with no appeal to AMD_2, and it was fixed in `amd2`,

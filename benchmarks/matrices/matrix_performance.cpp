@@ -29,8 +29,8 @@
 // selects the matrices this driver can use, and `performance_candidates.txt` is the list. A matrix
 // that refuses is reported and stepped over, as everywhere in this folder.
 //
-// FOUR ORDERINGS, TWO NAMED. MMD and AMD are the vendored codes and need `../../private`; MMD3 and
-// AMD3 are Oblio's. The vendored pair is the reference: it says whether our implementations cost
+// FOUR ORDERINGS, TWO NAMED. MMD and AMD are the vendored codes and need `../../private`; MmdFlat
+// and AmdFlat are Oblio's. The vendored pair is the reference: it says whether our implementations cost
 // what they should and fill what they should. Where private/ is absent those two rows report a
 // refusal and the other two still run.
 
@@ -259,10 +259,10 @@ struct Method {
 };
 
 const Method kMethods[] = {
-    {Ordering::MMD,  "MMD"},
-    {Ordering::MMD3, "MMD3"},
-    {Ordering::AMD,  "AMD"},
-    {Ordering::AMD3, "AMD3"},
+    {Ordering::MmdVendored,  "MMD"},
+    {Ordering::MmdFlat, "MmdFlat"},
+    {Ordering::AmdVendored,  "AMD"},
+    {Ordering::AmdFlat, "AmdFlat"},
 };
 const int kNumMethods = 4;
 

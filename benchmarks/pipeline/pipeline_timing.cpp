@@ -260,9 +260,9 @@ int main(int argc, char** argv) {
     }
 
     const std::vector<std::pair<std::string, Ordering>> methods = {
-        {"Natural", Ordering::Natural}, {"MMD", Ordering::MMD},
-        {"MMD3", Ordering::MMD3},
-        {"AMD", Ordering::AMD},         {"AMD3", Ordering::AMD3},
+        {"Natural", Ordering::Natural}, {"MMD", Ordering::MmdVendored},
+        {"MmdFlat", Ordering::MmdFlat},
+        {"AMD", Ordering::AmdVendored},         {"AmdFlat", Ordering::AmdFlat},
     };
 
     for (int side : sides) {

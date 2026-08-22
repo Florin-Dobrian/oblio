@@ -1,6 +1,6 @@
 #include "oblio/OrderEngine.h"
-#include "oblio/Mmd3.h"
-#include "oblio/Amd3.h"
+#include "oblio/MmdFlat.h"
+#include "oblio/AmdFlat.h"
 
 #include <vector>
 
@@ -39,17 +39,17 @@ bool OrderEngine::compute(const std::vector<std::size_t>&  colPtr,
     switch (mOrdering) {
         case Ordering::Natural: return orderNatural(size, P);
 #ifdef OBLIO_VENDORED_ORDERINGS
-        case Ordering::MMD:     return orderMMD(size, colPtr, rowIdx, P);
+        case Ordering::MmdVendored:     return orderMmdVendored(size, colPtr, rowIdx, P);
 #else
-        case Ordering::MMD:     return false;   // vendored, and private/ is not present
+        case Ordering::MmdVendored:     return false;   // vendored, and private/ is not present
 #endif
-        case Ordering::MMD3:    return orderMMD3(size, colPtr, rowIdx, P);
+        case Ordering::MmdFlat:    return orderMmdFlat(size, colPtr, rowIdx, P);
 #ifdef OBLIO_VENDORED_ORDERINGS
-        case Ordering::AMD:     return orderAMD(size, colPtr, rowIdx, P);
+        case Ordering::AmdVendored:     return orderAmdVendored(size, colPtr, rowIdx, P);
 #else
-        case Ordering::AMD:     return false;   // vendored, and private/ is not present
+        case Ordering::AmdVendored:     return false;   // vendored, and private/ is not present
 #endif
-        case Ordering::AMD3:    return orderAMD3(size, colPtr, rowIdx, P);
+        case Ordering::AmdFlat:    return orderAmdFlat(size, colPtr, rowIdx, P);
     }
     return false;   // unreachable: every enumerator is named above, which is what -Wall checks
 }
@@ -62,7 +62,7 @@ bool OrderEngine::orderNatural(std::size_t size, Permutation& P) const {
 }
 
 #ifdef OBLIO_VENDORED_ORDERINGS
-bool OrderEngine::orderMMD(std::size_t size,
+bool OrderEngine::orderMmdVendored(std::size_t size,
                            const std::vector<std::size_t>&  colPtr,
                            const std::vector<std::int32_t>& rowIdx,
                            Permutation& P) const {
@@ -72,7 +72,7 @@ bool OrderEngine::orderMMD(std::size_t size,
 
     // A is stored full-symmetric; the vendored MMD wants the off-diagonal structure only, so
     // strip the diagonal (no expansion needed, A already holds both triangles). This is MMD's
-    // requirement alone: AMD symmetrizes and drops the diagonal itself, and MMD3 builds its own
+    // requirement alone: AMD symmetrizes and drops the diagonal itself, and MmdFlat builds its own
     // adjacency lists skipping i == j. Columns are indices, so aj is an int32_t and the
     // comparison against rowIdx[cp] needs no cast; cp is a position into A's arrays.
     std::vector<std::size_t> colPtrOff(size + 1, 0);
@@ -109,7 +109,7 @@ bool OrderEngine::orderMMD(std::size_t size,
 #endif
 
 // The completed MMD with genmmd's list order, which changes the permutation and nothing else.
-bool OrderEngine::orderMMD3(std::size_t size,
+bool OrderEngine::orderMmdFlat(std::size_t size,
                             const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,
                             Permutation& P) const {
@@ -117,7 +117,7 @@ bool OrderEngine::orderMMD3(std::size_t size,
     P.mNewToOld.assign(size, 0);
     if (size == 0) return true;
 
-    const std::vector<std::int32_t> order = orderMmd3(colPtr, rowIdx);
+    const std::vector<std::int32_t> order = Oblio::orderMmdFlat(colPtr, rowIdx);
     if (order.size() != size) return false;
 
     for (std::size_t k = 0; k < size; ++k) {
@@ -130,7 +130,7 @@ bool OrderEngine::orderMMD3(std::size_t size,
 // A is full-symmetric; AMD ignores the diagonal and symmetrizes internally, so its structure
 // can be passed straight through.
 #ifdef OBLIO_VENDORED_ORDERINGS
-bool OrderEngine::orderAMD(std::size_t size,
+bool OrderEngine::orderAmdVendored(std::size_t size,
                            const std::vector<std::size_t>&  colPtr,
                            const std::vector<std::int32_t>& rowIdx,
                            Permutation& P) const {
@@ -158,7 +158,7 @@ bool OrderEngine::orderAMD(std::size_t size,
 
 // Ours, the bound with aggressive absorption, hash detection and the vendored routine's list
 // order, which together reproduce AMD's permutation. Written into the maps the same way.
-bool OrderEngine::orderAMD3(std::size_t size,
+bool OrderEngine::orderAmdFlat(std::size_t size,
                             const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,
                             Permutation& P) const {
@@ -166,7 +166,7 @@ bool OrderEngine::orderAMD3(std::size_t size,
     P.mNewToOld.assign(size, 0);
     if (size == 0) return true;
 
-    const std::vector<std::int32_t> order = orderAmd3(colPtr, rowIdx);
+    const std::vector<std::int32_t> order = Oblio::orderAmdFlat(colPtr, rowIdx);
     if (order.size() != size) return false;
 
     for (std::size_t k = 0; k < size; ++k) {

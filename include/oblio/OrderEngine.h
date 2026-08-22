@@ -4,19 +4,19 @@
 //
 //   Natural, identity (no reordering)
 //   MMD,     Multiple Minimum Degree (Liu/Sparspak, via 0.9)
-//   MMD3,    Multiple Minimum Degree, Oblio's own, matching MMD's permutation (src/Mmd3.cpp)
+//   MmdFlat,    Multiple Minimum Degree, Oblio's own, matching MMD's permutation (src/MmdFlat.cpp)
 //   AMD,     Approximate Minimum Degree (SuiteSparse 3.3.4, BSD-3)
-//   AMD3,    Approximate Minimum Degree, Oblio's own, matching AMD's permutation (src/Amd3.cpp)
+//   AmdFlat, Approximate Minimum Degree, Oblio's own, matching AMD's permutation (src/AmdFlat.cpp)
 //
 // FIVE ENUMERATORS, TWO OF THEM OURS, and each of ours returns its reference's exact permutation
-// on every matrix the benchmarks cover. So a caller choosing MMD3 over MMD, or AMD3 over AMD, is
-// choosing an implementation and not an ordering: the fill is identical by construction.
+// on every matrix the benchmarks cover. So a caller choosing MmdFlat over MMD, or AmdFlat over AMD,
+// is choosing an implementation and not an ordering: the fill is identical by construction.
 //
 // THE EARLIER LADDER LAYERS WERE RETIRED ON 2026-08-21 and are in retired/. `MMD1`, `MMD2`, `AMD1`
 // and `AMD2` were ours too, each carrying the base algorithm without its reference's later
 // refinements, so they ordered differently and were not drop-in replacements. They were the
-// ladder that got us to MMD3 and AMD3, and the same ladder lives as working C++ and Python twins
-// in experiments/ordering/. See retired/README.md.
+// ladder that got us to MmdFlat and AmdFlat, and the same ladder lives as working C++ and Python
+// twins in experiments/ordering/. See retired/README.md.
 //
 // THE B AND C LAYERS ARE NOT IN THIS ENUM, DELIBERATELY. Three exist and are PERMANENT,
 // `orderMmd3B`, `orderMmd3C` and `orderAmd3B`, each declared in its own header and reached as a
@@ -30,8 +30,8 @@
 // benchmarked; they are simply not offered.
 //
 // Two lineages sit behind these names. MMD and AMD are vendored, self-contained codes operating on
-// raw int CSC arrays (src/Mmd.cpp, src/Amd.cpp). MMD3 and AMD3 are ours, built over the shared
-// quotient graph in include/oblio/QuotientGraph.h. Either way this engine is the seam that reads
+// raw int CSC arrays (src/Mmd.cpp, src/Amd.cpp). MmdFlat and AmdFlat are ours, built over the
+// shared quotient graph in include/oblio/QuotientGraph.h. Either way this engine is the seam that reads
 // the matrix structure and fills the Permutation. Returns true on success.
 
 #include "oblio/SparseMatrix.h"
@@ -45,7 +45,7 @@
 namespace Oblio {
 
 
-enum class Ordering { Natural, MMD, MMD3, AMD, AMD3 };
+enum class Ordering { Natural, MmdVendored, MmdFlat, AmdVendored, AmdFlat };
 
 class OrderEngine {
 public:
@@ -72,33 +72,33 @@ public:
 
 private:
     // Our MMD, not the vendored one, because the vendored orderings are optional: a default has to
-    // be an ordering that is always there. MMD3 since 2026-08-07, and the reason is not that it
+    // be an ordering that is always there. MmdFlat since 2026-08-07, and the reason is not that it
     // measured best. It returns genmmd's permutation EXACTLY, on every example, every square grid
     // and all 246 matrices in benchmarks/matrices, so its behavior is whatever thirty years of use
     // have established for a reference implementation. The alternative then was an earlier ladder
     // layer whose tie-break was ours and had been exercised on grids alone; a default is a bet on
     // the cases nobody has run, and reproducing the reference is the better bet. See
     // experiments/ordering's mmd3 section.
-    Ordering mOrdering = Ordering::MMD3;
+    Ordering mOrdering = Ordering::MmdFlat;
 
     bool orderNatural(std::size_t size, Permutation& P) const;
     // The two vendored orderings, declared only when private/ supplies their sources. Everything
     // else here is ours and is always present.
 #ifdef OBLIO_VENDORED_ORDERINGS
-    bool orderMMD(std::size_t size,
+    bool orderMmdVendored(std::size_t size,
                   const std::vector<std::size_t>&  colPtr,
                   const std::vector<std::int32_t>& rowIdx,
                   Permutation& P) const;
-    bool orderAMD(std::size_t size,
+    bool orderAmdVendored(std::size_t size,
                   const std::vector<std::size_t>&  colPtr,
                   const std::vector<std::int32_t>& rowIdx,
                   Permutation& P) const;
 #endif
-    bool orderMMD3(std::size_t size,
+    bool orderMmdFlat(std::size_t size,
                    const std::vector<std::size_t>&  colPtr,
                    const std::vector<std::int32_t>& rowIdx,
                    Permutation& P) const;
-    bool orderAMD3(std::size_t size,
+    bool orderAmdFlat(std::size_t size,
                    const std::vector<std::size_t>&  colPtr,
                    const std::vector<std::int32_t>& rowIdx,
                    Permutation& P) const;

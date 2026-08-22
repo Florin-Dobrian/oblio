@@ -205,11 +205,11 @@ private:
 // a separate seen-this-step mark. One array holds three facts: `w[c] == 0` is absorbed, `0 < w[c] <
 // wflg` is alive but stale, and `w[c] >= wflg` is seen this step with `w[c] - wflg` the value. So
 // there is no mark to carry and no clearing pass, and first sighting is `w[c] != 0 && w[c] < wflg`
-// rather than a tag comparison. `Amd3` uses that encoding; `Amd1` and `Amd2` use the other, which
-// is why this is a second struct rather than a flag on the first.
+// rather than a tag comparison. `AmdFlat` uses that encoding; `Amd1` and `Amd2` use the other,
+// which is why this is a second struct rather than a flag on the first.
 //
-// `key` is the odd one and is here because of where the walks are. `Amd3` builds its hash key from
-// the PRUNED A[u] and the FINAL I[u], and a driver that folds its first scan in here keeps a walk
+// `key` is the odd one and is here because of where the walks are. `AmdFlat` builds its hash key
+// from the PRUNED A[u] and the FINAL I[u], and a driver that folds its first scan in here keeps a walk
 // of I[u] but loses its second walk of A[u], so the ADJACENCY HALF has nowhere else to go. This
 // fills that half and the driver adds the other.
 //
@@ -306,7 +306,7 @@ public:
     // attempt and this is what found it.
     //
     // IT LIVES HERE RATHER THAN IN THE DRIVERS because only this class knows which vertices ever
-    // formed a clique. Summing over a driver's pivot list looks equivalent and is not: `Mmd3`
+    // formed a clique. Summing over a driver's pivot list looks equivalent and is not: `MmdFlat`
     // pushes prepass vertices onto that list, and for those `cliqueSize` still reports A[p]'s
     // length. That was the second wrong version of this check.
     bool cliqueCountBalances() const;
@@ -385,7 +385,7 @@ public:
     // inside the loops that build the clique, at its lines 1492 and 1636.
     //
     // MEASURED AT ZERO, and that is the point of saying so here. CPU Counters before and after,
-    // same session: useful cycles unchanged within half a percent in both families, AMD3 still
+    // same session: useful cycles unchanged within half a percent in both families, AmdFlat still
     // 1.61x the vendored routine on cubes and 1.56x in 2D. The 25 visits per pivot this removes on
     // cubes were contiguous walks over hot arrays and cost near nothing. It is kept as a faithful
     // port that removes two passes and a stale-value hazard, NOT as a speed fix, and it should not
@@ -397,7 +397,7 @@ public:
     // of thing that goes stale silently.
     //
     // Over the UNTRIMMED clique, which is what the drivers want: mass elimination runs after the
-    // absorption in Amd3, and the value that pass needs is the one before any trimming. Amd3
+    // absorption in AmdFlat, and the value that pass needs is the one before any trimming. AmdFlat
     // recomputes it afterwards over the trimmed clique, which is ledger entry 7 and stays.
     std::uint32_t cliqueWeight() const { return mCliqueWeight; }
 
@@ -529,7 +529,7 @@ public:
     // already removed every member of C[p] from A[u] and mass elimination merges only members of
     // C[p]. Neither would survive reordering the phases.
 
-    // The same fusion for the tagged-W encoding, which is the one `Amd3` carries. Everything the
+    // The same fusion for the tagged-W encoding, which is the one `AmdFlat` carries. Everything the
     // overload above says about why the fold is sound applies here unchanged; only the three-facts
     // array differs. It also fills the hash key's adjacency half, which that overload has no need
     // of because its callers keep a separate walk of A[u].
@@ -573,8 +573,8 @@ public:
     // vertices AMD merges.
     //
     // With this on, eliminate() returns an EMPTY merged list and C[pivot] is reach(pivot) exactly,
-    // and the caller must call massEliminate() once it has absorbed. Used by Amd3 alone. See
-    // experiments/ordering/AMD3.md, ledger entry 3.
+    // and the caller must call massEliminate() once it has absorbed. Used by AmdFlat alone. See
+    // experiments/ordering/AmdFlat.md, ledger entry 3.
     void setLateMassElimination(bool on) { mLateMassElimination = on; }
 
     // The half eliminate() no longer does under the flag above: fold into the pivot's supervariable
@@ -603,7 +603,7 @@ public:
 
     // The same permutation with each supervariable's members in ASCENDING VERTEX INDEX rather
     // than merge order. Indistinguishable members, so the fill and the forest are unchanged;
-    // only the permutation is, and it is genmmd's. Used by Mmd3 alone. See the .cpp.
+    // only the permutation is, and it is genmmd's. Used by MmdFlat alone. See the .cpp.
     std::vector<std::int32_t> orderAscending(const std::vector<std::int32_t>& pivots) const;
 
 private:
@@ -770,7 +770,7 @@ private:
     // the clique seen LAST is expanded FIRST; we hold a vector and append. Same set either way and
     // the same cost, but the order decides C[pivot]'s order, hence which of two equal-degree
     // candidates a later iteration finds first, and minimum degree is settled by exactly that.
-    // Off by default, so every existing driver is unaffected; Mmd3 turns it on. See
+    // Off by default, so every existing driver is unaffected; MmdFlat turns it on. See
     // experiments/ordering/mmd3.py, where the same four walks are reversed together.
     bool mReverseIncidence = false;
 
@@ -855,7 +855,7 @@ inline QuotientGraph::QuotientGraph(const std::vector<std::size_t>&  colPtr,
     }
 
     // The clique arena is reserved for the same size as the source pool, and that one line was
-    // worth 11 percent of AMD3's run time.
+    // worth 11 percent of AmdFlat's run time.
     //
     // It is APPEND ONLY: a new clique is written at the end and a dead one's block is left where
     // it lies, so the arena grows to the sum of |C[p]| over the whole elimination, which is a
@@ -910,7 +910,7 @@ inline void QuotientGraph::reachableSetAmd(std::int32_t u, std::vector<std::int3
     // at every death site rather than inferred from a value.
     //
     // It matters because this is the hottest line in the ordering. Instruments put the clique-walk
-    // copy of it at 235 ms of an 8.37 s AMD3 run at 140 a side, two random loads into two arrays
+    // copy of it at 235 ms of an 8.37 s AmdFlat run at 140 a side, two random loads into two arrays
     // where Amd.cpp does one.
     // THE SIGN OF THE WEIGHT IS THE MEMBERSHIP MARK, 2026-08-17, which is `AMD_2`'s `Nv`. The
     // negation IS the insertion: `nv > 0` is "not yet emitted" and `mWeight[v] = -nv` is the emit,
@@ -919,7 +919,7 @@ inline void QuotientGraph::reachableSetAmd(std::int32_t u, std::vector<std::int3
     //
     // C[pivot] IS LEFT NEGATED AND massEliminate PUTS IT BACK. That is the contract, and it is why
     // the negation can be afforded at all: the restore rides in a walk of the same set that already
-    // exists. A caller that sets late mass elimination MUST call massEliminate; Amd3 does.
+    // exists. A caller that sets late mass elimination MUST call massEliminate; AmdFlat does.
     //
     // THE ADJACENCY LOOPS STILL ASK mMark, the clique loops do not, and the asymmetry is exact
     // rather than cautious. `number()` numbers a prepass vertex, leaves its weight at one so its
@@ -996,7 +996,7 @@ inline void QuotientGraph::reachableSetMmd(std::int32_t u, std::vector<std::int3
     // at every death site rather than inferred from a value.
     //
     // It matters because this is the hottest line in the ordering. Instruments put the clique-walk
-    // copy of it at 235 ms of an 8.37 s AMD3 run at 140 a side, two random loads into two arrays
+    // copy of it at 235 ms of an 8.37 s AmdFlat run at 140 a side, two random loads into two arrays
     // where Amd.cpp does one.
     // THE SIGN OF THE WEIGHT IS THE MEMBERSHIP MARK, 2026-08-17, which is `AMD_2`'s `Nv`. The
     // negation IS the insertion: `nv > 0` is "not yet emitted" and `mWeight[v] = -nv` is the emit,
@@ -1005,7 +1005,7 @@ inline void QuotientGraph::reachableSetMmd(std::int32_t u, std::vector<std::int3
     //
     // C[pivot] IS LEFT NEGATED AND massEliminate PUTS IT BACK. That is the contract, and it is why
     // the negation can be afforded at all: the restore rides in a walk of the same set that already
-    // exists. A caller that sets late mass elimination MUST call massEliminate; Amd3 does.
+    // exists. A caller that sets late mass elimination MUST call massEliminate; AmdFlat does.
     //
     // THE ADJACENCY LOOPS STILL ASK mMark, the clique loops do not, and the asymmetry is exact
     // rather than cautious. `number()` numbers a prepass vertex, leaves its weight at one so its
@@ -1407,9 +1407,9 @@ inline const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pi
     // incidence writes the pivot before the rest, which yields AMD_2's order without a second
     // pass over anything. Holding one entry back costs a register; doing it afterwards costs a
     // rotate per list per reached vertex, which is a whole extra walk of the structure and was
-    // measured at about 50 percent of AMD3's run time before this was folded in. AMD_2 spends
+    // measured at about 50 percent of AmdFlat's run time before this was folded in. AMD_2 spends
     // three assignments on it for the same reason, letting the list's start shift rather than
-    // moving a list. See experiments/ordering/AMD3.md, ledger entry 5 and iteration 10.
+    // moving a list. See experiments/ordering/AmdFlat.md, ledger entry 5 and iteration 10.
     for (std::uint32_t ri = 0; ri < reachedSize; ++ri) {
         const std::int32_t u = reached[ri];
         // ONE FETCH OF THE RUN, not three. The three numbers share a 16-byte object, so the
@@ -1567,7 +1567,7 @@ inline const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pi
         // I[u], every one of which is a dead pivot, and u is live.
         //
         // The driver's obligation is one store: the slot goes back to alive-and-unseen once the
-        // bound has been read. See src/Amd3.cpp.
+        // bound has been read. See src/AmdFlat.cpp.
         scan.w[u]               = static_cast<std::int32_t>(explicitPart);
         // Through the int32 slot the key rides in, bit pattern preserved and read back as uint32
         // in the driver's bound pass. The slot is the vertex's degree-list predecessor, free
@@ -1639,7 +1639,7 @@ inline const std::vector<std::int32_t>& QuotientGraph::finishElimination(std::in
 //
 // It runs from finishElimination by default and from the driver under mLateMassElimination, and
 // the body is the same either way: what moves is when the question is asked, since aggressive
-// absorption is what makes this cheap test agree with the true one. experiments/ordering/AMD3.md, entry 3.
+// absorption is what makes this cheap test agree with the true one. experiments/ordering/AmdFlat.md, entry 3.
 inline const std::vector<std::int32_t>& QuotientGraph::massEliminate(std::int32_t pivot) {
     std::vector<std::int32_t>& merged = mMerged;   // scratch, kept for its capacity
     merged.clear();
@@ -1653,7 +1653,7 @@ inline const std::vector<std::int32_t>& QuotientGraph::massEliminate(std::int32_
     // pivot goes first, since the merge below adds into it and both operands must be magnitudes.
     //
     // SO EVERY PATH THROUGH AN ELIMINATION MUST REACH THIS FUNCTION. finishElimination calls it
-    // unless mLateMassElimination is set, and the one driver that sets it, Amd3, calls it itself
+    // unless mLateMassElimination is set, and the one driver that sets it, AmdFlat, calls it itself
     // after aggressive absorption. Nothing between the two reads a weight directly, and `weight()`
     // returns the magnitude in any case.
     // THE SIGNS COME BACK HERE UNLESS THE DRIVER IS DOING IT. Mass elimination is the last reader
@@ -1698,9 +1698,9 @@ inline const std::vector<std::int32_t>& QuotientGraph::massEliminate(std::int32_
             // Amd2B, read the UNTRIMMED size where they had been computing the trimmed one, which
             // is a bound too large per vertex the merge took. That is the same shape as ledger
             // entry 7 and it was caught by `prototype and production agree` in
-            // experiments/ordering, with `make amdorder` and all 283 assertions passing: Amd3
+            // experiments/ordering, with `make amdorder` and all 283 assertions passing: AmdFlat
             // mass-eliminates late, so its own first read is legitimately of the untrimmed clique
-            // and every check that watches Amd3 stayed green.
+            // and every check that watches AmdFlat stayed green.
             mCliqueWeight -= weight(u);            // magnitude: the sign depends on `restore`
             mWeight[pivot] += mWeight[u];
             mWeight[u] = 0;

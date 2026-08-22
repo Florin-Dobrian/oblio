@@ -28,9 +28,9 @@
 // A driver added to the list below simply has no baseline entry until the next record, and the run
 // says so rather than passing silently.
 
-#include "oblio/Amd3.h"
+#include "oblio/AmdFlat.h"
 #include "oblio/Amd3B.h"
-#include "oblio/Mmd3.h"
+#include "oblio/MmdFlat.h"
 #include "oblio/Mmd3B.h"
 #include "oblio/Mmd3C.h"
 
@@ -99,7 +99,7 @@ using OrderFn = std::vector<std::int32_t> (*)(const std::vector<std::size_t>&,
                                    const std::vector<std::int32_t>& rowIdx) {     \
         return CALL(colPtr, rowIdx);                                              \
     }
-OBLIO_DIGEST_FORWARD(mmd3Default,  orderMmd3)
+OBLIO_DIGEST_FORWARD(mmd3Default,  orderMmdFlat)
 OBLIO_DIGEST_FORWARD(mmd3bDefault, orderMmd3B)
 OBLIO_DIGEST_FORWARD(mmd3cDefault, orderMmd3C)
 #undef OBLIO_DIGEST_FORWARD
@@ -111,8 +111,8 @@ struct Driver { const char* name; OrderFn fn; };
 // `make amdorder` and `make mmdorder` are where the vendored comparison lives.
 const std::vector<Driver>& drivers() {
     static const std::vector<Driver> d = {
-        {"MMD3",  mmd3Default}, {"MMD3B", mmd3bDefault}, {"MMD3C", mmd3cDefault},
-        {"AMD3",  orderAmd3},   {"AMD3B", orderAmd3B},
+        {"MmdFlat",  mmd3Default}, {"MMD3B", mmd3bDefault}, {"MMD3C", mmd3cDefault},
+        {"AmdFlat",  orderAmdFlat},   {"AMD3B", orderAmd3B},
     };
     return d;
 }

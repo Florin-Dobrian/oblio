@@ -156,8 +156,9 @@ single cold reading is a reading rather than a result, and `-O3 -DNDEBUG` for th
 two problem families is exactly the error the second family exists to prevent.
 
 **`AMDraw` is a column and not a method.** `AMD` is `amd_order` as SuiteSparse ships it, which is
-what a caller selecting `Ordering::AMD` gets; `AMDraw` is the same routine with an additive hook
-reporting the order `AMD_2` would emit if it stopped at the end of its main loop, before
+what a caller selecting `Ordering::AmdVendored` gets; `AMDraw` is the same routine with an
+additive hook reporting the order `AMD_2` would emit if it stopped at the end of its main loop,
+before
 `AMD_postorder` relabels it. It is there because `AMD3` reproduces that raw order and deliberately
 does not postorder, so `AMD` is the wrong thing for it to sit against: they are different
 permutations and their fill need not agree. It does agree on every size in these tables, and
@@ -1681,7 +1682,7 @@ oracle trustworthy go with it.
 printing figures if it does not: the permutation entry for entry, `Info[AMD_LNZ]` and
 `Info[AMD_NCMPA]`, all against unhooked `amd_order` on the same pattern, once per row before
 anything is timed. `Control` is `nullptr` in both, which is what `OrderEngine` passes for
-`Ordering::AMD`, so the phases describe the same call the `AMD` column measures.
+`Ordering::AmdVendored`, so the phases describe the same call the `AMD` column measures.
 
 **And the caveat: a clock read is a compiler barrier.** Each of the five sits at a phase boundary,
 between two loops rather than inside one, so there is nothing across it the optimizer should have

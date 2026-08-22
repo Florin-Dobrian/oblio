@@ -1,4 +1,4 @@
-#include "oblio/Amd3.h"
+#include "oblio/AmdFlat.h"
 
 #include <algorithm>
 #include <cassert>
@@ -11,7 +11,7 @@ namespace {
 
 // THE BODY, WITH ONE OPTIONAL OUT-PARAMETER. The public forms are an overload pair rather than one
 // function with a default argument, because a default argument is not part of a function's type: a
-// defaulted parameter here would stop `orderAmd3` binding to the plain two-argument function
+// defaulted parameter here would stop `orderAmdFlat` binding to the plain two-argument function
 // pointer that benchmarks/ordering and the digest harness take its address as. An overload leaves
 // that type intact.
 std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
@@ -25,7 +25,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
 
     // The two shared-class conventions this layer differs by. Both are off for every other driver
     // and neither changes which sets are computed, only which permutation comes out. See the
-    // setters, and experiments/ordering/AMD3.md for ledger entries 2, 3 and 5.
+    // setters, and experiments/ordering/AmdFlat.md for ledger entries 2, 3 and 5.
     qg.setLateMassElimination(true);    // and mass elimination becomes this driver's, below
 
     std::vector<std::int32_t> pivots;               // the order over supervariables
@@ -274,8 +274,8 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
         // five percent slower in Amd1B's case, which is why it took a re-run to find: that reading
         // was 2D, at one size, before ledger entry 8.
         //
-        // clearFlag RUNS FIRST, where Amd3 calls it after the elimination: the scan is inside the
-        // eliminator now, so the tag has to be valid before it, and `Amd.cpp` calls clear_flag
+        // clearFlag RUNS FIRST, where AmdFlat calls it after the elimination: the scan is inside
+        // the eliminator now, so the tag has to be valid before it, and `Amd.cpp` calls clear_flag
         // before its own scan 1 for the same reason. `lemax` still advances after, needing degme,
         // and it is consumed only at the end of the step.
         clearFlag();
@@ -362,7 +362,8 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
         // test fail. Amd.cpp says so itself, making the same test in its scan 2 over a clique
         // list absorption has already compacted: with aggressive absorption, `deg == 0` is
         // identical to `Elen[i] == 1 && p3 == pn`. Asking first, as every other driver here does,
-        // declines merges the vendored routine makes. experiments/ordering/AMD3.md, ledger entry 3.
+        // declines merges the vendored routine makes. experiments/ordering/AmdFlat.md, ledger
+        // entry 3.
         const std::vector<std::int32_t>& merged = qg.massEliminate(pivot);
         numEliminated += 1 + static_cast<std::uint32_t>(merged.size());
         numLive -= qg.weight(pivot);                // every original the pivot stands for
@@ -399,7 +400,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
         // clique is already trimmed when they take `degme` and their single write is correct. The
         // defect arrived with ledger entry 3, which moved mass elimination out and did not carry
         // the second write that placement is the whole reason for. Half a mechanism, as entry 6
-        // was. See experiments/ordering/AMD3.md.
+        // was. See experiments/ordering/AmdFlat.md.
         degrees[pivot] = degme;
 
         const std::uint32_t numLeft = numLive;
@@ -427,7 +428,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
             const std::uint32_t incidenceSize = qg.incidenceSize(u);
 
             // THE ADJACENCY TERM AND THE WHOLE KEY ARE ALREADY IN HAND, accumulated by the
-            // prune over exactly the sets it produced. Amd3 walks A[u] here for the bound's
+            // prune over exactly the sets it produced. AmdFlat walks A[u] here for the bound's
             // explicit part and for the key's explicit half, and walks I[u] for the key's other
             // half; this reads both instead, which is one whole walk of A[u] removed and the key
             // out of the loop below entirely. The key's rule that an eliminated neighbor is
@@ -508,7 +509,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
             // the variant was timed as a free function and this driver through OrderEngine, which
             // also builds a Permutation, a bias of up to 2.4 percent. It removes a sweep over C[p]
             // and two walks, 26.70 of 149.96 element visits per pivot at 140 a side and 66.77 of
-            // 352.57 at 26 cubed. See benchmarks/ordering/README.md and AMD3.md.
+            // 352.57 at 26 cubed. See benchmarks/ordering/README.md and AmdFlat.md.
             //
             // THE GUARD AND THE DIRECTION ARE THE TWO THINGS THAT HAD TO COME ACROSS. The key pass
             // skipped an eliminated member and this bound pass does not, so the skip moves onto
@@ -633,8 +634,8 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
                 // clique, `if (mMark[v] == inClique) continue`, so A[u] cannot contain v and A[v]
                 // cannot contain u. Nothing to exclude. That is exactly why Amd.cpp's stamp has no
                 // such guard either. This was landed as a separate driver first, so that
-                // `AMD3C == AMD3` could say the reasoning held rather than merely sounding right,
-                // and folded in once it did.
+                // `AMD3C == AmdFlat` could say the reasoning held rather than merely sounding
+                // right, and folded in once it did.
                 //
                 // Roles swapped with the hoist: u is stamped and v is walked, where before it was
                 // v stamped and u walked. The test is symmetric so the outcome does not move, and the SURVIVOR
@@ -676,7 +677,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
                     //     A[u] == A[v]   and   I[u] == I[v]
                     // against the stamp of u laid down once above. Both walks short-circuit on the
                     // first mismatch, which is what made the comparison cheap and the stamping the
-                    // thing that had to move: see experiments/ordering/AMD3.md, iteration 15.
+                    // thing that had to move: see experiments/ordering/AmdFlat.md, iteration 15.
                     if (qg.adjacencySize(v) != adjacencyU) continue;
                     if (qg.incidenceSize(v) != incidenceU) continue;
 
@@ -784,7 +785,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
             // and `degrees[u]` has just been written from it, so the pass this replaces was one
             // scattered read per survivor per pivot to recover a value it had already had.
             // AMD_2 does the same inside its restore-degree-lists loop, `if (deg < mindeg)`.
-            // Amd1 has always done it this way; Amd2, Amd2B and Amd3 did not.
+            // Amd1 has always done it this way; Amd2, Amd2B and AmdFlat did not.
             //
             // MEASURED AT ZERO, with the clique-weight fusion beside it: useful cycles unchanged
             // within half a percent in both families. A port and a simplification, not a speed
@@ -830,7 +831,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
 
 } // namespace
 
-std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
+std::vector<std::int32_t> orderAmdFlat(const std::vector<std::size_t>&  colPtr,
                                     const std::vector<std::int32_t>& rowIdx) {
     return orderAmd3Impl(colPtr, rowIdx, nullptr);
 }
@@ -838,7 +839,7 @@ std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
 // The same ordering, reporting how many entries the clique arena ended up holding. A SIZE, not a
 // capacity, and for this scheme also the peak, the arena never shrinking. `benchmarks/matrices`
 // prints it beside nnz(L); see QuotientGraph::arenaEntries.
-std::vector<std::int32_t> orderAmd3(const std::vector<std::size_t>&  colPtr,
+std::vector<std::int32_t> orderAmdFlat(const std::vector<std::size_t>&  colPtr,
                                     const std::vector<std::int32_t>& rowIdx,
                                     std::size_t& arenaEntries) {
     return orderAmd3Impl(colPtr, rowIdx, &arenaEntries);

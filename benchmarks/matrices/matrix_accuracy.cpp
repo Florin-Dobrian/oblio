@@ -2,7 +2,7 @@
 // answer is: the backward error, the residual, and what each factorization had to do to get
 // there. The report drawn from it is ACCURACY.md beside this file.
 //
-// The first pass over real input. Ordering is MMD3, the tree's default, and the traversal is
+// The first pass over real input. Ordering is MmdFlat, the tree's default, and the traversal is
 // left-looking; both are held fixed on purpose, because the question here is whether the
 // pipeline computes correctly on matrices nobody generated, not which ordering is best. The
 // other axes come after this one has been read.
@@ -345,7 +345,7 @@ void processMatrix(const std::string& path, std::size_t maxFill, std::FILE* out)
         return;
     }
 
-    DirectSolver<double> solver(Ordering::MMD3, Factorization::Cholesky,
+    DirectSolver<double> solver(Ordering::MmdFlat, Factorization::Cholesky,
                                 Traversal::LeftLooking);
 
     bool analyzed = false;
@@ -488,7 +488,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::printf("ordering MMD3, traversal left-looking, b all ones\n");
+    std::printf("ordering MmdFlat, traversal left-looking, b all ones\n");
     std::printf("bwd = ||Ax - b|| / (||A|| ||x|| + ||b||), res = ||Ax - b|| / ||b||, "
                 "infinity norms throughout\n");
     std::printf("note: Np, the static LDL perturbed N pivots it could not divide by, having no way\n      to pivot. Nd, the dynamic LDL delayed N columns to a parent rather than\n      pivot on them.\n");

@@ -13,7 +13,7 @@ traversals over one pipeline.
   field, where one is symmetric and the other Hermitian
 - **Three traversal algorithms**: Left-looking, Right-looking, Multifrontal
 - **Two fill-reducing orderings**, both minimum degree: MMD, using the exact degree, and AMD,
-  using an approximate degree bound. `Ordering::MMD` and `Ordering::AMD`
+  using an approximate degree bound. `Ordering::MmdVendored` and `Ordering::AmdVendored`
 - **One right-hand side per solve**, a `Vector<Val>`, with the factorization reused across as
   many as wanted. Many right-hand sides at once, which is where the solve would become a level-3
   BLAS operation, is the one thing on the roadmap rather than in the library; see Status

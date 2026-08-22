@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-// Amd3B.cpp - Amd3 on AMD_2'S CLIQUE STORAGE: one pool with a free cursor and a compaction.
+// Amd3B.cpp - AmdFlat on AMD_2'S CLIQUE STORAGE: one pool with a free cursor and a compaction.
 //
 // WHAT IT IS FOR, AND IT IS TWO THINGS. Both are permanent; this file is not an experiment awaiting
 // a verdict and its old stop condition is withdrawn. It is the amd counterpart of Mmd3B, which says
@@ -33,11 +33,11 @@
 // FOUR OF THE FIVE ARE PORTED, 2026-08-17, and the fold set is closed. The sign, the merge before
 // the compaction and the restore all landed in `QuotientGraph`, so every driver has them; the
 // restore rides in massEliminate's walk over C[pivot] rather than in a bound pass, which is a
-// different existing pass serving the same purpose. The detection stamp landed in `Amd3` and in
+// different existing pass serving the same purpose. The detection stamp landed in `AmdFlat` and in
 // `Amd2`, both of which already carried the tagged `w`. `Amd1` needed nothing, having no
 // supervariable detection at all. SO THIS FILE'S TIME COLUMN IS NOW THE STORAGE PRICE ALONE, as
-// Mmd3B's already was, and it reads about 6 to 8 percent below AMD3 up to 256 a side and 15 percent
-// below it from 400 up, reproduced across two runs.
+// Mmd3B's already was, and it reads about 6 to 8 percent below AmdFlat up to 256 a side and 15
+// percent below it from 400 up, reproduced across two runs.
 //
 // THE FIFTH CANNOT PORT, AND THE REASON IS Mmd1 RATHER THAN THE PREPASS. `eliminated()` answers
 // from `mWeight[u] == 0` here and from `mMark[u] == GONE` in the shared class, and the two differ
@@ -54,8 +54,8 @@
 // `mMark[u]` for `mWeight[u]`, both scattered, and the array stays for mmd either way. Checked and
 // declined 2026-08-17.
 //
-// SECOND, IT IS THE PREDICTABLE-SPACE VERSION OF AMD3. From a conversation with Alex Pothen: given
-// a machine you know whether A fits, but you cannot know whether L fits, nnz(L) depending on the
+// SECOND, IT IS THE PREDICTABLE-SPACE VERSION OF AmdFlat. From a conversation with Alex Pothen:
+// given a machine you know whether A fits, but you cannot know whether L fits, nnz(L) depending on the
 // ordering being computed. So a method that stays within `O(n + m)` carries a guarantee no amount
 // of speed substitutes for: IF THE INPUT FITS, THE ANSWER IS REACHABLE. The compaction
 // below is that guarantee bought deliberately, not frugality. Our arena is the right default for a
@@ -73,8 +73,8 @@
 // it is accepted on purpose; `make digest` catches a copy that has stopped reproducing its original
 // in half a second.
 //
-// ITS OBLIGATION. It must return Amd3's permutation exactly, which is `AMD_2`'s raw order, so its
-// nnz(L) column in benchmarks/ordering must equal AMDraw's on every row and its fill column carries
+// ITS OBLIGATION. It must return AmdFlat's permutation exactly, which is `AMD_2`'s raw order, so
+// its nnz(L) column in benchmarks/ordering must equal AMDraw's on every row and its fill column carries
 // nothing. That obligation is what makes it an instrument rather than a second ordering, and
 // `make digest` checks it across every driver in half a second.
 //
@@ -143,8 +143,8 @@ namespace {
 // See include/oblio/QuotientGraphCompacted.h.
 
 
-// THE ONE BODY, TAKING A POINTER SO THAT BOTH PUBLIC FORMS SHARE IT. The same shape `Amd3`,
-// `Mmd3` and `Mmd3C` use; `Amd3B` was the one driver without it until 2026-08-21.
+// THE ONE BODY, TAKING A POINTER SO THAT BOTH PUBLIC FORMS SHARE IT. The same shape `AmdFlat`,
+// `MmdFlat` and `Mmd3C` use; `Amd3B` was the one driver without it until 2026-08-21.
 std::vector<std::int32_t> orderAmd3BImpl(const std::vector<std::size_t>&  colPtr,
                                          const std::vector<std::int32_t>& rowIdx,
                                          std::size_t* arenaEntries) {
@@ -166,9 +166,9 @@ std::vector<std::int32_t> orderAmd3BImpl(const std::vector<std::size_t>&  colPtr
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u)
         degrees[u] = qg.adjacencySize(u);
 
-    // THE EMPTY-ROW PREPASS, riding in the filing loop as `AMD_2` does and as Amd3 now does. See
-    // src/Amd3.cpp for why it exists and what it fixes; the two must produce the same permutation
-    // and `test_order` asserts it.
+    // THE EMPTY-ROW PREPASS, riding in the filing loop as `AMD_2` does and as AmdFlat now does. See
+    // src/AmdFlat.cpp for why it exists and what it fixes; the two must produce the same
+    // permutation and `test_order` asserts it.
     // AND THE DENSE-ROW RULE, the other half of `AMD_2`'s initialization pass. A row whose degree
     // exceeds `max (16, 10 * sqrt (n))` is SET ASIDE: not eliminated, not available, kept out of
     // every reachable set by a zero weight, and appended to the permutation at the end. `AMD_2`:
@@ -432,7 +432,7 @@ std::vector<std::int32_t> orderAmd3BImpl(const std::vector<std::size_t>&  colPtr
     // NOT AN ASSERT THAT THE LIVE COUNT IS ZERO. A clique dies when one of its members becomes a
     // pivot, and at the close of a run the last cliques can have had every member mass eliminated
     // into the pivot instead, leaving no one to absorb them, so a handful of entries legitimately
-    // survive. `Amd3` asserts the same thing on the same grounds.
+    // survive. `AmdFlat` asserts the same thing on the same grounds.
     assert(qg.cliqueCountBalances() && "clique births and deaths do not balance");
 
     // How often the pool actually needed compacting. `AMD_2` reports the same figure as
@@ -457,7 +457,7 @@ std::vector<std::int32_t> orderAmd3B(const std::vector<std::size_t>&  colPtr,
 }
 
 // The same, reporting the pool's size. See QuotientGraphCompacted::arenaEntries for why that is a
-// different quantity from the flat class's, and Amd3.h for why this is an overload.
+// different quantity from the flat class's, and AmdFlat.h for why this is an overload.
 std::vector<std::int32_t> orderAmd3B(const std::vector<std::size_t>&  colPtr,
                                      const std::vector<std::int32_t>& rowIdx,
                                      std::size_t& arenaEntries) {

@@ -261,8 +261,8 @@ public:
     // PEAK LIVE CLIQUE MEMBERS. A MEMBER is a vertex in a live clique at this instant, where an
     // ENTRY is a pool slot; the two differ here and not in the flat class, because this layout
     // reclaims. IT IS A PROPERTY OF THE ALGORITHM AND NOT OF THE LAYOUT, which is what makes it
-    // comparable against `Amd3`'s and `Mmd3`'s: two drivers agreeing on a permutation can still be
-    // caught doing different work, and have been. Checked in tests/test_order.cpp.
+    // comparable against `AmdFlat`'s and `MmdFlat`'s: two drivers agreeing on a permutation can
+    // still be caught doing different work, and have been. Checked in tests/test_order.cpp.
     std::size_t numPeakCliqueMembers() const { return mNumPeakCliqueMembers; }
     std::size_t numLiveCliqueMembers() const { return mNumLiveCliqueMembers; }
 
@@ -852,26 +852,6 @@ inline void QuotientGraphCompacted::merge(std::int32_t u, std::int32_t v) {
     markGone(v);          // mmd only; the amd branch reads the zero weight above and has no array
 }
 
-// WRITES AT `mFree` RATHER THAN APPENDING, which is the storage change. The caller still ensures
-// room for a whole reach before the walk starts, so the cursor cannot run past the pool inside it;
-// that test is the last divergence from `AMD_2`, which tests per entry instead, and closing it is
-// what the positions below are for.
-//
-// INCIDENCE THEN ADJACENCY, which is `AMD_2`'s `for (knt1 = 1 ; knt1 <= elenme + 1 ; knt1++)`:
-// the cliques of me on the first `elenme` passes and the supervariables on the last. It is now
-// also the physical order of the run, so the walk reads the two parts in the order they lie.
-//
-// POSITIONS RATHER THAN POINTERS, and this is the whole of what the change buys. The compactor
-// moves every live block, so a pointer taken before it runs points at whatever landed there
-// afterwards, and a walk holding one cannot resume. A POSITION survives, because the pool itself
-// never reallocates: `mSource` is sized once at construction and the compactor only slides data
-// within it, so what a compaction invalidates is a block's OFFSET and never the array's base.
-// Hoisting that base costs the same as holding a pointer, and `AMD_2` walks the same way for the
-// same reason, keeping `p` and `pj` as indices and restoring them from `Pe [me]` and `Pe [e]`.
-//
-// THE OFFSETS ARE THEREFORE RE-READ FROM THE DESCRIPTORS at the top of each clique rather than
-// carried, which is what makes them re-derivable at all. `mFree` is likewise read from the member
-// and never cached across the walk.
 // WRITES AT `mFree` RATHER THAN APPENDING, which is the storage change, and TESTS FOR ROOM PER
 // ENTRY exactly as `AMD_2` does with `if (pfree >= iwlen) garbage_collection`. The walk resumes
 // afterwards, which is what the two steps below it were for.
@@ -977,10 +957,10 @@ inline std::uint32_t QuotientGraphCompacted::reachableSetAmd(std::int32_t u) {
     return reached;
 }
 
-// WRITES AT `mFree` RATHER THAN APPENDING, which is the storage change. The caller has already
-// made room for a whole reach, so the cursor cannot run out inside the walk; and the reach lands
-// exactly where the clique is to live, so there is no copy from a scratch into place. Production
-// appends to its arena and needs a capacity check per pivot for the same guarantee.
+// WRITES AT `mFree` RATHER THAN APPENDING, which is the storage change, and TESTS FOR ROOM PER
+// ENTRY, so a compaction can fire inside this walk and the walk then resumes; the positions and
+// cursors below are what make resuming possible. The reach lands exactly where the clique is to
+// live, so there is no copy from a scratch into place.
 inline std::uint32_t QuotientGraphCompacted::reachableSetMmd(std::int32_t u) {
     ++mTag;
     // THE PIVOT IS ALREADY NEGATED, by `beginEliminationMmd`, which is where the amd branch has

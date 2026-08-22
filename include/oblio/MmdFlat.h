@@ -1,6 +1,6 @@
 #pragma once
 
-// Mmd3.h - multiple minimum degree with the mechanisms that ride with the batch, over the shared
+// MmdFlat.h - multiple minimum degree with the mechanisms that ride with the batch, over the shared
 // quotient graph. Section 5.11 of archive/sparse_factorization.md, and the mmd2 layer of
 // experiments/ordering.
 //
@@ -45,7 +45,7 @@ namespace Oblio {
 // true minima, negative takes one pivot per round.
 //
 // It takes A's pattern, which is all an ordering reads, and builds its own quotient graph from it.
-std::vector<std::int32_t> orderMmd3(const std::vector<std::size_t>&  colPtr,
+std::vector<std::int32_t> orderMmdFlat(const std::vector<std::size_t>&  colPtr,
                                     const std::vector<std::int32_t>& rowIdx,
                                     std::int32_t delta = 0);
 
@@ -54,7 +54,7 @@ std::vector<std::int32_t> orderMmd3(const std::vector<std::size_t>&  colPtr,
 // default argument is not part of a function's type, but adding one here would still change how the
 // name resolves where its address is taken, and `delta` must stay explicit at this call so the two
 // forms cannot be confused.
-std::vector<std::int32_t> orderMmd3(const std::vector<std::size_t>&  colPtr,
+std::vector<std::int32_t> orderMmdFlat(const std::vector<std::size_t>&  colPtr,
                                     const std::vector<std::int32_t>& rowIdx,
                                     std::int32_t delta,
                                     std::size_t& arenaEntries);

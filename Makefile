@@ -63,10 +63,10 @@ OBLIO_SRCS = \
   src/SparseMatrix.cpp \
   src/Permutation.cpp \
   src/OrderEngine.cpp \
-  src/Mmd3.cpp \
+  src/MmdFlat.cpp \
   src/Mmd3B.cpp \
   src/Mmd3C.cpp \
-  src/Amd3.cpp \
+  src/AmdFlat.cpp \
   src/Amd3B.cpp \
   src/ElmForestEngine.cpp \
   src/SymFactorEngine.cpp \
@@ -85,8 +85,9 @@ OBLIO_SRCS = \
 # so warnings are silenced (-w) for these two files only.
 #
 # They live in private/, which is not tracked, and are optional: the build detects them rather than
-# requiring them. Present, Ordering::MMD and Ordering::AMD work as they always have. Absent, the
-# library still builds and those two enumerators refuse, everything else being unaffected. Nothing
+# requiring them. Present, Ordering::MmdVendored and Ordering::AmdVendored work as they always
+# have. Absent, the library still builds and those two enumerators refuse, everything else being
+# unaffected. Nothing
 # is switched by hand and there is no flag to remember; a tree that has the directory behaves one
 # way and a clone behaves the other. See docs/DESIGN_DECISIONS.md.
 # OBLIO_PUBLIC=1 builds as everyone else does, ignoring private/ even when it is there. It is the
@@ -94,7 +95,7 @@ OBLIO_SRCS = \
 ifdef OBLIO_PUBLIC
   VENDOR_SRCS =
 else
-  VENDOR_SRCS = $(wildcard private/Amd.cpp private/Mmd.cpp)
+  VENDOR_SRCS = $(wildcard private/AmdVendored.cpp private/MmdVendored.cpp)
 endif
 
 ifneq ($(VENDOR_SRCS),)

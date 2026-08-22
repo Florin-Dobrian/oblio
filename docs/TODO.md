@@ -1324,8 +1324,9 @@ and the other three are covered elsewhere.
 calls `checkIndexRange(mNnz, ...)` and throws before any ordering is chosen. The 2026-07-15 entry in
 DESIGN_DECISIONS explains why, and that explanation is now partly wrong: it says the cap comes from
 "the ordering handoff," as though there were one. There are nine paths and only two have it. The
-vendored `orderMMD` and `orderAMD` narrow `nnz` to `int` at `OrderEngine.cpp` lines 88 and 155, for
-`amd_order` and `mmd_order`, which are the `int`-based builds. **Ours impose nothing**: they take
+vendored `orderMmdVendored` and `orderAmdVendored` narrow `nnz` to `int` at `OrderEngine.cpp`
+lines 88 and 155, for `amd_order` and `mmd_order`, which are the `int`-based builds. **Ours
+impose nothing**: they take
 `colPtr` and `rowIdx` directly, `QuotientGraph` holds every position as `std::size_t`, and its only
 `int32_t` values are vertex indices, capped by `n` rather than by nnz.
 

@@ -15,8 +15,17 @@ five alignment items between the flat and compacted classes, all closed, and the
 
 **THE ORDERING SUBSYSTEM IS IN A SETTLED STATE.** Five enum orderings, `MMD3` and `AMD3` each
 reproducing its reference exactly; three non-enum layers on the two vendored clique stores; two
-quotient graph classes differing in three driver calls on the mmd side and nine on the amd side,
-`docs/QUOTIENT_GRAPH_USAGE.md` having the ledger. What is open is below and none of it is cleanup.
+quotient graph classes whose driver call sequences are IDENTICAL on the mmd side and differ in two
+calls on the amd side, `docs/QUOTIENT_GRAPH_USAGE.md` having the ledger. What is open is below and
+none of it is cleanup.
+
+**THE FIGURES IN THAT SENTENCE WERE THREE AND NINE UNTIL 2026-08-21.** They came from an extraction
+that read `qg.<method>` out of the drivers without stripping comments, so a method named in prose
+counted as a call. All three mmd differences were comment text and one of the nine amd ones was.
+What actually remains on the amd side is two `adjacencyAmd` calls in `Amd3`'s hash-detection block,
+which is the run order and not an accident; `compactions` against `arenaEntries` is excluded
+throughout, being layout. Corrected in `docs/QUOTIENT_GRAPH_USAGE.md` and in the 2026-08-21
+`DESIGN_DECISIONS.md` entry.
 
 **WHERE TO START: "The inlining bias" below.** It is short and it invalidates figures quoted
 elsewhere in this file and in `benchmarks/matrices/ORDERING.md`. Read it with the caution the
@@ -429,6 +438,22 @@ Full account and the three-row table in docs/DESIGN_DECISIONS.md (2026-08-19).
   It is now a both-split build, so a plain re-run of `benchmarks/matrices` gives the fair figure.
   Until then it should not be quoted. `benchmarks/matrices/ORDERING.md` and the header note in
   `src/Mmd3C.cpp` both still carry mixed-build figures.
+
+  **THAT BULLET WAS OVERTAKEN THE NEXT DAY AND IS WRONG AS IT STANDS, marked 2026-08-21.** It was
+  written on 2026-08-19; `19efe5f` landed on 2026-08-20 and regenerated the report from a fresh
+  run of all 246 with every driver already split. `ORDERING.md` therefore carries FAIR amd figures,
+  and its own header says so. The `AMD3B / AMD3` row did not exist before that commit: `af829bb`
+  had `AMD3B / AMD` only, aggregate 0.95 and median 0.90 over 242 matrices, and the re-run gives
+  aggregate 0.94 and median 0.950 over 235. The two 0.95s are different statistics, which is how
+  the figure looked unchanged and so looked un-rerun.
+
+  **WHAT IS ACTUALLY STALE ABOUT IT IS ONE DAY LATER.** `ORDERING.md` was measured at `19efe5f`
+  and so predates `97f4bc6` and `1da85c5`, which means it does not carry the `AMD3` speedup from
+  alignment item 4. A re-run of `make amdorder` is still wanted; the reason is the alignment
+  commits, not the build arrangement. And the header note in `src/Mmd3C.cpp` is not mixed-build
+  either: it says outright that its figure was 0.90 until 2026-08-19, that this was not a fair
+  comparison, and that building both sides alike gives 0.92 to 0.95. So the bullet was wrong about
+  both files it named.
 - `MMD3B / MMD3` at 1.14 to 1.25 is UNDERSTATED, `Mmd3B` still being private. Chaining loses while
   holding the advantage, so that conclusion is safe.
 - `AMD3 / AMD` and `MMD3 / MMD` overstate our gap by roughly three points, permanently: both

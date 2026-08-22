@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <vector>
 
-// Mmd3C.cpp - Mmd3 on AMD_2'S CLIQUE LAYOUT: one pooled workspace with a free cursor and a
+// Mmd3C.cpp - MmdFlat on AMD_2'S CLIQUE LAYOUT: one pooled workspace with a free cursor and a
 // compaction, where production keeps a separate append-only arena in elimination order.
 //
 // IT IS A CELL OF THE LAYOUT MATRIX, and the matrix is why it exists. Two algorithms and three
@@ -18,20 +18,20 @@
 // C is a driver on the OTHER branch's, so this is the mmd counterpart of Amd3B and pairs with it
 // down a column. See docs/DESIGN_DECISIONS.md (2026-08-16, the layout matrix, and 2026-08-17).
 //
-// WHAT IT IS FOR, precisely. With encoding held equal, genmmd's dead-segment scheme COSTS Mmd3
-// about 8 percent on squares and 29 on cubes, and AMD_2's pool EARNS Amd3 about 9 percent, rising
-// to 15 at large n. Each of those is a single reading on a single algorithm, so neither can be told
+// WHAT IT IS FOR, precisely. With encoding held equal, genmmd's dead-segment scheme COSTS MmdFlat
+// about 8 percent on squares and 29 on cubes, and AMD_2's pool EARNS AmdFlat about 9 percent,
+// rising to 15 at large n. Each of those is a single reading on a single algorithm, so neither can be told
 // apart from something about how that algorithm walks. This file is the second reading of the pool:
 // if mmd on it also comes in below 1.0, the pool wins on both algorithms and our arena is the thing
 // to change.
 //
-// IT DOES, BY 5 TO 8 PER CENT. `MMD3C / MMD3` on alpamayo reads 0.92 to 0.95 on square grids from
-// 801 to 1601 a side and about 0.91 at 81 cubed, so the pooled workspace beats our append-only
+// IT DOES, BY 5 TO 8 PER CENT. `MMD3C / MmdFlat` on alpamayo reads 0.92 to 0.95 on square grids
+// from 801 to 1601 a side and about 0.91 at 81 cubed, so the pooled workspace beats our append-only
 // arena on this branch as it does on the amd one.
 //
 // THE FIGURE WAS 0.90 UNTIL 2026-08-19 AND THAT WAS NOT A FAIR COMPARISON. This file held its own
 // quotient graph then, in an anonymous namespace, so the class was inlined into the pivot loop
-// while `Mmd3`'s was called across a translation-unit boundary. Build both the same way, either
+// while `MmdFlat`'s was called across a translation-unit boundary. Build both the same way, either
 // way round, and the answer is 0.92 to 0.95. See docs/DESIGN_DECISIONS.md (2026-08-19).
 //
 // A PREVIOUS Mmd3C HELD THIS NAME AND WAS SOMETHING ELSE. It was mmd on the PRODUCTION layout, a
@@ -39,11 +39,11 @@
 // class six drivers run. It did that; the folds are in QuotientGraph and the file was replaced.
 // Nothing of it survives here but the name.
 //
-// ITS OBLIGATION. It must return Mmd3's permutation exactly, which is genmmd's. `make digest` in
+// ITS OBLIGATION. It must return MmdFlat's permutation exactly, which is genmmd's. `make digest` in
 // benchmarks/ordering hashes every driver's permutation over 73 grids and names which one moved;
 // `make mmdorder` in experiments/ordering is what says correct. And it must stay ENCODING-IDENTICAL
-// to Mmd3: a fold that lands in QuotientGraph lands here too, or its time column stops being about
-// storage and starts being about whatever drifted. That is the same obligation Mmd3B carries, and
+// to MmdFlat: a fold that lands in QuotientGraph lands here too, or its time column stops being
+// about storage and starts being about whatever drifted. That is the same obligation Mmd3B carries, and
 // Mmd3B was found to have broken it on 2026-08-17.
 //
 // NOTHING HERE IS A COPY ANY MORE. This file held its own `QuotientGraphCompacted` and its own
@@ -57,8 +57,8 @@
 // moved a permutation: the elbow room off `nzaat` rather than off `nnz` with the diagonal, the
 // clique-count recomputation, the walk converted to positions and cursors, and the mid-walk
 // compactor with the absorbed-clique capture and the contraction report that go with it. The line
-// this replaces said the storage had not landed and the file was a verbatim copy of Mmd3, which is
-// how it was first committed and stopped being true well before then.
+// this replaces said the storage had not landed and the file was a verbatim copy of MmdFlat, which
+// is how it was first committed and stopped being true well before then.
 
 namespace Oblio {
 

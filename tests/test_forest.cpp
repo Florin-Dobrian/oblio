@@ -151,9 +151,9 @@ int main(){
       ck(inv && roots==2 && eq(f.parent(),{1,NP,3,NP}) && f.snodeSize()==4
          && eq(f.nodeToSnode(),{0,1,1,2,3,3}), "two blocks natural  : 2 trees, compressed"); }
     { auto A=tridiagFull(30); reqSym(A,"tridiag n=30        : symmetric");
-      OrderEngine ord(Ordering::MMD3); Permutation P; ord.compute(A,P);
+      OrderEngine ord(Ordering::MmdFlat); Permutation P; ord.compute(A,P);
       ElmForest f; bool ok=eng.compute(A,P,f); std::size_t roots=0; bool inv=validEtree(f.parent(),roots);
-      ck(ok && inv && f.size()==30 && roots>=1, "tridiag n=30 + MMD3 : valid etree"); }
+      ck(ok && inv && f.size()==30 && roots>=1, "tridiag n=30 + MmdFlat : valid etree"); }
 
     // The links, height and sizes, none of which the etree cases above touch.
     { auto A=tridiagFull(4); Permutation P(4); ElmForest f; eng.compute(A,P,f);
@@ -186,7 +186,7 @@ int main(){
     // The full invariant set against independent recomputation, over random patterns,
     // natural and AMD ordered. Covers the links, the height, and the front/update sizes.
     { std::mt19937 rng(20260711);
-      OrderEngine ord(Ordering::MMD3);
+      OrderEngine ord(Ordering::MmdFlat);
       int bad=0;
       for(int trial=0; trial<200; ++trial){
           std::size_t size = 3 + rng()%10;
@@ -247,7 +247,7 @@ int main(){
     // The invariants that survive tie-breaking. Amalgamation is greedy and not canonical, so
     // the partition it produces depends on how ties are broken; these hold regardless.
     { std::mt19937 rng(20260712);
-      OrderEngine ord(Ordering::MMD3);
+      OrderEngine ord(Ordering::MmdFlat);
       int bad=0; std::size_t fund=0, at8=0;
       for(int trial=0; trial<200; ++trial){
           std::size_t size = 3 + rng()%10;
@@ -356,7 +356,7 @@ int main(){
       SparseMatrix<double> A(n, cp, ri, v);
 
       Permutation P;
-      OrderEngine oe; oe.setOrdering(Ordering::MMD3);
+      OrderEngine oe; oe.setOrdering(Ordering::MmdFlat);
       oe.compute(A, P);
 
       ElmForest fOff, fOn;

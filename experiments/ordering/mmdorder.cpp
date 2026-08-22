@@ -1,6 +1,6 @@
-// mmdorder.cpp -- production Mmd3 against genmmd's elimination order.
+// mmdorder.cpp -- production MmdFlat against genmmd's elimination order.
 //
-// THE ACCEPTANCE TEST FOR THE MMD ALIGNMENT, and one of a pair with amdorder.cpp. `Mmd3` adds no
+// THE ACCEPTANCE TEST FOR THE MMD ALIGNMENT, and one of a pair with amdorder.cpp. `MmdFlat` adds no
 // mechanism to `Mmd2`: it exists to return genmmd's permutation, so that a comparison against the
 // vendored routine is an EQUALITY TEST rather than a fill number somebody has to judge. This is
 // what makes that claim checkable.
@@ -33,7 +33,7 @@
 // `make aligned` runs this and amdorder.cpp together. See experiments/ordering/README.md, "mmd3,
 // and the alignment ledger".
 
-#include "oblio/Mmd3.h"
+#include "oblio/MmdFlat.h"
 
 #include "graphs.h"
 
@@ -83,7 +83,7 @@ static bool check(const std::string& name, const Graph& graph) {
     std::vector<std::size_t>  colPtr;
     std::vector<std::int32_t> rowIdx;
     toCsc(graph, colPtr, rowIdx);
-    const std::vector<std::int32_t> ours = Oblio::orderMmd3(colPtr, rowIdx);
+    const std::vector<std::int32_t> ours = Oblio::orderMmdFlat(colPtr, rowIdx);
 
     std::vector<int> ap, ai;
     toCscNoDiagonal(graph, ap, ai);
@@ -108,7 +108,7 @@ static bool check(const std::string& name, const Graph& graph) {
 }
 
 int main(int argc, char** argv) {
-    std::printf("production Mmd3 against genmmd's elimination order\n");
+    std::printf("production MmdFlat against genmmd's elimination order\n");
     std::printf("  (the permutation itself: genmmd emits the order it eliminates in and\n");
     std::printf("   does no postorder, so nothing has to be reconstructed)\n\n");
 

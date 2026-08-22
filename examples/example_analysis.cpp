@@ -45,10 +45,10 @@ using Val = double;
 const char* name(Ordering ordering) {
     switch (ordering) {
         case Ordering::Natural: return "Natural";
-        case Ordering::MMD:     return "MMD";
-        case Ordering::MMD3:    return "MMD3";
-        case Ordering::AMD:     return "AMD";
-        case Ordering::AMD3:    return "AMD3";
+        case Ordering::MmdVendored:     return "MMD";
+        case Ordering::MmdFlat:    return "MmdFlat";
+        case Ordering::AmdVendored:     return "AMD";
+        case Ordering::AmdFlat:    return "AmdFlat";
     }
     return "?";
 }
@@ -112,8 +112,8 @@ void report(const char* what, const SparseMatrix<Val>& A) {
     printf("  %-8s  %8s  %8s  %10s  %6s\n",
            "--------", "------", "----", "----------", "------");
 
-    for (Ordering ordering : {Ordering::Natural, Ordering::MMD, Ordering::MMD3,
-                              Ordering::AMD, Ordering::AMD3}) {
+    for (Ordering ordering : {Ordering::Natural, Ordering::MmdVendored, Ordering::MmdFlat,
+                              Ordering::AmdVendored, Ordering::AmdFlat}) {
         // The factorization and traversal are left at their defaults and never used: analyze reads
         // neither. Only the traversal would matter, and only across the multifrontal boundary,
         // where the forest itself differs.

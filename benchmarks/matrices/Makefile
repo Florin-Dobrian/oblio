@@ -5,7 +5,7 @@
 #:   make all         build the four programs
 #:   make accuracy    the accuracy pass over accuracy_candidates.txt
 #:   make performance the timing pass over performance_candidates.txt
-#:   make mmdorder    the ORDERING STEP ALONE, genmmd against Mmd3, over all of data/. A
+#:   make mmdorder    the ORDERING STEP ALONE, genmmd against MmdFlat, over all of data/. A
 #:                    different question from the performance table's ordering column and so a
 #:                    different set: every matrix whose PATTERN can be read, values or not,
 #:                    positive definite or not, which is roughly twice as many. The two return
@@ -15,10 +15,10 @@
 #:                    coming and will be `make amdorder` beside it. Not to be confused with
 #:                    experiments/ordering's targets of the same names, which check that our
 #:                    orderings match the vendored ones rather than timing them.
-#:   make amdorder    the same for the amd branch, amd_order against Amd3, over the same set.
+#:   make amdorder    the same for the amd branch, amd_order against AmdFlat, over the same set.
 #:                    The CLOCK is on amd_order whole, which is what a caller pays and includes
 #:                    AMD_aat and AMD_postorder, neither of which we do; every other column comes
-#:                    from the hooked PRE-POSTORDER copy, since Amd3 returns that order.
+#:                    from the hooked PRE-POSTORDER copy, since AmdFlat returns that order.
 #:   make read        the reader alone over data/, an inventory of what is usable
 #:   make clean
 #:   make help        print this list
@@ -84,18 +84,18 @@ OBLIO_HDRS = $(wildcard ../../include/oblio/*.h)
 ifdef OBLIO_PUBLIC
   VENDOR_SRCS =
 else
-  VENDOR_SRCS = $(wildcard ../../private/Amd.cpp ../../private/Mmd.cpp)
+  VENDOR_SRCS = $(wildcard ../../private/AmdVendored.cpp ../../private/MmdVendored.cpp)
 endif
 
 ifneq ($(VENDOR_SRCS),)
   VENDOR_DEFS = -DOBLIO_VENDORED_ORDERINGS
   VENDOR_OBJS = Amd.o Mmd.o
   # The hooked copy, for `make amdorder`. It reports the elimination order BEFORE AMD_postorder,
-  # which is the order Amd3 returns, so the fill column can be both routines' as it is on the mmd
+  # which is the order AmdFlat returns, so the fill column can be both routines' as it is on the mmd
   # side. Present only where private/ is, exactly as the vendored objects are. GENERATED from
-  # whatever private/Amd.cpp currently says, gitignored, removed by clean, so no edited copy of
-  # vendored code can drift from the original unnoticed. Same generator and same discipline as
-  # ../ordering; see its Makefile for why the tool lives at the repo root.
+  # whatever private/AmdVendored.cpp currently says, gitignored, removed by clean, so no edited
+  # copy of vendored code can drift from the original unnoticed. Same generator and same
+  # discipline as ../ordering; see its Makefile for why the tool lives at the repo root.
   RAW_SRCS    = amd_raw.cpp
 endif
 
@@ -146,7 +146,7 @@ matrix_performance_cpp: matrix_performance.cpp MatrixMarket.h $(OBLIO_SRCS) $(VE
 	$(if $(VENDOR_SRCS),$(CXX) $(CXXFLAGS) -w -c $(VENDOR_SRCS))
 	$(CXX) $(CXXFLAGS) $(VENDOR_DEFS) $< $(OBLIO_SRCS) $(VENDOR_OBJS) $(BLAS_LIBS) -o $@
 
-amd_raw.cpp: ../../private/Amd.cpp ../../tools/hook_amd.py
+amd_raw.cpp: ../../private/AmdVendored.cpp ../../tools/hook_amd.py
 	@python3 ../../tools/hook_amd.py $< $@
 
 matrix_ordering_cpp: matrix_ordering.cpp MatrixMarket.h $(OBLIO_SRCS) $(VENDOR_SRCS) \

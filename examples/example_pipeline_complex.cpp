@@ -55,10 +55,10 @@ using Val = std::complex<double>;
 const char* name(Ordering m) {
     switch (m) {
         case Ordering::Natural: return "Natural";
-        case Ordering::MMD:     return "MMD";
-        case Ordering::MMD3:    return "MMD3";
-        case Ordering::AMD:     return "AMD";
-        case Ordering::AMD3:    return "AMD3";
+        case Ordering::MmdVendored:     return "MMD";
+        case Ordering::MmdFlat:    return "MmdFlat";
+        case Ordering::AmdVendored:     return "AMD";
+        case Ordering::AmdFlat:    return "AmdFlat";
     }
     return "?";
 }
@@ -134,8 +134,8 @@ int main() {
     printf("  %-8s  %-13s  %-13s  %-5s  %s\n", "-----", "-------------", "---------", "-----",
            "--------");
 
-    for (Ordering ordering : {Ordering::Natural, Ordering::MMD, Ordering::MMD3,
-                              Ordering::AMD, Ordering::AMD3}) {
+    for (Ordering ordering : {Ordering::Natural, Ordering::MmdVendored, Ordering::MmdFlat,
+                              Ordering::AmdVendored, Ordering::AmdFlat}) {
         // Structural only, so one permutation, forest and symbolic factor serve both matrices.
         OrderEngine ordEng(ordering);
         Permutation P;
@@ -199,7 +199,7 @@ int main() {
     // One actual solution, so the example ends on numbers a reader can check. Cholesky needs the
     // Hermitian matrix, so that is the one solved here.
     {
-        OrderEngine ordEng(Ordering::MMD3);
+        OrderEngine ordEng(Ordering::MmdFlat);
         Permutation P;  ordEng.compute(AH, P);
         ElmForest ef;   ElmForestEngine efEng;  efEng.compute(AH, P, ef);
         SymFactor sf;   SymFactorEngine sfEng;  sfEng.compute(AH, P, ef, sf);

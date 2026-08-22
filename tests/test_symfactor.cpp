@@ -243,7 +243,7 @@ int main(){
 
     // Random connected patterns against the oracle, with AMD as well as natural order.
     { std::mt19937 rng(20260711);
-      OrderEngine ord(Ordering::MMD3);
+      OrderEngine ord(Ordering::MmdFlat);
       int bad=0; std::size_t totalFill=0;
       for(int trial=0; trial<200; ++trial){
           std::size_t size = 3 + rng()%10;
@@ -260,7 +260,7 @@ int main(){
           if(!runCase(A,pAmd,f2)) ++bad;
           totalFill += f1 + f2;
       }
-      ck(bad==0, "random x200         : natural and MMD3 match oracle");
+      ck(bad==0, "random x200         : natural and MmdFlat match oracle");
       ck(totalFill>0, "random x200         : fill exercised ("+std::to_string(totalFill)+" entries)"); }
 
 

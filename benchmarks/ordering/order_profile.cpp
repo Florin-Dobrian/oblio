@@ -46,9 +46,9 @@
 #include <pthread.h>
 #endif
 
-#include "oblio/Amd3.h"
+#include "oblio/AmdFlat.h"
 #include "oblio/Amd3B.h"
-#include "oblio/Mmd3.h"
+#include "oblio/MmdFlat.h"
 #include "oblio/Mmd3B.h"
 #include "oblio/Mmd3C.h"
 #include "oblio/OrderEngine.h"
@@ -164,7 +164,7 @@ int main(int argc, char** argv) {
         for (std::size_t cp = colPtr[aj]; cp < colPtr[aj + 1]; ++cp)
             if (rowIdx[cp] == static_cast<std::int32_t>(aj)) val[cp] = 100.0;
     const SparseMatrix<double> A(colPtr.size() - 1, colPtr, rowIdx, val);
-    const OrderEngine engine(method == "mmd" ? Ordering::MMD : Ordering::AMD);
+    const OrderEngine engine(method == "mmd" ? Ordering::MmdVendored : Ordering::AmdVendored);
 
     // Refuse an unknown method rather than falling through it. A profile of a method that never
     // ran is not empty, it is a trace of dyld and process startup, and it reads as a real one.
@@ -182,8 +182,8 @@ int main(int argc, char** argv) {
     // The sum is only there to stop the optimizer deleting the calls.
     std::size_t sum = 0;
     for (int k = 0; k < repeats; ++k) {
-        if      (method == "mmd3") sum += orderMmd3(colPtr, rowIdx).size();
-        else if (method == "amd3") sum += orderAmd3(colPtr, rowIdx).size();
+        if      (method == "mmd3") sum += orderMmdFlat(colPtr, rowIdx).size();
+        else if (method == "amd3") sum += orderAmdFlat(colPtr, rowIdx).size();
         // THE THREE NON-ENUM LAYERS, added 2026-08-17. Each is its original computed differently,
         // so each is a thing whose cost is a question in its own right: Mmd3B and Amd3B carry the
         // vendored clique storage schemes and Mmd3C carries the port of the amd array folds onto

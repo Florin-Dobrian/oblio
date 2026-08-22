@@ -1,9 +1,5 @@
 #include "oblio/OrderEngine.h"
-#include "oblio/Mmd1.h"
-#include "oblio/Mmd2.h"
 #include "oblio/Mmd3.h"
-#include "oblio/Amd1.h"
-#include "oblio/Amd2.h"
 #include "oblio/Amd3.h"
 
 #include <vector>
@@ -47,16 +43,12 @@ bool OrderEngine::compute(const std::vector<std::size_t>&  colPtr,
 #else
         case Ordering::MMD:     return false;   // vendored, and private/ is not present
 #endif
-        case Ordering::MMD1:    return orderMMD1(size, colPtr, rowIdx, P);
-        case Ordering::MMD2:    return orderMMD2(size, colPtr, rowIdx, P);
         case Ordering::MMD3:    return orderMMD3(size, colPtr, rowIdx, P);
 #ifdef OBLIO_VENDORED_ORDERINGS
         case Ordering::AMD:     return orderAMD(size, colPtr, rowIdx, P);
 #else
         case Ordering::AMD:     return false;   // vendored, and private/ is not present
 #endif
-        case Ordering::AMD1:    return orderAMD1(size, colPtr, rowIdx, P);
-        case Ordering::AMD2:    return orderAMD2(size, colPtr, rowIdx, P);
         case Ordering::AMD3:    return orderAMD3(size, colPtr, rowIdx, P);
     }
     return false;   // unreachable: every enumerator is named above, which is what -Wall checks
@@ -80,7 +72,7 @@ bool OrderEngine::orderMMD(std::size_t size,
 
     // A is stored full-symmetric; the vendored MMD wants the off-diagonal structure only, so
     // strip the diagonal (no expansion needed, A already holds both triangles). This is MMD's
-    // requirement alone: AMD symmetrizes and drops the diagonal itself, and MMD1 builds its own
+    // requirement alone: AMD symmetrizes and drops the diagonal itself, and MMD3 builds its own
     // adjacency lists skipping i == j. Columns are indices, so aj is an int32_t and the
     // comparison against rowIdx[cp] needs no cast; cp is a position into A's arrays.
     std::vector<std::size_t> colPtrOff(size + 1, 0);
@@ -115,47 +107,6 @@ bool OrderEngine::orderMMD(std::size_t size,
     return true;
 }
 #endif
-
-// Ours, over the shared quotient graph. The driver returns an elimination order, exactly as the
-// vendored AMD returns its P, and the two maps are written from it here: the friend grant on
-// Permutation belongs to the engine that fills it, so the algorithms below stay free functions
-// with no access of their own and can be called without a Permutation in hand.
-bool OrderEngine::orderMMD1(std::size_t size,
-                            const std::vector<std::size_t>&  colPtr,
-                            const std::vector<std::int32_t>& rowIdx,
-                            Permutation& P) const {
-    P.mOldToNew.assign(size, 0);
-    P.mNewToOld.assign(size, 0);
-    if (size == 0) return true;
-
-    const std::vector<std::int32_t> order = orderMmd1(colPtr, rowIdx);
-    if (order.size() != size) return false;
-
-    for (std::size_t k = 0; k < size; ++k) {
-        P.mNewToOld[k]        = order[k];
-        P.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
-    }
-    return true;
-}
-
-// Ours, the completed MMD, written into the maps the same way.
-bool OrderEngine::orderMMD2(std::size_t size,
-                            const std::vector<std::size_t>&  colPtr,
-                            const std::vector<std::int32_t>& rowIdx,
-                            Permutation& P) const {
-    P.mOldToNew.assign(size, 0);
-    P.mNewToOld.assign(size, 0);
-    if (size == 0) return true;
-
-    const std::vector<std::int32_t> order = orderMmd2(colPtr, rowIdx);
-    if (order.size() != size) return false;
-
-    for (std::size_t k = 0; k < size; ++k) {
-        P.mNewToOld[k]        = order[k];
-        P.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
-    }
-    return true;
-}
 
 // The completed MMD with genmmd's list order, which changes the permutation and nothing else.
 bool OrderEngine::orderMMD3(std::size_t size,
@@ -205,27 +156,8 @@ bool OrderEngine::orderAMD(std::size_t size,
 }
 #endif
 
-// Ours, over the same quotient graph as MMD1, and written into the maps the same way.
-bool OrderEngine::orderAMD1(std::size_t size,
-                            const std::vector<std::size_t>&  colPtr,
-                            const std::vector<std::int32_t>& rowIdx,
-                            Permutation& P) const {
-    P.mOldToNew.assign(size, 0);
-    P.mNewToOld.assign(size, 0);
-    if (size == 0) return true;
-
-    const std::vector<std::int32_t> order = orderAmd1(colPtr, rowIdx);
-    if (order.size() != size) return false;
-
-    for (std::size_t k = 0; k < size; ++k) {
-        P.mNewToOld[k]        = order[k];
-        P.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
-    }
-    return true;
-}
-
-// Ours, AMD2 with the vendored routine's list order, which changes the permutation and nothing
-// else. Written into the maps the same way.
+// Ours, the bound with aggressive absorption, hash detection and the vendored routine's list
+// order, which together reproduce AMD's permutation. Written into the maps the same way.
 bool OrderEngine::orderAMD3(std::size_t size,
                             const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,
@@ -243,26 +175,6 @@ bool OrderEngine::orderAMD3(std::size_t size,
     }
     return true;
 }
-
-bool OrderEngine::orderAMD2(std::size_t size,
-                            const std::vector<std::size_t>&  colPtr,
-                            const std::vector<std::int32_t>& rowIdx,
-                            Permutation& P) const {
-    P.mOldToNew.assign(size, 0);
-    P.mNewToOld.assign(size, 0);
-    if (size == 0) return true;
-
-    const std::vector<std::int32_t> order = orderAmd2(colPtr, rowIdx);
-    if (order.size() != size) return false;
-
-    for (std::size_t k = 0; k < size; ++k) {
-        P.mNewToOld[k]        = order[k];
-        P.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
-    }
-    return true;
-}
-
-
 
 template bool OrderEngine::compute(const SparseMatrix<double>&, Permutation&) const;
 template bool OrderEngine::compute(const SparseMatrix<std::complex<double>>&, Permutation&) const;

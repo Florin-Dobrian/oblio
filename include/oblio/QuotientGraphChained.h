@@ -171,12 +171,14 @@ public:
     // is: the two lists share one run of one flat array. A[u] starts at the run and I[u] starts
     // immediately behind it, which is why the incidence lookup reads the adjacency's length. See
     // the note on the members below.
-    const std::int32_t* adjacency(std::int32_t u) const {
+    // SUFFIXED, and this class has ONE branch so only the mmd half exists. The name is split all
+    // the same, so that `Mmd3B` reads like `Mmd3` and `Mmd3C`; see QuotientGraph.h.
+    const std::int32_t* adjacencyMmd(std::int32_t u) const {
         return mSource.data() + mRun[u].sourcePtr;
     }
     std::uint32_t adjacencySize(std::int32_t u) const { return mRun[u].adjacencySize; }
 
-    const std::int32_t* incidence(std::int32_t u) const {
+    const std::int32_t* incidenceMmd(std::int32_t u) const {
         return mSource.data() + mRun[u].sourcePtr + mRun[u].adjacencySize;
     }
     std::uint32_t incidenceSize(std::int32_t u) const { return mRun[u].incidenceSize; }

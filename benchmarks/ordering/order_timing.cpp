@@ -685,8 +685,7 @@ int main(int argc, char** argv) {
     // vector per vertex reset per call and a push per member, so timing it would measure our
     // instrumentation rather than AMD. Its fill is exact and is the column AMD3 must equal.
     const std::vector<Method> allMethods = {
-        {"MMD",  Ordering::MMD},  {"MMD1", Ordering::MMD1},
-        {"MMD2", Ordering::MMD2}, {"MMD3", Ordering::MMD3},
+        {"MMD",  Ordering::MMD},  {"MMD3", Ordering::MMD3},
         {"MMD3B", Ordering::MMD3, false, true},
         // MMD3C IS TRANSITIONAL, unlike every other row here, and its time column is currently
         // MMD3's own: at this commit it is a verbatim copy, which is what makes it the error-bar
@@ -698,8 +697,6 @@ int main(int argc, char** argv) {
 #ifdef OBLIO_AMD_RAW
         {"AMDraw", Ordering::AMD, true},
 #endif
-        {"AMD1", Ordering::AMD1},
-        {"AMD2", Ordering::AMD2},
         {"AMD3", Ordering::AMD3},
         // AMD3B JOINS THIS LIST 2026-08-17. It was in `amdMethods` alone, so `make scale-amd-2d`
         // and `scale-amd-3d` showed it while `run2d` and `run3d` did not, which is not a
@@ -714,8 +711,7 @@ int main(int argc, char** argv) {
     // anyone adds such a control again, and the shape is worth reusing, one function under two
     // names being the only way to hold everything but position fixed.
     const std::vector<Method> mmdMethods = {
-        {"MMD",  Ordering::MMD},
-        {"MMD2", Ordering::MMD2}, {"MMD3", Ordering::MMD3},
+        {"MMD",  Ordering::MMD},  {"MMD3", Ordering::MMD3},
         {"MMD3B", Ordering::MMD3, false, true},
         {"MMD3C", Ordering::MMD3, false, false, mmd3cDefault},
     };
@@ -747,7 +743,6 @@ int main(int argc, char** argv) {
 #ifdef OBLIO_AMD_RAW
         {"AMDraw", Ordering::AMD, true},
 #endif
-        {"AMD2", Ordering::AMD2},
         {"AMD3", Ordering::AMD3},
         // AMD3B IS PERMANENT, exactly as MMD3B is on the mmd list, 2026-08-16. It is AMD3 on
         // AMD_2's clique storage, one pool with a free cursor and a garbage collection rather than

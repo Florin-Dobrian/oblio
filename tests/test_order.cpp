@@ -88,14 +88,16 @@ int main(){
         // The vendored MMD and AMD are checked only when private/ supplies them; see
     // docs/TESTING_SPECIFICATION.md. Fourteen assertions here are theirs, one pair on each of the
     // arrow, the diagonal and the complex arrow and one pair per size in the tridiagonal loop, so
-    // the total is 87 with that directory and 73 without. Nothing else changes.
+    // the total is 59 with that directory and 45 without. Nothing else changes.
     //
-    // COUNTS CORRECTED 2026-08-17, having been wrong here and in three other files. This comment
-    // said 77 and 63, README.md, CLAUDE.md and docs/TESTING_SPECIFICATION.md said 91 and 77, and
-    // the suite ran 69 and 55. Retiring AMD1B and AMD2B on 2026-08-15 removed fourteen sameness
-    // assertions and, since the pair also left the enum, fourteen validity ones, and Mmd3B added
-    // six back. Nothing detected it because every figure was internally consistent and the suite
-    // passes whatever a comment claims.
+    // IT WAS 87 AND 73 UNTIL 2026-08-21, when MMD1, MMD2, AMD1 and AMD2 were retired to retired/
+    // and their sixteen validity assertions went with them. Twelve more went with the enumerators
+    // in other suites; see retired/README.md.
+    //
+    // COUNTS CORRECTED 2026-08-17, having been wrong here and in three other files, every figure
+    // internally consistent and none of them the number the suite ran. A count in a comment is
+    // worth nothing unless it is read off a run, which is how both of the figures above were
+    // obtained.
     std::cout<<"=== OrderEngine tests (AMD / MMD lineages, full-symmetric A) ===\n";
     { std::vector<std::size_t> cp={0,6,8,10,12,14,16};
       std::vector<std::int32_t> ri={0,1,2,3,4,5, 0,1, 0,2, 0,3, 0,4, 0,5};
@@ -105,11 +107,7 @@ int main(){
       checkOrder(A,Ordering::AMD,"arrow 6x6      : AMD valid");
       checkOrder(A,Ordering::MMD,"arrow 6x6      : MMD valid");
 #endif
-      checkOrder(A,Ordering::MMD1,"arrow 6x6      : MMD1 valid");
-      checkOrder(A,Ordering::MMD2,"arrow 6x6      : MMD2 valid");
       checkOrder(A,Ordering::MMD3,"arrow 6x6      : MMD3 valid");
-      checkOrder(A,Ordering::AMD1,"arrow 6x6      : AMD1 valid");
-      checkOrder(A,Ordering::AMD2,"arrow 6x6      : AMD2 valid");
       checkOrder(A,Ordering::AMD3,"arrow 6x6      : AMD3 valid");
       // THE THREE NON-ENUM LAYERS, each of which must reproduce its original entry for entry,
       // which is the whole of what makes it a measurement rather than a second ordering. Mmd3B is
@@ -133,11 +131,7 @@ int main(){
       checkOrder(A,Ordering::AMD,"tridiag n="+std::to_string(size)+" : AMD valid");
       checkOrder(A,Ordering::MMD,"tridiag n="+std::to_string(size)+" : MMD valid");
 #endif
-      checkOrder(A,Ordering::MMD1,"tridiag n="+std::to_string(size)+" : MMD1 valid");
-      checkOrder(A,Ordering::MMD2,"tridiag n="+std::to_string(size)+" : MMD2 valid");
       checkOrder(A,Ordering::MMD3,"tridiag n="+std::to_string(size)+" : MMD3 valid");
-      checkOrder(A,Ordering::AMD1,"tridiag n="+std::to_string(size)+" : AMD1 valid");
-      checkOrder(A,Ordering::AMD2,"tridiag n="+std::to_string(size)+" : AMD2 valid");
       checkOrder(A,Ordering::AMD3,"tridiag n="+std::to_string(size)+" : AMD3 valid");
       checkSameOrderFn(A,Ordering::MMD3,mmd3bDefault,
                        "tridiag n="+std::to_string(size)+" : MMD3B == MMD3");
@@ -153,11 +147,7 @@ int main(){
       checkOrder(A,Ordering::AMD,"diagonal 5x5   : AMD valid");
       checkOrder(A,Ordering::MMD,"diagonal 5x5   : MMD valid");
 #endif
-      checkOrder(A,Ordering::MMD1,"diagonal 5x5   : MMD1 valid");
-      checkOrder(A,Ordering::MMD2,"diagonal 5x5   : MMD2 valid");
       checkOrder(A,Ordering::MMD3,"diagonal 5x5   : MMD3 valid");
-      checkOrder(A,Ordering::AMD1,"diagonal 5x5   : AMD1 valid");
-      checkOrder(A,Ordering::AMD2,"diagonal 5x5   : AMD2 valid");
       checkOrder(A,Ordering::AMD3,"diagonal 5x5   : AMD3 valid");
       // n ISOLATED VERTICES, where every degree is zero and nothing ever merges. None of the three
       // layers was checked on this shape until 2026-08-17, and it is the one the experiment's own
@@ -173,11 +163,7 @@ int main(){
       checkOrder(C,Ordering::AMD,"arrow complex  : AMD valid");
       checkOrder(C,Ordering::MMD,"arrow complex  : MMD valid");
 #endif
-      checkOrder(C,Ordering::MMD1,"arrow complex  : MMD1 valid");
-      checkOrder(C,Ordering::MMD2,"arrow complex  : MMD2 valid");
       checkOrder(C,Ordering::MMD3,"arrow complex  : MMD3 valid");
-      checkOrder(C,Ordering::AMD1,"arrow complex  : AMD1 valid");
-      checkOrder(C,Ordering::AMD2,"arrow complex  : AMD2 valid");
       checkOrder(C,Ordering::AMD3,"arrow complex  : AMD3 valid");
       // THE SECOND SCALAR TYPE. An ordering reads only the pattern, so the permutation must be the
       // real arrow's; what this exercises is the structural overloads through a second

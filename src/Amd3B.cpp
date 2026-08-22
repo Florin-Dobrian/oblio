@@ -143,10 +143,11 @@ namespace {
 // See include/oblio/QuotientGraphCompacted.h.
 
 
-} // namespace
-
-std::vector<std::int32_t> orderAmd3B(const std::vector<std::size_t>&  colPtr,
-                                    const std::vector<std::int32_t>& rowIdx) {
+// THE ONE BODY, TAKING A POINTER SO THAT BOTH PUBLIC FORMS SHARE IT. The same shape `Amd3`,
+// `Mmd3` and `Mmd3C` use; `Amd3B` was the one driver without it until 2026-08-21.
+std::vector<std::int32_t> orderAmd3BImpl(const std::vector<std::size_t>&  colPtr,
+                                         const std::vector<std::int32_t>& rowIdx,
+                                         std::size_t* arenaEntries) {
     if (colPtr.empty()) return std::vector<std::int32_t>();
     const std::size_t size = colPtr.size() - 1;
     if (size == 0) return std::vector<std::int32_t>();
@@ -242,12 +243,7 @@ std::vector<std::int32_t> orderAmd3B(const std::vector<std::size_t>&  colPtr,
         touchedCliques.clear();
         TaggedScan scan{&buckets, w, degrees, touchedCliques, wflg,
                         static_cast<std::int32_t>(size + 1)};
-        // THE THREE STEPS, SPELLED OUT, where this used to be one `eliminate` call. The wrapper
-        // went with the merge: this prune takes a `TaggedScan` and the mmd one takes nothing, so a
-        // shared wrapper would have carried a parameter one branch ignores.
-        qg.beginEliminationAmd(pivot);
-        qg.pruneAmd(pivot, scan);
-        qg.finishEliminationAmd(pivot);
+        qg.eliminate(pivot, scan);
         pivots.push_back(pivot);
 
         buckets.unfile(pivot);
@@ -265,7 +261,7 @@ std::vector<std::int32_t> orderAmd3B(const std::vector<std::size_t>&  colPtr,
             if (w[c] == wflg) { deadCliques.push_back(c); w[c] = 0; }   // |C[c] - C[p]| == 0
         qg.absorb(deadCliques, pivotClique, pivotCliqueSize);
 
-        const std::vector<std::int32_t>& merged = qg.massEliminateAmd(pivot);
+        const std::vector<std::int32_t>& merged = qg.massEliminate(pivot);
         numEliminated += 1 + static_cast<std::uint32_t>(merged.size());
         numLive -= qg.weight(pivot);                // every original the pivot stands for
         for (std::int32_t u : merged) {
@@ -448,8 +444,24 @@ std::vector<std::int32_t> orderAmd3B(const std::vector<std::size_t>&  colPtr,
     // assembly puts them. They were compacted in an ascending pass, so appending the vector is
     // that order; each stands only for itself, having been set aside before it could absorb
     // anything, so `order` expands a chain of one.
+    if (arenaEntries != nullptr) *arenaEntries = qg.arenaEntries();
     pivots.insert(pivots.end(), denseRows.begin(), denseRows.end());
     return qg.order(pivots);
+}
+
+} // namespace
+
+std::vector<std::int32_t> orderAmd3B(const std::vector<std::size_t>&  colPtr,
+                                     const std::vector<std::int32_t>& rowIdx) {
+    return orderAmd3BImpl(colPtr, rowIdx, nullptr);
+}
+
+// The same, reporting the pool's size. See QuotientGraphCompacted::arenaEntries for why that is a
+// different quantity from the flat class's, and Amd3.h for why this is an overload.
+std::vector<std::int32_t> orderAmd3B(const std::vector<std::size_t>&  colPtr,
+                                     const std::vector<std::int32_t>& rowIdx,
+                                     std::size_t& arenaEntries) {
+    return orderAmd3BImpl(colPtr, rowIdx, &arenaEntries);
 }
 
 } // namespace Oblio

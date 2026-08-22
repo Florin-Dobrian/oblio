@@ -103,7 +103,7 @@ int main() {
     };
     const int settings = 6;
 
-    printf("Grid %zux%zu, n = %zu, nnz(A) = %zu. Cholesky, MMD2, left-looking.\n\n",
+    printf("Grid %zux%zu, n = %zu, nnz(A) = %zu. Cholesky, MMD3, left-looking.\n\n",
            side, side, size, A.nnz());
     printf("  %-9s %9s %10s %10s %10s %10s %10s\n",
            "threshold", "snodes", "nnz(L)", "numVal", "factor ms", "solve ms", "residual");
@@ -114,7 +114,7 @@ int main() {
     std::size_t nnzAt[settings], snodesAt[settings];
 
     for (int t = 0; t < settings; ++t) {
-        DirectSolver<Val> solver(Ordering::MMD2, Factorization::Cholesky, Traversal::LeftLooking,
+        DirectSolver<Val> solver(Ordering::MMD3, Factorization::Cholesky, Traversal::LeftLooking,
                                  Supernodes::Fundamental, threshold[t]);
         if (!solver.analyze(A)) { printf("  analyze failed\n"); return 1; }
 

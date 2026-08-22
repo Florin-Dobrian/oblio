@@ -35,4 +35,12 @@ extern std::size_t gAmd3BCompactions;
 std::vector<std::int32_t> orderAmd3B(const std::vector<std::size_t>&  colPtr,
                                      const std::vector<std::int32_t>& rowIdx);
 
+// The same, reporting how many entries the clique store ended up holding. Here that is the POOL'S
+// SIZE, fixed at construction, rather than an arena's final extent; see
+// QuotientGraphCompacted::arenaEntries. An OVERLOAD rather than a defaulted parameter, for the
+// reason Amd3.h gives at its own pair.
+std::vector<std::int32_t> orderAmd3B(const std::vector<std::size_t>&  colPtr,
+                                     const std::vector<std::int32_t>& rowIdx,
+                                     std::size_t& arenaEntries);
+
 } // namespace Oblio

@@ -65,6 +65,79 @@ be real, which requires Hermitian. Once that is on the table, the design collaps
 **Cholesky is `CC^H`, always, and in real that *is* `CC^T`.** No option, no flag, no forbidden
 combination to reject. The answer was not hard. Asking the right question was.
 
+## 2026-08-21: reading the 1996 AMD paper against what we built, and a taxonomy that came out of it
+
+The paper is in the project as a zip of per-page text and images rather than a PDF, which is why
+anything treating it as a PDF fails. The full account is in `experiments/ordering/README.md`, in
+four new sections; this entry records what changed our understanding rather than what it says.
+
+**TWO THINGS WE HAD BEEN CALLING `AMD_2` IMPLEMENTATION DETAIL ARE PUBLISHED DESIGN.** Section 5,
+page 17, one paragraph, credited to MA27 rather than presented as new: the in-place branch when the
+incidence list is empty, and elbow room of size n. Both are in our drivers and neither came from
+the paper when we wrote them; they came from reading the code.
+
+**AND THE WHOLE COLLECTION MECHANISM IS NOT IN THE PAPER.** No FLIP encoding, no parked head, no
+two-pass sweep, no carrying of a half-built clique. Nor is the run order, nor the front placement
+of the new clique, nor the rotation that puts it there, all three of which decide the permutation.
+
+**THE COMPLEXITY BOUND RESTS ON AN ASSUMPTION WE CAN NOW TEST.** Page 18 conditions it on few hash
+collisions and a constant number of collections, saying the assumptions seem to hold in practice.
+The `AMD cmp` column added on 2026-08-20 tests the second directly over 246 matrices, and it holds
+in shape: median one, 122 of 246 never compacting. Our maximum is ten against their two, on matrix
+classes that did not exist in 1996.
+
+**A THREE-FAMILY TAXONOMY, WHICH IS THE USEFUL PART.** Everything either branch adds beyond the
+naive algorithm falls into exactly one of three families, and stating them answers "is that all of
+them" structurally rather than by enumeration:
+
+```
+detecting indistinguishability   operates on vertex identity
+                                 mass elimination, q2h, hash, pre-compression
+removing redundancy              operates on cliques
+                                 natural absorption, aggressive absorption
+scheduling the work              operates on the refresh
+                                 multiple elimination, incomplete update, the bound
+```
+
+**The families are coupled through one object, the REACH SET.** The scheduling choice decides
+whether it is ever formed, and that decides what the other two can afford. An exact degree
+materializes it, so q2h merging and outmatching fall out of a walk already happening. A bound
+decomposes it and never forms it, so amd must go looking for its pairs, which is what the hash is
+for, and cannot outmatch at all.
+
+**THREE CORRECTIONS TO THINGS WRITTEN EARLIER THE SAME DAY, all from the paper.**
+
+- **"Only amd can afford aggressive absorption" is false.** MA27 does it with true degrees. Amd
+  gets the test for free, since `|Le \ Lp|` is what the bound computes anyway, which is not the
+  same as being the only one able to run it.
+- **"Incomplete update needs exact degrees" is the wrong statement.** It needs the REACH SETS;
+  exactness is what you get for free once you have them. MA27 has the sets and does not use them
+  this way, so the implication runs one direction only.
+- **Pre-compression is not a different idea from hash detection.** It is the same hash function
+  applied once to the whole matrix instead of repeatedly to `C[p]`, so it finds only vertices
+  already alike in A. It comes from structural engineering, where identical rows are common.
+
+**MA27 IS THE THIRD DESIGN POINT AND IT SEPARATES THE AXES.** MMD and AMD differ on five things at
+once, which is why a two-code comparison cannot attribute anything; MA27 holds three of the five
+fixed. Exact degrees with hash detection and aggressive absorption and neither of Liu's techniques.
+
+**TWO DIRECTIONS FOR LATER, both reasoning rather than measurement.**
+
+- **Aggressive absorption for mmd.** Available, and MA27 proves it. But the motivation differs: for
+  amd it is quality, a shorter list tightening the bound; for mmd the degrees are exact whatever
+  `I[u]` holds, so degrees, pivots and fill would be IDENTICAL and the gain is purely cost. That
+  makes the prediction sharp and `make digest` the check, with one caveat: removing cliques changes
+  visit order in the refresh, hence bucket order, hence the tie-break.
+- **Multiple elimination for amd.** Also available: it needs the SET OF REACHED VERTICES, which is
+  `C[p]` and which amd forms anyway. Incomplete update needs THEIR REACH SETS and is self-defeating
+  for amd, since building them is exactly what the bound exists to avoid, after which the bound has
+  nothing left to buy.
+
+Neither could go in `Mmd3` or `Amd3`, which reproduce their references exactly. Each would be a new
+layer with its own twin.
+
+---
+
 ## 2026-08-19: the quotient graphs are header-only, which removes ONE asymmetry and not all of them
 
 **`QuotientGraph` and `QuotientGraphCompacted` now keep their bodies in their headers**, and

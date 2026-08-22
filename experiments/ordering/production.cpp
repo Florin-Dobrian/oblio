@@ -15,17 +15,13 @@
 // diagonal is under the same check as everything else.
 //
 // Build:  make production   (the sources are the two under ../../src, plus this file)
-// Run:    ./production_cpp mmd1
-//         ./production_cpp amd1
-//         ./production_cpp mmd1 3      just the third example
+// Run:    ./production_cpp mmd3
+//         ./production_cpp amd3
+//         ./production_cpp mmd3 3      just the third example
 
-#include "oblio/Amd1.h"
-#include "oblio/Amd2.h"
 #include "oblio/Amd3.h"
 #include "oblio/ElmForest.h"
 #include "oblio/ElmForestEngine.h"
-#include "oblio/Mmd1.h"
-#include "oblio/Mmd2.h"
 #include "oblio/Mmd3.h"
 #include "oblio/Permutation.h"
 #include "oblio/SparseMatrix.h"
@@ -76,11 +72,7 @@ static void run(const std::string& layer, const std::string& name, const Graph& 
     std::vector<std::size_t>  colPtr;
     std::vector<std::int32_t> rowIdx;
     toCsc(graph, colPtr, rowIdx);
-    if (layer == "mmd1") printOrder(Oblio::orderMmd1(colPtr, rowIdx));
-    if (layer == "amd1") printOrder(Oblio::orderAmd1(colPtr, rowIdx));
-    if (layer == "mmd2") printOrder(Oblio::orderMmd2(colPtr, rowIdx));
     if (layer == "mmd3") printOrder(Oblio::orderMmd3(colPtr, rowIdx));
-    if (layer == "amd2") printOrder(Oblio::orderAmd2(colPtr, rowIdx));
     if (layer == "amd3") printOrder(Oblio::orderAmd3(colPtr, rowIdx));
     std::cout << "\n";
 }
@@ -89,9 +81,9 @@ int main(int argc, char** argv) {
     // The seven examples come from graphs.h, shared with vendored.cpp and amdorder.cpp.
     const auto& examples = OrderingExperiment::exampleGraphs();
 
-    const std::string layer = (argc > 1) ? argv[1] : "mmd1";
+    const std::string layer = (argc > 1) ? argv[1] : "mmd3";
 
-    // Grid mode, matching the prototypes' own:  ./production_cpp amd2 grid 20
+    // Grid mode, matching the prototypes' own:  ./production_cpp amd3 grid 20
     if (argc > 3 && std::string(argv[2]) == "grid") {
         const int side = std::atoi(argv[3]);
         run(layer, "grid " + std::to_string(side) + "x" + std::to_string(side), gridGraph(side));

@@ -758,14 +758,12 @@ int main() {
         // be a valid permutation and still be one the rest of the pipeline cannot use, which is
         // the failure test_order's validity check cannot see, so what is asserted here is that a
         // factorization comes out the other end at machine precision. Fill is not asserted, for
-        // any method: no ordering in this suite is checked for quality, and MMD1 is not held to
-        // the vendored routines' output, being a different ordering rather than a copy of one.
+        // any method: no ordering in this suite is checked for quality, ours being held to the
+        // vendored routines' output by test_order and by benchmarks/matrices instead.
         double worstOrder   = 0.0;
         int    reachedOrder = 0;
-        for (Ordering om : {Ordering::Natural, Ordering::MMD, Ordering::MMD1,
-                               Ordering::MMD2, Ordering::MMD3,
-                               Ordering::AMD, Ordering::AMD1,
-                               Ordering::AMD2, Ordering::AMD3}) {
+        for (Ordering om : {Ordering::Natural, Ordering::MMD, Ordering::MMD3,
+                               Ordering::AMD, Ordering::AMD3}) {
             DirectSolver<double> solver(om, Factorization::Cholesky, Traversal::LeftLooking);
             if (!solver.analyze(A) || !solver.factor(A) || !solver.solve(b, x))
                 continue;
@@ -773,20 +771,19 @@ int main() {
             worstOrder = std::max(worstOrder, solver.relativeResidual(A, b, x));
         }
 
-        // Two of the nine are the vendored routines, which are optional: without private/ they
+        // Two of the five are the vendored routines, which are optional: without private/ they
         // refuse and the sweep skips them, so what is expected is every ordering the build has.
         // The count is written out rather than taken from the list's size, deliberately: adding an
         // enumerator should make this fail until someone has decided the new ordering belongs in
         // the sweep, which is exactly what happened when MMD3 was added.
         //
-        // It was eleven and nine until AMD1B and AMD2B left the enum on 2026-08-15. They are still
-        // built and still checked, in test_order, against their originals entry for entry, which
-        // is a stronger statement than a residual; what they stopped being is orderings a caller
-        // can ask for. See OrderEngine.h.
+        // It was eleven and nine until AMD1B and AMD2B left the enum on 2026-08-15, and nine and
+        // seven until MMD1, MMD2, AMD1 and AMD2 were retired on 2026-08-21; those four are in
+        // retired/ and out of the build. See OrderEngine.h and retired/README.md.
 #ifdef OBLIO_VENDORED_ORDERINGS
-        const int expectedOrderings = 9;
+        const int expectedOrderings = 5;
 #else
-        const int expectedOrderings = 7;
+        const int expectedOrderings = 3;
 #endif
         ck(reachedOrder == expectedOrderings, "Ordering       : every ordering built was reached");
         ck(reachedOrder == expectedOrderings && worstOrder < tol,
@@ -903,7 +900,7 @@ int main() {
         {
             const SparseMatrix<double> S = toSparse(bandIndefinite(40, 3, 0.50, 7));
 
-            OrderEngine     ordEng(Ordering::MMD2);
+            OrderEngine     ordEng(Ordering::MMD3);
             ElmForestEngine efEng;
             SymFactorEngine sfEng;
             Permutation     P;
@@ -1013,7 +1010,7 @@ int main() {
             // The guard the facade puts in front of all three. A Cholesky handed this indefinite
             // matrix analyzes and then refuses, leaving whatever the attempt wrote behind; the
             // facade must report zero rather than that debris.
-            DirectSolver<double> dsFailed(Ordering::MMD2, Factorization::Cholesky,
+            DirectSolver<double> dsFailed(Ordering::MMD3, Factorization::Cholesky,
                                           Traversal::LeftLooking);
             const bool refused = dsFailed.analyze(S) && !dsFailed.factor(S);
             ck(refused && dsFailed.numNodeIdx() == 0 && dsFailed.nnz() == 0
@@ -1022,16 +1019,16 @@ int main() {
 
             // The facade forwards to whichever storage is live, and reports zero before there is
             // one. Zero is the count for a factor that does not exist, not a sentinel.
-            DirectSolver<double> dsBefore(Ordering::MMD2, Factorization::DynamicLDLT,
+            DirectSolver<double> dsBefore(Ordering::MMD3, Factorization::DynamicLDLT,
                                           Traversal::LeftLooking);
             ck(dsBefore.numNodeIdx() == 0 && dsBefore.nnz() == 0 && dsBefore.numVal() == 0,
                "sizes             : the facade reports zero before factor()");
             ck(dsBefore.analyze(S) && dsBefore.numNodeIdx() == 0 && dsBefore.nnz() == 0,
                "sizes             : and still zero after analyze() alone");
 
-            DirectSolver<double> dsS(Ordering::MMD2, Factorization::StaticLDLT,
+            DirectSolver<double> dsS(Ordering::MMD3, Factorization::StaticLDLT,
                                      Traversal::LeftLooking);
-            DirectSolver<double> dsD(Ordering::MMD2, Factorization::DynamicLDLT,
+            DirectSolver<double> dsD(Ordering::MMD3, Factorization::DynamicLDLT,
                                      Traversal::LeftLooking);
             const bool forwarded =
                    dsS.analyze(S) && dsS.factor(S) && dsD.analyze(S) && dsD.factor(S)
@@ -1049,7 +1046,7 @@ int main() {
         const std::size_t g = 8;
         const double      shift[] = { 0.0, 1.0, 3.0 };
 
-        DirectSolver<double> dsIn(Ordering::MMD2, Factorization::DynamicLDLT);
+        DirectSolver<double> dsIn(Ordering::MMD3, Factorization::DynamicLDLT);
         ck(dsIn.analyze(toSparse(shiftedGridLaplacian(g, 0.0))),
            "inertia           : one analysis serves every shift, the pattern being shared");
 
@@ -1077,8 +1074,8 @@ int main() {
 
         // The same three matrices under Cholesky and static LDL, where they answer at all: a
         // congruence preserves inertia, so three different factors of one matrix must agree.
-        DirectSolver<double> dsCh(Ordering::MMD2, Factorization::Cholesky);
-        DirectSolver<double> dsSt(Ordering::MMD2, Factorization::StaticLDLT);
+        DirectSolver<double> dsCh(Ordering::MMD3, Factorization::Cholesky);
+        DirectSolver<double> dsSt(Ordering::MMD3, Factorization::StaticLDLT);
         const SparseMatrix<double> definite = toSparse(shiftedGridLaplacian(g, 0.0));
         Inertia inCh, inSt, inDy;
         const bool agree =
@@ -1091,12 +1088,12 @@ int main() {
         ck(agree, "inertia           : Cholesky, static and dynamic agree on the definite matrix");
 
         // The two cases it declines rather than guessing.
-        DirectSolver<double> dsUnfactored(Ordering::MMD2, Factorization::DynamicLDLT);
+        DirectSolver<double> dsUnfactored(Ordering::MMD3, Factorization::DynamicLDLT);
         Inertia unused;
         ck(!dsUnfactored.inertia(unused),
            "inertia           : refused before a factorization exists");
 
-        DirectSolver<std::complex<double>> dsSym(Ordering::MMD2, Factorization::DynamicLDLT);
+        DirectSolver<std::complex<double>> dsSym(Ordering::MMD3, Factorization::DynamicLDLT);
         ck(!dsSym.inertia(unused),
            "inertia           : refused for complex-symmetric LDLT, whose eigenvalues are complex");
     }

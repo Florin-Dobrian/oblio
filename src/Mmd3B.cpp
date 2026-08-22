@@ -275,7 +275,7 @@ std::vector<std::int32_t> orderMmd3B(const std::vector<std::size_t>&  colPtr,
                 // having appended the pivot, so the two sources are either one variable and the
                 // clique, or two cliques of which one is the clique.
                 if (qg.adjacencySize(u) == 1) {                    // a variable, genmmd's fwd >= 0
-                    const std::int32_t v = qg.adjacency(u)[0];
+                    const std::int32_t v = qg.adjacencyMmd(u)[0];
                     // ONE LOAD FOR BOTH QUESTIONS. `vertexTag` is the newest tag drawn, so
                     // anything at or above it is either this pass's own stamp or GONE, and both
                     // mean skip.
@@ -285,7 +285,7 @@ std::vector<std::int32_t> orderMmd3B(const std::vector<std::size_t>&  colPtr,
                         degree += qg.weight(v);
                     }
                 } else {                                           // two cliques; take the other
-                    const std::int32_t* incidence = qg.incidence(u);
+                    const std::int32_t* incidence = qg.incidenceMmd(u);
                     const std::int32_t  c = (incidence[0] == clique) ? incidence[1] : incidence[0];
                     qg.forEachMember(c, [&](std::int32_t v) {
                         const std::int32_t m = qg.mark(v);

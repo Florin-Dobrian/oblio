@@ -45,15 +45,11 @@ unset(CMAKE_REQUIRED_LIBRARIES)
 # CMake is the release path, so running it occasionally is the only thing that catches this; see
 # README.md, "Which to use".
 add_library(oblio STATIC
-    src/Amd1.cpp
-    src/Amd2.cpp
     src/Amd3.cpp
     src/Amd3B.cpp
     src/BlasLapack.cpp
     src/DirectSolver.cpp
     src/ElmForestEngine.cpp
-    src/Mmd1.cpp
-    src/Mmd2.cpp
     src/Mmd3.cpp
     src/Mmd3B.cpp
     src/Mmd3C.cpp

@@ -174,7 +174,7 @@ double compare(const SparseMatrix<Val>& A, const Permutation& P,
 // ordered. One number: the worst error anywhere.
 template<class Val>
 double sweep(int trials, Traversal traversal, std::mt19937& rng, int& failures) {
-    OrderEngine ord(Ordering::MMD2);
+    OrderEngine ord(Ordering::MMD3);
     double worst = 0;
     for (int t = 0; t < trials; ++t) {
         const std::size_t n = 4 + rng() % 12;
@@ -374,7 +374,7 @@ double dynamicLdlWorst(const std::vector<std::vector<double>>& dense, int& twoBy
     const std::int32_t n = static_cast<std::int32_t>(dense.size());
     const SparseMatrix<double> A = toSparse(dense);
 
-    OrderEngine ord(Ordering::MMD2);
+    OrderEngine ord(Ordering::MMD3);
     Permutation P;
     if (!ord.compute(A, P)) return -1;
 
@@ -492,7 +492,7 @@ int main() {
 
     // The grid. This is the sparse case: deep forest, real fill, an ordering that matters.
     {
-        OrderEngine ord(Ordering::MMD2);
+        OrderEngine ord(Ordering::MMD3);
         double worstR = 0, worstC = 0;
         int gridFail = 0;
         std::size_t supNat = 0, supAmd = 0, idxNat = 0, idxAmd = 0, heightNat = 0;
@@ -530,19 +530,19 @@ int main() {
         }
 
         ck(gridFail == 0 && worstR < tol,
-           "10x10 grid, real    : matches dense Cholesky, three traversals, natural and MMD2");
+           "10x10 grid, real    : matches dense Cholesky, three traversals, natural and MMD3");
         ck(gridFail == 0 && worstC < tol,
-           "10x10 grid, complex : matches dense Cholesky, three traversals, natural and MMD2");
+           "10x10 grid, complex : matches dense Cholesky, three traversals, natural and MMD3");
         ck(heightNat > 50 && supAmd < supNat && idxAmd < idxNat,
            "10x10 grid          : structure exercised (forest height "
-           + std::to_string(heightNat) + "; MMD2 cuts supernodes "
+           + std::to_string(heightNat) + "; MMD3 cuts supernodes "
            + std::to_string(supNat) + "->" + std::to_string(supAmd)
            + ", indices " + std::to_string(idxNat) + "->" + std::to_string(idxAmd) + ")");
     }
 
     // Static LDL. Three symmetries, two traversals, checked by reconstruction.
     {
-        OrderEngine ord(Ordering::MMD2);
+        OrderEngine ord(Ordering::MMD3);
         int ldlFail = 0;
         std::size_t perturbations = 0;
         double wR = 0, wCs = 0, wCh = 0;
@@ -594,7 +594,7 @@ int main() {
     // (initNumFactor, the accessors, the friend write path) without any of the growth verbs dynamic
     // LDL will add.
     {
-        OrderEngine ord(Ordering::MMD2);
+        OrderEngine ord(Ordering::MMD3);
         int dynFail = 0;
         double worst = 0;
 

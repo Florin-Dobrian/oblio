@@ -26,7 +26,6 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
     // The two shared-class conventions this layer differs by. Both are off for every other driver
     // and neither changes which sets are computed, only which permutation comes out. See the
     // setters, and experiments/ordering/AMD3.md for ledger entries 2, 3 and 5.
-    qg.setVendoredListOrder(true);      // cliques before adjacency; the new clique at the front
     qg.setLateMassElimination(true);    // and mass elimination becomes this driver's, below
 
     std::vector<std::int32_t> pivots;               // the order over supervariables
@@ -424,7 +423,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
             // disjoint. All the overcounting is therefore clique against clique, outside C[p],
             // which is the smallest place it could have been put.
             // Every length hoisted out of its condition; see the note in Amd1.
-            const std::int32_t* incidence     = qg.incidence(u);
+            const std::int32_t* incidence     = qg.incidenceAmd(u);
             const std::uint32_t incidenceSize = qg.incidenceSize(u);
 
             // THE ADJACENCY TERM AND THE WHOLE KEY ARE ALREADY IN HAND, accumulated by the
@@ -533,7 +532,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
             // this fusion measure nothing. Entry 4 split this driver's bound in two and
             // moved the refile below the hash, for the post-merge weight, and that is what leaves
             // this loop free of tie-break duty. Second thing that split has bought by accident.
-            if (!qg.eliminated(u)) {
+            if (!qg.eliminatedAmd(u)) {
                 // Amd.cpp's `hval = hval % n`, one reduction over a key that has wrapped in uint32
                 // rather than been reduced per term. See the prune for the other three halves of
                 // this arithmetic.
@@ -591,7 +590,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
 
         for (std::uint32_t kk = 0; kk < pivotCliqueSize; ++kk) {
             const std::int32_t seed = pivotClique[kk];
-            if (qg.eliminated(seed)) continue;
+            if (qg.eliminatedAmd(seed)) continue;
             const std::int32_t hash = buckets.key(seed);
             const std::int32_t headOfBucket = hashHead[hash];
             if (headOfBucket == NIL) continue;      // an earlier member already emptied it
@@ -604,7 +603,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
             // 400 square before this, and 0.33 after.
             for (std::int32_t u = headOfBucket; u != NIL && buckets.chain(u) != NIL;
                  u = buckets.chain(u)) {
-                if (qg.eliminated(u)) continue;
+                if (qg.eliminatedAmd(u)) continue;
                 // AMD_2 enters this loop only for a bucket member with a successor,
                 // `while (i != EMPTY && Next [i] != EMPTY)`, and the guard is the other half of
                 // the hoisted stamp below: without it a member with nothing after it pays a full
@@ -663,15 +662,15 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
                 const std::int32_t  other      = ++stamp;
                 const std::uint32_t adjacencyU = qg.adjacencySize(u);
                 const std::uint32_t incidenceU = qg.incidenceSize(u);
-                const std::int32_t* runU       = qg.adjacency(u);
+                const std::int32_t* runU       = qg.adjacencyAmd(u);
                 for (std::uint32_t a = 0; a < adjacencyU; ++a) w[runU[a]] = other;
                 // Index 1: the new clique is at the front of every I[u] and is shared by every
                 // member of C[pivot], so it can never discriminate. Ledger entry 6.
-                const std::int32_t* incidenceRunU = qg.incidence(u);
+                const std::int32_t* incidenceRunU = qg.incidenceAmd(u);
                 for (std::uint32_t i = 1; i < incidenceU; ++i) w[incidenceRunU[i]] = other;
 
                 for (std::int32_t v = buckets.chain(u); v != NIL; v = buckets.chain(v)) {
-                    if (qg.eliminated(v)) continue;
+                    if (qg.eliminatedAmd(v)) continue;
 
                     // The exact test the hash only filters for:
                     //     A[u] == A[v]   and   I[u] == I[v]
@@ -682,11 +681,11 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
                     if (qg.incidenceSize(v) != incidenceU) continue;
 
                     bool                same       = true;
-                    const std::int32_t* adjacencyV = qg.adjacency(v);
+                    const std::int32_t* adjacencyV = qg.adjacencyAmd(v);
                     for (std::uint32_t a = 0; a < adjacencyU && same; ++a)
                         if (w[adjacencyV[a]] != other) same = false;
                     if (same) {
-                        const std::int32_t* incidenceV = qg.incidence(v);
+                        const std::int32_t* incidenceV = qg.incidenceAmd(v);
                         for (std::uint32_t i = 1; i < incidenceU && same; ++i)
                             if (w[incidenceV[i]] != other) same = false;
                     }
@@ -749,12 +748,19 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
         // RESTORE DEGREE LISTS: the survivors are written back over the front of the clique and
         // what detection absorbed falls off the end. One store on a walk this pass makes anyway,
         // and without it those vertices are visited by every later walk of this clique.
+        // THE SIGNS COME BACK INSIDE THIS PASS, not in mass elimination, which ran late and left
+        // them negative. `AMD_2` does the same, `nvi = -Nv [i]` then `Nv [i] = nvi` under RESTORE
+        // DEGREE LISTS, and the store rides on the load this pass makes anyway. A vertex the hash
+        // absorbed is skipped and never restored, which is right: `merge` zeroed its weight, and
+        // zero is the absorbed state whatever sign it arrived with.
+        qg.restorePivotWeight(pivot);
+
         std::int32_t* cliqueOut = qg.clique(pivot);
         std::uint32_t kept      = 0;
         for (std::uint32_t k = 0; k < pivotCliqueSize; ++k) {
             const std::int32_t u = pivotClique[k];
-            if (qg.eliminated(u)) continue;         // absorbed by the hash a moment ago
-            const std::uint32_t weightU = qg.weight(u);   // POST-merge, which is the whole point
+            if (qg.eliminatedAmd(u)) continue;         // absorbed by the hash a moment ago
+            const std::uint32_t weightU = qg.restoreWeight(u);   // POST-merge, and un-negated here
             // ONE OPERAND WIDENED, so the sum is formed in `std::size_t`; see the note in Amd1
             // on why widening cannot be done after the addition the way narrowing is done after
             // the subtraction. `partial[u]` and `degme` each reach n, so the sum reaches 2n, and

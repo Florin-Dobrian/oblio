@@ -166,12 +166,7 @@ std::vector<std::int32_t> orderMmd3CImpl(const std::vector<std::size_t>&  colPtr
             const std::int32_t pivot = buckets.head(minDegree);
             buckets.unfile(pivot);
 
-            // THE THREE STEPS, SPELLED OUT, where this used to be one `eliminate` call. The
-            // wrapper went with the merge: amd's prune takes a `TaggedScan` and mmd's takes
-            // nothing, so a shared wrapper would have carried a parameter this branch ignores.
-            qg.beginEliminationMmd(pivot);
-            qg.pruneMmd(pivot);
-            const std::vector<std::int32_t>& merged = qg.finishEliminationMmd(pivot);
+            const std::vector<std::int32_t>& merged = qg.eliminate(pivot);
             batch.push_back(pivot);
             pivots.push_back(pivot);
             numEliminated += 1 + static_cast<std::uint32_t>(merged.size());

@@ -24,6 +24,7 @@ std::vector<std::int32_t> orderMmd3Impl(const std::vector<std::size_t>&  colPtr,
     // vector. Same sets, same cost, different winner among equals, and minimum degree is settled by
     // exactly that. See experiments/ordering/mmd3.py.
     qg.setReverseIncidence(true);
+    qg.enableMarks();   // this branch needs the tag array; the amd one does not
     std::vector<std::int32_t> pivots;
     pivots.reserve(size);
     std::uint32_t numEliminated = 0;
@@ -144,7 +145,7 @@ std::vector<std::int32_t> orderMmd3Impl(const std::vector<std::size_t>&  colPtr,
 
             cliqueMembers.clear();
             for (std::uint32_t k = 0; k < membersSize; ++k)
-                if (!qg.eliminated(members[k])) cliqueMembers.push_back(members[k]);
+                if (!qg.eliminatedMmd(members[k])) cliqueMembers.push_back(members[k]);
 
             const std::int32_t cliqueTag = qg.advanceTag();   // marked once for the clique
             for (std::int32_t v : cliqueMembers) qg.setMark(v, cliqueTag);
@@ -166,7 +167,8 @@ std::vector<std::int32_t> orderMmd3Impl(const std::vector<std::size_t>&  colPtr,
             // mmdupd's q2h list, `list[nb] = q2h; q2h = nb`.
             for (auto uu = q2h.rbegin(); uu != q2h.rend(); ++uu) {
                 const std::int32_t u = *uu;
-                if (qg.eliminated(u) || buckets.outmatched(u)) continue;   // by an earlier q2h vertex
+                // by an earlier q2h vertex
+                if (qg.eliminatedMmd(u) || buckets.outmatched(u)) continue;
                 const std::int32_t vertexTag = qg.advanceTag();
                 // dg0 is kept WHOLE and u's own weight subtracted at the end, which is
                 // genmmd's `dg - qsize[en] + 1` and not the same as subtracting it now. The
@@ -182,19 +184,20 @@ std::vector<std::int32_t> orderMmd3Impl(const std::vector<std::size_t>&  colPtr,
                 // cliques between them and a length loaded up front is overhead rather than a
                 // saving. Hoist where a loop is long; leave it where the loop is short or exits
                 // early. Measured both ways.
-                const std::int32_t* adjacency = qg.adjacency(u);
+                const std::int32_t* adjacency = qg.adjacencyMmd(u);
                 for (std::uint32_t a = 0; a < qg.adjacencySize(u); ++a) {
                     const std::int32_t v = adjacency[a];
                     // ONE LOAD FOR BOTH QUESTIONS. `vertexTag` is the newest tag drawn, so
                     // anything at or above it is either this pass's own stamp or GONE, and both
-                    // mean skip. This was `qg.eliminated(v) || mark[v] == vertexTag`, two arrays.
+                    // mean skip. This was `qg.eliminatedMmd(v) || mark[v] == vertexTag`, two
+                    // arrays.
                     const std::int32_t m = qg.mark(v);
                     if (m >= vertexTag) continue;                  // seen this pass, or dead
                     if (m == cliqueTag) continue;                 // already counted in dg0
                     qg.setMark(v, vertexTag);
                     degree += qg.weight(v);
                 }
-                const std::int32_t* incidence = qg.incidence(u);
+                const std::int32_t* incidence = qg.incidenceMmd(u);
                 for (std::uint32_t i = 0; i < qg.incidenceSize(u); ++i) {
                     const std::int32_t c = incidence[i];
                     if (c == clique) continue;
@@ -229,7 +232,7 @@ std::vector<std::int32_t> orderMmd3Impl(const std::vector<std::size_t>&  colPtr,
             // mmdupd's qxh list, the same stack.
             for (auto uu = qxh.rbegin(); uu != qxh.rend(); ++uu) {
                 const std::int32_t u = *uu;                 // the full union, as md5 computes it
-                if (qg.eliminated(u) || buckets.outmatched(u)) continue;
+                if (qg.eliminatedMmd(u) || buckets.outmatched(u)) continue;
                 const std::uint32_t degree = qg.reachableWeight(u); // reach excludes u already
                 const std::uint32_t filed = std::max<std::uint32_t>(degree + 1, 1);
                 buckets.file(filed, u);

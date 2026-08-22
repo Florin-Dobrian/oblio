@@ -45,12 +45,8 @@ const char* name(Ordering m) {
     switch (m) {
         case Ordering::Natural: return "Natural";
         case Ordering::MMD:     return "MMD";
-        case Ordering::MMD1:    return "MMD1";
-        case Ordering::MMD2:    return "MMD2";
         case Ordering::MMD3:    return "MMD3";
         case Ordering::AMD:     return "AMD";
-        case Ordering::AMD1:    return "AMD1";
-        case Ordering::AMD2:    return "AMD2";
         case Ordering::AMD3:    return "AMD3";
     }
     return "?";
@@ -105,10 +101,8 @@ int main() {
     // The forest and symbolic factor depend only on the pattern and the ordering, not on the
     // factorization or traversal, so they are computed once per ordering. Only the numeric factor
     // varies inside the inner loops.
-    for (Ordering ordering : {Ordering::Natural, Ordering::MMD, Ordering::MMD1,
-                              Ordering::MMD2, Ordering::MMD3,
-                              Ordering::AMD, Ordering::AMD1,
-                              Ordering::AMD2, Ordering::AMD3}) {
+    for (Ordering ordering : {Ordering::Natural, Ordering::MMD, Ordering::MMD3,
+                              Ordering::AMD, Ordering::AMD3}) {
         OrderEngine ordEng(ordering);
         Permutation P;
         if (!ordEng.compute(A, P))
@@ -166,7 +160,7 @@ int main() {
 
     // One actual solution, so the example ends on a number a reader can check by hand.
     {
-        OrderEngine ordEng(Ordering::MMD2);
+        OrderEngine ordEng(Ordering::MMD3);
         Permutation P;  ordEng.compute(A, P);
         ElmForest ef;   ElmForestEngine efEng;  efEng.compute(A, P, ef);
         SymFactor sf;   SymFactorEngine sfEng;  sfEng.compute(A, P, ef, sf);
@@ -176,7 +170,7 @@ int main() {
         Vector<Val> x(n);
         solEng.compute(P, nf, b, x);
 
-        printf("\nSolution (MMD2, Cholesky, LeftLooking):\n");
+        printf("\nSolution (MMD3, Cholesky, LeftLooking):\n");
         for (std::size_t i = 0; i < n; ++i)
             printf("  x[%zu] = %.10f\n", i, x[i]);
     }

@@ -107,7 +107,13 @@ BINS   = $(addsuffix _cpp,$(LAYERS))
 # The digit is not the chain here: amd4 forks sideways from amd2 and is temporary, renamed out of
 # the way so that amd3 can be the layer aligned to the vendored routine, which is what mmd3
 # already is on the other branch. Its own header says so and says when it goes.
-PORTED      = mmd1 mmd2 mmd3 amd1 amd2 amd3
+#
+# MMD1, MMD2, AMD1 AND AMD2 LEFT THIS LIST ON 2026-08-21, when the production drivers of those
+# names were retired to retired/ and out of the build. The PROTOTYPES are untouched and still
+# build and still check against their Python twins; what is gone is the second half of the
+# comparison, "production still says what the prototype says", for those four layers. It survives
+# for mmd3 and amd3, which are the two that ship. See retired/README.md.
+PORTED      = mmd3 amd3
 PORTED_FILL =
 
 

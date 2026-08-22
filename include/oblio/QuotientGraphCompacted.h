@@ -203,15 +203,23 @@ public:
     void pruneAmd(std::int32_t pivot, TaggedScan& scan);
     void pruneMmd(std::int32_t pivot);
 
-    const std::vector<std::int32_t>& finishEliminationAmd(std::int32_t pivot);
-    const std::vector<std::int32_t>& finishEliminationMmd(std::int32_t pivot);
+    // ONE METHOD FOR BOTH BRANCHES. `markGone` inside it does nothing when the mark array is
+    // absent, which is the amd branch, so the two halves this was split into differed in a store
+    // that was already a no-op on one of them.
+    const std::vector<std::int32_t>& finishElimination(std::int32_t pivot);
 
-    // MASS ELIMINATION, and the two differ only in whether they restore the negated weights as
-    // they go. Amd does not, its driver restoring in a pass of its own; mmd does, because
-    // `reachableWeight` is called per vertex in the refresh and each call must leave the weights
-    // as it found them.
-    const std::vector<std::int32_t>& massEliminateAmd(std::int32_t pivot);
-    const std::vector<std::int32_t>& massEliminateMmd(std::int32_t pivot);
+    // AND THE THREE AS ONE CALL, overloaded on the scan exactly as `QuotientGraph`'s pair is: the
+    // mmd prune takes nothing and the amd one takes a `TaggedScan`, so the argument selects the
+    // branch. The value of the wrapper is that the ORDER of the three steps lives here rather
+    // than in each driver, where nothing could enforce it. The three remain public and remain
+    // suffixed; this is a sequence rather than a replacement.
+    const std::vector<std::int32_t>& eliminate(std::int32_t pivot);
+    const std::vector<std::int32_t>& eliminate(std::int32_t pivot, TaggedScan& scan);
+
+    // MASS ELIMINATION, one method for both branches. Whoever runs it restores the negated
+    // weights: this method when the eliminator runs it eagerly, the driver when it runs it late.
+    // See the body, and `restoreWeight`.
+    const std::vector<std::int32_t>& massEliminate(std::int32_t pivot);
 
     // AGGRESSIVE ABSORPTION, amd only: a clique whose external degree has reached zero is dead,
     // and its members drop it from their incidence lists.
@@ -701,28 +709,29 @@ inline void QuotientGraphCompacted::pruneMmd(std::int32_t pivot) {
 // amd prune needs the untrimmed clique for its degree bound, so the trim happens later and in the
 // driver. The flag is still tested rather than assumed, the class not being the place that decides.
 inline const std::vector<std::int32_t>&
-QuotientGraphCompacted::finishEliminationAmd(std::int32_t pivot) {
+QuotientGraphCompacted::finishElimination(std::int32_t pivot) {
     if (mLateMassElimination) {
         mMerged.clear();
     } else {
-        massEliminateAmd(pivot);
-    }
-
-    mRun[pivot].incidenceSize = 0;
-    return mMerged;
-}
-
-inline const std::vector<std::int32_t>&
-QuotientGraphCompacted::finishEliminationMmd(std::int32_t pivot) {
-    if (mLateMassElimination) {
-        mMerged.clear();
-    } else {
-        massEliminateMmd(pivot);
+        massEliminate(pivot);
     }
 
     mRun[pivot].incidenceSize = 0;
     markGone(pivot);
     return mMerged;
+}
+
+inline const std::vector<std::int32_t>& QuotientGraphCompacted::eliminate(std::int32_t pivot) {
+    beginEliminationMmd(pivot);
+    pruneMmd(pivot);
+    return finishElimination(pivot);
+}
+
+inline const std::vector<std::int32_t>& QuotientGraphCompacted::eliminate(std::int32_t pivot,
+                                                                          TaggedScan& scan) {
+    beginEliminationAmd(pivot);
+    pruneAmd(pivot, scan);
+    return finishElimination(pivot);
 }
 
 // MASS ELIMINATION, `AMD_2`'s "eliminate non principal supervariables". A vertex whose reach is
@@ -731,69 +740,21 @@ QuotientGraphCompacted::finishEliminationMmd(std::int32_t pivot) {
 // THE AMD FORM DOES NOT RESTORE THE NEGATED WEIGHTS, its driver doing that in a pass it already
 // makes over C[pivot]. The mmd form must, `reachableWeight` being called per vertex in the refresh.
 inline const std::vector<std::int32_t>&
-QuotientGraphCompacted::massEliminateAmd(std::int32_t pivot) {
+QuotientGraphCompacted::massEliminate(std::int32_t pivot) {
     std::vector<std::int32_t>& merged = mMerged;   // scratch, kept for its capacity
     merged.clear();
     const std::int32_t* reached     = mSource.data() + mRun[pivot].sourcePtr;
     const std::uint32_t reachedSize = mRun[pivot].adjacencySize;
+    // THE SIGNS COME BACK HERE UNLESS THE DRIVER IS DOING IT. Mass elimination is the last reader
+    // of the negated form, so whoever runs it restores: this method when the eliminator runs it
+    // eagerly, the driver when it runs it late and has a refile pass to ride the store on.
+    // `AMD_2` is the late case, mass-eliminating with the weights still negative, `nvi = -Nv [i]`,
+    // and restoring afterwards under RESTORE DEGREE LISTS. See restoreWeight.
+    const bool restore = !mLateMassElimination;
+    if (restore) mWeight[pivot] = -mWeight[pivot];
     for (std::uint32_t ri = 0; ri < reachedSize; ++ri) {
         const std::int32_t u = reached[ri];
-        if (mRun[u].adjacencySize == 0 && mRun[u].incidenceSize == 1 &&
-            mSource[mRun[u].sourcePtr] == pivot) {         // I[u] starts at the run, always now
-            mRun[u].incidenceSize = 0;
-            merged.push_back(u);
-        }
-    }
-    if (!merged.empty()) {
-        // THE MERGE HAPPENS FIRST, so that the compaction can read the ZERO WEIGHT it leaves
-        // rather than a stamp of its own. The old order was the reverse and needed a tag pass over
-        // `merged` plus a mark array read per member; the weight says the same thing and the
-        // supervariable bookkeeping had to write it anyway. This was the last reader of mMark's
-        // VERTEX half, and with it gone the array is clique ids alone.
-        for (std::int32_t u : merged) {                // the pivot now stands for them too
-            mSuperNext[mSuperLast[pivot]] = u;         // append u's chain, order preserved
-            mSuperLast[pivot]             = mSuperLast[u];
-            mCliqueWeight -= static_cast<std::uint32_t>(-mWeight[u]);
-            mWeight[pivot] += mWeight[u];              // both negative; magnitudes add
-            mWeight[u] = 0;
-        }
-
-        std::int32_t*     members     = mSource.data() + mRun[pivot].sourcePtr;
-        const std::uint32_t membersSize = mRun[pivot].adjacencySize;
-        std::uint32_t       kept        = 0;
-        for (std::uint32_t k = 0; k < membersSize; ++k)
-            if (mWeight[members[k]] != 0) members[kept++] = members[k];
-        mNumLiveCliqueMembers -= membersSize - kept;   // a shrink is a partial death
-        mRun[pivot].adjacencySize = kept;
-
-        // THE SPACE THE COMPACTION FREED GOES BACK TO THE CURSOR, which is `AMD_2`'s
-        // `if (elenme != 0) pfree = p`: "clique was not constructed in place: deallocate part of
-        // it since newly nonprincipal variables may have been removed". Only in the pooled case,
-        // and the in-place case has nothing to give back since it never took any.
-        //
-        // SAFE BECAUSE THE CLIQUE IS STILL THE LAST BLOCK IN THE POOL. Nothing is written to the
-        // pool between beginElimination building it and this function trimming it: the prune
-        // rewrites vertex runs in place, and absorption only zeroes lengths. If that ever stops
-        // being true this becomes wrong silently, so the condition is asserted rather than assumed.
-        if (!mBuiltInPlace) {
-            assert(mRun[pivot].sourcePtr + membersSize == mFree &&
-                   "the pivot's clique is no longer the last block in the pool");
-            mFree = mRun[pivot].sourcePtr + kept;
-        }
-    }
-    return merged;
-}
-
-inline const std::vector<std::int32_t>&
-QuotientGraphCompacted::massEliminateMmd(std::int32_t pivot) {
-    std::vector<std::int32_t>& merged = mMerged;   // scratch, kept for its capacity
-    merged.clear();
-    const std::int32_t* reached     = mSource.data() + mRun[pivot].sourcePtr;
-    const std::uint32_t reachedSize = mRun[pivot].adjacencySize;
-    mWeight[pivot] = -mWeight[pivot];
-    for (std::uint32_t ri = 0; ri < reachedSize; ++ri) {
-        const std::int32_t u = reached[ri];
-        mWeight[u] = -mWeight[u];                          // live again, and positive
+        if (restore) mWeight[u] = -mWeight[u];             // live again, and positive
         if (mRun[u].adjacencySize == 0 && mRun[u].incidenceSize == 1 &&
             mSource[mRun[u].sourcePtr] == pivot) {         // A[u] empty, so I[u] starts at the run
             mRun[u].incidenceSize = 0;
@@ -805,7 +766,7 @@ QuotientGraphCompacted::massEliminateMmd(std::int32_t pivot) {
         for (std::int32_t u : merged) {                // the pivot now stands for them too
             mSuperNext[mSuperLast[pivot]] = u;         // append u's chain, order preserved
             mSuperLast[pivot]             = mSuperLast[u];
-            mCliqueWeight -= static_cast<std::uint32_t>(mWeight[u]);
+            mCliqueWeight -= weight(u);            // magnitude: the sign depends on `restore`
             mWeight[pivot] += mWeight[u];
             mWeight[u] = 0;
         }

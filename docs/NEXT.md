@@ -1,19 +1,22 @@
-# NEXT: the three quotient graphs are shared and header-only; re-measure, then decide
+# NEXT: the ordering vocabulary and the quotient graphs are settled; measure, then decide
 
-**CURRENT AS OF `af829bb` PLUS THE UNCOMMITTED WORK BELOW, 2026-08-19.** Everything from here down
-to "What was done since commit 5ea68cc" is recent; that section and everything after it is older,
-and several of its items are closed and marked where they are.
+**CURRENT AS OF `97f4bc6`, 2026-08-21, AND THE TREE IS CLEAN.** Everything from here down to "What
+was done since commit 5ea68cc" is recent; that section and everything after it is older, and
+several of its items are closed and marked where they are.
 
 **WHERE TO START: "The inlining bias" below.** It is short and it invalidates figures quoted
 elsewhere in this file and in `benchmarks/matrices/ORDERING.md`. Read it with the caution the
 section before it carries: the account of what translation units cost does not predict its own
 results, and one movement it cannot explain is on the record.
 
-**UNCOMMITTED IN THE TREE:** `include/oblio/QuotientGraphCompacted.h` is new and header-only;
-`include/oblio/QuotientGraphChained.h` is new and header-only too; `src/QuotientGraph.cpp` is
-DELETED, its bodies folded into its own header the same way; `src/Amd3.cpp`, `src/Amd3B.cpp`,
-`src/Mmd3.cpp`, `src/Mmd3B.cpp`, `src/Mmd3C.cpp`, `include/oblio/OrderEngine.h`,
-`experiments/ordering/Makefile`, `Makefile` and `CMakeLists.txt` are modified.
+**WHAT THE LAST TWO COMMITS DID.** `19efe5f`: the three quotient graphs became shared and
+header-only, `src/QuotientGraph.cpp` deleted with its bodies folded into its header, so every
+ordering driver now compiles its graph into its own translation unit; `Mmd3C` and `Mmd3B` were both
+brought onto shared classes; the real-matrix tables gained compaction counts and `MMD3C`;
+`benchmarks/matrices/ORDERING.md` was regenerated from a fresh run of all 246. `97f4bc6`: the
+vocabulary sweep, element to clique and garbage collection to compaction throughout our own code
+and the twins, plus four new sections in `experiments/ordering/README.md` reading the 1996 AMD
+paper against what we have built.
 
 `Mmd3C` was brought level with `Amd3B` on storage before any of that, in four steps: the elbow room
 off `nzaat`, `cliqueCountBalances`, the walk in positions and cursors, and the mid-walk collector

@@ -107,7 +107,8 @@ fetched by hand appears in a run only if a list names it.
 The three in `extras.txt` are the case that prompted this. They are standard hard matrices from
 the sparse direct literature and all three are far beyond what either report covers: `Si87H76` is
 n = 240369 with 10.7 million nonzeros, and Oblio's analysis predicts **5.68 billion entries of fill
-under MMD3**, which is 42.3 GB of values. The accuracy driver reported that and declined, which is
+under MmdFlat**, which is 42.3 GB of values. The accuracy driver reported that and declined, which
+is
 the cap working: the analysis completed, since the symbolic factor stores index sets rather than
 entries, and only the numeric phase would have allocated. `PARSEC` matrices fill this way under any
 minimum degree ordering; what they want is nested dissection, which Oblio does not have.
@@ -688,20 +689,20 @@ not in yet.
 
 **`ORDERING.md` is this program's report**, over all 246 files.
 
-**`matrix_accuracy_cpp`** answers how good the answers are. One ordering, MMD3, and the
+**`matrix_accuracy_cpp`** answers how good the answers are. One ordering, MmdFlat, and the
 left-looking traversal, both held fixed on purpose: the question is whether we compute correctly on
 matrices nobody generated, not which ordering is best. It drops `nnz(A)` from its table, which
 `mmread_cpp` already reports, to make room for the two measures. `ACCURACY.md` is its report.
 
 **`matrix_performance_cpp`** answers what they cost. Four orderings, the vendored MMD and AMD
-beside our MMD3 and AMD3, and three traversals, with **Cholesky held still**. That choice buys
+beside our MmdFlat and AmdFlat, and three traversals, with **Cholesky held still**. That choice buys
 three things at once: the factor's structure is exactly what the analysis predicted, so nnz(L) is a
 property of the ordering alone; no column is delayed, so the fill cap is exact rather than a lower
 bound and no fork guard is needed; and the numeric phase does the same arithmetic under every
 traversal, so a difference between them is a difference in scheduling rather than in work. Its
 phase split and timing protocol are `../pipeline`'s, so rows can be read across the two folders,
-and the vendored pair is a live oracle in every row: MMD and MMD3 must agree on nnz(L), as must AMD
-and AMD3.
+and the vendored pair is a live oracle in every row: MmdVendored and MmdFlat must agree on nnz(L),
+as must AmdVendored and AmdFlat.
 
 All three take file names, so a subset needs no option:
 
@@ -908,7 +909,7 @@ back here.
 ## Why some matrices order slowly, 2026-08-11
 
 The first performance run turned up ordering times that looked wrong: `GHS_indef/bloweybq` at 148
-ms under AMD3 where the vendored AMD took 0.38, `Lourakis/bundle1` at 121 against 1.93,
+ms under AmdFlat where the vendored AMD took 0.38, `Lourakis/bundle1` at 121 against 1.93,
 `Mulvey/finan512` at 347 against 6.42. **Two different causes, and neither is a defect.**
 
 ### One is a missing feature, and its remedy is documented in the vendored source
@@ -919,14 +920,14 @@ time by up to O(n^2), unless they are removed prior to ordering". Its remedy is 
 `max(16, 10 * sqrt(n))` by default, above which a row is called dense, pulled out before ordering
 and placed last in the output.
 
-**Oblio implements no such rule**, in `Amd3.cpp` or in `QuotientGraph`, and neither does MMD3 or
+**Oblio implements no such rule**, in `Amd3.cpp` or in `QuotientGraph`, and neither does MmdFlat or
 the vendored genmmd. So all three carry a vertex adjacent to everything through every degree
 update, and the vendored AMD does not.
 
 Removing every column above AMD's own threshold, alpamayo, milliseconds:
 
 ```
-                     n  threshold  dense    MMD             MMD3            AMD           AMD3
+                     n  threshold  dense    MMD             MmdFlat            AMD           AmdFlat
 bloweybq         10001       1000      1    70.70 -> 0.83  145.37 -> 1.31  1.36 -> 1.35  470.32 ->
 1.54
 bundle1          10581       1028    252   259.34 -> 10.98 322.25 -> 15.93 7.47 -> 2.46  107.30 ->
@@ -949,7 +950,7 @@ AMD's 2.8 million, **losing on both axes at once**.
 
 Its degree histogram says why: 512 columns at 54, 512 at 51, 512 at 22, 1024 at 20, 24064 at 6.
 That is a nested block structure with massive degree ties, which is exactly where exact minimum
-degree spends its time and where AMD's approximate degree does not. **Our MMD3 is nearly twice as
+degree spends its time and where AMD's approximate degree does not. **Our MmdFlat is nearly twice as
 fast as the vendored genmmd here**, 452 against 815, so this one is not ours to answer for.
 
 **Two lessons for reading any ordering timing.** A minimum degree ordering's cost depends on the
@@ -959,7 +960,7 @@ exposed to nothing else here, where MMD is exposed to both.
 
 ## What the runs showed, 2026-08-10
 
-**alpamayo (Apple Silicon), macOS, Apple Clang, Accelerate.** MMD3, left-looking throughout. Four
+**alpamayo (Apple Silicon), macOS, Apple Clang, Accelerate.** MmdFlat, left-looking throughout. Four
 runs, at 60, 107, 140 and 160 files. The 160-file run is the current record:
 
 ```
@@ -1042,11 +1043,11 @@ of the 114 files read: 107 measured, 1 not positive definite, 5 over the fill ca
 geometric mean relative to the best ordering on each matrix:
   order      nnz(L)      order    analyze     factLL
   MMD         1.032      1.566      1.335      1.081
-  MMD3        1.032      1.821      1.416      1.074
+  MmdFlat        1.032      1.821      1.416      1.074
   AMD         1.020      1.126      1.045      1.073
-  AMD3        1.020      1.529      1.282      1.040
+  AmdFlat        1.020      1.529      1.282      1.040
 
-traversals at MMD3, relative to the best traversal on each matrix:
+traversals at MmdFlat, relative to the best traversal on each matrix:
   left-looking   1.364
   right-looking  1.388
   multifrontal   1.028
@@ -1070,10 +1071,11 @@ the dense-row rule the vendored AMD has and nothing else does.
 **billion**
 entries, about 10 GB of values. Without it that would have been another `bloweya`.
 
-**And the vendored pair is an oracle in every row.** MMD and MMD3 agreed on nnz(L) on all 107
-matrices. **AMD and AMD3 did not**, differing on a minority of rows, once substantially:
+**And the vendored pair is an oracle in every row.** MmdVendored and MmdFlat agreed on nnz(L) on all
+107
+matrices. **AmdVendored and AmdFlat did not**, differing on a minority of rows, once substantially:
 `HB/bcsstk08` at 31153 against 29922, where ours fills 4 percent less. The acceptance tests in
-`experiments/ordering` have AMD3 reproducing the vendored raw order exactly on all 38 cases, but
+`experiments/ordering` have AmdFlat reproducing the vendored raw order exactly on all 38 cases, but
 those are grids and random patterns. This is the first evidence from real structure and it is
 unexplained; it is recorded here rather than chased.
 
@@ -1107,7 +1109,7 @@ it as an experiment rather than as an optimization, and the reason is in these n
 matrices in question order in tenths of a millisecond and need no ordering at all.
 
 **Two figures worth keeping from the fill column.** `PARSEC/Si87H76` produces 5,679,875,732 entries
-of fill under MMD3, confirming to three digits a prediction this tree had only extrapolated from
+of fill under MmdFlat, confirming to three digits a prediction this tree had only extrapolated from
 grids. And there is a worse case nothing had recorded: `FlowIPM22/uni_chimera_i1`, n = 100000 and
 nnz(A) = 1100592, produces 1,179,373,506, which is 1072x nnz(A) from a matrix an eighth of
 `Si87H76`'s size. Both are arguments for nested dissection, and `uni_chimera_i1` is the cheaper one
@@ -1128,7 +1130,7 @@ to experiment on.
 - **A dense-row threshold**, which is the single largest ordering-time item and the one with a
   documented remedy. It belongs in `QuotientGraph` so that all six ordering drivers gain it at
   once. See "Why some matrices order slowly" above.
-- **Why AMD3 and the vendored AMD disagree on fill** on a minority of real matrices, where the 38
+- **Why AmdFlat and the vendored AMD disagree on fill** on a minority of real matrices, where the 38
   acceptance cases in `experiments/ordering` show exact agreement. Ours fills less where they
   differ, so it is not urgent, but it is a divergence the acceptance tests cannot see.
 - **The scaling report**, the third of the three: synthetic 2D and 3D grids, Cholesky throughout,

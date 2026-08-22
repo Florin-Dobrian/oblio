@@ -122,7 +122,7 @@ program was reading its own freed memory and getting the right answer back. Both
 
 **The mmd check is newer than the mmd alignment**, which is worth knowing when reading dates. The
 alignment was established on 2026-08-07 by a scratch probe that did not survive its session, and
-what ran between then and 2026-08-09 was the benchmark's fill column, which `MMD3.md` iteration 6
+what ran between then and 2026-08-09 was the benchmark's fill column, which `MmdFlat.md` iteration 6
 shows is not sufficient: fill was exact at every size while the permutation still diverged at pivot
 700 of 1024.
 
@@ -188,8 +188,8 @@ composition against direct application and the inverse against the identity.
 ### test_order, 59 assertions (14 of them the vendored pair's, and optional)
 
 Seven matrices, each checked for structural symmetry and then ordered by all four non-trivial enum
-methods and checked for validity as a permutation: AMD, AMD3, MMD and MMD3. Matrices: a 6x6 arrow,
-tridiagonals at n = 1, 2, 10 and 100, a 5x5 diagonal, and a complex arrow.
+methods and checked for validity as a permutation: AmdVendored, AmdFlat, MmdVendored and MmdFlat.
+Matrices: a 6x6 arrow, tridiagonals at n = 1, 2, 10 and 100, a 5x5 diagonal, and a complex arrow.
 
 **Three further layers are reached as FREE FUNCTIONS and are the strongest oracle in this suite**,
 because each must reproduce its original ENTRY FOR ENTRY. Every other pair of orderings here can
@@ -199,9 +199,9 @@ permutation is a requirement and any difference is a defect in one of the two.
 
 | layer | is | permanent |
 |---|---|---|
-| `MMD3B` | MMD3 on genmmd's dead-segment clique storage | yes |
-| `AMD3B` | AMD3 on AMD_2's compacted storage | yes |
-| `MMD3C` | MMD3 on AMD_2's compacted storage | yes |
+| `MmdChained` | MmdFlat on genmmd's dead-segment clique storage | yes |
+| `AmdCompacted` | AmdFlat on AMD_2's compacted storage | yes |
+| `MmdCompacted` | MmdFlat on AMD_2's compacted storage | yes |
 
 None is in the `Ordering` enum, so none is reached by `test_pipeline`'s sweep, and none has a
 prototype in `experiments/ordering` or appears in its `PORTED` list. **This suite and `make digest`
@@ -209,8 +209,10 @@ in `benchmarks/ordering` are the only things that check them at all**, which is 
 uniform rather than sampled: one validity assertion per layer on the arrow, and one sameness
 assertion per layer on every one of the seven matrices, 24 in all.
 
-**That uniformity is new on 2026-08-17 and it closed two real gaps.** `MMD3B` ran on five of the
-seven, missing the 5x5 diagonal and the complex arrow, and `AMD3B` had no assertion anywhere in the
+**That uniformity is new on 2026-08-17 and it closed two real gaps.** `MmdChained` ran on five of
+the
+seven, missing the 5x5 diagonal and the complex arrow, and `AmdCompacted` had no assertion anywhere
+in the
 suite despite being a permanent maintained alternative. The two matrices it was missing are the ones
 `experiments/ordering`'s own graphs cannot produce, since all seven of those are connected and none
 is trivial: the diagonal is n isolated vertices where every degree is zero and nothing merges, and

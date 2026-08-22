@@ -31,14 +31,31 @@ to do.
 
 ## What Oblio was asked to do
 
-**Oblio's defaults throughout, held fixed on purpose.** The question here is accuracy, not which
-ordering or traversal is fastest, so nothing varies that does not have to. Oblio also provides AMD
+**One configuration throughout, held fixed on purpose.** The question here is accuracy, not which
+ordering or traversal is fastest, so nothing varies that does not have to. Oblio also provides amd
 orderings and right-looking and multifrontal traversals; those are the subject of the performance
 report and would only distract from this one.
 
+**THE ORDERING IS `MmdCompacted` AND THE TREE'S DEFAULT IS `AmdCompacted`.** This pass has run
+under mmd since it was written, and holding it there keeps every figure below comparable across
+re-runs. `MmdCompacted` returns `MmdFlat`'s permutation exactly, which is genmmd's, so the change
+of store made on 2026-08-21 cannot move a number here.
+
+**Running it under `AmdCompacted` was tried on 2026-08-21 and it cost a matrix.**
+`Oberwolfach/LFAT5000` is killed by the OOM killer under amd where mmd factors it at 232.4x fill,
+and the section below on the cost of accuracy is largely about that matrix. Amd's PREDICTED fill on
+it is LOWER than mmd's, 54978 against 67463, so the loss is in the delayed-pivot cascade rather
+than in the ordering's fill.
+
+**The two runs differ in the ordering and in nothing else**, which is checked rather than assumed:
+the mmd run reproduces every figure in this report exactly, 106 solved, the same 30/18/56/2
+classification and the same eight residual rows. So the matrix was lost to the ordering and not to
+a change of input set. It is an open question rather than a reason to prefer mmd generally;
+`docs/NEXT.md` carries it.
+
 | | |
 |---|---|
-| Ordering | multiple minimum degree (MMD), the default |
+| Ordering | `MmdCompacted`, which is NOT the tree's default; see below |
 | Traversal | left-looking, the default |
 | Factorizations | Cholesky, static $LDL^T$, dynamic $LDL^T$ |
 | Values | real, double precision |
@@ -171,7 +188,8 @@ short of factoring can. Those cases are marked in the results instead, from the 
 
 ## Results
 
-Of the 160 files: 41 carry no values, 12 are structurally singular and declined, 1 could not be
+Of the 119 the benchmark reads, the 41 pattern-only files having been filtered out of
+`accuracy_candidates.txt` by `--values`: 12 are structurally singular and declined, 1 could not be
 factored in the memory available (discussed below), and **106 were solved**.
 
 ### Classification, from the inertia

@@ -1,29 +1,68 @@
-# NEXT: the two quotient graphs are aligned; nested dissection and the chunked store are open
+# NEXT: the drivers are renamed and the default moved; one regression is open
 
-**CURRENT AS OF 2026-08-21, AND THE TREE IS CLEAN.** Everything from here down to "What was done
-since commit 5ea68cc" is recent; that section and everything after it is older, and several of its
-items are closed and marked where they are.
+## OPEN, FOUND 2026-08-21: the amd default costs `Oberwolfach/LFAT5000`
 
-**WHAT THE LAST THREE COMMITS DID.** `19efe5f`: the three quotient graphs became shared and
-header-only, so every ordering driver compiles its graph into its own translation unit; the
-real-matrix tables gained compaction counts and `MMD3C`; `benchmarks/matrices/ORDERING.md` was
-regenerated from a fresh run of all 246. `97f4bc6`: the vocabulary sweep, element to clique and
-garbage collection to compaction throughout our own code and the twins, plus four new sections in
-`experiments/ordering/README.md` reading the 1996 AMD paper against what we have built. `1da85c5`:
-five alignment items between the flat and compacted classes, all closed, and the retirement of
-`MMD1`, `MMD2`, `AMD1` and `AMD2` to `retired/`.
+**`make accuracy` under `AmdCompacted` is killed by the OOM killer on that matrix, where mmd
+factors it.** It is the one open defect from this session and nothing else in the tree shows it.
 
-**THE ORDERING SUBSYSTEM IS IN A SETTLED STATE.** Five enum orderings, `MMD3` and `AMD3` each
-reproducing its reference exactly; three non-enum layers on the two vendored clique stores; two
-quotient graph classes whose driver call sequences are IDENTICAL on the mmd side and differ in two
-calls on the amd side, `docs/QUOTIENT_GRAPH_USAGE.md` having the ledger. What is open is below and
-none of it is cleanup.
+```
+                        predicted fill   actual        ratio     delayed     outcome
+MmdCompacted                 67 463      15 678 721    232.4x    3 128 750   bwd 9.7e-20
+AmdCompacted                 54 978          -            -          -       KILLED, signal 9
+```
+
+**Amd predicts LESS fill on this matrix and still dies**, so the cause is the delayed-pivot cascade
+rather than the ordering's fill. `LFAT5000` is positive definite, every pivot acceptable, and
+dynamic LDL delayed 3.1 million columns anyway under mmd; under amd it delays past the memory
+budget. `benchmarks/matrices/ACCURACY.md` has the mmd account, in "The cost of accuracy".
+
+**The accuracy pass is held at `MmdCompacted` meanwhile**, not at the tree's default, and
+`benchmarks/matrices/matrix_accuracy.cpp` says why at its head. `MmdCompacted` returns `MmdFlat`'s
+permutation exactly, so every published figure in that report stays comparable.
+
+**THE CONTROL IS DONE AND IT ISOLATES THE ORDERING.** `make accuracy` under `MmdCompacted`, same
+119 files, reproduces the published run exactly: 106 solved, 12 singular, 1 killed, the same
+30/18/56/2 classification, and the same eight residual rows to every digit. `LFAT5000` factors
+there at 232.4x with 3 128 750 delays. So the two runs differ in the ordering and in nothing else,
+and the matrix was lost to amd rather than to a changed input set. It also confirms in passing that
+`MmdCompacted` and `MmdFlat` are interchangeable here, which is what let the accuracy pass move
+onto the compacted store without re-measuring anything.
+
+**WHAT WOULD SETTLE THE MECHANISM.** Whether the cascade is amd-specific or a threshold effect mmd
+happens to sit under: run the amd pass with a raised memory ceiling and read the delay count
+against mmd's 3.1 million. If amd merely delays somewhat more, this is a tuning question and
+`docs/TODO.md`'s dynamic-pivoting entries are where it belongs. If it delays an order of magnitude
+more, the interaction between an approximate-degree ordering and delayed pivots is a real finding
+and nobody here has looked at it. `matrix_accuracy_cpp --max-fill=2e8` is the flag.
+
+**NOT A REASON TO MOVE THE DEFAULT BACK**, on one matrix of 119 and with the mechanism unknown.
+
+## Where the ordering subsystem stands
+
+**CURRENT AS OF 2026-08-21, AND THE TREE IS CLEAN** apart from the accuracy work above.
+
+**THE DRIVERS WERE RENAMED AND THE DEFAULT MOVED.** A driver is now its branch plus the clique
+store it runs on: `MmdVendored` `MmdFlat` `MmdChained` `MmdCompacted` and `AmdVendored` `AmdFlat`
+`AmdCompacted`, eight enumerators with `Natural`. The three alternative-store drivers joined the
+enum, having been free functions. `AmdCompacted` is the default and `MmdCompacted` is the mmd
+driver to use; the flat pair stay as the unbounded reference the bounded ones must equal, and
+`MmdChained` stays as the measured alternative. See `docs/DESIGN_DECISIONS.md` (2026-08-21), twice.
+
+**THE REASON FOR THE COMPACTED PAIR IS THE BOUND, NOT THE CLOCK.** A fresh run of all 246 put the
+compacted store within 1.4 per cent of the arena on both branches, winning 188 of 235 on amd and a
+coin flip on mmd. The store is bounded from the input and our arena is not. See
+`benchmarks/matrices/ORDERING.md`, which is a snapshot of 2026-08-21.
+
+**THE ORDERING SUBSYSTEM IS OTHERWISE SETTLED.** Eight enumerators, each of ours reproducing its
+branch's reference exactly; two quotient graph classes whose driver call sequences are IDENTICAL on
+the mmd side and differ in two calls on the amd side, `docs/QUOTIENT_GRAPH_USAGE.md` having the
+ledger. What is open is below and, apart from `LFAT5000`, none of it is cleanup.
 
 **THE FIGURES IN THAT SENTENCE WERE THREE AND NINE UNTIL 2026-08-21.** They came from an extraction
 that read `qg.<method>` out of the drivers without stripping comments, so a method named in prose
 counted as a call. All three mmd differences were comment text and one of the nine amd ones was.
-What actually remains on the amd side is two `adjacencyAmd` calls in `Amd3`'s hash-detection block,
-which is the run order and not an accident; `compactions` against `arenaEntries` is excluded
+What actually remains on the amd side is two `adjacencyAmd` calls in `AmdFlat`'s hash-detection
+block, which is the run order and not an accident; `compactions` against `arenaEntries` is excluded
 throughout, being layout. Corrected in `docs/QUOTIENT_GRAPH_USAGE.md` and in the 2026-08-21
 `DESIGN_DECISIONS.md` entry.
 
@@ -34,26 +73,29 @@ results, and one movement it cannot explain is on the record.
 
 **WHAT THE LAST TWO COMMITS DID.** `19efe5f`: the three quotient graphs became shared and
 header-only, `src/QuotientGraph.cpp` deleted with its bodies folded into its header, so every
-ordering driver now compiles its graph into its own translation unit; `Mmd3C` and `Mmd3B` were both
-brought onto shared classes; the real-matrix tables gained compaction counts and `MMD3C`;
+ordering driver now compiles its graph into its own translation unit; `MmdCompacted` and
+`MmdChained` were both
+brought onto shared classes; the real-matrix tables gained compaction counts and `MmdCompacted`;
 `benchmarks/matrices/ORDERING.md` was regenerated from a fresh run of all 246. `97f4bc6`: the
 vocabulary sweep, element to clique and garbage collection to compaction throughout our own code
 and the twins, plus four new sections in `experiments/ordering/README.md` reading the 1996 AMD
 paper against what we have built.
 
-`Mmd3C` was brought level with `Amd3B` on storage before any of that, in four steps: the elbow room
+`MmdCompacted` was brought level with `AmdCompacted` on storage before any of that, in four steps:
+the elbow room
 off `nzaat`, `cliqueCountBalances`, the walk in positions and cursors, and the mid-walk collector
 with its absorbed capture and contraction report.
 
 What got done and is now behind us:
 
-- `Amd3` and `Amd3B` return `AMD_2`'s PRE-POSTORDER PERMUTATION ON ALL 246 real matrices, where
+- `AmdFlat` and `AmdCompacted` return `AMD_2`'s PRE-POSTORDER PERMUTATION ON ALL 246 real matrices,
+where
   before four kinds of difference showed on about sixty. One of the four fixes was a CORRECTNESS
   BUG in supervariable detection that had been costing fill silently.
-- `Mmd3` and `Mmd3B` return genmmd's permutation on all 246, and needed no fixes at all.
+- `MmdFlat` and `MmdChained` return genmmd's permutation on all 246, and needed no fixes at all.
 - Peak live clique members is published by all five drivers and CHECKED across each branch's pair,
-  in `test_order` and in both benchmark tables. It found two defects in `Amd3B`'s collector that
-  nothing else in the tree could see.
+  in `test_order` and in both benchmark tables. It found two defects in `AmdCompacted`'s collector
+that   nothing else in the tree could see.
 - The layout question is measured: `AMD_2`'s compacted pool beats our arena by five per cent,
   genmmd's chaining loses to it by 56. **BOTH FIGURES WERE TAKEN IN THE MIXED BUILD ARRANGEMENT;
   see "The inlining bias" below before quoting either.**
@@ -62,22 +104,24 @@ What got done and is now behind us:
 
 A B or C layer exists so that a differential against a vendored code is APPLES TO APPLES: identical
 algorithm, identical encoding, identical storage layout, so that whatever still differs is either
-the layout being priced or a real improvement to carry back into `Amd3` and `Mmd3`. **If the layout
+the layout being priced or a real improvement to carry back into `AmdFlat` and `MmdFlat`. **If the
+layout
 is not identical the differential is not a differential**, and the file has no purpose. That is a
 validity question, not a cost-benefit one, and it was briefly treated as the latter.
 
 ```
                  our arena      genmmd's layout    AMD_2's layout
-mmd ladder       Mmd3           Mmd3B              Mmd3C
-amd ladder       Amd3           Amd3C   NOT BUILT  Amd3B
+mmd ladder       MmdFlat           MmdChained              MmdCompacted
+amd ladder       AmdFlat           Amd3C   NOT BUILT  AmdCompacted
 ```
 
 Production keeps a separate append-only clique arena with no constraint and is not required to
-match anything. `Amd3B` and `Mmd3C` must match `AMD_2` exactly. `Mmd3B` must match genmmd exactly.
+match anything. `AmdCompacted` and `MmdCompacted` must match `AMD_2` exactly. `MmdChained` must
+match genmmd exactly.
 
 ## Where faithfulness actually stands, 2026-08-18
 
-**`Amd3B` against `AMD_2`: the storage is closed, and so are both schedule items found by the
+**`AmdCompacted` against `AMD_2`: the storage is closed, and so are both schedule items found by the
 audit.** Done in this order, each verified alone, and no permutation moved at any point:
 
 - CLOSED, in-place construction, `AMD_2`'s `if (elenme == 0)`.
@@ -112,18 +156,19 @@ rule, the rotation in `absorb`, and the stamp base. Those are what took the amd 
 sixty differing matrices to none, and the last was a correctness bug. They have their own section
 above; this list is the storage half and stops here.
 
-**`Mmd3B` against genmmd: clique storage faithful, vertex list NOT.** The links, the chain
+**`MmdChained` against genmmd: clique storage faithful, vertex list NOT.** The links, the chain
 following, the terminator rule and the unchecked first loop all match `mmdelm` line for line. But
 genmmd keeps ONE MIXED LIST per vertex, variables and elements together, told apart by the sign of
 `fwd`, where we keep two sublists in a run with explicit lengths.
 
-**One thing was closed there today: `Mmd3B` no longer compacts C[pivot].** `mmdelm` mass-eliminates
+**One thing was closed there today: `MmdChained` no longer compacts C[pivot].** `mmdelm`
+mass-eliminates
 with `qsize [md] += qsize [rn] ; qsize [rn] = 0` and does NOT rewrite the list; the merged vertex
 keeps its place and every later reader skips it on `qsize [nb] != 0`. We had been compacting, which
 cost a pass genmmd never pays and saved the skipped entries it pays on every read. Neither is
 visible in a permutation, so no check in this tree would have caught it; it was found by reading
-`mmdelm` while answering a question about clique lifetimes. Measured after: `MMD3B / MMD` unchanged
-within noise, so the two costs are about equal, and the file is now honest rather than faster.
+`mmdelm` while answering a question about clique lifetimes. Measured after: `MmdChained / MMD`
+unchanged within noise, so the two costs are about equal, and the file is now honest rather than faster.
 
 **AND THE MMD BRANCH IS NOW THE OPEN FRONT.** `make mmdorder` in benchmarks/matrices has never had
 the marker the amd table has, because genmmd's own order is what `mmd_order` returns and there is
@@ -131,13 +176,14 @@ no postorder to hook around. So the mmd side has no equivalent of the check that
 divergences today. Whether the same kinds of difference exist there is UNKNOWN rather than ruled
 out, and giving that table an equality check is the obvious next move.
 
-**`Mmd3C` has NOT followed `Amd3B`.** It is mmd on `AMD_2`'s layout and it uses the plain list
+**`MmdCompacted` has NOT followed `AmdCompacted`.** It is mmd on `AMD_2`'s layout and it uses the
+plain list
 convention, which the flipped run cannot serve: with the incidence part at the front there is no
 way to append the new clique behind it without a free slot or a shift, which is why `AMD_2` inserts
 by rotation. That needs a decision before the C cell can be brought level, and until it is, the
-`MMD3C` column is measuring the old layout.
+`MmdCompacted` column is measuring the old layout.
 
-## The one thing left in `Amd3B`, and it is a trade rather than a defect
+## The one thing left in `AmdCompacted`, and it is a trade rather than a defect
 
 **Our prune has `AMD_2`'s scan 1 fused into it, and that is what forces the separate `absorb`
 visit.** `AMD_2` makes two passes over the new clique: scan 1 walks element lists only and computes
@@ -147,8 +193,9 @@ until all of scan 1 is done, and ours is fused into the prune, we cannot absorb 
 rewrites the list and have to revisit it afterwards.
 
 So the fusion saves a pass and costs a pass, and which way it comes out is a measurement rather
-than an argument. It is also the last thing standing between `Amd3B` and a pass-for-pass copy, so
-the `AMD / AMD3B` column is priced against a schedule that differs in exactly this one place.
+than an argument. It is also the last thing standing between `AmdCompacted` and a pass-for-pass
+copy, so
+the `AMD / AmdCompacted` column is priced against a schedule that differs in exactly this one place.
 
 Two smaller notes attached to it. The slide in `absorb` is already gone, the incidence part being
 compacted rightward so the adjacency never moves, so what remains is the VISIT and not the copy.
@@ -253,16 +300,18 @@ two must already agree. What worked was intervention and logging:
 - **Dump the actual state at that point.** Printing both vertices' lists from both codes showed
   them identical and NOT duplicates, which proved the test wrong rather than the lists divergent.
 
-## Two bugs in `Amd3B`'s collector, found by a benchmark rather than by a test, 2026-08-19
+## Two bugs in `AmdCompacted`'s collector, found by a benchmark rather than by a test, 2026-08-19
 
 **Both were introduced by the mid-walk collector**, step 3 of the storage alignment, and both were
-invisible to everything the suite runs. `Amd3B` alone truncates a list while walking it; `Amd3` has
-no collector and `Mmd3C` still reserves before the walk, so neither could have them.
+invisible to everything the suite runs. `AmdCompacted` alone truncates a list while walking it;
+`AmdFlat` has no collector and `MmdCompacted` still reserves before the walk, so neither could have
+them.
 
 **Neither moved a permutation.** `make digest` over 73 grids, `make amdorder` over 38 shapes,
 `test_order`, the sanitizers and both scaling ladders were green throughout, before and after. They
-were found by the `AMD3B pC differs` marker added to `benchmarks/matrices`'s amd table, which
-compares `Amd3B`'s PEAK LIVE CLIQUE MEMBERS against `Amd3`'s. That figure is a property of the
+were found by the `AmdCompacted pC differs` marker added to `benchmarks/matrices`'s amd table, which
+compares `AmdCompacted`'s PEAK LIVE CLIQUE MEMBERS against `AmdFlat`'s. That figure is a property of
+the
 algorithm and not of the layout, so two drivers agreeing on the permutation can still be caught
 doing different work, and they were.
 
@@ -284,22 +333,25 @@ is the pC check earning itself a second time.
 .adjacencySize = ln`, is a contraction, and `killClique` afterwards then subtracted only what
 remained. One line where the truncation happens.
 
-**What is still missing, and it is the lesson.** `Amd3B` has no permanent `cliqueCountBalances`,
-the debug recomputation the shared class has. Both bugs were diagnosed by bolting one on
+**What is still missing, and it is the lesson.** `AmdCompacted` has no permanent
+`cliqueCountBalances`, the debug recomputation the shared class has. Both bugs were diagnosed by bolting one on
 temporarily; with it in place the second would have been a `test_order` failure rather than a
 benchmark marker on a matrix someone happened to send. Adding it is small and is the obvious next
 step.
 
 ## The peak counter reaches all five drivers, and the layout answer, 2026-08-19
 
-**`Mmd3B` publishes `pC` now, and it cost an array.** The flat drivers read a clique's size from
+**`MmdChained` publishes `pC` now, and it cost an array.** The flat drivers read a clique's size
+from
 `mRun[c].adjacencySize`, a descriptor they keep anyway; the chained store has NO clique length at
-all, ending a list at a terminator, so `Mmd3B` carries `mCliqueLiveMembers`, one uint32 per vertex.
+all, ending a list at a terminator, so `MmdChained` carries `mCliqueLiveMembers`, one uint32 per
+vertex.
 Birth and contraction are free, the reach count and `merged.size()`; DEATH is the only event that
 needs the array, a clique's size then being born minus contracted with nothing else carrying it.
 
 **It tracks the NOTIONAL count, not this file's stored one**, which is the odd part and is
-deliberate: `Mmd3` drops the mass-eliminated from C[pivot] and `Mmd3B` does not, `mmdelm` leaving
+deliberate: `MmdFlat` drops the mass-eliminated from C[pivot] and `MmdChained` does not, `mmdelm`
+leaving
 them in place. Tracking what the flat drivers hold is what makes the comparison possible at all.
 Read as a description of the chained store it would be wrong, and the declaration says so.
 
@@ -315,16 +367,16 @@ branches.
 
 | | total | against its vendored | against our arena |
 |---|---:|---:|---:|
-| `AMD3B`, `AMD_2`'s compacted pool | 3.92 s | 1.11 | **0.95** |
-| `MMD3B`, genmmd's chained segments | 82.5 s | 1.09 | **1.56** |
+| `AmdCompacted`, `AMD_2`'s compacted pool | 3.92 s | 1.11 | **0.95** |
+| `MmdChained`, genmmd's chained segments | 82.5 s | 1.09 | **1.56** |
 
 **The two say opposite things and both are consistent with the mechanism.** Compaction is a rare
 sweep, about once per ordering at a fifth of elbow room, so it amortises to nearly nothing and the
 pool BEATS our arena by five per cent, on 224 of 242 matrices. Chaining is a link test on every
 read of every clique forever, and no headroom reduces it because chaining exists precisely to need
 none, so it COSTS 56 per cent and wins on 60 of 237. In the band holding 96 per cent of the mmd
-time, `MMD3` reads 0.69 against genmmd and `MMD3B` reads 1.09: a 31 per cent win turned into a nine
-per cent loss.
+time, `MmdFlat` reads 0.69 against genmmd and `MmdChained` reads 1.09: a 31 per cent win turned into
+a nine per cent loss.
 
 **The grid ladders understate chaining badly**, 1.1 to 1.3 there against 1.56 on real matrices,
 because grids have short cliques and few links to follow. benchmarks/matrices ORDERING.md carries
@@ -332,18 +384,20 @@ the full reading.
 
 ## What was borrowed into production, 2026-08-18
 
-Two of the audit's findings were not `Amd3B` defects but shared ones, so they went into `Amd3` and
-`QuotientGraph` as well. Both verified by digest, `make amdorder` and `make mmdorder`.
+Two of the audit's findings were not `AmdCompacted` defects but shared ones, so they went into
+`AmdFlat` and `QuotientGraph` as well. Both verified by digest, `make amdorder` and `make mmdorder`.
 
-- **THE CLIQUE TRIM AFTER DETECTION.** `trimClique` on the shared class, called from `Amd3`'s
-  restore pass, which now writes survivors back as it walks. One difference from `Amd3B`: there is
+- **THE CLIQUE TRIM AFTER DETECTION.** `trimClique` on the shared class, called from `AmdFlat`'s
+  restore pass, which now writes survivors back as it walks. One difference from `AmdCompacted`:
+there is
   NO CURSOR TO PULL BACK, the arena's length being the vector's own and the clique not necessarily
   its last block, so the trimmed tail is left as a hole. The trim buys visits here, not space.
 - **DETECTION'S BLIND STAMP AND LENGTH REJECT.** `sizeU` and `sizeV` are gone. Production gets TWO
-  stamp loops where `Amd3B` gets one, and that is the layout rather than a choice: with `A[u]` then
-  `I[u]` the entry to skip sits in the middle, where `AMD_2`'s order puts it at index 0.
+  stamp loops where `AmdCompacted` gets one, and that is the layout rather than a choice: with
+`A[u]` then   `I[u]` the entry to skip sits in the middle, where `AMD_2`'s order puts it at index 0.
 
-**A third was considered and DECLINED: positions in the walks.** It works in `Amd3B` because that
+**A third was considered and DECLINED: positions in the walks.** It works in `AmdCompacted` because
+that
 pool never reallocates, so the base is provably invariant and hoisting it is free. Production's
 arena can reallocate, so the compiler cannot hoist `mCliqueArena.data()` across a `push_back` and
 positions would add a load per member in the hottest loop. The reserve it would retire is not a
@@ -372,16 +426,17 @@ clique, so its length is `A[v]`'s.
 were wrong. Asserting the live count returns to zero is false: a clique dies when a member becomes a
 pivot, and at the close of a run the last cliques have had every member mass eliminated instead, so
 a handful of entries legitimately survive. Summing `cliqueSize` over a driver's pivot list is exact
-for `Amd3` and wrong for `Mmd3`, which pushes prepass vertices onto that list. Only the class knows
+for `AmdFlat` and wrong for `MmdFlat`, which pushes prepass vertices onto that list. Only the class
+knows
 which vertices ever formed a clique, so it keeps a debug-only owner list and does the recomputation
 itself.
 
 ## The private types are named for what they are, 2026-08-18
 
 ```
-Amd3B    QuotientGraphA  BucketsA  TaggedScanA                  ->  ...Compacted
-Mmd3C    QuotientGraphC  BucketsC  TaggedScanC                  ->  ...Compacted
-Mmd3B    QuotientGraphB  BucketsB  TaggedScanB  ApproximateScanB ->  ...Chained
+AmdCompacted    QuotientGraphA  BucketsA  TaggedScanA                  ->  ...Compacted
+MmdCompacted    QuotientGraphC  BucketsC  TaggedScanC                  ->  ...Compacted
+MmdChained    QuotientGraphB  BucketsB  TaggedScanB  ApproximateScanB ->  ...Chained
 ```
 
 All three are in anonymous namespaces, so two files declaring `QuotientGraphCompacted` is legal.
@@ -397,7 +452,7 @@ sandbox paths from a previous session. Fix both before running them.
 ## The shared class is built and both drivers are on it, 2026-08-19: CLOSED
 
 `QuotientGraphCompacted` lives in `include/oblio/QuotientGraphCompacted.h`, header-only, and
-serves `Amd3B` and `Mmd3C`. Eight suffixed pairs, `eliminate`
+serves `AmdCompacted` and `MmdCompacted`. Eight suffixed pairs, `eliminate`
 gone, `merge` shared through `markGone`, the mark array on demand. See
 docs/DESIGN_DECISIONS.md (2026-08-19) for the inventory and the reasoning; the six-way split this
 section used to describe was derived from copies that had drifted and is superseded.
@@ -405,8 +460,8 @@ section used to describe was derived from copies that had drifted and is superse
 **The bucket question that blocked `QuotientGraphChained` is answered and it needed no decision.**
 `BucketsCompacted` and `TaggedScanCompacted` were production's types verbatim and are deleted.
 `BucketsChained` is production's `Buckets` too: its `evict(u)` is `unfile(u); restore(u);`, which
-`src/Mmd3.cpp` already writes at lines 114 and 115. So promoting the chained graph needs no second
-bucket class and no new method.
+`src/MmdFlat.cpp` already writes at lines 114 and 115. So promoting the chained graph needs no
+second bucket class and no new method.
 
 ## The translation-unit alignment is done, 2026-08-19: CLOSED
 
@@ -416,12 +471,13 @@ two dead `eliminate` declarations went with the chained class: overloads taking 
 scans, never defined and never called.
 
 **WHAT IT BOUGHT AND WHAT IT DID NOT.** Our own drivers can now be compared with each other, which
-they could not before: `MMD3C / MMD3` is 0.92 to 0.98 and `AMD3B / AMD3` is 0.82 to 0.84, both
+they could not before: `MmdCompacted / MmdFlat` is 0.92 to 0.98 and `AmdCompacted / AmdFlat` is 0.82
+to 0.84, both
 sides built alike. It did NOT make anything comparable to `MMD` or `AMD`, and the three-point gain
 predicted there never appeared.
 
-**AND ONE UNEXPLAINED RESULT, worth knowing before trusting any of this.** `Mmd3B` did not change
-translation unit at all, only where its class's source sits, and it slowed by 4 to 7 per cent.
+**AND ONE UNEXPLAINED RESULT, worth knowing before trusting any of this.** `MmdChained` did not
+change translation unit at all, only where its class's source sits, and it slowed by 4 to 7 per cent.
 See docs/DESIGN_DECISIONS.md (2026-08-19).
 
 ## The inlining bias, and the numbers that need re-measuring, 2026-08-19
@@ -433,30 +489,34 @@ Full account and the three-row table in docs/DESIGN_DECISIONS.md (2026-08-19).
 
 **WHAT THIS MEANS FOR THE NUMBERS ON RECORD:**
 
-- `MMD3C / MMD3` is 0.92 to 0.95 on large grids, not 0.90. Corrected, both fair arrangements agree.
-- **`AMD3B / AMD3` at 0.95 on the 246 predates the alignment and has NOT been re-measured.**
+- `MmdCompacted / MmdFlat` is 0.92 to 0.95 on large grids, not 0.90. Corrected, both fair
+arrangements agree.
+- **`AmdCompacted / AmdFlat` at 0.95 on the 246 predates the alignment and has NOT been
+re-measured.**
   It is now a both-split build, so a plain re-run of `benchmarks/matrices` gives the fair figure.
   Until then it should not be quoted. `benchmarks/matrices/ORDERING.md` and the header note in
-  `src/Mmd3C.cpp` both still carry mixed-build figures.
+  `src/MmdCompacted.cpp` both still carry mixed-build figures.
 
   **THAT BULLET WAS OVERTAKEN THE NEXT DAY AND IS WRONG AS IT STANDS, marked 2026-08-21.** It was
   written on 2026-08-19; `19efe5f` landed on 2026-08-20 and regenerated the report from a fresh
   run of all 246 with every driver already split. `ORDERING.md` therefore carries FAIR amd figures,
-  and its own header says so. The `AMD3B / AMD3` row did not exist before that commit: `af829bb`
-  had `AMD3B / AMD` only, aggregate 0.95 and median 0.90 over 242 matrices, and the re-run gives
+  and its own header says so. The `AmdCompacted / AmdFlat` row did not exist before that commit:
+`af829bb`
+  had `AmdCompacted / AMD` only, aggregate 0.95 and median 0.90 over 242 matrices, and the re-run
+gives
   aggregate 0.94 and median 0.950 over 235. The two 0.95s are different statistics, which is how
   the figure looked unchanged and so looked un-rerun.
 
   **WHAT IS ACTUALLY STALE ABOUT IT IS ONE DAY LATER.** `ORDERING.md` was measured at `19efe5f`
-  and so predates `97f4bc6` and `1da85c5`, which means it does not carry the `AMD3` speedup from
+  and so predates `97f4bc6` and `1da85c5`, which means it does not carry the `AmdFlat` speedup from
   alignment item 4. A re-run of `make amdorder` is still wanted; the reason is the alignment
-  commits, not the build arrangement. And the header note in `src/Mmd3C.cpp` is not mixed-build
-  either: it says outright that its figure was 0.90 until 2026-08-19, that this was not a fair
+  commits, not the build arrangement. And the header note in `src/MmdCompacted.cpp` is not
+mixed-build   either: it says outright that its figure was 0.90 until 2026-08-19, that this was not a fair
   comparison, and that building both sides alike gives 0.92 to 0.95. So the bullet was wrong about
   both files it named.
-- `MMD3B / MMD3` at 1.14 to 1.25 is UNDERSTATED, `Mmd3B` still being private. Chaining loses while
-  holding the advantage, so that conclusion is safe.
-- `AMD3 / AMD` and `MMD3 / MMD` overstate our gap by roughly three points, permanently: both
+- `MmdChained / MmdFlat` at 1.14 to 1.25 is UNDERSTATED, `MmdChained` still being private. Chaining
+loses while   holding the advantage, so that conclusion is safe.
+- `AmdFlat / AMD` and `MmdFlat / MMD` overstate our gap by roughly three points, permanently: both
   vendored files are single translation units with everything `static` inside. That is a real cost
   of our arrangement, not an error to correct away, and belongs beside the number rather than
   folded into it.
@@ -490,9 +550,9 @@ back for a run rather than reading these rows harder.
 **AND THE PHASE SPLIT CHANGED WHAT THE AMD LADDER MEANS.** `make phases2d`, from the gitignored
 `amd_timed.cpp` that `tools/hook_amd.py` regenerates, shows `AMD_aat` and `AMD_postorder` plus
 `valid` at about 13 per cent of the vendored column, none of which we do. Against the comparable
-region alone, `AMD3` reads 1.63x at 401 a side where the raw column says 1.43x. So the amd ladder
+region alone, `AmdFlat` reads 1.63x at 401 a side where the raw column says 1.43x. So the amd ladder
 does NOT say containers are free; the denominator was inflated. That removes the apparent
-contradiction with the mmd ladder's 15 per cent and takes the pressure off `Mmd3B` being
+contradiction with the mmd ladder's 15 per cent and takes the pressure off `MmdChained` being
 misaligned as the explanation.
 
 ## What was done since commit 5ea68cc
@@ -500,14 +560,17 @@ misaligned as the explanation.
 **All of this is committed. The bullets below are `c21f447`; everything in the 2026-08-18 sections
 above, plus the sections that follow this line, are `db377c9`.**
 
-- **`src/Mmd3C.cpp` and `include/oblio/Mmd3C.h` REBUILT.** The old file was mmd on the production
+- **`src/MmdCompacted.cpp` and `include/oblio/MmdCompacted.h` REBUILT.** The old file was mmd on the
+production
   arena, a transitional vehicle that had served its purpose; this one is mmd on `AMD_2`'s pool,
   the real matrix cell. Regenerated from current sources by `tmp/make_mmd3c.py`, so it inherits the
-  shared class's encoding, then the storage hand-ported from `Amd3B`.
-- **`src/Amd3B.cpp`**: in-place construction, the reclaim, and a `-Wunused-variable` under `NDEBUG`.
-- **`src/Mmd3C.cpp`**: the same two, plus a real bug found by ASan on a 3 by 3 grid. `Amd3B` negates
-  the pivot in `beginElimination` and `Mmd3C` inside `reachableSet`; the new in-place walk was a
-  third path and negated nothing, so the restore flipped a positive weight negative and
+  shared class's encoding, then the storage hand-ported from `AmdCompacted`.
+- **`src/AmdCompacted.cpp`**: in-place construction, the reclaim, and a `-Wunused-variable` under
+`NDEBUG`.
+- **`src/MmdCompacted.cpp`**: the same two, plus a real bug found by ASan on a 3 by 3 grid.
+`AmdCompacted` negates
+  the pivot in `beginElimination` and `MmdCompacted` inside `reachableSet`; the new in-place walk
+was a   third path and negated nothing, so the restore flipped a positive weight negative and
   `orderAscending` wrote four billion entries past the permutation. Recorded at the site.
 - **`experiments/ordering/README.md`**: the three-layouts section on Florin's one-axis
   classification, no constraint and no bookkeeping, a loose constraint and occasional bookkeeping,
@@ -519,8 +582,8 @@ UBSan with assertions live.
 
 **Figures now known to be stale**, marked in place rather than deleted: the pool timings and the
 headroom cliff were measured before the two fixes, so they price a variant and the cliff sits
-further left than it should. `AMD3B / AMD3` is 0.885 as of the last run; the mmd figure has not
-been re-measured.
+further left than it should. `AmdCompacted / AmdFlat` is 0.885 as of the last run; the mmd figure
+has not been re-measured.
 
 ### Other things open
 
@@ -553,7 +616,7 @@ that when three commits closed the constant factor on the amd branch. Appended t
 with two rounds that touched no algorithm, an idiom sweep and a Makefile consolidation, and again
 later that day with three commits on the ordering experiments, all under "Closed since the last
 note" and none of them changing a permutation or a fill figure. Appended to again on 2026-08-15
-with the MMD3 storage investigation, which is uncommitted work and is item 0 below. **It is meant to be
+with the MmdFlat storage investigation, which is uncommitted work and is item 0 below. **It is meant to be
 deleted** once the items below are done or
 abandoned.
 Everything in it that outlives the task is already somewhere durable and this file only points at
@@ -561,7 +624,7 @@ those places:
 
 - `docs/DESIGN_DECISIONS.md`, three 2026-08-10 entries: "a null result measures an implementation",
   "the algorithm was the smaller half", and the earlier "what the vendored AMD's speed is made of".
-- `experiments/ordering/AMD3.md`, iterations 25 and 26, the two fusions and how they were found.
+- `experiments/ordering/AmdFlat.md`, iterations 25 and 26, the two fusions and how they were found.
 - `experiments/ordering/REPORT.md`, "The one gap we can explain", now closed, and the new vendored
   against vendored section beside finding 1.
 - `benchmarks/ordering/README.md`, the per-pass inventory, the noise floor, and both scaling
@@ -582,18 +645,19 @@ belonged elsewhere.
 ## Read this first, and the rest only if you are picking up that item
 
 **ITEM 0 IS CLOSED, 2026-08-15, and the answer was not what this file spent a day predicting.**
-`MMD3` runs at 1.05 to 1.17x genmmd on square grids and 0.77 to 1.12x on cubes, against 1.35 to
+`MmdFlat` runs at 1.05 to 1.17x genmmd on square grids and 0.77 to 1.12x on cubes, against 1.35 to
 1.48x that morning, and `MMD2` reads the same to within the noise. Nothing about what is computed
 changed: every permutation and every nnz(L) is identical, on all 137 acceptance cases across nine
 orderings.
 
-**That MMD2 and MMD3 coincide is the useful shape of the result.** They are different orderings
+**That MMD2 and MmdFlat coincide is the useful shape of the result.** They are different orderings
 with different mechanisms; what they share is the quotient graph and its clique arena, so both are
 now bounded by it rather than by anything of their own. And the trade the library makes is worth
 stating in one line: our `std::vector` layer costs a few percent that genmmd does not pay, having
-raw arrays in registers for a whole run, and the SECOND ARENA more than covers it. `Mmd3B`, which
-is `Mmd3` on genmmd's single nnz(A) storage with every encoding fold present in both, reads 1.12 to
-1.23x where `Mmd3` reads 1.05 to 1.17x.
+raw arrays in registers for a whole run, and the SECOND ARENA more than covers it. `MmdChained`,
+which
+is `MmdFlat` on genmmd's single nnz(A) storage with every encoding fold present in both, reads 1.12
+to 1.23x where `MmdFlat` reads 1.05 to 1.17x.
 
 **The cause was the number of ARRAYS a vertex's state lives in**, not placement, not chaining, not
 the number of passes, and not the algorithm. genmmd indexes five arrays by a vertex and we indexed
@@ -609,11 +673,13 @@ visits in 2D. And it recorded the 2D penalty as stalls rather than work, which w
 symptom and wrong about the remedy: our own code was 1.13x its instructions all along.
 
 **And the storage question is answered in the opposite direction from the one it was asked in.**
-`Mmd3B` carries `Mmd3`'s algorithm on genmmd's storage, cliques in the dead segment of their own
-pivot with no second arena. Every encoding fold is now in both files, so storage is the only
-difference left, and ours wins on every axis: 1.02 to 1.19x genmmd in 2D against `Mmd3B`'s 1.15 to
+`MmdChained` carries `MmdFlat`'s algorithm on genmmd's storage, cliques in the dead segment of their
+own pivot with no second arena. Every encoding fold is now in both files, so storage is the only
+difference left, and ours wins on every axis: 1.02 to 1.19x genmmd in 2D against `MmdChained`'s 1.15
+to
 1.38x, 14.22M instructions against 16.61M, 119331 D1 read misses against 123510. **Spending nnz(L)
-on a second arena buys speed.** `Mmd3B` therefore STAYS, as the standing equal-encoding comparison
+on a second arena buys speed.** `MmdChained` therefore STAYS, as the standing equal-encoding
+comparison
 against the vendored storage scheme, which is a change to the stop condition its own header states.
 
 **What is open on the mmd branch, and it is one item.** The TAG SCHEME. genmmd's refresh puts the
@@ -625,20 +691,20 @@ is the category that actually paid, and the refresh is about a third of the run.
 
 **Everything else on this branch was tried and did not pay.** Four attempts at the container layer,
 each failing for its own reason, all in the "2026-08-15, later" design entry: the stamping fold
-ported to `Mmd3`, an arena cursor in place of `push_back`, raw bases in place of the accessors, and
-q2h indexed rather than looped. Read that entry before reaching for any of them.
+ported to `MmdFlat`, an arena cursor in place of `push_back`, raw bases in place of the accessors,
+and q2h indexed rather than looped. Read that entry before reaching for any of them.
 
-**And `Mmd3B` has finished answering its question.** It is now genmmd's data structure essentially
-exactly: one array of nnz(A), cliques in their pivot's dead segment, negative links, a value
+**And `MmdChained` has finished answering its question.** It is now genmmd's data structure
+essentially exactly: one array of nnz(A), cliques in their pivot's dead segment, negative links, a value
 terminator, no clique length array, no liveness array, the degree list in one link array. Its
-obligation from here is to stay ENCODING-IDENTICAL to `Mmd3`, so that the only difference between
+obligation from here is to stay ENCODING-IDENTICAL to `MmdFlat`, so that the only difference between
 them is storage; a fold that lands in `QuotientGraph` lands there too, or the comparison quietly
 stops being about storage.
 
 **And the amd branch has had NONE of this.** Its five drivers still carry `degrees`, `outside`,
 `cliqueDegree`, `explicitPart`, `hashHead` and `hashNext`, plus a 2n `mark`, and `AMD_2` allocates
 none of them: it overlays its hash buckets on the degree heads and keeps the running key in a link.
-`AMD3` gained from the shared-class folds alone, reading 1.28 to 1.87x in 2D and 0.97 to 1.26x on
+`AmdFlat` gained from the shared-class folds alone, reading 1.28 to 1.87x in 2D and 0.97 to 1.26x on
 cubes, but nothing driver-side has been touched. That is where the remaining headroom is.
 
 **One item to watch there.** The absorbed-clique stamp was deleted from the shared class, replaced
@@ -658,19 +724,19 @@ survived one that day.
 
 **EVERY TIMING FIGURE IN THIS TREE PREDATES 2026-08-15 AND UNDERSTATES US BY 20 TO 30 PERCENT.**
 `benchmarks/ordering/README.md`, `benchmarks/pipeline/README.md`,
-`experiments/ordering/README.md`, `experiments/ordering/REPORT.md`, `AMD3.md`, `MMD3.md` and
+`experiments/ordering/README.md`, `experiments/ordering/REPORT.md`, `AmdFlat.md`, `MmdFlat.md` and
 `docs/TODO.md` all carry ratios measured before it. Fill figures are unaffected, nothing having
 moved. Each file carries a dated superseding note rather than being rewritten, since a dated
 measurement is a record of a run.
 
-**Where the amd branch stands.** `Amd3` returns `AMD_2`'s raw elimination order exactly on all 38
+**Where the amd branch stands.** `AmdFlat` returns `AMD_2`'s raw elimination order exactly on all 38
 acceptance cases and now runs close to it: 0.83 to 0.89 ms at 16 cubed over eight runs where the
 vendored routine reads 0.74 to 0.86, so they overlap, rising to about 1.2x at 32 a side. In 2D it
-is 1.33x at 32 a side and about 1.95x at 400. Three days earlier it was 3.0x on cubes. `Mmd3` is
+is 1.33x at 32 a side and about 1.95x at 400. Three days earlier it was 3.0x on cubes. `MmdFlat` is
 0.87 to 1.05x genmmd on cubes and 1.26 to 1.55x in 2D, with no trend in n on either.
 
 **THE HASH KEY IS NOW `AMD_2`'S EXACTLY, 2026-08-16.** All four divergences listed anywhere in
-this file are closed in `Amd2`, `Amd2B` and `Amd3`: no `+ 1` on a term, the pivot's own clique
+this file are closed in `Amd2`, `Amd2B` and `AmdFlat`: no `+ 1` on a term, the pivot's own clique
 excluded, modulus `n` rather than `n + 1`, and a `uint32` accumulator that WRAPS at 2^32 the way
 Amd.cpp's `UInt hval` does, one reduction at the end rather than one per term. It changed no
 permutation, checked over 730 across ten drivers, and it corrected the grouping: our `pair` and
@@ -679,7 +745,7 @@ Worth about 4 percent. See `docs/DESIGN_DECISIONS.md` (2026-08-16).
 
 **What was done, 2026-08-08 to 08-10**, three commits: the hash key defect (ledger entry 8, worth a
 factor of two to three on cubes), the key folded into the bound pass, and the first scan folded into
-the prune. **The walk axis is finished**: `Amd3` walks `I[u]` twice per pivot and `A[u]` once,
+the prune. **The walk axis is finished**: `AmdFlat` walks `I[u]` twice per pivot and `A[u]` once,
 which is `AMD_2`'s count exactly.
 
 **Item 4 of the previous list is done.** Real matrices are in, `benchmarks/matrices/` holds the
@@ -722,7 +788,7 @@ said about the orderings, in order of how much it should affect the plan:
 2c. **AND THE EARLIER FORM OF THE SAME QUESTION IS ANSWERED, 2026-08-16, not in the form it
    was posed.** It asked whether one allocation carved into arrays would beat separate vectors,
    `AMD_2` carving Pe, Nv, Head, Elen, Degree, W and Iw out of one `S`. That was the leading
-   hypothesis for the 2D growth for one session and it was WRONG: `MMD3` has ten separate
+   hypothesis for the 2D growth for one session and it was WRONG: `MmdFlat` has ten separate
    allocations against genmmd's five and is flat, so a doubling of allocations does not by itself
    produce growth. What did produce it was two random probes per clique visit into arrays indexed
    by a dead pivot's id, and folding the arrays away removed them. The container question is
@@ -733,16 +799,17 @@ said about the orderings, in order of how much it should affect the plan:
    quadratic; the vendored AMD sets such rows aside before ordering, above `max(16, 10*sqrt(n))`
    entries, and places them last, and its own source says the cost of not doing so is O(n^2). Oblio
    has no such rule anywhere. On `GHS_indef/bloweybq`, one column of degree 10000 among 9992 of
-   degree 5, removing it by hand takes MMD from 70.7 ms to 0.83 and AMD3 from 470 to 1.5, while the
-   vendored AMD does not move. **Fill is unaffected**, so this is time only. It belongs in the
+   degree 5, removing it by hand takes MMD from 70.7 ms to 0.83 and AmdFlat from 470 to 1.5, while
+the    vendored AMD does not move. **Fill is unaffected**, so this is time only. It belongs in the
    shared quotient graph so all six drivers gain it at once.
 4. **The descriptor struct**, `docs/TODO.md` question 3, if that profile says stalls. Item 2d.
 5. **Narrow the one-dimensional sizes. THE ORDERING IS COMPLETE, 2026-08-11**; the symbolic and
    numeric phases remain and are the larger half. Item 2e.
-6. **Why `Amd3` and the vendored `AMD` disagree on fill on real matrices.** NEW on 2026-08-11, and
+6. **Why `AmdFlat` and the vendored `AMD` disagree on fill on real matrices.** NEW on 2026-08-11,
+and
    **the instrument for it now exists on the other branch, 2026-08-15**. `make mmdmatrices` runs
    the mmd alignment over `data/*/*.mtx` and reported 243 matched, 0 differed, 3 skipped on its
-   first run, so `Mmd3` reproduces genmmd on real structure and not merely on grids. An
+   first run, so `MmdFlat` reproduces genmmd on real structure and not merely on grids. An
    `amdmatrices` is the same driver with the hooked oracle and the dense-row knob, and unlike the
    mmd one it should be EXPECTED to find something, which is what this item is about.
    `HB/bcsstk08`, the 4 percent case named below, is in that run and matches on the mmd side.
@@ -765,7 +832,7 @@ said about the orderings, in order of how much it should affect the plan:
 8. **What a `std::vector` actually costs us, measured on purpose rather than inferred.** NEW on
    2026-08-15. Our code carries a container layer genmmd does not: its arrays arrive as parameters
    and live in registers for a whole run, ours are members reached through accessors. On a 100x100
-   grid that layer is 2.78M of `Mmd3B`'s 15.89M instructions, and roughly half of it, the
+   grid that layer is 2.78M of `MmdChained`'s 15.89M instructions, and roughly half of it, the
    `operator[]` half, is the element access genmmd also performs and merely has credited to its own
    source. The other half is `push_back` capacity tests, `size()` and growth arithmetic, which
    genmmd does not execute at all.
@@ -784,7 +851,7 @@ said about the orderings, in order of how much it should affect the plan:
    - **Per ACCESS**, in a hot loop: the case the three failed attacks were all aimed at, and where
      the compiler appears to be doing the work already.
    - **Per ARRAY, at setup**, which is the axis nothing has isolated. A pure diagonal is the case
-     that shows it: with no elimination work at all, an `Mmd3` ordering is roughly a third
+     that shows it: with no elimination work at all, an `MmdFlat` ordering is roughly a third
      `QuotientGraph` CONSTRUCTION and a sixth `orderAscending`, and construction allocates and
      initializes about ten size-n arrays where genmmd allocates five plus its 1-based copies. That
      is the array-count finding of the same day, moved from the loops into the constructor, and it
@@ -808,14 +875,14 @@ said about the orderings, in order of how much it should affect the plan:
 - The key fusion and the scan fold both FAILED first as versions carrying an array of size n. Price
   a re-schedule by what it walks AND by what it makes resident. The pass inventory counts only the
   first.
-- `AMD3 / AMD` per row is a poor measurement: the vendored column moves 16 percent between runs
+- `AmdFlat / AMD` per row is a poor measurement: the vendored column moves 16 percent between runs
   where ours moves 7. Quote absolute times with the vendored range beside them.
 - A benchmark column reached as a free function is timed differently from one reached through the
   enum, by up to 2.4 percent. Two columns compared must go down the same path.
 
 ---
 
-## The MMD3 storage investigation, 2026-08-15: CLOSED
+## The MmdFlat storage investigation, 2026-08-15: CLOSED
 
 Everything this section held is superseded by `docs/DESIGN_DECISIONS.md` (2026-08-15), which
 carries the result, the differential that found it, and the five hypotheses that failed on the way.
@@ -823,8 +890,8 @@ Two facts from it are worth having here because they are what a later reader wou
 re-derive:
 
 - **The five dead hypotheses stay dead**: construction cost, the liveness array in the clique walks,
-  the four-pass refresh preamble, index widths, and clique placement. `Mmd3B` implements genmmd's
-  placement in full and the time did not move.
+  the four-pass refresh preamble, index widths, and clique placement. `MmdChained` implements
+genmmd's   placement in full and the time did not move.
 - **The renumbering experiment that pointed at placement was CONFOUNDED**, since shuffling adds a
   large cost to both routines and a large common term compresses any ratio toward 1. If that test
   is ever repeated it needs a control.
@@ -896,33 +963,34 @@ the substance and its mmd2 section roughly tripled; what a later session needs f
 
 **The alignment check is widened, and the alignment holds.** `make amdorder` ran eleven 2D grids
 and now runs 38 cases over four shapes: the seven examples, 2D grids to 140, 3D grids to 24, and
-nine random patterns at n = 2000. All match on alpamayo, so `Amd3` reproduces `AMD_2`'s raw
+nine random patterns at n = 2000. All match on alpamayo, so `AmdFlat` reproduces `AMD_2`'s raw
 elimination order, member order included, on something far wider than the shape it was built
 against.
 
 Getting there found three things, none of them visible before:
 
-- a defect in production `Amd3`, ledger entry 7, the stored clique degree not rewritten after mass
-  elimination trimmed the clique;
+- a defect in production `AmdFlat`, ledger entry 7, the stored clique degree not rewritten after
+mass   elimination trimmed the clique;
 - a use-after-free in the shared `QuotientGraph` that every ordering had, benign until an allocator
   recycled the block, which is why it surfaced as two machines disagreeing about integer code;
 - two harness faults that looked like divergences, a dense threshold turned off by undefined
   behavior and a 3D grid builder emitting unsorted columns.
 
-`experiments/ordering/AMD3.md`, iterations 18 to 20, is the narrative.
+`experiments/ordering/AmdFlat.md`, iterations 18 to 20, is the narrative.
 
 **And the ordering benchmark measures cubic grids.** `make run3d` and `make scale3d`, beside
 `run2d` and `scale2d`, both axes now named in every target. It also carries an `AMDraw` column, the
-vendored AMD's raw elimination order through the same hook the acceptance test uses, so `AMD3` has
+vendored AMD's raw elimination order through the same hook the acceptance test uses, so `AmdFlat`
+has
 something to sit against that agrees by construction rather than nearly. What the first run found
 is in `benchmarks/ordering/README.md` under "Cubic grids, 2026-08-09", and the short version is
 that three standing claims were square-grid artifacts: our tie-break beating AMD's, MMD being the
 ordering to beat, and the LIFO question having an amd-side answer.
 
-**And the mmd branch has an acceptance test at last.** `make mmdorder` compares production `Mmd3`
+**And the mmd branch has an acceptance test at last.** `make mmdorder` compares production `MmdFlat`
 against genmmd's elimination order on the same four shapes, 38 cases, all matching. Until then the
 mmd alignment rested on a scratch probe from 2026-08-07 that died with its session and on the
-benchmark's fill column, which `MMD3.md` iteration 6 shows is not sufficient. It needs no hook,
+benchmark's fill column, which `MmdFlat.md` iteration 6 shows is not sufficient. It needs no hook,
 genmmd emitting that order directly, which is why it is forty lines against the amd machinery.
 `make aligned` runs both.
 
@@ -946,7 +1014,7 @@ it carries is one family's.
 **0. The work gap, DONE as an instrument and OPEN as a question, 2026-08-10.** The per-pass
 inventory named here is built, both halves, and it produced the first change in five attempts to
 move this gap. Everything durable from it is in `benchmarks/ordering/README.md` under "The per-pass
-inventory" and "What the inventory was worth", in `AMD3.md` iteration 25, and in
+inventory" and "What the inventory was worth", in `AmdFlat.md` iteration 25, and in
 `docs/DESIGN_DECISIONS.md` (2026-08-10). The short version:
 
 - We make **2.12x** `AMD_2`'s element visits on both families against 1.56x and 1.61x its useful
@@ -965,7 +1033,8 @@ inventory" and "What the inventory was worth", in `AMD3.md` iteration 25, and in
   sign was positive at all five cubic sizes in two runs, which is weak evidence of a small cost
   and no more.
 - **THE FLOOR IS PLUS OR MINUS 3 PERCENT**, measured between the fusion landing and the vehicle
-  being removed, when `Amd3B` held a verbatim copy of `Amd3` and the two benchmark columns were
+  being removed, when `AmdCompacted` held a verbatim copy of `AmdFlat` and the two benchmark columns
+were
   the same code timed twice. A single figure under about 4 percent is not a result; what rescues a
   small effect is consistency of sign across sizes. **Worth arranging again**: whenever the next
   vehicle exists, run the benchmark once with it still a verbatim copy before putting anything in
@@ -974,8 +1043,9 @@ inventory" and "What the inventory was worth", in `AMD3.md` iteration 25, and in
 
 **AND THE WALKS ARE DONE, 2026-08-10, later the same day.** The first scan is folded into the
 prune, so `I[u]` is walked twice per pivot and `A[u]` once, which is `AMD_2`'s count exactly.
-Over eight runs `AMD3` reads 0.83 to 0.89 ms at 16 cubed where `AMD` reads 0.74 to 0.86, so the two
-overlap there, and it is about 1.2x at 32 a side; 2D improved 0 to 8 percent as well. `AMD3.md`
+Over eight runs `AmdFlat` reads 0.83 to 0.89 ms at 16 cubed where `AMD` reads 0.74 to 0.86, so the
+two
+overlap there, and it is about 1.2x at 32 a side; 2D improved 0 to 8 percent as well. `AmdFlat.md`
 iteration 26 and `docs/DESIGN_DECISIONS.md` (2026-08-10, "the algorithm was the smaller half")
 carry it, with the corrections below.
 
@@ -987,11 +1057,12 @@ carry it, with the corrections below.
   at 32 a side rising about 45 percent to 1.9x at 400 with a knee past 280. The constant is nearly
   spent, and NOTHING measured so far touches the growth. The knee says memory. Two profiles of
   `amd3` compared AGAINST EACH OTHER rather than against the vendored routine, 140 and 400 a side
-  in 2D, or 16 and 32 cubed, would say whether it is instructions or stalls. `MMD3` over the same
+  in 2D, or 16 and 32 cubed, would say whether it is instructions or stalls. `MmdFlat` over the same
   quotient graph shows no growth on either family, which is the control that makes this an
   amd-branch property.
 - **QUOTE ABSOLUTE TIMES, NOT RATIOS PER ROW.** The vendored column is the noisiest in the table:
-  at 16 cubed it spans 16 percent across runs where `AMD3` spans 7, so `AMD3 / AMD` mostly measures
+  at 16 cubed it spans 16 percent across runs where `AmdFlat` spans 7, so `AmdFlat / AMD` mostly
+measures
   `AMD`. And a free-function column is timed by `orderTimeFn`, a standing method by `orderTime`
   which also builds a Permutation, a difference of up to 2.4 percent, so those two are not
   comparable. Both cost a wrong claim on 2026-08-10.
@@ -1000,23 +1071,24 @@ carry it, with the corrections below.
   fold measured 12 percent slower there with two extra vectors and 0 to 8 percent faster without
   them. There is no instrument for this and one would be cheap.
 - **`Amd2` and `Amd2B`, 2026-08-10: not by the cheap route, and PARKED rather than closed.**
-  Checked on a scratch copy: fusing there as `Amd3` does moves the permutation on all ten grids
+  Checked on a scratch copy: fusing there as `AmdFlat` does moves the permutation on all ten grids
   tried. They refile inside their single-pass bound, so that loop's direction is already a
   tie-break input and cannot also serve the hash chain, which wants the opposite direction under
   head insertion. Tail insertion would preserve the order and is untried; it needs a `hashTail`
   array of size n, which is the footprint that made the first version of this fusion measure
   nothing, so expect nothing. Not worth a measurement before the profile below. `Amd1` and `Amd1B`
-  have no hash and so no key. Only `Amd3` fuses free, because entry 4 moved its refile below the
+  have no hash and so no key. Only `AmdFlat` fuses free, because entry 4 moved its refile below the
   hash.
 - **The stamp and the mass-elimination sweep are DEMOTED, not queued.** Both were next on the
   reasoning that produced the `degme` deletion, and that reasoning now has a counterexample.
-- **`tmp/Amd3I.cpp` is the pre-fusion driver.** The pass inventory reproduces the OLD `Amd3` until
+- **`tmp/Amd3I.cpp` is the pre-fusion driver.** The pass inventory reproduces the OLD `AmdFlat`
+until
   it is re-derived, which is fine for the before-and-after already recorded and wrong for anything
   further.
 
 **And the 2D scaling divergence, which is larger than any of the above and is not made of passes.**
-`AMD3` runs at 1.54x the vendored routine at 64 a side and 2.07x at 400, growing monotonically,
-where `MMD3` over the same quotient graph shows no trend at all across those seven sizes. A
+`AmdFlat` runs at 1.54x the vendored routine at 64 a side and 2.07x at 400, growing monotonically,
+where `MmdFlat` over the same quotient graph shows no trend at all across those seven sizes. A
 constant-factor fix takes five percent off a growing curve and leaves it growing. Two profiles of
 `amd3` at 64 and at 400, compared against each other rather than against the vendored routine,
 would say what grows.
@@ -1030,9 +1102,10 @@ was taken, and against the vendored routine on the same graphs and for the SAME 
 testing 19.0 pairs per pivot at 140 a side where it tests 0.333, and 155.3 at 26 cubed where it
 tests 0.484. The cause is the key: its incidence half was multiplied by a stride of `n + 1` and
 then reduced modulo the same number, which annihilates it exactly, so the bucket was a function of
-the adjacency alone. Two lines in nine files. On alpamayo `AMD3` on cubes goes from about 3.0x the
+the adjacency alone. Two lines in nine files. On alpamayo `AmdFlat` on cubes goes from about 3.0x
+the
 vendored routine to 1.44x and `AMD2` from 2.85x to 1.40x, with both controls unmoved. It is ledger
-entry 8, `AMD3.md` iterations 21 to 24 are the narrative, and `docs/DESIGN_DECISIONS.md`
+entry 8, `AmdFlat.md` iterations 21 to 24 are the narrative, and `docs/DESIGN_DECISIONS.md`
 (2026-08-09) carries why five separate oracles were blind to it.
 
 **What that leaves of item 4 below, which is a re-pricing rather than a deletion.** The parked
@@ -1047,7 +1120,7 @@ percent in 2D and nothing on cubes, so what remains of the amd gap is a square-g
 **The original text of this item, kept because the reasoning is what produced the finding.** The
 cheapest measurement on this page and the one with the most behind it. `AMD1` is flat across
 both problem families at about 1.2 to 1.8x while
-`AMD3` goes 2.3x to 3.0x, so the amd branch's whole degradation on cubic grids is in the extras,
+`AmdFlat` goes 2.3x to 3.0x, so the amd branch's whole degradation on cubic grids is in the extras,
 and the hash pass is the only part of them whose cost is superlinear in clique size: its pair loop
 is the sum of squared bucket sizes over `C[p]`. Count pairs tested per iteration and the bucket
 size distribution at comparable n on both families. A flat count per pivot kills the hypothesis; a
@@ -1086,7 +1159,7 @@ of `I[u]` with the pivot among them. In `Amd.cpp`, `hval` is accumulated in scan
 the OLD element list, and `Iw [p1] = me` happens AFTERWARDS, in the "add me to the list for i"
 block. The new element is not in the sum.
 
-**And the comment at `src/Amd3.cpp` justifying this says the opposite**: "its scan 2 accumulates
+**And the comment at `src/AmdFlat.cpp` justifying this says the opposite**: "its scan 2 accumulates
 `hval += e` over the element list it is compacting, which by then holds the new element". The
 vendored source does not support that reading. **Either the comment is wrong or my reading is; that
 has to be settled before anything is changed**, and it is the first thing to do on this item.
@@ -1112,8 +1185,8 @@ long list at large n, but it is a real difference in the function.
 
 **None of this is measured.** The right first step is a collision counter, pairs tested per pivot
 and the bucket size distribution, on 2D and 3D at comparable n, against the vendored routine's
-0.33 and 0.48 recorded in the `Amd3.cpp` comment. That number is the one that moved by a factor of
-three last time, and it is the only output any of these four can change.
+0.33 and 0.48 recorded in the `AmdFlat.cpp` comment. That number is the one that moved by a factor
+of three last time, and it is the only output any of these four can change.
 
 **A FIFTH DIVERGENCE, in a different mechanism, found 2026-08-12 while reading the twins.** The
 mass-elimination test in `QuotientGraph::massEliminate` has three conjuncts where `AMD_2` has two:
@@ -1229,9 +1302,9 @@ same lines.
 ---
 
 **2b. Taking `AMD1B` and `AMD2B` out of the public enum: DONE, 2026-08-15.** `Ordering` is nine
-enumerators, `Natural, MMD, MMD1, MMD2, MMD3, AMD, AMD1, AMD2, AMD3`, and the two B layers are
-reached as free functions exactly as item 2c specified and as `AMDraw` and `MMD3B` already were.
-`Mmd1` and `Amd1` stay in the enum: they are ladder rungs, but they are also complete, correct
+enumerators, `Natural, MMD, MMD1, MMD2, MmdFlat, AMD, AMD1, AMD2, AmdFlat`, and the two B layers are
+reached as free functions exactly as item 2c specified and as `AMDraw` and `MmdChained` already
+were. `Mmd1` and `Amd1` stay in the enum: they are ladder rungs, but they are also complete, correct
 orderings a caller may legitimately choose.
 
 **What moved with it**, since the surface is wider than the enum: `OrderEngine`'s dispatch and its
@@ -1251,14 +1324,16 @@ anywhere.
 
 **2b. Taking `AMD1B` and `AMD2B` out of the public enum: DEFERRED 2026-08-10, deliberately.** The
 reasoning below still holds and the work is still worth doing eventually. It is not being done now
-because a third B name is in circulation that is not an oracle at all: `Amd3B` is a VEHICLE,
-holding one candidate change to `Amd3` at a time. It is SCRATCH and was never committed: it existed
+because a third B name is in circulation that is not an oracle at all: `AmdCompacted` is a VEHICLE,
+holding one candidate change to `AmdFlat` at a time. It is SCRATCH and was never committed: it
+existed
 on 2026-08-10 while the two candidates below were being priced and was removed with them. Item 2c
 says how the next one should be added so that it touches far less. Deciding the fate of the
 other two while that name comes and goes would be churn in the middle of an open investigation.
 Revisit when the amd branch is quiet.
 
-**2c. HOW TO ADD THE NEXT VEHICLE.** `Amd3B` was wired in as a full ordering on 2026-08-10, an
+**2c. HOW TO ADD THE NEXT VEHICLE.** `AmdCompacted` was wired in as a full ordering on 2026-08-10,
+an
 enumerator with everything that follows from one, and all of it was reverted a day later. One site
 was missed on the way in: three files under `examples/` switch over `Ordering`, so `make examples`
 warned. Do it as a FREE FUNCTION instead, which is the pattern `order_timing.cpp`'s `AMDraw` column
@@ -1269,7 +1344,7 @@ in each benchmark driver calling `orderAmd3B` directly, and a local identity che
 assertions, no `test_pipeline` sweep entry, and no move in `docs/TESTING_SPECIFICATION.md`.
 
 **2d. THE NEXT PERFORMANCE PASS, and what of 2026-08-10 the other layers never got.** The walk
-axis is FINISHED on `Amd3`: after the fold it walks `I[u]` twice per pivot and `A[u]` once, which
+axis is FINISHED on `AmdFlat`: after the fold it walks `I[u]` twice per pivot and `A[u]` once, which
 is `AMD_2`'s count exactly, so there is no pass left to remove that the vendored routine does not
 also make. What is left is seven sweeps over `C[p]` against its four, and the growth term. Three
 items, in the order the evidence supports.
@@ -1295,20 +1370,21 @@ tried once and measured nothing despite cutting simulated misses 17 percent.
 looked at:
 
 - **`Amd1B` and `Amd2B` carry `explicitPart(size)` as an extra array**, which is exactly the
-  footprint cost removed from `Amd3` that day. `Amd1B` is on record as "slower at large n after
+  footprint cost removed from `AmdFlat` that day. `Amd1B` is on record as "slower at large n after
   being faster at small", and that is the signature of precisely this. **But the fix may not
-  transfer.** `Amd3` had somewhere to put the value, `partial[u]`, which exists only because
+  transfer.** `AmdFlat` had somewhere to put the value, `partial[u]`, which exists only because
   ledger entry 4 split its bound in two; `Amd1B` and `Amd2B` form the bound in one pass and have
   no dead size-n array at that moment. `Amd2B` has `hashNext`, dead until filing, and `Amd1B`
   appears to have nothing. **Entry 4's split is now the third thing it has bought by accident**,
-  after `Amd3`'s immunity to the hash-bucket order and its ability to take the key fusion at all.
+  after `AmdFlat`'s immunity to the hash-bucket order and its ability to take the key fusion at all.
 - **The tagged W consolidation DID propagate, and this item is stale, 2026-08-17.** It said `Amd1`,
   `Amd1B`, `Amd2` and `Amd2B` all carry `outside(size)` plus a mark plus a clearing pass where
-  `Amd3` carries one `w`. `Amd1` and `Amd2` both carry the tagged `w` and `wflg` today, and the two
+  `AmdFlat` carries one `w`. `Amd1` and `Amd2` both carry the tagged `w` and `wflg` today, and the
+two
   B layers it names were retired on 2026-08-16. Finding this out is what made the supervariable
   stamp fold into `Amd2` a direct application rather than a prerequisite: the `w` it needed to
   stamp into was already there.
-- **AND THE 2n MARK IS GONE FROM BOTH AMD DRIVERS THAT HAD ONE, 2026-08-17.** `Amd3` and `Amd2`
+- **AND THE 2n MARK IS GONE FROM BOTH AMD DRIVERS THAT HAD ONE, 2026-08-17.** `AmdFlat` and `Amd2`
   now stamp supervariable detection into `w`, which is `AMD_2`'s `W [Iw [p]] = wflg`, so neither
   allocates a mark of its own and neither asks the shared class for clique marks. The
   `cliqueMarks` constructor argument and `cliqueBase()` went with them. `Amd1` has no detection at
@@ -1329,7 +1405,7 @@ three random patterns at n = 2000, all identical, and each clean under `-Wall -W
 `-fsanitize=address,undefined`. What landed: the four `QuotientGraph` arrays and the accessors over
 them, `Buckets`'s signatures, `degrees` with the scalars that travel with it, the four scan arrays
 with the two structs that bind them, then `usedKeys` and its hash locals, `sizeU` and `sizeV`,
-`reachableSize`, `absorb`'s `vertexCount`, and one entity loop in `Amd3` brought back to the
+`reachableSize`, `absorb`'s `vertexCount`, and one entity loop in `AmdFlat` brought back to the
 `int32_t` form. `docs/DESIGN_DECISIONS.md` (2026-08-11) carries the account and
 `docs/CODING_RULES.md` now states the three-way rule.
 
@@ -1341,8 +1417,8 @@ be reverted, being a fixed sum at its declaration and an accumulator three lines
 
 **What remains `std::size_t` in the ordering is correct, and the list is short enough to check
 against.** The `colPtr` parameters and the `cp` loop over them; `mSourcePtr` and `mCliquePtr`; the
-five accumulators, `bound` in the four accumulating amd drivers, `deg` in `Amd3` and the hash `key`
-in three, together with their `std::min<std::size_t>` calls and operand casts; `size()`;
+five accumulators, `bound` in the four accumulating amd drivers, `deg` in `AmdFlat` and the hash
+`key` in three, together with their `std::min<std::size_t>` calls and operand casts; `size()`;
 `Buckets`'s constructor; the driver-local `size`; and `numFlagSweeps`, a diagnostic counter bounded
 by the tag range rather than by n, which the dimension rule does not decide and which was left
 deliberately.
@@ -1350,7 +1426,7 @@ deliberately.
 **What is left of this item is everything outside the ordering.** The symbolic and numeric phases
 are untouched and are the larger half. **And two casts hold n prisoner**, neither reachable and
 both left deliberately:
-`Amd3`'s `modulus = static_cast<std::int32_t>(size + 1)` fails at exactly the largest n
+`AmdFlat`'s `modulus = static_cast<std::int32_t>(size + 1)` fails at exactly the largest n
 `checkIndexRange` admits, and `mark[incidenceU[i] + cliqueStamp]` in the three hash drivers reaches
 `2n - 1` in signed `int32_t` and is undefined above `n = 2^30`. The design entry says why they were
 not fixed with the rest.
@@ -1397,9 +1473,10 @@ which is the rule doing its job rather than the rule being slack.
 - Links: `mSuperNext`, `mSuperLast`, `hashHead`, `hashNext`, and `Buckets`'s `mHead`, `mNext`,
   `mPrev`, which carries two sentinels, `NIL` and `UNFILED = -2`.
 - Stamps: `mMark` and `mTag`, the drivers' `mark` and `tag`, `touchedRound`.
-- `Amd3`'s `w`, `wflg`, `lemax`, `wbig`, signed by requirement rather than by sentinel; see below.
+- `AmdFlat`'s `w`, `wflg`, `lemax`, `wbig`, signed by requirement rather than by sentinel; see
+below.
 
-`mEliminated` and `Mmd2`/`Mmd3`'s `outmatched` are `std::uint8_t` and stay.
+`mEliminated` and `Mmd2`/`MmdFlat`'s `outmatched` are `std::uint8_t` and stay.
 
 **Bucket 3, narrows to `std::uint32_t`.** In `QuotientGraph`, four arrays and one scalar, all
 bounded by n: `mAdjacencySize`, `mIncidenceSize`, `mCliqueSize`, `mWeight`, and the per-pivot
@@ -1417,13 +1494,13 @@ In the drivers, **twenty-three declarations across the eight files**:
 |---|---|---|
 | `degrees` | all eight | the filed degree, at most n |
 | `outside` | `Amd1`, `Amd1B`, `Amd2`, `Amd2B` | per clique, `\|C[c] - C[p]\|` weighted |
-| `cliqueDegree` | the five amd drivers other than `Amd3`, plus `Amd3` | per clique, `\|C[c]\|` weighted |
+| `cliqueDegree` | the five amd drivers other than `AmdFlat`, plus `AmdFlat` | per clique, `\|C[c]\|` weighted |
 | `explicitPart` | `Amd1B`, `Amd2B` | per vertex, weight summed over the pruned `A[u]` |
-| `partial` | `Amd3` | the half-formed bound, ledger entry 4 |
-| `usedKeys` | `Amd2`, `Amd2B`, `Amd3` | hash values in [0, n]; a count by the range test, though it does not read as one |
+| `partial` | `AmdFlat` | the half-formed bound, ledger entry 4 |
+| `usedKeys` | `Amd2`, `Amd2B`, `AmdFlat` | hash values in [0, n]; a count by the range test, though it does not read as one |
 
-`Amd3` has no `outside`, carrying `Amd.cpp`'s tagged `w` in its place, which is why the amd column
-is not uniform. The two scan structs hold references to these same arrays, three in
+`AmdFlat` has no `outside`, carrying `Amd.cpp`'s tagged `w` in its place, which is why the amd
+column is not uniform. The two scan structs hold references to these same arrays, three in
 `ApproximateScan` and two in `TaggedScan`, and move with them rather than being separate targets.
 
 And the scalars that move with the arrays: `numEliminated`, `numLive`, `minDegree`, `degme`,
@@ -1454,12 +1531,13 @@ is what keeps the change mechanical afterwards.
 **The NIL-carrying set needs no work.** `mMark`, `mTag`, `mHead`, `mNext`, `mPrev`, `mSuperNext`,
 `mSuperLast`, `hashHead`, `hashNext` and `touchedCliques` are already `std::int32_t`.
 
-**One quantity is deliberately SIGNED and must stay so**, and it is the only one. `Amd3`'s tagged W
+**One quantity is deliberately SIGNED and must stay so**, and it is the only one. `AmdFlat`'s tagged
+W
 array with `wflg`, `wnvi`, `lemax` and `wbig`: `wnvi = wflg - weight(u)` is negative whenever the
 tag is still small and the weight is not, which is the first few eliminations, and the arithmetic
 only comes right at `w[c] - wflg`. Unsigned wraps there and the bound comes out enormous. `Amd.cpp`
-is signed for the same reason. `src/Amd3.cpp` says this at its declaration; do not narrow it and do
-not make it unsigned.
+is signed for the same reason. `src/AmdFlat.cpp` says this at its declaration; do not narrow it and
+do not make it unsigned.
 
 **Two accumulators cross and must stay wide**, both in the bound pass. `deg` accumulates
 `w[c] - wflg` over every clique in `I[u]`, each term up to n and O(n) of them, so the intermediate
@@ -1524,12 +1602,14 @@ pass. The point is only that it no longer inherits an argument it used to.
 
 ## The state, in one paragraph
 
-`amd3` is aligned: production `Amd3` returns `AMD_2`'s permutation exactly, up to the postorder it
+`amd3` is aligned: production `AmdFlat` returns `AMD_2`'s permutation exactly, up to the postorder
+it
 deliberately does not do, on the seven examples, 2D grids to 140, 3D grids to 24 and nine random
 patterns. After the two fusions of 2026-08-10, the hash key into the bound and the first scan into
-the prune, `AMD3` runs at roughly 1.0 to 1.25x the vendored routine on cubic grids from 12 to 32 a
-side, overlapping it at 16, and 1.33 to about 1.95x on square grids from 32 to 400. `MMD3` is at
-0.87 to 1.05x its own on cubes and 1.26 to 1.55x in 2D, with no trend in n on either. `AMD3` is
+the prune, `AmdFlat` runs at roughly 1.0 to 1.25x the vendored routine on cubic grids from 12 to 32
+a
+side, overlapping it at 16, and 1.33 to about 1.95x on square grids from 32 to 400. `MmdFlat` is at
+0.87 to 1.05x its own on cubes and 1.26 to 1.55x in 2D, with no trend in n on either. `AmdFlat` is
 FASTER than both `AMD1` and `AMD2` at every cubic size while
 returning the vendored permutation, which `AMD2` does not. What is left is the 2D penalty, which
 grows with n and is stalls rather than work, and a cubic gap that has only now started to grow with
@@ -1561,7 +1641,7 @@ its liveness rides on `Nv`'s sign.
 
 **READ THIS BEFORE STARTING IT, added 2026-08-09.** The cubic benchmark says this may be aimed at
 the wrong half. Split the amd branch into its base and its extras, ratios against the vendored
-routine: `AMD1` costs about 1.2 to 1.8x on BOTH families, while `AMD3` goes from 2.3x in 2D to
+routine: `AMD1` costs about 1.2 to 1.8x on BOTH families, while `AmdFlat` goes from 2.3x in 2D to
 3.0x in 3D. So the degradation is entirely in aggressive absorption and hash supervariable
 detection, and this proposal changes the SHARED QUOTIENT GRAPH, which would help `AMD1` exactly as
 much and `AMD1` is the half that is already fine. The same objection applies to the locality
@@ -1603,8 +1683,8 @@ list. `make test` catches it, but check `mmd2` specifically and early.
 arena use-after-free, and a change that moves what a mark array means is exactly the shape that
 would introduce another.
 
-Also needed: an overflow guard on `mTag`, as `Amd3`'s `w` array has with `clearFlag`, since `mTag`
-only ever increments and `GONE` must stay above it.
+Also needed: an overflow guard on `mTag`, as `AmdFlat`'s `w` array has with `clearFlag`, since
+`mTag` only ever increments and `GONE` must stay above it.
 
 ## If it does not pay
 
@@ -1661,8 +1741,9 @@ routine's. `benchmarks/README.md` records how far an attempt to get them got and
   short-circuits on acceptance, searches less.
 - **Nested dissection, which Oblio does not have and which one matrix family badly wants.** NEW on
   2026-08-11. `PARSEC/Si87H76`, an electronic structure Hamiltonian at n = 240369 with 10.7 million
-  nonzeros, predicts **5.68 billion entries of fill under MMD3**, which is 42.3 GB of values and
-  beyond the machine. AMD3 will not rescue it: the two agree to within a few percent everywhere we
+  nonzeros, predicts **5.68 billion entries of fill under MmdFlat**, which is 42.3 GB of values and
+  beyond the machine. AmdFlat will not rescue it: the two agree to within a few percent everywhere
+we
   have measured, so an approximation of a metric will not save a matrix the metric itself handles
   badly. What that family wants is a partitioning ordering rather than a greedy one, which is what
   MUMPS and CHOLMOD reach for on exactly these matrices.

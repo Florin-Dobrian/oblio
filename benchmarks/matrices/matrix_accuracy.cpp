@@ -2,10 +2,21 @@
 // answer is: the backward error, the residual, and what each factorization had to do to get
 // there. The report drawn from it is ACCURACY.md beside this file.
 //
-// The first pass over real input. Ordering is AmdCompacted, the tree's default, and the traversal
-// is left-looking; both are held fixed on purpose, because the question here is whether the
-// pipeline computes correctly on matrices nobody generated, not which ordering is best. The
-// other axes come after this one has been read.
+// The first pass over real input. Ordering is MmdCompacted and the traversal is left-looking; both
+// are held fixed on purpose, because the question here is whether the pipeline computes correctly
+// on matrices nobody generated, not which ordering is best. The other axes come after this one has
+// been read.
+//
+// NOT THE TREE'S DEFAULT, AND THAT IS DELIBERATE, 2026-08-21. The default is `AmdCompacted` and
+// this pass ran under mmd from the beginning, so holding mmd keeps every published figure in
+// ACCURACY.md comparable: `MmdCompacted` returns `MmdFlat`'s permutation exactly, which is
+// genmmd's, so switching between those two cannot move a number here.
+//
+// Moving to `AmdCompacted` was tried and it COST A MATRIX. `Oberwolfach/LFAT5000` is killed by the
+// OOM killer under amd where mmd factors it, at a 232-fold fill increase from delayed pivots, and
+// amd's PREDICTED fill on that matrix is lower than mmd's. So the loss is the delayed-pivot
+// cascade rather than the ordering's fill, and it is an open question rather than a reason to
+// prefer mmd generally. See docs/NEXT.md.
 //
 //   ./matrix_accuracy_cpp ../../data/*/*.mtx
 //
@@ -345,7 +356,7 @@ void processMatrix(const std::string& path, std::size_t maxFill, std::FILE* out)
         return;
     }
 
-    DirectSolver<double> solver(Ordering::MmdFlat, Factorization::Cholesky,
+    DirectSolver<double> solver(Ordering::MmdCompacted, Factorization::Cholesky,
                                 Traversal::LeftLooking);
 
     bool analyzed = false;
@@ -488,7 +499,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::printf("ordering MmdFlat, traversal left-looking, b all ones\n");
+    std::printf("ordering MmdCompacted, traversal left-looking, b all ones\n");
     std::printf("bwd = ||Ax - b|| / (||A|| ||x|| + ||b||), res = ||Ax - b|| / ||b||, "
                 "infinity norms throughout\n");
     std::printf("note: Np, the static LDL perturbed N pivots it could not divide by, having no way\n      to pivot. Nd, the dynamic LDL delayed N columns to a parent rather than\n      pivot on them.\n");

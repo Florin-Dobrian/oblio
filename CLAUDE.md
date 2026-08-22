@@ -217,8 +217,9 @@ rm -rf /tmp/oblio-clone
 ```
 
 Run 2026-08-04 on alpamayo, after making the vendored orderings private: 252 in the tree, 238 in
-the clone, as expected. The counts are now 251 and 237: they grew to 279 and 265 with `MMD3`,
-`AMD3`, the amd alignment work and the uniform coverage of the three non-enum layers, then fell on
+the clone, as expected. The counts are now 251 and 237: they grew to 279 and 265 with `MmdFlat`,
+`AmdFlat`, the amd alignment work and the uniform coverage of the three non-enum layers, then fell
+on
 2026-08-21 when `MMD1`, `MMD2`, `AMD1` and `AMD2` were retired to `retired/` and took 28 assertions
 with them.
 
@@ -234,13 +235,13 @@ work in the clone with no `private/` present:
 
 ```
 cd /tmp/oblio-clone/experiments/ordering && make test    # every layer agrees, 35 comparisons
-cd /tmp/oblio-clone/benchmarks/ordering  && make all     # builds; MMD and AMD rows refuse
+cd /tmp/oblio-clone/benchmarks/ordering  && make all     # builds; the vendored rows refuse
 cd /tmp/oblio-clone/benchmarks/pipeline  && make all     # builds both drivers
 cd /tmp/oblio-clone && cmake -S . -B bld && cmake --build bld && (cd bld && ctest)
 ```
 
-The CMake configure line prints which mode it chose, so `private/ absent, MMD and AMD will refuse`
-is itself a check.
+The CMake configure line prints which mode it chose, so `private/ absent, MmdVendored and
+AmdVendored will refuse` is itself a check.
 
 Once before a release rather than per push: `make test` and `OBLIO_PUBLIC=1 make test` cover the
 day to day.
@@ -395,8 +396,8 @@ file, Makefile rule or README reference is affected by it.
   coding standard; build standalone with `make test`. Not part of the main build. See
   DESIGN_DECISIONS.
 - **experiments/ordering/**, the minimum-degree ladder, and the largest of these by some way. Its
-  own README is the durable record and holds both alignment ledgers. Beside it, `MMD3.md` and
-  `AMD3.md` record the two alignments ITERATION BY ITERATION: what each step established,
+  own README is the durable record and holds both alignment ledgers. Beside it, `MmdFlat.md` and
+  `AmdFlat.md` record the two alignments ITERATION BY ITERATION: what each step established,
   discovered and decided, the wrong turns at full length, and the defects each found in the layer
   below. Narrative, read once. They live here rather than under docs/ because they are the record
   of experiment work, not guidance for a reader of the library. The README's method section is where the

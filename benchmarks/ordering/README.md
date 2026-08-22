@@ -2,8 +2,8 @@
 
 > **SUPERSEDED IN PART, 2026-08-15.** Every ordering TIME and every ratio against a vendored
 > routine in this document was measured before the encoding work of that date, and understates
-> our orderings by roughly 20 to 30 percent. `MMD3` moved from 1.35 to 1.48x genmmd on square
-> grids to 1.02 to 1.19x, and to 0.81 at 32 cubed; `MMD2`, `AMD2` and `AMD3` all moved with it.
+> our orderings by roughly 20 to 30 percent. `MmdFlat` moved from 1.35 to 1.48x genmmd on square
+> grids to 1.02 to 1.19x, and to 0.81 at 32 cubed; `MMD2`, `AMD2` and `AmdFlat` all moved with it.
 > **Fill figures are unaffected**, nothing about what is computed having changed: every
 > permutation and every nnz(L) is identical. The tables are left as they stand because a dated
 > measurement is a record of a run. `docs/DESIGN_DECISIONS.md` (2026-08-15) has the account.
@@ -14,9 +14,10 @@
 > `experiments/ordering/`; see `retired/README.md`. `make digest` went from nine drivers to five,
 > 365 digests where it recorded 657.
 >
-> **`AMD3` also got 6 to 12 per cent faster on large grids the same day**, largest at 1601 squared,
+> **`AmdFlat` also got 6 to 12 per cent faster on large grids the same day**, largest at 1601
+squared,
 > from no longer allocating an n-int32 mark array it never read. Confirmed across two runs with the
-> vendored `AMD` control unmoved. Every `AMD3` time below predates that.
+> vendored `AmdVendored` control unmoved. Every `AmdFlat` time below predates that.
 
 > **AND AGAIN, 2026-08-19, FOR A DIFFERENT REASON.** Every ratio here between a driver holding its
 > quotient graph in its own translation unit and one calling into a separate `.cpp` is biased
@@ -24,7 +25,8 @@
 > Our drivers were split between the two arrangements until that date and are now uniform, so
 > ratios BETWEEN OUR OWN DRIVERS taken before it should be re-measured.
 >
-> **The ratios against `MMD` and `AMD` are a separate matter and were not fixed by that work.**
+> **The ratios against `MmdVendored` and `AmdVendored` are a separate matter and were not fixed by
+that work.**
 > They were expected to improve by about three points and did not move, so translation units are
 > not what the vendored gap is made of. Those routines differ from ours in ways nobody has
 > enumerated, and a ratio against a reference is a figure to watch rather than one to reason from.
@@ -77,7 +79,7 @@ be. A default invisible in the name is the kind that nobody revisits.
 
 **Why `scale` is per branch.** The gap columns are ratios against the vendored routine of the same
 lineage, so they only mean anything within one; and ten methods at 400 a side is a long wait for
-columns nobody is reading. The AMD list is AMD, AMD1, AMD2, AMD3, with the vendored routine first
+columns nobody is reading. The AMD list is AMD, AMD1, AMD2, AmdFlat, with the vendored routine first
 because the gap columns take the first entry as their baseline. The B variants are left out: they
 are their originals' permutations on a different schedule, so their fill column carries no
 information and their time column belongs to the question about the seam rather than to the
@@ -97,7 +99,8 @@ cubes from 2 to 20, hashes each permutation and writes 657 lines keyed by driver
 either way. It reports WHICH driver moved and at which size, which is what makes it useful for a
 change to `QuotientGraph`, where nine drivers read the code being edited.
 
-**`MMD3C` joined on 2026-08-17** and is the reason the count moved from eight. It is transitional
+**`MmdCompacted` joined on 2026-08-17** and is the reason the count moved from eight. It is
+transitional
 rather than permanent, so expect it to leave again: see `src/Mmd3C.cpp`. A baseline recorded before
 it existed has no row for it, and `digest` treats a driver it has no baseline for as new rather
 than as moved.
@@ -122,7 +125,8 @@ shape as the two dead-code leftovers that survived a counter-based revert check 
 instrument measuring the wrong thing, confidently. Record first; re-anchor with `make amdorder` and
 `make mmdorder` at the start and end of a stretch of work.
 
-**Two drivers are a partial exception.** `MMD3` reproduces genmmd's permutation exactly and `AMD3`
+**Two drivers are a partial exception.** `MmdFlat` reproduces genmmd's permutation exactly and
+`AmdFlat`
 reproduces `AMD_2`'s, so for those two a baseline recorded from a state that passed the anchor runs
 IS a proxy for the vendored answer. The other six have no such anchor and are only ever "unmoved".
 
@@ -155,12 +159,12 @@ single cold reading is a reading rather than a result, and `-O3 -DNDEBUG` for th
 **The two families are never rows of one table.** A row is a matrix, and a column read down across
 two problem families is exactly the error the second family exists to prevent.
 
-**`AMDraw` is a column and not a method.** `AMD` is `amd_order` as SuiteSparse ships it, which is
-what a caller selecting `Ordering::AmdVendored` gets; `AMDraw` is the same routine with an
+**`AMDraw` is a column and not a method.** `AmdVendored` is `amd_order` as SuiteSparse ships it,
+which is what a caller selecting `Ordering::AmdVendored` gets; `AMDraw` is the same routine with an
 additive hook reporting the order `AMD_2` would emit if it stopped at the end of its main loop,
 before
-`AMD_postorder` relabels it. It is there because `AMD3` reproduces that raw order and deliberately
-does not postorder, so `AMD` is the wrong thing for it to sit against: they are different
+`AMD_postorder` relabels it. It is there because `AmdFlat` reproduces that raw order and
+deliberately does not postorder, so `AmdVendored` is the wrong thing for it to sit against: they are different
 permutations and their fill need not agree. It does agree on every size in these tables, and
 differs by one to three entries on cubes of 4, 5 and 6 a side, because a postorder of AMD's
 ASSEMBLY tree is not fill-neutral. Its own header says that tree need not be the precise supernodal
@@ -168,7 +172,8 @@ elimination tree, mass elimination under an approximate degree merging vertices 
 adjacent. Against `AMDraw` the comparison is exact by construction, which is why the fill gap
 columns are taken against it while the time gaps stay against the shipped routine. Its own time is
 not reported: the hooked copy carries the hook's bookkeeping, so timing it would measure our
-instrumentation. The column needs `private/` and leaves the table with `AMD` in a published build.
+instrumentation. The column needs `private/` and leaves the table with `AmdVendored` in a published
+build.
 
 **A SECOND generated copy answers the timing question instead**, since that objection is about the
 raw copy rather than about the idea. `make phases2d` splits `amd_order`'s own time into five phases
@@ -667,7 +672,7 @@ more walk of `A[u]`, which is a third variant nobody has asked for. Recorded rat
 collapse condition, written before either was built, was that a B variant replaces its original
 when permutation-identical and faster; neither is faster, so neither fires.
 
-## AMD3, added 2026-08-08, and the one line that was 75 percent of it
+## AmdFlat, added 2026-08-08, and the one line that was 75 percent of it
 
 AMD2 with the vendored routine's list order, adding no mechanism, so its fill is the vendored AMD's
 exactly at every size and the only question it poses is cost.
@@ -675,14 +680,14 @@ exactly at every size and the only question it poses is cost.
 **alpamayo, `make scale-amd`, ratios against the vendored AMD in the same row:**
 
 ```
-grid          AMD ms    AMD1     AMD2     AMD3        AMD nnzL   AMD3 nnzL
+grid          AMD ms    AMD1     AMD2     AmdFlat        AMD nnzL   AmdFlat nnzL
  32x32          0.07    1.16x    2.06x    2.18x          11900       11900
 100x100         0.66    1.52x    2.46x    2.56x         206332      206332
 140x140         1.27    1.51x    2.42x    2.55x         474995      474995
 400x400        10.60    1.80x    2.58x    2.81x        5663298     5663298
 ```
 
-**Before entry 6 those AMD3 ratios were 3.54x, 4.41x, 4.07x and 4.63x**, and the whole difference
+**Before entry 6 those AmdFlat ratios were 3.54x, 4.41x, 4.07x and 4.63x**, and the whole difference
 was one line. The alignment's fifth entry put the new clique at the front of every `I[u]`, which is
 what `Amd.cpp` does, and did not also skip that entry in the hash pass's exact test, which
 `Amd.cpp` does in the same breath. So a guaranteed match sat at the head of a short-circuiting walk
@@ -702,7 +707,7 @@ recording because each was plausible and each had a mechanism:
   which is what a guaranteed match at position zero predicts. 1.08 after.
 
 ```
-                        AMD2      AMD3 before    AMD3 after
+                        AMD2      AmdFlat before    AmdFlat after
 Time Profiler total    8.90 s        14.90 s        9.44 s
 orderAmdN SELF         4.76 s        10.46 s        4.76 s
 ```
@@ -724,25 +729,25 @@ timed repeat count; nnz(L) in entries. The first cubic figures this folder has e
 the reason they exist is that every other number here is square.
 
 The default cubic ladder gained a 6 cube after this run, so a rerun has one more row than the
-tables below. It is there because 6 a side is the largest size at which `AMD` and `AMDraw`
+tables below. It is there because 6 a side is the largest size at which `AmdVendored` and `AMDraw`
 disagree, 3265 against 3266, and a pair of columns that always matches is a pair nobody reads. The
 ratio table in the section after this one comes from `make scale2d` and `make scale3d`, which run a
 wider ladder than these.
 
 ```
-grid3d      n      MMD    MMD1    MMD2    MMD3     AMD    AMD1    AMD2    AMD3
+grid3d      n      MMD    MMD1    MMD2    MmdFlat     AMD    AMD1    AMD2    AmdFlat
 12^3     1728     0.47    1.43    0.46    0.46    0.24    0.28    0.91    0.74
 16^3     4096     1.66    4.77    1.70    1.62    0.76    0.95    2.76    2.29
 20^3     8000     3.66   11.02    3.65    3.48    1.76    2.24    6.09    5.29
 26^3    17576     8.89   34.60    8.18    7.78    4.07    5.76   14.88   12.30
 
-grid3d      n      MMD nnzL   MMD1 nnzL   MMD2 nnzL   MMD3 nnzL
+grid3d      n      MMD nnzL   MMD1 nnzL   MMD2 nnzL   MmdFlat nnzL
 12^3     1728         75674       81415       77504       75674
 16^3     4096        295113      316502      303848      295113
 20^3     8000        840560      860800      808926      840560
 26^3    17576       2869267     3086339     2943504     2869267
 
-grid3d      n      AMD nnzL  AMDraw nnzL   AMD1 nnzL   AMD2 nnzL   AMD3 nnzL
+grid3d      n      AMD nnzL  AMDraw nnzL   AMD1 nnzL   AMD2 nnzL   AmdFlat nnzL
 12^3     1728         76038        76038       77240       71848       76038
 16^3     4096        281014       281014      310541      287924      281014
 20^3     8000        842282       842282      877430      819997      842282
@@ -774,13 +779,13 @@ lineage, from `make scale2d` and `make scale3d` on alpamayo:
 ```
                 2D, 32 to 400 a side       3D, 12 to 32 a side
 MMD1            1.47x  ->  2.85x           3.06x  ->  4.91x        base,   WORSE in 3D
-MMD3            1.17x  ->  1.51x           0.96x  ->  0.90x        extras, BETTER, and under 1
+MmdFlat            1.17x  ->  1.51x           0.96x  ->  0.90x        extras, BETTER, and under 1
 
 AMD1            1.19x  ->  1.76x           1.22x  ->  1.55x        base,   FLAT
-AMD3            1.96x  ->  2.54x           3.42x  ->  3.23x        extras, WORSE
+AmdFlat            1.96x  ->  2.54x           3.42x  ->  3.23x        extras, WORSE
 ```
 
-**The AMD3 row is superseded twice below and is kept because it is what produced the finding.**
+**The AmdFlat row is superseded twice below and is kept because it is what produced the finding.**
 The hash defect was found by taking the count this table asked for; the section after next gives
 1.44x on cubes once it was fixed, "What both families look like now, 2026-08-10" gives 0.98 to
 1.33 after the two fusions, and 2026-08-14 gives 1.09 to 1.25. Read the row as the evidence that
@@ -794,7 +799,7 @@ aggressive absorption and hash supervariable detection, which take the branch fr
 **That is a hint about where the remaining gap is, and it points away from where we have been
 looking.** The parked proposal in `docs/DESIGN_DECISIONS.md`, giving cliques their own mark space
 so that liveness folds into the vertex marks, is a change to the SHARED QUOTIENT GRAPH. It would
-help `AMD1` exactly as much as `AMD3`, and `AMD1` is the half that is already fine on both
+help `AMD1` exactly as much as `AmdFlat`, and `AMD1` is the half that is already fine on both
 families. The same is true of the locality hypothesis, one `Iw` pool against our two structures:
 whatever it costs, it is being paid by a driver whose ratio does not move between families. Neither
 is refuted by this, and both would still be worth what they are worth in 2D. But a fixed cost in
@@ -811,7 +816,7 @@ with the family while any cost proportional to clique COUNT does not.
 
 - `MMD1` recomputes a reach per refreshed vertex, walking the members of every clique that vertex
   names, so it pays members per vertex and reaches 4.9x.
-- `MMD2` and `MMD3` route through the q2h path, which computes per clique and shares the result
+- `MMD2` and `MmdFlat` route through the q2h path, which computes per clique and shares the result
   across its members. That is why they survive the family change, and apparently why they overtake:
   genmmd has the same idea and we are executing it faster once the loop dominates.
 - `AMD1`'s bound reads one number per clique and never opens it, which is the whole content of
@@ -833,17 +838,17 @@ with clique size, the fix is a better filter rather than a faster loop.
 
 **Three further readings, none of them expected.**
 
-- **`MMD3` is FASTER than genmmd in 3D**, 7.78 ms against 8.89 at 26 a side, 0.88x, where it runs
+- **`MmdFlat` is FASTER than genmmd in 3D**, 7.78 ms against 8.89 at 26 a side, 0.88x, where it runs
   about 1.2x in 2D. The first time one of ours has beaten a vendored routine on time here, and it
   corroborates the 0.86x `REPORT.md` measured for `MMD2` at 32 a side on a different machine.
-- **`AMD3`'s time gap WIDENS in 3D**, 12.30 against 4.07, so about 3.0x where 2D gives 2.3x. The
+- **`AmdFlat`'s time gap WIDENS in 3D**, 12.30 against 4.07, so about 3.0x where 2D gives 2.3x. The
   parked constant-factor work is worth more on this family than the square figure suggested.
 - **"MMD is the ordering to beat" is 2D-only too.** MMD fills 13 percent below AMD on squares and
   slightly ABOVE it on cubes, 2869267 against 2836813 at 26 a side. `benchmarks/pipeline/README.md`
   states that conclusion without qualification and should not.
 
-**`MMD3` and `AMD3` are 0.0 percent at every size**, which is the alignment holding on a family it
-was never measured on, and `AMD nnzL == AMDraw nnzL` throughout, which is the postorder being
+**`MmdFlat` and `AmdFlat` are 0.0 percent at every size**, which is the alignment holding on a
+family it was never measured on, and `AMD nnzL == AMDraw nnzL` throughout, which is the postorder being
 fill-neutral at every size a table here reports.
 
 **And the fill columns reproduce across machines exactly**, digit for digit against a Linux run of
@@ -866,19 +871,19 @@ against its 0.333, and 155.3 at 26 cubed against its 0.484.
 `make scale2d`, against the rows recorded earlier the same day:
 
 ```
-grid3d          AMD      AMD1      AMD2      AMD3          AMD3 vs AMD
+grid3d          AMD      AMD1      AMD2      AmdFlat          AmdFlat vs AMD
 26^3  before   4.07      5.76     14.88     12.30                3.02x
 26^3  after    4.06      5.69      5.45      5.83                1.44x
 32^3  after    8.81     13.03     12.33     12.71                1.44x
 
-grid            AMD      AMD1      AMD2      AMD3          AMD3 vs AMD
+grid            AMD      AMD1      AMD2      AmdFlat          AmdFlat vs AMD
 140x140 before  1.27      1.51x     2.42x     2.55x
 140x140 after   1.21      1.80      2.04      2.24                1.81x
 400x400 after  10.49     17.47     19.86     21.80                2.08x
 ```
 
 **The two controls do not move**, the vendored routine and `AMD1` sitting within a percent, which
-is the drift and is what says the rest is real. `AMD3` on cubes goes from about 3.0x to 1.44x and
+is the drift and is what says the rest is real. `AmdFlat` on cubes goes from about 3.0x to 1.44x and
 `AMD2` from 2.85x to 1.40x. In 2D the same change is worth about 1.4x, which is the ratio the count
 predicted from 155 pairs per pivot against 19: the defect was family dependent because `A[u]`
 empties as the elimination proceeds and cubes reach that state sooner.
@@ -892,7 +897,7 @@ empties as the elimination proceeds and cubes reach that state sooner.
   2026-08-08 by the entry-4 filing defect; both halves were measurements of defects rather than of
   mechanisms.
 - **The families have swapped roles.** The extras were free in 2D and ruinous on cubes; they are
-  now free on cubes and cost about 25 percent in 2D, `AMD1` 17.47 against `AMD2` 19.86 and `AMD3`
+  now free on cubes and cost about 25 percent in 2D, `AMD1` 17.47 against `AMD2` 19.86 and `AmdFlat`
   21.80 at 400 a side. Whatever remains of the amd gap is a SQUARE-grid effect, which is the
   opposite of where these tables pointed a few hours earlier.
 - **And the parked constant-factor proposals need re-pricing rather than reading off the section
@@ -903,18 +908,18 @@ empties as the elimination proceeds and cubes reach that state sooner.
   against 6.28 and 12.72 clique members per pivot, so the residual tracks elements walked rather
   than pivots.
 
-**AMD2's fill moves and AMD3's does not**, which is a tie-break consequence rather than a quality
+**AMD2's fill moves and AmdFlat's does not**, which is a tie-break consequence rather than a quality
 one: `Amd3` refiles every survivor after the hash in a fixed clique order and comes out canonical,
 where `Amd2`'s last write to a bucket is the merge's own refile, so the hash partition reaches the
 degree buckets. `Amd2` reads `+1.4` percent of fill at 140x140 and `-3.1` at 26^3, two-sided, and
 it now beats the vendored routine at six of the seven square sizes, tying at the smallest, and at
 four of the six cubic ones. Every AMD2 and AMD2B fill figure recorded above predates this and should
-be read with it. `AMD3`'s column is unchanged and still exact, `make amdorder` matching on all 38
+be read with it. `AmdFlat`'s column is unchanged and still exact, `make amdorder` matching on all 38
 cases.
 
 `docs/DESIGN_DECISIONS.md` (2026-08-09) carries the defect and the account of why five separate
-oracles were blind to it; `experiments/ordering/AMD3.md` iterations 21 to 24 are the narrative and
-the ledger's entry 8 the record.
+oracles were blind to it; `experiments/ordering/AmdFlat.md` iterations 21 to 24 are the narrative
+and the ledger's entry 8 the record.
 
 ## What each family is actually made of, 2026-08-09
 
@@ -1013,11 +1018,11 @@ Two passes over `C[p]` per pivot removed, about 13 scattered loads per pivot on 
                     cycles          useful cycles        work vs AMD
 3D 26^3
   vendored AMD   10.677 -> 10.686    2.681 -> 2.679     1.000
-  AMD3           15.164 -> 15.144    4.338 -> 4.324     1.618 -> 1.614
+  AmdFlat           15.164 -> 15.144    4.338 -> 4.324     1.618 -> 1.614
   AMD2           14.078 -> 14.136    4.005 -> 3.995     1.494 -> 1.491
 2D 140x140
   vendored AMD   15.036 -> 15.023    8.580 -> 8.569     1.000
-  AMD3           28.107 -> 28.179   13.356 -> 13.390    1.557 -> 1.563
+  AmdFlat           28.107 -> 28.179   13.356 -> 13.390    1.557 -> 1.563
   AMD2           25.434 -> 25.400   12.381 -> 12.361    1.443 -> 1.442
 ```
 
@@ -1036,8 +1041,9 @@ amdorder` and all 283 assertions passed; only `prototype and production agree` c
 mass-eliminating late and so being legitimately untrimmed.
 
 **And a caution about this benchmark that cost a wrong claim.** The scale tables appeared to show
-`AMD3` improving from about 1.41 to 1.30 on the cubic ladder after the fusions, and that was
-**drift**. `AMD3` at 26 a side has measured 5.83, 5.95 and 5.65 ms across three runs of the same or
+`AmdFlat` improving from about 1.41 to 1.30 on the cubic ladder after the fusions, and that was
+**drift**. `AmdFlat` at 26 a side has measured 5.83, 5.95 and 5.65 ms across three runs of the same
+or
 nearly-same code, a 5 percent spread, where the cycle counts for those runs agree to 0.2 percent.
 **Ratios in these tables move by several percent between runs at fixed code**, so a change that
 does not exceed that band is not visible here at all, and the counters are the instrument for
@@ -1081,7 +1087,7 @@ every run, which is why it is in the source instead.
 one run, and the difference between the two is the instrument measuring itself:
 
 ```
-identical code       AMD3    AMD3B              AMD3    AMD3B
+identical code       AmdFlat    AmdCompacted              AmdFlat    AmdCompacted
 32x32                0.09     0.08  -11.1%      6^3     0.03     0.03    0.0%
 64x64                0.38     0.38    0.0%     12^3     0.29     0.29    0.0%
 100x100              1.00     1.02   +2.0%     16^3     0.94     0.92   -2.1%
@@ -1102,7 +1108,8 @@ as one.
 
 **Free, and worth arranging deliberately.** An idle variant column costs one benchmark column and
 gives every other column an error bar taken under identical conditions, which no amount of
-repetition of a single column can supply. `AMD3B` is not a standing column here: it is added with a
+repetition of a single column can supply. `AmdCompacted` is not a standing column here: it is added
+with a
 candidate change and removed with it, so the arrangement to repeat is to run the benchmark ONCE
 with the new vehicle still a verbatim copy, before putting anything into it.
 
@@ -1128,8 +1135,8 @@ driver once.
 
 ```
                               per pivot, corrected     as previously recorded
-AMD3 element visits, 140x140        112.26                     155.15
-AMD3 element visits, 26^3           276.25                     374.83
+AmdFlat element visits, 140x140        112.26                     155.15
+AmdFlat element visits, 26^3           276.25                     374.83
 ```
 
 Two consequences worth keeping. The prune's incidence compaction is **not** oversized: corrected it
@@ -1184,7 +1191,7 @@ removed once it has landed or been recorded, so it is not a standing column in t
 split is the whole reason we know what that was.
 
 ```
-AMD3 -> AMD3B         B1, a sweep deleted     B2, the key folded into the bound
+AmdFlat -> AmdCompacted         B1, a sweep deleted     B2, the key folded into the bound
 64x64                        0.0%                        -7.0%
 100x100                      0.0%                        -4.6%
 140x140                     -0.9%                        -6.5%
@@ -1198,9 +1205,10 @@ AMD3 -> AMD3B         B1, a sweep deleted     B2, the key folded into the bound
 32^3                        +1.4%                        -8.0%
 ```
 
-`nnz(L)` identical to `AMD3` at every size in every run. `AMD3B` carrying B2 came out at 11.20 ms
-at 32^3 against `AMD2`'s 11.70 while returning the vendored permutation, which is a firmer
-statement than any ratio against `AMD` here, both being ours and both having run in one process.
+`nnz(L)` identical to `AmdFlat` at every size in every run. `AmdCompacted` carrying B2 came out at
+11.20 ms at 32^3 against `AMD2`'s 11.70 while returning the vendored permutation, which is a firmer
+statement than any ratio against `AmdVendored` here, both being ours and both having run in one
+process.
 
 **B1 deletes a sweep, is provably redundant, and measured NOTHING.** `Amd3` re-sums `weight(u)`
 over `C[p]` after mass elimination trims it, recovering a number `massEliminate` already maintains,
@@ -1248,20 +1256,21 @@ ceiling on this direction is low; if cycles fall further than instructions, the 
 from touching each list once instead of twice, and the three remaining walks of `I[u]` in the
 prune, scan 1 and the bound become the large prize, since `AMD_2` makes two where we make four.
 
-**And what B2 does not touch**, which is larger than B2. `AMD3`'s 2D gap grows with n, 1.54x at 64
-a side to 2.07x at 400, and a constant five percent off a growing curve leaves it growing. `MMD3`
+**And what B2 does not touch**, which is larger than B2. `AmdFlat`'s 2D gap grows with n, 1.54x at
+64
+a side to 2.07x at 400, and a constant five percent off a growing curve leaves it growing. `MmdFlat`
 over the same quotient graph shows no such trend across the same seven sizes, so whatever grows
 lives on the amd branch alone and is not made of passes.
 
 ## The first scan folded into the prune, 2026-08-10
 
-**`AMD3` reaches the vendored routine on cubic grids.** The driver walked `I[u]` three times per
+**`AmdFlat` reaches the vendored routine on cubic grids.** The driver walked `I[u]` three times per
 pivot and `A[u]` twice; `AMD_2` walks them twice and once. `QuotientGraph::eliminate` now
 accumulates |C[c] - C[p]| and the bound's adjacency term on the walk the prune is already making,
 so scan 1 goes entirely and the bound's adjacency loop with it.
 
 ```
-                  AMD3   AMD3B                    AMD3   AMD3B
+                  AmdFlat   AmdCompacted                    AmdFlat   AmdCompacted
 12^3              0.29    0.26  -10.3%   64x64     0.41    0.41    0.0%
 16^3              0.93    0.85   -8.6%   100x100   1.03    0.95   -7.8%
 20^3              2.22    1.94  -12.6%   140x140   2.07    1.98   -4.3%
@@ -1284,13 +1293,15 @@ both down the same path, the fold is worth **10 to 16 percent on cubes**, 16.1 a
 at 16, 9.8 at 20, 10.3 at 26 and 12.8 at 32. Larger than first recorded, and arrived at properly.
 
 **And the ratio's denominator is the noisiest column in the table.** Over eight runs at 16 cubed,
-`AMD` reads 0.74 to 0.86 ms, a 16 percent spread, where `AMD3` reads 0.83 to 0.89, a 7 percent one.
-**The vendored routine varies more than we do**, so `AMD3 / AMD` per row is mostly a measurement of
-it. This section first said `AMD3` reaches 1.01x, 1.02x and 1.07x at 12, 16 and 20 a side, "which
+`AmdVendored` reads 0.74 to 0.86 ms, a 16 percent spread, where `AmdFlat` reads 0.83 to 0.89, a 7
+percent one.
+**The vendored routine varies more than we do**, so `AmdFlat / AMD` per row is mostly a measurement
+of
+it. This section first said `AmdFlat` reaches 1.01x, 1.02x and 1.07x at 12, 16 and 20 a side, "which
 is parity"; that was one run. What reproduces:
 
 ```
-                 AMD3 ms        AMD ms        ratio over eight runs
+                 AmdFlat ms        AMD ms        ratio over eight runs
 12^3           0.26 - 0.28   0.20 - 0.27         0.98 - 1.33
 16^3           0.83 - 0.89   0.74 - 0.86         0.97 - 1.18
 26^3           4.65 - 4.89   3.98 - 4.13         1.13 - 1.19
@@ -1379,7 +1390,7 @@ With the cubic constant factor largely gone, the two families have the same SHAP
 time, and it is not the shape either had before.
 
 ```
-cubes, AMD3 / AMD        2D, AMD3 / AMD
+cubes, AmdFlat / AMD        2D, AmdFlat / AMD
 12^3   0.98 - 1.33       32x32     1.33
 16^3   0.97 - 1.18       64x64     1.39
 20^3   1.05 - 1.17       100x100   1.56 - 1.73
@@ -1397,8 +1408,8 @@ knee past 280, where the working set roughly doubles.
 
 **That is a different question from the one the pass inventory answered.** The inventory addressed
 a constant factor and the constant factor is nearly spent. Nothing measured so far touches a term
-that scales, and the knee says memory rather than instructions. `MMD3` over the same quotient graph
-shows no growth on either family, which is the control that makes this an amd-branch property
+that scales, and the knee says memory rather than instructions. `MmdFlat` over the same quotient
+graph shows no growth on either family, which is the control that makes this an amd-branch property
 rather than a shared-infrastructure one.
 
 ## The two storage prices, measured with encoding held equal, 2026-08-17
@@ -1410,8 +1421,8 @@ the columns finally mean what they were built to mean. Identical permutations th
 
 ```
                                               square    cubic
-MMD3B / MMD3   genmmd's dead segments COST     1.079    1.288
-AMD3B / AMD3   AMD_2's pooled workspace EARNS  0.914    0.855 at large n
+MmdChained / MmdFlat   genmmd's dead segments COST     1.079    1.288
+AmdCompacted / AmdFlat   AMD_2's pooled workspace EARNS  0.914    0.855 at large n
 ```
 
 Geometric means over the ladder; the amd figure splits, 1.078 at 256 a side and below against 1.155
@@ -1425,7 +1436,7 @@ measured, flat, so whatever the advantage is, it is not L1: the candidates are p
 compacted pool against two large regions one of which only grows, and prefetch, a cursor walking
 forward being a stride hardware can follow where a scatter across an append-only arena is not.
 
-The cubic price for `MMD3B` is large and was not recorded anywhere before; the 4 to 10 percent
+The cubic price for `MmdChained` is large and was not recorded anywhere before; the 4 to 10 percent
 figure elsewhere in this file is the SQUARE ladder only.
 
 ## The ladders as they now stand, and how to read the tables, 2026-08-16
@@ -1463,22 +1474,23 @@ again as many vertices. The unstarred rows are the honest baseline.
                  all 12    powers of two    other sides
 MMD (genmmd)      1.062          1.071          1.056
 MMD2              1.052          1.051          1.055
-MMD3              1.052          1.047          1.058
-MMD3B             1.054          1.054          1.056
+MmdFlat              1.052          1.047          1.058
+MmdChained             1.054          1.054          1.056
 MMD1              1.169          1.214          1.138
 
 AMD (vendored)    1.084          1.106          1.080
 AMD2              n/a            n/a            n/a
-AMD3              1.095          1.107          1.088
-AMD3B             1.066          1.081          1.056
+AmdFlat              1.095          1.107          1.088
+AmdCompacted             1.066          1.081          1.056
 ```
 
 **The mmd branch has no growth term**: every layer but `MMD1` sits at 1.05 against genmmd's 1.06,
-with no series split, and what `MMD3` carries is a constant of 1.04 to 1.20 that erodes with n.
+with no series split, and what `MmdFlat` carries is a constant of 1.04 to 1.20 that erodes with n.
 **`MMD1` is the one genuinely different slope in either family**, 1.169, and its ratio to genmmd
 climbs from 1.60 at 32 a side to 2.89 at 800.
 
-**On the amd branch `AMD3B` is now BELOW the vendored routine on both series.** It reads 0.93x at
+**On the amd branch `AmdCompacted` is now BELOW the vendored routine on both series.** It reads
+0.93x at
 1024 squared and 0.97x at 1600, the first square sizes where anything of ours has beaten it. See
 `docs/DESIGN_DECISIONS.md` (2026-08-16, later still) for what did it.
 
@@ -1499,14 +1511,16 @@ aligning separates them.
 ```
 side       32    50    64   100   128   200   256   400   512   800
 AMD      58.6  56.0  63.5  59.0  72.0  64.0  75.2  64.0  96.7  77.1     ns/vertex, zigzags
-AMD3     68.4  76.0  78.1  82.0  84.2  87.2  89.3  94.2 108.1 127.2     smooth
+AmdFlat     68.4  76.0  78.1  82.0  84.2  87.2  89.3  94.2 108.1 127.2     smooth
 genmmd   48.8  52.0  51.3  55.0  55.5  58.0  62.9  57.1  61.5  66.2     smooth
-MMD3     58.6  60.0  61.0  60.0  59.8  61.5  61.3  61.6  64.0  72.1     smooth
+MmdFlat     58.6  60.0  61.0  60.0  59.8  61.5  61.3  61.6  64.0  72.1     smooth
 ```
 
-**Only `AMD` zigzags**, costing more per vertex at every power-of-two side than at the larger
+**Only `AmdVendored` zigzags**, costing more per vertex at every power-of-two side than at the
+larger
 50-series side beside it. So the two-series pattern in the RATIO columns is a denominator effect,
-and the ratio falling at 32, 64, 128, 256 and 512 means `AMD` got worse, not that we got better.
+and the ratio falling at 32, 64, 128, 256 and 512 means `AmdVendored` got worse, not that we got
+better.
 
 **A ratio hides which side is moving.** This survived a full differential and seven folds while
 being read as a property of our code. If a column here looks like a trend, convert it to time per
@@ -1519,10 +1533,10 @@ everywhere. `time ~ nnz(A)^alpha`:
 
 ```
 MMD  (genmmd)   1.039        AMD  (vendored)  1.054   confounded, two series
-MMD3            1.018        AMD3             1.077
+MmdFlat            1.018        AmdFlat             1.077
 
-AMD  powers of two   1.080   AMD3  powers of two   1.071
-AMD  other sides     1.049   AMD3  other sides     1.081
+AMD  powers of two   1.080   AmdFlat  powers of two   1.071
+AMD  other sides     1.049   AmdFlat  other sides     1.081
 ```
 
 **Everything is superlinear, and the exponents are small.** Read these as slopes to compare, not as
@@ -1530,17 +1544,18 @@ complexity claims: the published bounds are worst-case and dense, and an exponen
 theory expects on a grid. `experiments/ordering/README.md`, "What the literature proves about these
 algorithms", has the bounds and why they do not bind here.
 
-**`AMD3` has ONE slope**, 1.071 and 1.081, indistinguishable between the series. **`AMD` has two**,
-1.080 aligned and 1.049 unaligned. So at power-of-two sides the vendored routine grows at our
+**`AmdFlat` has ONE slope**, 1.071 and 1.081, indistinguishable between the series. **`AmdVendored`
+has
+two**, 1.080 aligned and 1.049 unaligned. So at power-of-two sides the vendored routine grows at our
 exponent and elsewhere at a lower one: the self-aliasing described below costs it about **0.03 in
 the exponent**, which is the same finding stated as a slope rather than as a ratio.
 
 **Our amd excess is 1.081 against 1.049**, about 0.032 in the exponent, or 1.23x over the full
 range. Real, small, and the sharpest form the open question has taken.
 
-**And `MMD3`'s slope is BELOW genmmd's**, 1.018 against 1.039. We grow more slowly than the
+**And `MmdFlat`'s slope is BELOW genmmd's**, 1.018 against 1.039. We grow more slowly than the
 reference on that branch. The container overhead is a constant paid at every size and it is being
-eroded: `MMD3` reads 1.20x genmmd at 32 a side and 1.09x at 800.
+eroded: `MmdFlat` reads 1.20x genmmd at 32 a side and 1.09x at 800.
 
 **Two caveats on the fits.** The smallest rows are quantised, 0.05 to 0.07 ms printed to two
 decimals being plus or minus ten percent; refitting from 100 a side up moves every alpha by at most
@@ -1558,16 +1573,17 @@ are FLAT across 400, 512 and 800 to a tenth of a percent, while D1 read misses p
 else, removes 56 percent of the misses at 512 and none at 400, with byte-identical permutations.
 See `docs/DESIGN_DECISIONS.md` (2026-08-16, later).
 
-**The honest baseline for growth is therefore `AMD`'s UNALIGNED series**, and the aligned rows
-should not be read as our columns improving.
+**The honest baseline for growth is therefore `AmdVendored`'s UNALIGNED series**, and the aligned
+rows should not be read as our columns improving.
 
 ### What the two ends measure
 
-At 32 a side `AMD3` is 1.17x `AMD` per vertex and `MMD3` is 1.20x genmmd. That is the
+At 32 a side `AmdFlat` is 1.17x `AmdVendored` per vertex and `MmdFlat` is 1.20x genmmd. That is the
 `std::vector` layer, measured twice independently.
 
-Over a 256-fold range within a series, `AMD3` grows 1.55 to 1.58x and `AMD`'s unaligned series grows
-1.38x, so about **1.13x of growth is genuinely ours** and is not yet explained. `MMD3` grows 1.09
+Over a 256-fold range within a series, `AmdFlat` grows 1.55 to 1.58x and `AmdVendored`'s unaligned
+series grows
+1.38x, so about **1.13x of growth is genuinely ours** and is not yet explained. `MmdFlat` grows 1.09
 and 1.20x against genmmd's 1.26 and 1.27x, so the mmd branch has no such term.
 
 ### What the top rows cost
@@ -1579,9 +1595,10 @@ seconds per ordering, which is most of that target's run time.
 
 ## The amd branch's 2D growth, and the one change that removed it, 2026-08-16
 
-**The symptom this file recorded for two weeks.** `AMD3` read 1.25x the vendored routine at 32 a
-side and 1.82x at 400, rising monotonically, while `MMD3` over the same quotient graph was flat and
-`AMD3`'s own cubic column was nearly flat. Six folds were applied to the amd drivers over one
+**The symptom this file recorded for two weeks.** `AmdFlat` read 1.25x the vendored routine at 32 a
+side and 1.82x at 400, rising monotonically, while `MmdFlat` over the same quotient graph was flat
+and
+`AmdFlat`'s own cubic column was nearly flat. Six folds were applied to the amd drivers over one
 session; five of them moved the whole 2D column down by a constant and left the slope exactly where
 it was.
 
@@ -1591,7 +1608,7 @@ probed two separate n-arrays at a dead pivot's id, once per element of every `I[
 16-byte load on a line the walk already touches.
 
 ```
-AMD3B against AMD    32    64   100   140   200   280   400
+AmdCompacted against AMD    32    64   100   140   200   280   400
 before             1.11  1.19  1.26  1.42  1.39  1.43  1.49     rising
 after              1.26  1.15  1.38  1.33  1.38  1.38  1.38     flat
 ```
@@ -1610,8 +1627,10 @@ constant 0.09 misses per visit, real but far too small at sizes where everything
 
 ### What to run, and what a reader should check
 
-`make scale-amd-2d` and `make scale-amd-3d`. The columns to read against each other are `AMD3` and
-`AMD3B` while both exist; they are the same algorithm and should agree within the plus or minus 3
+`make scale-amd-2d` and `make scale-amd-3d`. The columns to read against each other are `AmdFlat`
+and
+`AmdCompacted` while both exist; they are the same algorithm and should agree within the plus or
+minus 3
 percent floor. The ladder's default sides are geometric enough to show a trend but sparse in the
 middle, and the driver takes explicit sides, so a denser ladder needs no code:
 
@@ -1620,7 +1639,7 @@ middle, and the driver takes explicit sides, so a denser ladder needs no code:
 ```
 
 **And the open one.** `AMD1` and `AMD2` still climb in 2D, 1.05 to 1.22x and 1.36 to 1.47x, where
-`AMD3` is flat. The descriptor fold is in the shared class and reached them for free, so whatever
+`AmdFlat` is flat. The descriptor fold is in the shared class and reached them for free, so whatever
 remains is driver-side. That is the next thing the differential should be pointed at.
 
 ## The vendored routine's own phases, and the denominator every ratio here divides by, 2026-08-15
@@ -1636,7 +1655,7 @@ whole, and two of that routine's phases have no counterpart on our side:
   `Amd.cpp`'s own header says that tree "is not guaranteed to be the precise supernodal elimination
   tree" in any case.
 
-So `AMD3 1.82x` at 400 a side is measured against more work than the comparison is about. **This
+So `AmdFlat 1.82x` at 400 a side is measured against more work than the comparison is about. **This
 file has carried one estimate of the correction since 2026-08-01**, 139 ms and 154 ms of a 3.67 s
 run at 140 a side, about 8 percent, from a single profile at a single size, with the conclusion
 "the true gap is nearer 1.6x than 1.46x" resting on it. The estimate has never been measured per
@@ -1682,7 +1701,7 @@ oracle trustworthy go with it.
 printing figures if it does not: the permutation entry for entry, `Info[AMD_LNZ]` and
 `Info[AMD_NCMPA]`, all against unhooked `amd_order` on the same pattern, once per row before
 anything is timed. `Control` is `nullptr` in both, which is what `OrderEngine` passes for
-`Ordering::AmdVendored`, so the phases describe the same call the `AMD` column measures.
+`Ordering::AmdVendored`, so the phases describe the same call the `AmdVendored` column measures.
 
 **And the caveat: a clock read is a compiler barrier.** Each of the five sits at a phase boundary,
 between two loops rather than inside one, so there is nothing across it the optimizer should have
@@ -1705,7 +1724,8 @@ grid          AMD ms   AMDt ms    valid      aat    build     core     post    o
 100x100        2.272     2.261    0.064    0.083    0.098    1.834    0.182    0.000    85.5%
 ```
 
-Both self-checks pass: `AMDt` tracks `AMD` within the floor, and `other` is zero to three decimals.
+Both self-checks pass: `AMDt` tracks `AmdVendored` within the floor, and `other` is zero to three
+decimals.
 **And the share reads FLAT**, 85.1, 85.5, 85.5 over a tenfold range in n, which if it holds on
 alpamayo means the excluded phases are a constant fraction and **the amd branch's 2D growth is
 ours**. It also puts the correction nearer 15 percent than the 8 recorded here in August, which
@@ -1716,13 +1736,13 @@ order: do both self-checks pass; is `comp%` flat across the full 32-to-400 ladde
 same on cubes, where the phase mix should differ, `AMD_aat` being linear in nnz(A) while `core`
 grows with fill.
 
-## MMD3's remaining gap is a CONSTANT, not growth, 2026-08-14
+## MmdFlat's remaining gap is a CONSTANT, not growth, 2026-08-14
 
 `make scale2d` and `make scale3d` on alpamayo, the first full pair since the 2026-08-10 fusions.
 Ratios against the vendored routine of the same lineage:
 
 ```
-            MMD1    MMD3            AMD1    AMD3
+            MMD1    MmdFlat            AMD1    AmdFlat
 32x32       1.53    1.17            1.13    1.25
 64x64       2.29    1.43            1.22    1.60
 100x100     2.43    1.39            1.50    1.83
@@ -1739,7 +1759,8 @@ Ratios against the vendored routine of the same lineage:
 32^3        4.80    0.89            1.37    1.17
 ```
 
-**MMD3 in 2D is flat at 1.35 to 1.43 from 64 a side to 400**, a forty-fold range in n. The 1.17 at
+**MmdFlat in 2D is flat at 1.35 to 1.43 from 64 a side to 400**, a forty-fold range in n. The 1.17
+at
 32 is 0.06 ms against 0.07 and sits under this benchmark's noise floor, so the apparent rise from
 it is not a trend. That settles the shape of the question: a constant factor, not a term that
 scales, so the profile is looking for something we do per vertex or per bucket operation that
@@ -1752,15 +1773,15 @@ faster comes to dominate the per-vertex overhead we carry, and the sign of the d
 The same account then says the 2D residual is whatever we pay per vertex or per bucket operation,
 since that is the term a smaller clique cannot amortize.
 
-**MMD2 and MMD3 are the same speed everywhere**, 0.83 against 0.77, 3.24 against 3.26, 13.73
+**MMD2 and MmdFlat are the same speed everywhere**, 0.83 against 0.77, 3.24 against 3.26, 13.73
 against 12.87. The four tie-break reversals cost nothing measurable, so a profile of either
 answers for both, and the question is about the extras rather than about mmd3.
 
-**MMD1 at 2.3 to 2.7x against MMD3's 1.4x says the extras are already paying for themselves in
+**MMD1 at 2.3 to 2.7x against MmdFlat's 1.4x says the extras are already paying for themselves in
 2D.** The residual is not the extras being slow; it is what remains after they have done their
 work.
 
-**AMD3 on cubes is 1.09 to 1.25**, against 1.44x recorded after the hash fix and 3.0x before it,
+**AmdFlat on cubes is 1.09 to 1.25**, against 1.44x recorded after the hash fix and 3.0x before it,
 so the two fusions took another quarter out of it. 2D is 1.60 to 2.03 above 64 a side, still the
 larger of the two, and still the growth term that "What both families look like now" identified
 and nothing has yet addressed.

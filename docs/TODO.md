@@ -107,8 +107,9 @@ rather than one at a time. Trigger: before anyone outside this effort runs the s
 
 **LARGELY DONE AS OF 2026-08-21.** This section is now a record of how it went rather than a
 plan.
-`MMD3` and `AMD3` each reproduce their reference's permutation exactly on every matrix the
-benchmarks cover, `MMD3` is the default, and the earlier ladder layers this section discusses,
+Every driver of ours reproduces its branch's reference permutation exactly on every matrix the
+benchmarks cover, `AmdCompacted` is the default, and the earlier ladder layers this section
+discusses,
 `MMD1`, `MMD2`, `AMD1` and `AMD2`, were retired to `retired/`. The steps below are kept because
 each names a mechanism and says what it was for; read them as history. What remains open is in
 `docs/NEXT.md`.
@@ -116,7 +117,7 @@ each names a mechanism and says what it was for; read them as history. What rema
 `OrderEngine` offers two lineages. MMD and AMD are vendored; MMD1, AMD1 and AMD2 were ours, built
 from the matching prototypes over the shared `QuotientGraph`. The intent was to keep both lineages
 while ours developed, and to deprecate the vendored pair only once they could replace it. The
-vendored routines are the default for neither lineage now: `MMD3` is.
+vendored routines are the default for neither lineage now: `AmdCompacted` is.
 
 What ours do not yet have, and each is a step rather than a question:
 
@@ -1353,7 +1354,7 @@ dirties a line four vertices share.
 the whole direction at "roughly 7 percent of a one-shot solve" on the basis that closing AMD1's
 1.46x was all there was. What the day found is that the array COUNT, not the layout, was most of
 the gap: genmmd indexes five arrays by a vertex where we indexed eleven, each of its arrays
-answering several questions at once. Four folds on that basis took `MMD3` from 1.35 to 1.48x
+answering several questions at once. Four folds on that basis took `MmdFlat` from 1.35 to 1.48x
 genmmd in 2D to 1.02 to 1.19x, and to 0.81 at 32 cubed. `docs/DESIGN_DECISIONS.md` (2026-08-15)
 carries the account.
 
@@ -1683,17 +1684,17 @@ elimination avoids. `degme` is decremented inside `AMD_2`'s scan 2 but never rea
 enters a survivor's degree only in the later pass, `deg = Degree[i] + degme - nvi`, by which point
 it is final. Every survivor sees the same number in both codes, and there was nothing to avoid.
 
-**Production `Amd3` and `Ordering::AMD3` are extracted, 2026-08-08.** It reproduces the vendored
+**Production `Amd3` and `Ordering::AmdFlat` are extracted, 2026-08-08.** It reproduces the vendored
 routine's raw permutation directly, and its fill column in `benchmarks/ordering` is the vendored
 AMD's exactly. `amd3` is in `PORTED`, so `make test` now holds it to production on the examples and
 on grids as well as to its own twin. The shared quotient graph gained two flags and one method,
 `setVendoredListOrder`, `setLateMassElimination` and `massEliminate`, all inert for the other five
 drivers and verified so before `Amd3` existed.
 
-**`AMD3` is NOT the default, deliberately.** `MMD3` became one because reproducing a reference with
-decades of use is a better bet on unseen inputs than a tie-break of our own. The same argument
+**`AmdFlat` is NOT the default, deliberately.** `MmdFlat` became one because reproducing a reference
+with decades of use is a better bet on unseen inputs than a tie-break of our own. The same argument
 would apply here and the evidence does not: with the filing defect fixed, `AMD2` fills less than
-the vendored routine on grids, so `AMD3` fills more. Revisit if the 3D grids say otherwise.
+the vendored routine on grids, so `AmdFlat` fills more. Revisit if the 3D grids say otherwise.
 
 **What is left of this work:** deleting `amd4` once nothing further is wanted from it, lifting its
 postorder block first if a permutation-level check is ever wanted.
@@ -1721,8 +1722,8 @@ three things, and only one of them was an ordering defect.
 **And the mmd branch gained the acceptance test it never had, 2026-08-09.** `make mmdorder`
 compares production `Mmd3` against genmmd's elimination order on the same four shapes, 38 cases,
 all matching, and `make aligned` runs both branches. The mmd alignment had rested since 2026-08-07
-on a scratch probe that died with its session, and day to day on `MMD3 nnzL == MMD nnzL`, which
-`MMD3.md` iteration 6 shows is not sufficient: fill was exact at every size while the permutation
+on a scratch probe that died with its session, and day to day on `MmdFlat nnzL == MMD nnzL`, which
+`MmdFlat.md` iteration 6 shows is not sufficient: fill was exact at every size while the permutation
 still diverged at pivot 700 of 1024. The check needs no hook, since genmmd emits that order and
 does no postorder, which is why it took forty lines where the amd side took a generator.
 

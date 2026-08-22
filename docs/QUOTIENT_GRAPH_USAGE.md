@@ -397,24 +397,24 @@ for a cross-build comparison, says a step changed something it should not have.
 
 | | 801^2 | 1025^2 | 1601^2 | 65^3 | 81^3 |
 |---|---:|---:|---:|---:|---:|
-| `MMD3C / MMD3` | 0.938 | 0.927 | 0.941 | 0.959 | 0.911 |
-| `AMD3B / AMD3` | 0.850 | 0.840 | 0.831 | 0.895 | 0.897 |
-| `MMD3B / MMD3` | 1.216 | 1.194 | 1.207 | 1.357 | 1.542 |
+| `MmdCompacted / MmdFlat` | 0.938 | 0.927 | 0.941 | 0.959 | 0.911 |
+| `AmdCompacted / AmdFlat` | 0.850 | 0.840 | 0.831 | 0.895 | 0.897 |
+| `MmdChained / MmdFlat` | 1.216 | 1.194 | 1.207 | 1.357 | 1.542 |
 
 The absolute milliseconds behind them, from the same run:
 
 | | 801^2 | 1025^2 | 1601^2 | 65^3 | 81^3 |
 |---|---:|---:|---:|---:|---:|
-| `MMD3` | 44.81 | 92.69 | 218.19 | 145.92 | 306.56 |
-| `MMD3C` | 42.05 | 85.94 | 205.27 | 139.96 | 279.17 |
-| `MMD3B` | 54.49 | 110.63 | 263.34 | 198.01 | 472.79 |
-| `AMD3` | 78.39 | 164.56 | 358.09 | 93.15 | 207.41 |
-| `AMD3B` | 66.67 | 138.16 | 297.43 | 83.36 | 186.00 |
+| `MmdFlat` | 44.81 | 92.69 | 218.19 | 145.92 | 306.56 |
+| `MmdCompacted` | 42.05 | 85.94 | 205.27 | 139.96 | 279.17 |
+| `MmdChained` | 54.49 | 110.63 | 263.34 | 198.01 | 472.79 |
+| `AmdFlat` | 78.39 | 164.56 | 358.09 | 93.15 | 207.41 |
+| `AmdCompacted` | 66.67 | 138.16 | 297.43 | 83.36 | 186.00 |
 
-`MMD3B` is here as a control rather than a candidate: chaining is kept as a permanent alternative
-and is out of scope for this exercise, so its column should not move at all.
+`MmdChained` is here as a control rather than a candidate: chaining is kept as a permanent
+alternative and is out of scope for this exercise, so its column should not move at all.
 
 **The real-matrix figures are the other half of this baseline** and are in
-`benchmarks/matrices/ORDERING.md`, measured 2026-08-20: `MMD3C / MMD3` at 0.982 median and
-`AMD3B / AMD3` at 0.950, both over 246 matrices. Those are the ones to quote; the grid table above
-is for catching drift between steps, being cheap to rerun.
+`benchmarks/matrices/ORDERING.md`, measured 2026-08-20: `MmdCompacted / MmdFlat` at 0.982 median and
+`AmdCompacted / AmdFlat` at 0.950, both over 246 matrices. Those are the ones to quote; the grid
+table above is for catching drift between steps, being cheap to rerun.

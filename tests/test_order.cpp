@@ -1,9 +1,9 @@
 #include "oblio/SparseMatrix.h"
 #include "oblio/Permutation.h"
 #include "oblio/OrderEngine.h"
-#include "oblio/Mmd3B.h"
-#include "oblio/Mmd3C.h"
-#include "oblio/Amd3B.h"
+#include "oblio/MmdChained.h"
+#include "oblio/MmdCompacted.h"
+#include "oblio/AmdCompacted.h"
 #include "oblio/QuotientGraph.h"
 #include "test_util.h"
 #include <cstdint>
@@ -26,25 +26,25 @@ template<class Val> static void checkOrder(const SparseMatrix<Val>& A, Ordering 
 // experiments/ordering or appears in its PORTED list, so this is the only thing checking them at
 // all, and `make digest` in benchmarks/ordering is the only other place any of them is exercised.
 //
-// ALL THREE ARE CHECKED ON EVERY MATRIX, deliberately and uniformly. Mmd3B ran on five of the seven
-// until 2026-08-17, missing the 5x5 diagonal and the complex arrow, and Amd3B had no assertion
-// anywhere. The two absent matrices are the ones the experiment's own graphs cannot produce: n
+// ALL THREE ARE CHECKED ON EVERY MATRIX, deliberately and uniformly. MmdChained ran on five of the
+// seven until 2026-08-17, missing the 5x5 diagonal and the complex arrow, and AmdCompacted had
+// no assertion anywhere. The two absent matrices are the ones the experiment's own graphs cannot produce: n
 // isolated vertices, where every degree is zero and nothing ever merges, and the complex scalar
 // type, which exercises the structural overloads on a second instantiation.
 using OrderFn = std::vector<std::int32_t>(*)(const std::vector<std::size_t>&,
                                              const std::vector<std::int32_t>&);
-// `orderMmd3B` and `orderMmd3C` take a third argument, `delta`, with a default, so their type is
-// not OrderFn and neither can be named directly where one is wanted. Forwarded rather than widening
+// `orderMmdChained` and `orderMmdCompacted` take a third argument, `delta`, with a default, so
+// their type is not OrderFn and neither can be named directly where one is wanted. Forwarded rather than widening
 // OrderFn: the helpers exist to compare a free function against an enum member, and delta is the
-// mmd layers' business. `orderAmd3B` needs no forwarder, the amd branch having no delta.
-static std::vector<std::int32_t> mmd3bDefault(const std::vector<std::size_t>&  colPtr,
+// mmd layers' business. `orderAmdCompacted` needs no forwarder, the amd branch having no delta.
+static std::vector<std::int32_t> mmdChainedDefault(const std::vector<std::size_t>&  colPtr,
                                               const std::vector<std::int32_t>& rowIdx) {
-    return orderMmd3B(colPtr, rowIdx);
+    return orderMmdChained(colPtr, rowIdx);
 }
 
-static std::vector<std::int32_t> mmd3cDefault(const std::vector<std::size_t>&  colPtr,
+static std::vector<std::int32_t> mmdCompactedDefault(const std::vector<std::size_t>&  colPtr,
                                               const std::vector<std::int32_t>& rowIdx) {
-    return orderMmd3C(colPtr, rowIdx);
+    return orderMmdCompacted(colPtr, rowIdx);
 }
 
 template<class Val> static void checkOrderFn(const SparseMatrix<Val>& A, OrderFn f,
@@ -60,8 +60,8 @@ template<class Val> static void checkOrderFn(const SparseMatrix<Val>& A, OrderFn
 // agree on output while doing different work is the failure this catches and the permutation
 // comparison cannot, and it is the shape of defect this tree has repeatedly found by hand.
 //
-// ZERO MEANS NOT TRACKED, and then only the order is compared. `Mmd3B` does not track it: chained
-// storage ends a clique at a terminator and keeps no size, so subtracting a length on death would
+// ZERO MEANS NOT TRACKED, and then only the order is compared. `MmdChained` does not track it:
+// chained storage ends a clique at a terminator and keeps no size, so subtracting a length on death would
 // need a per-vertex array in the one file whose purpose is genmmd's array economy.
 template<class Val> static void checkSameOrderFn(const SparseMatrix<Val>& A, Ordering m,
                                                  OrderFn f, const std::string& lbl){
@@ -110,21 +110,25 @@ int main(){
       checkOrder(A,Ordering::MmdFlat,"arrow 6x6      : MmdFlat valid");
       checkOrder(A,Ordering::AmdFlat,"arrow 6x6      : AmdFlat valid");
       // THE THREE NON-ENUM LAYERS, each of which must reproduce its original entry for entry,
-      // which is the whole of what makes it a measurement rather than a second ordering. Mmd3B is
-      // MmdFlat on genmmd's clique storage and Amd3B is AmdFlat on AMD_2's, both permanent; Mmd3C
-      // is MmdFlat on the production layout and is transitional, carrying the amd folds onto
+      // which is the whole of what makes it a measurement rather than a second ordering. MmdChained
+      // is MmdFlat on genmmd's clique storage and AmdCompacted is AmdFlat on AMD_2's, both
+      // permanent; MmdCompacted is MmdFlat on the production layout and is transitional,
+      // carrying the amd folds onto
       // the mmd side. The two AMD B layers that used to be checked here were retired on 2026-08-16 when
       // their schedule moved into their originals.
       //
       // Validity is asserted once per layer, here, and sameness on every matrix below. Sameness
       // against an original already checked valid implies validity, so the arrow's three are what
       // exercise the free-function path through setNewToOld rather than the comparison.
-      checkOrderFn(A,mmd3bDefault,"arrow 6x6      : MMD3B valid");
-      checkOrderFn(A,mmd3cDefault,"arrow 6x6      : MMD3C valid");
-      checkOrderFn(A,orderAmd3B,  "arrow 6x6      : AMD3B valid");
-      checkSameOrderFn(A,Ordering::MmdFlat,mmd3bDefault,"arrow 6x6      : MMD3B == MmdFlat");
-      checkSameOrderFn(A,Ordering::MmdFlat,mmd3cDefault,"arrow 6x6      : MMD3C == MmdFlat");
-      checkSameOrderFn(A,Ordering::AmdFlat,orderAmd3B,  "arrow 6x6      : AMD3B == AmdFlat"); }
+      checkOrderFn(A,mmdChainedDefault,"arrow 6x6      : MmdChained valid");
+      checkOrderFn(A,mmdCompactedDefault,"arrow 6x6      : MmdCompacted valid");
+      checkOrderFn(A,orderAmdCompacted,  "arrow 6x6      : AmdCompacted valid");
+      checkSameOrderFn(A,Ordering::MmdFlat,mmdChainedDefault,
+                       "arrow 6x6      : MmdChained == MmdFlat");
+      checkSameOrderFn(A,Ordering::MmdFlat,mmdCompactedDefault,
+                       "arrow 6x6      : MmdCompacted == MmdFlat");
+      checkSameOrderFn(A,Ordering::AmdFlat,orderAmdCompacted,
+                       "arrow 6x6      : AmdCompacted == AmdFlat"); }
     for(std::size_t size : {1u,2u,10u,100u}){ auto A=tridiagFull(size);
       reqSym(A,"tridiag n="+std::to_string(size)+" : symmetric");
 #ifdef OBLIO_VENDORED_ORDERINGS
@@ -133,12 +137,12 @@ int main(){
 #endif
       checkOrder(A,Ordering::MmdFlat,"tridiag n="+std::to_string(size)+" : MmdFlat valid");
       checkOrder(A,Ordering::AmdFlat,"tridiag n="+std::to_string(size)+" : AmdFlat valid");
-      checkSameOrderFn(A,Ordering::MmdFlat,mmd3bDefault,
-                       "tridiag n="+std::to_string(size)+" : MMD3B == MmdFlat");
-      checkSameOrderFn(A,Ordering::MmdFlat,mmd3cDefault,
-                       "tridiag n="+std::to_string(size)+" : MMD3C == MmdFlat");
-      checkSameOrderFn(A,Ordering::AmdFlat,orderAmd3B,
-                       "tridiag n="+std::to_string(size)+" : AMD3B == AmdFlat"); }
+      checkSameOrderFn(A,Ordering::MmdFlat,mmdChainedDefault,
+                       "tridiag n="+std::to_string(size)+" : MmdChained == MmdFlat");
+      checkSameOrderFn(A,Ordering::MmdFlat,mmdCompactedDefault,
+                       "tridiag n="+std::to_string(size)+" : MmdCompacted == MmdFlat");
+      checkSameOrderFn(A,Ordering::AmdFlat,orderAmdCompacted,
+                       "tridiag n="+std::to_string(size)+" : AmdCompacted == AmdFlat"); }
     { std::size_t size=5; std::vector<std::size_t> cp(size+1); std::vector<std::int32_t> ri(size); std::vector<double> v(size,1.0);
       for(std::size_t j=0;j<size;++j){cp[j]=j; ri[j]=static_cast<std::int32_t>(j);} cp[size]=size;
       SparseMatrix<double> A(size,cp,ri,v);
@@ -152,9 +156,12 @@ int main(){
       // n ISOLATED VERTICES, where every degree is zero and nothing ever merges. None of the three
       // layers was checked on this shape until 2026-08-17, and it is the one the experiment's own
       // graphs cannot produce: all seven of them are connected and none is trivial.
-      checkSameOrderFn(A,Ordering::MmdFlat,mmd3bDefault,"diagonal 5x5   : MMD3B == MmdFlat");
-      checkSameOrderFn(A,Ordering::MmdFlat,mmd3cDefault,"diagonal 5x5   : MMD3C == MmdFlat");
-      checkSameOrderFn(A,Ordering::AmdFlat,orderAmd3B,  "diagonal 5x5   : AMD3B == AmdFlat"); }
+      checkSameOrderFn(A,Ordering::MmdFlat,mmdChainedDefault,
+                       "diagonal 5x5   : MmdChained == MmdFlat");
+      checkSameOrderFn(A,Ordering::MmdFlat,mmdCompactedDefault,
+                       "diagonal 5x5   : MmdCompacted == MmdFlat");
+      checkSameOrderFn(A,Ordering::AmdFlat,orderAmdCompacted,
+                       "diagonal 5x5   : AmdCompacted == AmdFlat"); }
     { std::vector<std::size_t> cp={0,6,8,10,12,14,16};
       std::vector<std::int32_t> ri={0,1,2,3,4,5, 0,1, 0,2, 0,3, 0,4, 0,5};
       std::vector<std::complex<double>> v(ri.size(),{1,0}); SparseMatrix<std::complex<double>> C(6,cp,ri,v);
@@ -168,9 +175,12 @@ int main(){
       // THE SECOND SCALAR TYPE. An ordering reads only the pattern, so the permutation must be the
       // real arrow's; what this exercises is the structural overloads through a second
       // instantiation of the templated helpers.
-      checkSameOrderFn(C,Ordering::MmdFlat,mmd3bDefault,"arrow complex  : MMD3B == MmdFlat");
-      checkSameOrderFn(C,Ordering::MmdFlat,mmd3cDefault,"arrow complex  : MMD3C == MmdFlat");
-      checkSameOrderFn(C,Ordering::AmdFlat,orderAmd3B,  "arrow complex  : AMD3B == AmdFlat"); }
+      checkSameOrderFn(C,Ordering::MmdFlat,mmdChainedDefault,
+                       "arrow complex  : MmdChained == MmdFlat");
+      checkSameOrderFn(C,Ordering::MmdFlat,mmdCompactedDefault,
+                       "arrow complex  : MmdCompacted == MmdFlat");
+      checkSameOrderFn(C,Ordering::AmdFlat,orderAmdCompacted,
+                       "arrow complex  : AmdCompacted == AmdFlat"); }
     std::cout<<"\nOrderEngine tests: "<<pass<<"/"<<(pass+fail)<<" passed\n";
     return fail==0?0:1;
 }

@@ -2,10 +2,10 @@
 // that ship: a size at which the ordering costs noticeably more per vertex than at the sizes either
 // side of it, because arrays indexed by vertex have landed in the same cache sets.
 //
-// WHY. On 2026-08-17 `Mmd3C` was found to read 1.28x `MmdFlat` at exactly 200 a side and about
-// 0.99x at 199 and 201, and padding every size-n allocation by one page removed it: size-n arrays landing
-// in the same cache sets at that n. `Mmd3C` is transitional and its addresses are about to change,
-// so the question that outlives it is whether `QuotientGraph` has such points, since `MmdFlat` and
+// WHY. On 2026-08-17 `MmdCompacted` was found to read 1.28x `MmdFlat` at exactly 200 a side and
+// about 0.99x at 199 and 201, and padding every size-n allocation by one page removed it: size-n arrays landing
+// in the same cache sets at that n. `MmdCompacted` is transitional and its addresses are about to
+// change, so the question that outlives it is whether `QuotientGraph` has such points, since `MmdFlat` and
 // `AmdFlat` allocate the same shaped set of vectors and would collide by the same mechanism at
 // whatever n aligns. The scaling ladder cannot see it: it visits twelve sides, and this one was
 // found only because 200 happens to be a rung.
@@ -17,7 +17,8 @@
 // depends on a ladder.
 //
 // A FLAGGED SIDE IS A CANDIDATE AND NOT A RESULT. Confirming one means padding the allocations by a
-// page and seeing it go, exactly as `Mmd3C`'s `OBLIO_MMD3C_PAD` did; nothing here proves a cause.
+// page and seeing it go, exactly as `MmdCompacted`'s `OBLIO_MMD3C_PAD` did; nothing here proves a
+// cause.
 //
 // REPEATS MATTER MORE THAN USUAL, and the default is 25 for a measured reason. At best-of-3 in the
 // sandbox the series scattered by about 10 percent, which is the same size as the effect, and one
@@ -39,7 +40,7 @@
 // WHAT IT FOUND, 2026-08-17, the run it was written for: NOTHING, which was the wanted answer.
 // `MmdFlat` and `AmdFlat` are flat across sides 190 to 210 on alpamayo, and 200 in particular is
 // unremarkable in both, `AmdFlat` reading BELOW both its neighbors there. So the point that
-// prompted this belongs to `Mmd3C`'s allocations and not to the shared class's. One band of 21 sides, so a
+// prompted this belongs to `MmdCompacted`'s allocations and not to the shared class's. One band of 21 sides, so a
 // point at some other n is unobserved rather than excluded.
 
 #include "oblio/AmdFlat.h"

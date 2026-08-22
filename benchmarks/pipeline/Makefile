@@ -80,7 +80,11 @@ $(shell [ "`cat .build-mode 2>/dev/null`" = "$(BUILD_MODE)" ] || rm -f .build-mo
 
 ifneq ($(VENDOR_SRCS),)
   VENDOR_DEFS = -DOBLIO_VENDORED_ORDERINGS
-  VENDOR_OBJS = Amd.o Mmd.o
+  # DERIVED FROM VENDOR_SRCS RATHER THAN SPELLED OUT. `-c` on several sources writes each
+  # object to the basename in the CURRENT directory, so these must track the source names
+  # exactly; they were spelled out until 2026-08-21 and a rename of the sources broke the
+  # link, the compile step having quietly produced objects under the new names.
+  VENDOR_OBJS = $(notdir $(VENDOR_SRCS:.cpp=.o))
 endif
 
 # Bare `make` prints the target list rather than building. Stated explicitly because the default
@@ -125,5 +129,5 @@ scale3d: pipeline_scaling_cpp
 # is overridable, `make CXXFLAGS="... -g"` produces one on macOS, and clean removes what a build
 # in this directory CAN produce.
 clean:
-	rm -f .build-mode pipeline_timing_cpp pipeline_scaling_cpp Amd.o Mmd.o
+	rm -f .build-mode pipeline_timing_cpp pipeline_scaling_cpp AmdVendored.o MmdVendored.o
 	rm -rf *.dSYM

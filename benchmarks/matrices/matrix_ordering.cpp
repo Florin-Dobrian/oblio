@@ -41,12 +41,12 @@
 #include "MatrixMarket.h"
 
 #include "oblio/AmdFlat.h"
-#include "oblio/Amd3B.h"
+#include "oblio/AmdCompacted.h"
 #include "oblio/ElmForest.h"
 #include "oblio/ElmForestEngine.h"
 #include "oblio/MmdFlat.h"
-#include "oblio/Mmd3B.h"
-#include "oblio/Mmd3C.h"
+#include "oblio/MmdChained.h"
+#include "oblio/MmdCompacted.h"
 #include "oblio/Permutation.h"
 #include "oblio/QuotientGraph.h"
 #include "oblio/SparseMatrix.h"
@@ -229,11 +229,11 @@ void run(const std::string& path, const Options& options) {
     //        moment, and PAYLOAD ONLY, with no per-clique header, no allocator rounding and no
     //        capacity above size.
     //
-    // pC IS A PROPERTY OF THE ALGORITHM, NOT OF THE LAYOUT. `MmdFlat`, `Mmd3B` and `Mmd3C` return
-    // the same permutation, so they form the same cliques and lose the same members at the same
+    // pC IS A PROPERTY OF THE ALGORITHM, NOT OF THE LAYOUT. `MmdFlat`, `MmdChained` and
+    // `MmdCompacted` return the same permutation, so they form the same cliques and lose the same members at the same
     // moments; the figure is identical for all three, and the same holds for `AmdFlat` against
-    // `Amd3B`. Neither vendored routine can report one. Only cC is ours, and a chunked version
-    // would show this same pC with a cC of nothing.
+    // `AmdCompacted`. Neither vendored routine can report one. Only cC is ours, and a chunked
+    // version would show this same pC with a cC of nothing.
     std::size_t cC = 0;
     gPeakCliqueMembers = 0;
     const std::vector<std::int32_t> order = amd ? orderAmdFlat(colPtr, rowIdx, cC)
@@ -241,8 +241,8 @@ void run(const std::string& path, const Options& options) {
     const std::size_t pC   = gPeakCliqueMembers;
     const std::size_t nnzL = fillOf(A, order);
 
-    // THE B SIBLING RIDES ALONG ON BOTH BRANCHES, and only its time is reported: `Amd3B` on the amd
-    // side, `Mmd3B` on the mmd side. Each is its branch's driver on a DIFFERENT CLIQUE LAYOUT,
+    // THE B SIBLING RIDES ALONG ON BOTH BRANCHES, and only its time is reported: `AmdCompacted` on
+    // the amd side, `MmdChained` on the mmd side. Each is its branch's driver on a DIFFERENT CLIQUE LAYOUT,
     // `AMD_2`'s compacting pool and genmmd's chained segments respectively, so in neither case is
     // there anything for a `cC` column to compare; see experiments/ordering/README.md on the three
     // layouts. Everything else about a sibling MUST match its driver, the two being the same
@@ -251,23 +251,24 @@ void run(const std::string& path, const Options& options) {
     //
     // THE `pC` CHECK IS THE SHARP ONE, and it is why this exists. Peak live clique members is a
     // property of the ALGORITHM and not of the layout, so two drivers agreeing on the permutation
-    // can still be caught doing different work. It found two defects in `Amd3B`'s mid-walk
+    // can still be caught doing different work. It found two defects in `AmdCompacted`'s mid-walk
     // collector on 2026-08-19, neither of which moved a permutation or a fill figure and neither
     // of which the digest, the vendored acceptance checks, `test_order` or the sanitizers could
     // see. Order and fill compare the ANSWER; a B layer exists to differ in MECHANISM while
     // agreeing on the answer, so until this check there was nothing watching the thing it varies.
     // TWO SIBLINGS ON THE MMD BRANCH, ONE ON THE AMD BRANCH, and every one of them gets all three
-    // checks. `Mmd3C` is the mmd algorithm on `AMD_2`'s compacting pool, the second layout this
-    // branch has, so it belongs beside `Mmd3B` rather than instead of it. There is no `Amd3C`.
+    // checks. `MmdCompacted` is the mmd algorithm on `AMD_2`'s compacting pool, the second layout
+    // this branch has, so it belongs beside `MmdChained` rather than instead of it. There is no
+    // `Amd3C`.
     double      sibMs[2] = {0.0, 0.0};
     std::size_t nCmp[2]  = {0, 0};
     const int   sibCount = amd ? 1 : 2;
     std::string extra;
     for (int si = 0; si < sibCount; ++si) {
-        const char* tag = amd ? "AMD3B" : (si == 0 ? "MMD3B" : "MMD3C");
+        const char* tag = amd ? "AmdCompacted" : (si == 0 ? "MmdChained" : "MmdCompacted");
         auto sibling = [&] {
-            if (amd) return orderAmd3B(colPtr, rowIdx);
-            return si == 0 ? orderMmd3B(colPtr, rowIdx) : orderMmd3C(colPtr, rowIdx);
+            if (amd) return orderAmdCompacted(colPtr, rowIdx);
+            return si == 0 ? orderMmdChained(colPtr, rowIdx) : orderMmdCompacted(colPtr, rowIdx);
         };
         sibMs[si] = bestOf([&] { const auto p = sibling(); (void) p; }, repeats);
         gPeakCliqueMembers = 0;
@@ -275,9 +276,10 @@ void run(const std::string& path, const Options& options) {
         const std::size_t sibPC = gPeakCliqueMembers;
         // HOW OFTEN THE POOL HAD TO BE COMPACTED, for the two siblings that have one. Both size it
         // to `nzaat + nzaat/5 + n`, which is `AMD_2`'s `iwlen`, so the figure is directly against
-        // that routine's Info[AMD_NCMPA] below. `Mmd3B` chains and never compacts, so it has none.
-        if (amd)          nCmp[si] = gAmd3BCompactions;
-        else if (si == 1) nCmp[si] = gMmd3CCompactions;
+        // that routine's Info[AMD_NCMPA] below. `MmdChained` chains and never compacts, so it has
+        // none.
+        if (amd)          nCmp[si] = gAmdCompactions;
+        else if (si == 1) nCmp[si] = gMmdCompactions;
         if (sibOrder != order)                extra += std::string("  ") + tag + " order differs";
         else if (fillOf(A, sibOrder) != nnzL) extra += std::string("  ") + tag + " fill differs";
         if (sibPC != pC)                      extra += std::string("  ") + tag + " pC differs";
@@ -302,8 +304,8 @@ void run(const std::string& path, const Options& options) {
         vendored = bestOf(
             [&] { amd_order(n, ap.data(), ai.data(), perm.data(), nullptr, nullptr); }, repeats);
         // AND THE REFERENCE'S OWN COUNT, one untimed call with an Info array. Info[AMD_NCMPA] is
-        // the same quantity `Amd3B` reports, over a workspace of the same size, so the two are
-        // comparable entry for entry.
+        // the same quantity `AmdCompacted` reports, over a workspace of the same size, so the two
+        // are comparable entry for entry.
         {
             double info[20] = {0.0};
             amd_order(n, ap.data(), ai.data(), perm.data(), nullptr, info);
@@ -380,7 +382,8 @@ void usage() {
                 "caller\n");
     std::printf("       pays; EVERYTHING ELSE comes from the hooked pre-postorder copy, because\n");
     std::printf("       AmdFlat does no postorder and returns that order.\n\n");
-    std::printf("  Each branch also times its B sibling, Mmd3B or Amd3B, and CHECKS its order,\n");
+    std::printf("  Each branch also times its B sibling, MmdChained or AmdCompacted, and "
+                "CHECKS its order,\n");
     std::printf("  fill and pC against the driver's rather than printing them. A mismatch is\n");
     std::printf("  flagged at the end of the row.\n");
 }
@@ -427,13 +430,13 @@ int main(int argc, char** argv) {
         std::printf("  (best of N after a warm-up, through the same helper. THE CLOCK IS ON\n");
         std::printf("   amd_order WHOLE, which is what a caller pays and includes AMD_aat and\n");
         std::printf("   AMD_postorder, neither of which we do; nnz(L) is both routines', from\n");
-        std::printf("   the hooked PRE-POSTORDER copy, AmdFlat returning it. AmdFlat/AMD "
+        std::printf("   the hooked PRE-POSTORDER copy, AmdFlat returning it. Flt/Vnd "
                     "below 1 is\n");
         std::printf("   ours faster)\n\n");
     } else {
         std::printf("the ordering step alone, genmmd against MmdFlat, on real matrices\n");
         std::printf("  (best of N after a warm-up, both through the same helper; nnz(L) is both\n");
-        std::printf("   routines', the two returning the same permutation. MmdFlat/MMD "
+        std::printf("   routines', the two returning the same permutation. Flt/Vnd "
                     "below 1 is\n");
         std::printf("   ours faster)\n\n");
     }
@@ -454,17 +457,23 @@ int main(int argc, char** argv) {
     // factorization will need and no clique scheme is worth building for it whatever pC/cC says.
     // Where the arena is half the factor, and this set has those too, it decides.
     //
-    // Each branch's siblings follow its own columns: `Mmd3B` and `Mmd3C` on the mmd side, `Amd3B`
-    // on the amd side. Only their times are printed; their order, fill and pC are checked against
+    // Each branch's siblings follow its own columns: `MmdChained` and `MmdCompacted` on the mmd
+    // side, `AmdCompacted` on the amd side. Only their times are printed; their order, fill and pC are checked against
     // the branch driver's and a mismatch is flagged at the end of the row.
+    // THE DRIVER COLUMNS CARRY THE THREE-LETTER TAGS and the legend above says what each is. A run
+    // is mmd or amd, never both, so the branch is not in the tag: it is in the line below and in
+    // the title already printed. Tags per the 2026-08-21 naming entry in docs/DESIGN_DECISIONS.md,
+    // `Vnd` `Flt` `Chn` `Com`; `Raw` does not appear here, matrix_ordering having no such column.
+    // The full names are what prose and the aggregate tables in ORDERING.md use.
+    if (amd) std::printf("  Vnd AmdVendored. Flt AmdFlat. Com AmdCompacted.\n\n");
+    else     std::printf("  Vnd MmdVendored. Flt MmdFlat. Chn MmdChained. Com MmdCompacted.\n\n");
+
     std::printf("  %-38s %8s %10s %11s %11s %11s %11s %13s %8s %8s %7s %9s %9s %8s",
                 "matrix", "n", "m", "tril(A)", "A+I", "cC", "pC", "nnz(L)", "cC/tril", "cC/nnzL",
-                "pC/cC", amd ? "AMD ms" : "MMD ms", amd ? "AmdFlat ms" : "MmdFlat ms",
-                amd ? "AmdFlat/AMD" : "MmdFlat/MMD");
-    std::printf(" %9s %9s", amd ? "AMD3B ms" : "MMD3B ms",
-                amd ? "AMD3B/AMD" : "MMD3B/MMD");
-    if (!amd) std::printf(" %9s %9s", "MMD3C ms", "MMD3C/MMD");
-    std::printf(" %8s %8s", amd ? "AMD cmp" : "-", amd ? "AMD3B cmp" : "MMD3C cmp");
+                "pC/cC", "Vnd ms", "Flt ms", "Flt/Vnd");
+    std::printf(" %9s %9s", amd ? "Com ms" : "Chn ms", amd ? "Com/Vnd" : "Chn/Vnd");
+    if (!amd) std::printf(" %9s %9s", "Com ms", "Com/Vnd");
+    std::printf(" %8s %8s", amd ? "Vnd cmp" : "-", "Com cmp");
     std::printf("\n");
 
     for (const std::string& path : paths) run(path, options);

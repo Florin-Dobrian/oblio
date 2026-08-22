@@ -2,15 +2,20 @@
 
 // OrderEngine.h, computes a fill-reducing permutation of a SparseMatrix.
 //
-//   Natural, identity (no reordering)
-//   MMD,     Multiple Minimum Degree (Liu/Sparspak, via 0.9)
-//   MmdFlat,    Multiple Minimum Degree, Oblio's own, matching MMD's permutation (src/MmdFlat.cpp)
-//   AMD,     Approximate Minimum Degree (SuiteSparse 3.3.4, BSD-3)
-//   AmdFlat, Approximate Minimum Degree, Oblio's own, matching AMD's permutation (src/AmdFlat.cpp)
+//   Natural,       identity (no reordering)
+//   MmdVendored,   Multiple Minimum Degree (Liu/Sparspak, via 0.9)
+//   MmdFlat,       ours, matching MmdVendored's permutation      (src/MmdFlat.cpp)
+//   MmdChained,    the same, on genmmd's chained store           (src/MmdChained.cpp)
+//   MmdCompacted,  the same, on AMD_2's compacted store          (src/MmdCompacted.cpp)
+//   AmdVendored,   Approximate Minimum Degree (SuiteSparse 3.3.4, BSD-3)
+//   AmdFlat,       ours, matching AmdVendored's permutation      (src/AmdFlat.cpp)
+//   AmdCompacted,  the same, on AMD_2's compacted store          (src/AmdCompacted.cpp)  DEFAULT
 //
-// FIVE ENUMERATORS, TWO OF THEM OURS, and each of ours returns its reference's exact permutation
-// on every matrix the benchmarks cover. So a caller choosing MmdFlat over MMD, or AmdFlat over AMD,
-// is choosing an implementation and not an ordering: the fill is identical by construction.
+// EIGHT ENUMERATORS, SIX OF THEM OURS, and TWO AXES rather than one. The BRANCH decides the
+// permutation: every mmd enumerator returns genmmd's and every amd one returns `AMD_2`'s, exactly,
+// on every matrix the benchmarks cover. The STORE decides only what the computation costs. So a
+// caller choosing among the three mmd enumerators, or between the two amd ones, is choosing an
+// implementation and not an ordering, and the fill is identical by construction.
 //
 // THE EARLIER LADDER LAYERS WERE RETIRED ON 2026-08-21 and are in retired/. `MMD1`, `MMD2`, `AMD1`
 // and `AMD2` were ours too, each carrying the base algorithm without its reference's later
@@ -18,21 +23,30 @@
 // ladder that got us to MmdFlat and AmdFlat, and the same ladder lives as working C++ and Python
 // twins in experiments/ordering/. See retired/README.md.
 //
-// THE B AND C LAYERS ARE NOT IN THIS ENUM, DELIBERATELY. Three exist and are PERMANENT,
-// `orderMmd3B`, `orderMmd3C` and `orderAmd3B`, each declared in its own header and reached as a
-// free function: they are their originals on a different CLIQUE STORAGE scheme, the chained one
-// genmmd uses and the compacted one `AMD_2` uses, both of which keep the ordering inside
-// `O(n + m)` where ours does not. A B or a C is not an ordering but the SAME ordering computed
-// differently, so it must return exactly its original's permutation and a difference is a defect
-// in one of them. That makes it a measuring instrument, and an enumerator would put a benchmark's
-// oracle into the library's public enum and into every switch over it, which is a cost paid by
-// every reader of every switch for something no caller should choose. They are built, tested and
-// benchmarked; they are simply not offered.
+// THE THREE ALTERNATIVE-STORE LAYERS JOINED THIS ENUM ON 2026-08-21, having been free functions
+// before it. The entry this replaces argued they were measuring instruments rather than orderings
+// and that an enumerator would put a benchmark's oracle into the public enum. The premise was
+// sound and the conclusion did not follow: `MmdFlat` against `MmdVendored` is already the same
+// kind of choice, one ordering computed two ways, and it has been offered from the start. What
+// the store changes is cost, which is exactly the sort of thing a caller may want to choose.
 //
-// Two lineages sit behind these names. MMD and AMD are vendored, self-contained codes operating on
-// raw int CSC arrays (src/Mmd.cpp, src/Amd.cpp). MmdFlat and AmdFlat are ours, built over the
-// shared quotient graph in include/oblio/QuotientGraph.h. Either way this engine is the seam that reads
-// the matrix structure and fills the Permutation. Returns true on success.
+// EACH IS ITS ORIGINAL ON A DIFFERENT CLIQUE STORE, the chained one genmmd uses and the compacted
+// one `AMD_2` uses, both of which hold the ordering inside `O(n + m)` where our flat arena does
+// not. Each must return exactly its branch's permutation, and a difference is a defect in one of
+// them rather than a variation. That obligation is what makes them useful as instruments, and it
+// is also what makes them safe to offer.
+//
+// `AmdCompacted` IS THE DEFAULT, changed from `MmdFlat` on 2026-08-21. Two decisions, and only the
+// second is free. AMD over MMD is the branch decision: on the 246 real matrices the amd branch
+// orders in 4.25 s against the mmd branch's 50.7 s, and it is the decision that changes what a
+// caller sees, since the two branches return different permutations and different fill. Compacted
+// over flat is the store decision and changes nothing but time, the two returning one permutation.
+// See benchmarks/matrices/ORDERING.md and docs/DESIGN_DECISIONS.md.
+//
+// Two lineages sit behind these names. `MmdVendored` and `AmdVendored` are vendored, self-contained
+// codes operating on raw int CSC arrays, in private/. The other six are ours, built over the
+// quotient graph classes in include/oblio/. Either way this engine is the seam that reads the
+// matrix structure and fills the Permutation. Returns true on success.
 
 #include "oblio/SparseMatrix.h"
 #include "oblio/Permutation.h"
@@ -45,7 +59,8 @@
 namespace Oblio {
 
 
-enum class Ordering { Natural, MmdVendored, MmdFlat, AmdVendored, AmdFlat };
+enum class Ordering { Natural, MmdVendored, MmdFlat, MmdChained, MmdCompacted,
+                      AmdVendored, AmdFlat, AmdCompacted };
 
 class OrderEngine {
 public:
@@ -71,15 +86,21 @@ public:
                  Permutation& P) const;
 
 private:
-    // Our MMD, not the vendored one, because the vendored orderings are optional: a default has to
-    // be an ordering that is always there. MmdFlat since 2026-08-07, and the reason is not that it
-    // measured best. It returns genmmd's permutation EXACTLY, on every example, every square grid
-    // and all 246 matrices in benchmarks/matrices, so its behavior is whatever thirty years of use
-    // have established for a reference implementation. The alternative then was an earlier ladder
-    // layer whose tie-break was ours and had been exercised on grids alone; a default is a bet on
-    // the cases nobody has run, and reproducing the reference is the better bet. See
-    // experiments/ordering's mmd3 section.
-    Ordering mOrdering = Ordering::MmdFlat;
+    // Ours, not a vendored one, because the vendored orderings are optional: a default has to be an
+    // ordering that is always there. That constraint has held since 2026-08-07 and still does.
+    //
+    // `AmdCompacted` since 2026-08-21, replacing `MmdFlat`. The old entry's argument was that a
+    // default is a bet on the cases nobody has run, so reproducing a reference beats a tie-break
+    // of our own. That argument is unchanged and `AmdCompacted` satisfies it: it returns `AMD_2`'s
+    // permutation EXACTLY on every example, every square grid, and all 246 matrices in
+    // benchmarks/matrices, compaction for compaction. What changed is that the amd branch now has
+    // a layer that meets the bar, where in 2026-08-07 only the mmd one did.
+    //
+    // Two decisions, and only the second is free. AMD over MMD is the branch, and it is the one a
+    // caller sees: different permutation, different fill, and on the 246 real matrices 4.25 s of
+    // ordering against 50.7 s. Compacted over flat is the store, and it changes nothing but time,
+    // the two returning one permutation. See benchmarks/matrices/ORDERING.md.
+    Ordering mOrdering = Ordering::AmdCompacted;
 
     bool orderNatural(std::size_t size, Permutation& P) const;
     // The two vendored orderings, declared only when private/ supplies their sources. Everything
@@ -99,6 +120,18 @@ private:
                    const std::vector<std::int32_t>& rowIdx,
                    Permutation& P) const;
     bool orderAmdFlat(std::size_t size,
+                   const std::vector<std::size_t>&  colPtr,
+                   const std::vector<std::int32_t>& rowIdx,
+                   Permutation& P) const;
+    bool orderMmdChained(std::size_t size,
+                   const std::vector<std::size_t>&  colPtr,
+                   const std::vector<std::int32_t>& rowIdx,
+                   Permutation& P) const;
+    bool orderMmdCompacted(std::size_t size,
+                   const std::vector<std::size_t>&  colPtr,
+                   const std::vector<std::int32_t>& rowIdx,
+                   Permutation& P) const;
+    bool orderAmdCompacted(std::size_t size,
                    const std::vector<std::size_t>&  colPtr,
                    const std::vector<std::int32_t>& rowIdx,
                    Permutation& P) const;

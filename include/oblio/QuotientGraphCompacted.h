@@ -23,8 +23,8 @@
 // reallocates, so a position survives it and a pointer does not, and a truncation shortens the
 // list being read, so a count of what is LEFT survives and a count of what has been done does not.
 //
-// ONE CLASS, TWO BRANCHES, AND THE SPLIT IS BY SUFFIX. `Amd3B` and `Mmd3C` are the two drivers.
-// Where the vendored codes AGREE there is one method; where they disagree there are two, named
+// ONE CLASS, TWO BRANCHES, AND THE SPLIT IS BY SUFFIX. `AmdCompacted` and `MmdCompacted` are the
+// two drivers. Where the vendored codes AGREE there is one method; where they disagree there are two, named
 // `...Amd` and `...Mmd`, so that each body can be read against `AMD_2` or `mmdelm` directly rather
 // than against a flag that means one thing on one branch and another on the other. The count of
 // splits is not a constraint: contorting shared code to avoid a suffix is worse than the suffix.
@@ -413,8 +413,8 @@ inline constexpr std::size_t kOrderingPad = 0;
 // 2026-08-17 investigation spent two rounds on other hypotheses after a sixteen-int pad moved
 // nothing, which was not evidence of anything, the allocator having returned the same addresses.
 //
-// See docs/DESIGN_DECISIONS.md (2026-08-17), where this mechanism cost `Mmd3C` 28 per cent at
-// exactly 200 a side and nothing at 199 or 201.
+// See docs/DESIGN_DECISIONS.md (2026-08-17), where this mechanism cost `MmdCompacted` 28 per cent
+// at exactly 200 a side and nothing at 199 or 201.
 template <class T>
 inline void padded(std::vector<T>& v, std::size_t size, std::size_t which) {
 #ifdef OBLIO_PAD_ORDERING
@@ -930,8 +930,8 @@ inline std::uint32_t QuotientGraphCompacted::reachableSetAmd(std::int32_t u) {
                 // live clique being consumed into the new one; dropping its consumed prefix
                 // shortens it, and `killClique` below will then subtract only what remained. Not
                 // telling the counter here left the difference live forever, which is what the
-                // `AMD3B pC differs` check caught on `JGD_Trefethen/Trefethen_2000`, +31 of 11091.
-                // The peak is unaffected either way, being taken only at a birth, and by then the
+                // `AmdCompacted pC differs` check caught on `JGD_Trefethen/Trefethen_2000`, +31 of
+                // 11091. The peak is unaffected either way, being taken only at a birth, and by then the
                 // clique is dead in full: the two subtractions sum to its original length.
                 //
                 // The pivot's own run needs no such line. `u` is a live vertex and the length
@@ -1046,7 +1046,7 @@ inline std::uint32_t QuotientGraphCompacted::reachableSetMmd(std::int32_t u) {
                 // live clique being consumed into the new one; dropping its consumed prefix
                 // shortens it, and the `killClique` in `beginElimination` would then subtract only
                 // what remained, leaving the difference live for the rest of the run. This is the
-                // second of the two defects `Amd3B` introduced with its own compactor.
+                // second of the two defects `AmdCompacted` introduced with its own compactor.
                 mNumLiveCliqueMembers -= mRun[c].adjacencySize - ln;
                 mRun[c].sourcePtr      = pj;
                 mRun[c].adjacencySize  = ln;
@@ -1099,8 +1099,8 @@ inline std::uint32_t QuotientGraphCompacted::reachableSetInPlaceAmd(std::int32_t
 // starts at the read cursor and only ever falls behind it, a vertex being written only when it was
 // read. `AMD_2` spells it `Iw [++pme2] = i` with `pme2 = pme1 - 1`.
 //
-// THE GONE TEST SURVIVES HERE, unlike in Amd3B, and for the reason it survives everywhere on this
-// branch: `number()` leaves a prepass vertex at weight one and in every neighbour's adjacency, so
+// THE GONE TEST SURVIVES HERE, unlike in AmdCompacted, and for the reason it survives everywhere on
+// this branch: `number()` leaves a prepass vertex at weight one and in every neighbour's adjacency, so
 // a positive weight does not mean live in an ADJACENCY list. This walk reads nothing else.
 inline std::uint32_t QuotientGraphCompacted::reachableSetInPlaceMmd(std::int32_t u) {
     // THE PIVOT IS ALREADY NEGATED, by `beginEliminationMmd`. It has to be negated somewhere and
@@ -1246,8 +1246,8 @@ inline void QuotientGraphCompacted::compact(std::size_t& cliqueStart) {
 // I[pivot] COPIED BEFORE ANY WALK TOUCHES IT. A walk truncates that list as it consumes it, so
 // after a mid-walk compaction the run is short or empty and the cliques it named could never be
 // killed from it: each would keep a non-zero length, stay a live block for the compactor to copy,
-// and never be subtracted from the live count. That defect existed in `Amd3B` for a day, moved no
-// permutation, and was found by a benchmark comparing peaks across drivers.
+// and never be subtracted from the live count. That defect existed in `AmdCompacted` for a day,
+// moved no permutation, and was found by a benchmark comparing peaks across drivers.
 inline void QuotientGraphCompacted::captureAbsorbed(const std::int32_t* incidence,
                                                     std::uint32_t count) {
     mAbsorbed.clear();

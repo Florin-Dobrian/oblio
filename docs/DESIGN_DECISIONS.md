@@ -65,6 +65,44 @@ be real, which requires Hermitian. Once that is on the table, the design collaps
 **Cholesky is `CC^H`, always, and in real that *is* `CC^T`.** No option, no flag, no forbidden
 combination to reject. The answer was not hard. Asking the right question was.
 
+## 2026-08-21: the compacted pair become the main drivers, and a fill sign error
+
+**THE DECISION.** `AmdCompacted` is the default and `MmdCompacted` is the mmd driver to use.
+`MmdFlat` and `AmdFlat` stay and are no longer what the examples or the README show. `MmdChained`
+stays. Three enumerators were added to `Ordering` to make this expressible; before today the three
+alternative-store drivers were free functions.
+
+**THE REASON IS THE BOUND, NOT THE CLOCK, and the timings are what make it affordable.** A
+compacted store is sized from the input. Our arena is not and cannot be, since it grows with a
+quantity that depends on the ordering being computed: given a machine you can say whether A fits
+and you cannot say whether the arena will. On the 246 real matrices two of them grow it past fifty
+times `tril(A)`.
+
+Had the bound cost something it would have been a trade. It costs nothing measurable. Over the set
+the compacted store is within 1.4 per cent of the arena on both branches, 0.957 at the median on
+amd where it wins 188 of 235, and a flat coin flip on mmd at 0.998. The other way of bounding the
+store, chaining, costs 70 per cent.
+
+**AMD OVER MMD IS THE OTHER HALF AND IT IS THE HALF A CALLER SEES**, the two branches returning
+different permutations. On the 246 the amd branch orders 21.3 times faster and fills 1.6 per cent
+LESS.
+
+### The sign error, recorded because it decided something
+
+**`README.md` said the amd branch cost "1.6 per cent MORE fill" and used it as the reason not to
+default there.** The magnitude was right and the direction was backwards. There was never a trade:
+amd wins on time and on fill both.
+
+**Fill is deterministic, so this was never a measurement that moved.** It could not have been
+caught by re-running, and re-running is the reflex. `benchmarks/matrices/ORDERING.md` had it right
+the whole time, in a sentence with mmd as the subject, "MMD costs 21.3 times what AMD costs on this
+set, for 1.6 per cent more fill". The README restated that sentence with amd as the subject and
+inverted its meaning while keeping its number.
+
+**The lesson is about restatement rather than about arithmetic.** A figure copied from one document
+to another with the subject changed is a new claim, and the number surviving intact makes it look
+checked. Both documents had been read many times.
+
 ## 2026-08-21: naming the ordering drivers by branch and store
 
 **THE OLD SUFFIXES NAME A RELATIONSHIP RATHER THAN A THING, WHICH IS THE DEFECT.** `B` reads "this

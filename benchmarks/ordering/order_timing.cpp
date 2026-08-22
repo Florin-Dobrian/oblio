@@ -35,10 +35,10 @@
 
 #include "oblio/SparseMatrix.h"
 #include "oblio/Permutation.h"
-#include "oblio/Mmd3B.h"
-#include "oblio/Mmd3C.h"
+#include "oblio/MmdChained.h"
+#include "oblio/MmdCompacted.h"
 #include "oblio/AmdFlat.h"
-#include "oblio/Amd3B.h"
+#include "oblio/AmdCompacted.h"
 #include "oblio/OrderEngine.h"
 
 // ASK FOR A PERFORMANCE CORE, on the one platform where cores differ. Apple Silicon runs a
@@ -220,14 +220,14 @@ static constexpr double targetMs = 300.0;
 // it an enumerator in `Ordering` would put a benchmark's oracle into the library's public enum and
 // into every switch over it. So the identity is local to this file.
 //
-// `MMD3B` is local for the same reason and is PERMANENT, 2026-08-16. It is MmdFlat on genmmd's
-// dead-segment clique storage, carried in src/Mmd3B.cpp with its own private copy of QuotientGraph.
-// That storage keeps the ordering inside `O(n + m)`, so the answer is reachable whenever the input
+// `MmdChained` is local for the same reason and is PERMANENT, 2026-08-16. It is MmdFlat on genmmd's
+// dead-segment clique storage, carried in src/MmdChained.cpp with its own private copy of
+// QuotientGraph. That storage keeps the ordering inside `O(n + m)`, so the answer is reachable whenever the input
 // fits, which our arena cannot promise; it is a maintained alternative rather than an experiment
 // awaiting a verdict, and the columns here are how its price stays measured. It returns MmdFlat's
 // permutation by construction, so its fill column carries nothing and its TIME column is the price.
 // It is not in `Ordering`, not in the library's source list and not in the examples: it is reached
-// here as a free function, so nothing outside this directory builds it. See src/Mmd3B.cpp,
+// here as a free function, so nothing outside this directory builds it. See src/MmdChained.cpp,
 // docs/DESIGN_DECISIONS.md (2026-08-16), and the section "The
 // vendored storage scheme, and what it is worth" in experiments/ordering/README.md for what is
 // being measured.
@@ -236,19 +236,26 @@ using OrderFn = std::vector<std::int32_t>(*)(const std::vector<std::size_t>&,
 
 struct Method {
     std::string name;
+    // THE THREE-LETTER TAG THE SCALE TABLES PRINT. `Vnd`, `Flt`, `Chn`, `Com`, `Raw`, per the
+    // 2026-08-21 naming entry in docs/DESIGN_DECISIONS.md. The full name is what prose and the
+    // aggregate tables use; a per-size table is a legend-driven table, as `nnzL` and `n` already
+    // are, and a header of `MmdCompacted nnzL` in every column is unreadable. The BRANCH is not in
+    // the tag because it is not in the table either: a run is mmd or amd, never both, and the
+    // title line above the header says which.
+    std::string tag;
     Ordering    ordering;
     bool        raw = false;
     // Three columns are not orderings and so are not in `Ordering`: `AMDraw` is the vendored
-    // routine through a hook, and `MMD3B` is a B layer, the same ordering on a different clique
-    // storage scheme. Each is reached as a free function and flagged here, locally, for the reason
+    // routine through a hook, and `MmdChained` is a B layer, the same ordering on a different
+    // clique storage scheme. Each is reached as a free function and flagged here, locally, for the reason
     // the header gives: an enumerator would put a benchmark's oracle into the library's public enum
     // and into every switch over it.
     //
     // THE AMD B LAYERS ARE GONE, 2026-08-16. AMD1B and AMD2B were their originals on a fused
     // eliminator schedule, and the schedule won: permutation-identical and faster on both families
     // once the tagged W removed the array crossing that had been paying for it, so it moved into
-    // AMD1 and AMD2 and the files went. AMD3B, which carried the array folds, went with them,
-    // AmdFlat now being identical to it. See docs/DESIGN_DECISIONS.md (2026-08-16).
+    // AMD1 and AMD2 and the files went. AmdCompacted, which carried the array folds, went with
+    // them, AmdFlat now being identical to it. See docs/DESIGN_DECISIONS.md (2026-08-16).
     bool        mmd3b = false;
     OrderFn     fn = nullptr;    // a B layer reached directly; see below
 };
@@ -293,7 +300,7 @@ static Permutation rawPermutation(const SparseMatrix<double>& A) {
 #endif
 }
 
-// MMD3B's permutation, reached as a free function since it is not in `Ordering`. The body is
+// MmdChained's permutation, reached as a free function since it is not in `Ordering`. The body is
 // `rawPermutation`'s, with the ordering call swapped: `setNewToOld` completes the other direction
 // exactly as OrderEngine's loop does. This file's own note on measurement warns that a column
 // reached one way times differently from a column reached another, so what differs between this
@@ -325,21 +332,21 @@ static double orderTimeFnB(const SparseMatrix<double>& A, OrderFn f) {
     return best;
 }
 
-// MMD3C reaches the general free-function path above rather than getting a flag of its own, which
-// is what MMD3B has for historical reasons. `orderMmd3C` carries a defaulted `delta` so its type is
-// not OrderFn and it cannot be named where one is wanted; this forwards it, exactly as
+// MmdCompacted reaches the general free-function path above rather than getting a flag of its own,
+// which is what MmdChained has for historical reasons. `orderMmdCompacted` carries a defaulted
+// `delta` so its type is not OrderFn and it cannot be named where one is wanted; this forwards it, exactly as
 // test_order.cpp and order_digest.cpp do. Zero is what OrderEngine passes.
-static std::vector<std::int32_t> mmd3cDefault(const std::vector<std::size_t>&  colPtr,
+static std::vector<std::int32_t> mmdCompactedDefault(const std::vector<std::size_t>&  colPtr,
                                               const std::vector<std::int32_t>& rowIdx) {
-    return orderMmd3C(colPtr, rowIdx);
+    return orderMmdCompacted(colPtr, rowIdx);
 }
 
 static Permutation mmd3bPermutation(const SparseMatrix<double>& A) {    Permutation P;
-    P.setNewToOld(orderMmd3B(A.colPtr(), A.rowIdx()));
+    P.setNewToOld(orderMmdChained(A.colPtr(), A.rowIdx()));
     return P;
 }
 
-static double orderTimeMmd3B(const SparseMatrix<double>& A) {
+static double orderTimeMmdChained(const SparseMatrix<double>& A) {
     { Permutation warm = mmd3bPermutation(A); (void) warm; }   // warm-up, discarded
 
     const auto p0 = std::chrono::steady_clock::now();
@@ -601,8 +608,8 @@ int main(int argc, char** argv) {
     //
     // THE 199 / 200 / 201 BRACKET IS GONE WITH IT. It was a probe rather than a rung, three sizes
     // one percent apart so that a real trend would be flat over them and an artifact would not, and
-    // it did its job: the `MMD3C` singularity at exactly 200 a side was shown to be data placement
-    // rather than anything algorithmic, and it did not survive that file's rebuild. 201 stays,
+    // it did its job: the `MmdCompacted` singularity at exactly 200 a side was shown to be data
+    // placement rather than anything algorithmic, and it did not survive that file's rebuild. 201 stays,
     // being the rung 200 would have become.
     //
     // The 6 cube stays at 6 rather than moving to 7. It is the largest size at which `AMD` and
@@ -685,46 +692,48 @@ int main(int argc, char** argv) {
     // vector per vertex reset per call and a push per member, so timing it would measure our
     // instrumentation rather than AMD. Its fill is exact and is the column AmdFlat must equal.
     const std::vector<Method> allMethods = {
-        {"MMD",  Ordering::MmdVendored},  {"MmdFlat", Ordering::MmdFlat},
-        {"MMD3B", Ordering::MmdFlat, false, true},
-        // MMD3C IS TRANSITIONAL, unlike every other row here, and its time column is currently
-        // MmdFlat's own: at this commit it is a verbatim copy, which is what makes it the error-bar
-        // column docs/NEXT.md asks for, two readings of one code under identical conditions. Once
-        // it carries the amd folds the column becomes the price of those. Expect the row to leave
-        // when the file does. See src/Mmd3C.cpp.
-        {"MMD3C", Ordering::MmdFlat, false, false, mmd3cDefault},
-        {"AMD",  Ordering::AmdVendored},
+        {"MmdVendored", "Vnd", Ordering::MmdVendored},  {"MmdFlat", "Flt", Ordering::MmdFlat},
+        {"MmdChained", "Chn", Ordering::MmdFlat, false, true},
+        // MmdCompacted WAS CALLED TRANSITIONAL HERE UNTIL 2026-08-21 and the note said its time
+        // column was a second reading of MmdFlat's own code. Both described the PREVIOUS file of
+        // that name, mmd on our flat layout, which was a vehicle for working the amd array folds
+        // onto the mmd side and was replaced once they landed. The current file is mmd on
+        // `AMD_2`'s compacted store, the counterpart of `AmdCompacted`, and its column is the
+        // price of that store rather than an error bar. It is permanent and it is an enumerator.
+        // See src/MmdCompacted.cpp.
+        {"MmdCompacted", "Com", Ordering::MmdFlat, false, false, mmdCompactedDefault},
+        {"AmdVendored", "Vnd", Ordering::AmdVendored},
 #ifdef OBLIO_AMD_RAW
-        {"AMDraw", Ordering::AmdVendored, true},
+        {"AMDraw", "Raw", Ordering::AmdVendored, true},
 #endif
-        {"AmdFlat", Ordering::AmdFlat},
-        // AMD3B JOINS THIS LIST 2026-08-17. It was in `amdMethods` alone, so `make scale-amd-2d`
-        // and `scale-amd-3d` showed it while `run2d` and `run3d` did not, which is not a
+        {"AmdFlat", "Flt", Ordering::AmdFlat},
+        // AmdCompacted JOINS THIS LIST 2026-08-17. It was in `amdMethods` alone, so `make
+        // scale-amd-2d` and `scale-amd-3d` showed it while `run2d` and `run3d` did not, which is not a
         // distinction anything wanted: it is a permanent maintained alternative and its storage
-        // price is a standing figure. MMD3B was in both lists all along.
-        {"AMD3B", Ordering::AmdFlat, false, false, orderAmd3B},
+        // price is a standing figure. MmdChained was in both lists all along.
+        {"AmdCompacted", "Com", Ordering::AmdFlat, false, false, orderAmdCompacted},
     };
-    // A SECOND MMD3C COLUMN SAT HERE ON 2026-08-17 and has been removed, having answered. It was
-    // the same function under a second name, timed second where MMD3C is timed sixth, to separate
-    // the driver from its place in the run. Both read about 1.33x `MmdFlat` at 200 a side, 3.20 and
+    // A SECOND MmdCompacted COLUMN SAT HERE ON 2026-08-17 and has been removed, having answered. It
+    // was the same function under a second name, timed second where MmdCompacted is timed sixth,
+    // to separate the driver from its place in the run. Both read about 1.33x `MmdFlat` at 200 a side, 3.20 and
     // 3.28, so the effect follows the DRIVER: not heap history, not position. Worth knowing before
     // anyone adds such a control again, and the shape is worth reusing, one function under two
     // names being the only way to hold everything but position fixed.
     const std::vector<Method> mmdMethods = {
-        {"MMD",  Ordering::MmdVendored},  {"MmdFlat", Ordering::MmdFlat},
-        {"MMD3B", Ordering::MmdFlat, false, true},
-        {"MMD3C", Ordering::MmdFlat, false, false, mmd3cDefault},
+        {"MmdVendored", "Vnd", Ordering::MmdVendored},  {"MmdFlat", "Flt", Ordering::MmdFlat},
+        {"MmdChained", "Chn", Ordering::MmdFlat, false, true},
+        {"MmdCompacted", "Com", Ordering::MmdFlat, false, false, mmdCompactedDefault},
     };
     // The vendored routine first, since the gap columns below take the first entry as the baseline.
     // The B variants are left out of the AMD list: they are their originals' permutations on a
     // different schedule, so their fill column carries no information and their time column
     // belongs to the question about the seam rather than to the question about the branch.
     //
-    // MMD3B IS AN EXCEPTION AND A PERMANENT ONE, 2026-08-16. Its fill column is MmdFlat's by
+    // MmdChained IS AN EXCEPTION AND A PERMANENT ONE, 2026-08-16. Its fill column is MmdFlat's by
     // construction and carries nothing, exactly as the rule says; its TIME column is the PRICE of
     // genmmd's dead-segment storage, which keeps the ordering inside `O(n + m)` where our arena
     // cannot. It is a maintained alternative, not an experiment, so it stays in these lists: the
-    // price is something to keep measured rather than to settle once. See src/Mmd3B.cpp.
+    // price is something to keep measured rather than to settle once. See src/MmdChained.cpp.
     // MMD1 AND AMD1 ARE OUT OF THE BRANCH LISTS, 2026-08-16, and symmetrically so the two tables
     // keep the same shape. They are still in `allMethods`, so `run2d` and `run3d` show them and
     // nothing is lost; what they are out of is the SCALING targets.
@@ -739,13 +748,13 @@ int main(int argc, char** argv) {
     // aggressive absorption, so they are what says how much those two mechanisms are worth; when
     // that question comes up again, restore them.
     const std::vector<Method> amdMethods = {
-        {"AMD",  Ordering::AmdVendored},
+        {"AmdVendored", "Vnd", Ordering::AmdVendored},
 #ifdef OBLIO_AMD_RAW
-        {"AMDraw", Ordering::AmdVendored, true},
+        {"AMDraw", "Raw", Ordering::AmdVendored, true},
 #endif
-        {"AmdFlat", Ordering::AmdFlat},
-        // AMD3B IS PERMANENT, exactly as MMD3B is on the mmd list, 2026-08-16. It is AmdFlat on
-        // AMD_2's clique storage, one pool with a free cursor and a garbage collection rather than
+        {"AmdFlat", "Flt", Ordering::AmdFlat},
+        // AmdCompacted IS PERMANENT, exactly as MmdChained is on the mmd list, 2026-08-16. It is
+        // AmdFlat on AMD_2's clique storage, one pool with a free cursor and a garbage collection rather than
         // our separate append-only arena, which keeps the ordering inside `O(n + m)` where our
         // arena cannot. Its fill column is AmdFlat's by construction and carries nothing.
         //
@@ -753,19 +762,35 @@ int main(int argc, char** argv) {
         // half of why it is kept: holding cliques the way AMD_2 does is what lets a comparison
         // separate layout from everything else. Five array folds came out of that arrangement and
         // are being ported to AmdFlat, which is why this column currently reads faster than
-        // AmdFlat's; the storage on its own measured as a wash. See src/Amd3B.cpp.
-        {"AMD3B", Ordering::AmdFlat, false, false, orderAmd3B},
+        // AmdFlat's; the storage on its own measured as a wash. See src/AmdCompacted.cpp.
+        {"AmdCompacted", "Com", Ordering::AmdFlat, false, false, orderAmdCompacted},
     };
     const auto& methods = mmdOnly ? mmdMethods : (amdOnly ? amdMethods : allMethods);
 
+    // THE BRANCH IS SAID ONCE, HERE, AND NOT AGAIN IN EVERY COLUMN. A run is mmd or amd or both,
+    // and when it is one the columns need only the store. The tags are the 2026-08-21 naming
+    // entry's, `Vnd Flt Chn Com`, plus `Raw` for the hooked pre-postorder copy, which is not a
+    // store and so is the one tag that names something else. When BOTH branches are shown the
+    // tags would collide, two columns headed `Vnd`, so the full name is printed instead.
+    // `branchOnly` is the same condition, already computed: tags are usable exactly when one
+    // branch is shown. The legend is built from `methods` rather than written out, so a column
+    // added or removed cannot leave it describing a table that is not there.
+    if (branchOnly) {
+        std::printf("%s, %s grids.", mmdOnly ? "mmd" : "amd", cubic ? "3d" : "2d");
+        for (const auto& m : methods) std::printf(" %s %s.", m.tag.c_str(), m.name.c_str());
+        std::printf("\n");
+    }
+
+    const auto head = [branchOnly](const Method& m) { return branchOnly ? m.tag : m.name; };
+
     std::printf("%-12s %8s", cubic ? "grid3d" : "grid", "n");
-    for (const auto& m : methods) if (!m.raw) std::printf(" %10s", (m.name + " ms").c_str());
-    for (const auto& m : methods) std::printf(" %10s", (m.name + " nnzL").c_str());
+    for (const auto& m : methods) if (!m.raw) std::printf(" %10s", (head(m) + " ms").c_str());
+    for (const auto& m : methods) std::printf(" %10s", (head(m) + " nnzL").c_str());
     if (branchOnly)
         for (std::size_t k = 1; k < methods.size(); ++k) {
             if (methods[k].raw) continue;        // the fill baseline has no gap against itself
-            std::printf(" %10s", (methods[k].name + " time").c_str());
-            std::printf(" %10s", (methods[k].name + " fill").c_str());
+            std::printf(" %10s", (head(methods[k]) + " time").c_str());
+            std::printf(" %10s", (head(methods[k]) + " fill").c_str());
         }
     std::printf("\n");
 
@@ -785,7 +810,7 @@ int main(int argc, char** argv) {
         std::vector<std::size_t> fills;
         for (const auto& m : methods)
             times.push_back(m.raw ? 0.0
-                                  : m.mmd3b ? orderTimeMmd3B(A)
+                                  : m.mmd3b ? orderTimeMmdChained(A)
                                   : m.fn    ? orderTimeFnB(A, m.fn)
                                             : orderTime(A, m.ordering));
         for (const auto& m : methods) fills.push_back(fill(A, m));

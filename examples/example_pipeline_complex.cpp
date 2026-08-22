@@ -55,10 +55,13 @@ using Val = std::complex<double>;
 const char* name(Ordering m) {
     switch (m) {
         case Ordering::Natural: return "Natural";
-        case Ordering::MmdVendored:     return "MMD";
-        case Ordering::MmdFlat:    return "MmdFlat";
-        case Ordering::AmdVendored:     return "AMD";
-        case Ordering::AmdFlat:    return "AmdFlat";
+        case Ordering::MmdVendored:  return "MmdVendored";
+        case Ordering::MmdFlat:      return "MmdFlat";
+        case Ordering::MmdChained:   return "MmdChained";
+        case Ordering::MmdCompacted: return "MmdCompacted";
+        case Ordering::AmdVendored:  return "AmdVendored";
+        case Ordering::AmdFlat:      return "AmdFlat";
+        case Ordering::AmdCompacted: return "AmdCompacted";
     }
     return "?";
 }
@@ -134,8 +137,8 @@ int main() {
     printf("  %-8s  %-13s  %-13s  %-5s  %s\n", "-----", "-------------", "---------", "-----",
            "--------");
 
-    for (Ordering ordering : {Ordering::Natural, Ordering::MmdVendored, Ordering::MmdFlat,
-                              Ordering::AmdVendored, Ordering::AmdFlat}) {
+    for (Ordering ordering : {Ordering::Natural, Ordering::MmdVendored, Ordering::MmdCompacted,
+                              Ordering::AmdVendored, Ordering::AmdCompacted}) {
         // Structural only, so one permutation, forest and symbolic factor serve both matrices.
         OrderEngine ordEng(ordering);
         Permutation P;
@@ -199,7 +202,7 @@ int main() {
     // One actual solution, so the example ends on numbers a reader can check. Cholesky needs the
     // Hermitian matrix, so that is the one solved here.
     {
-        OrderEngine ordEng(Ordering::MmdFlat);
+        OrderEngine ordEng(Ordering::AmdCompacted);
         Permutation P;  ordEng.compute(AH, P);
         ElmForest ef;   ElmForestEngine efEng;  efEng.compute(AH, P, ef);
         SymFactor sf;   SymFactorEngine sfEng;  sfEng.compute(AH, P, ef, sf);
@@ -209,7 +212,7 @@ int main() {
         Vector<Val> x(n);
         solEng.compute(P, nf, b, x);
 
-        printf("\nSolution (Hermitian input, MMD2, Cholesky, LeftLooking):\n");
+        printf("\nSolution (Hermitian input, AmdCompacted, Cholesky, LeftLooking):\n");
         for (std::size_t i = 0; i < n; ++i)
             printf("  x[%zu] = %+.10f %+.10fi\n", i, x[i].real(), x[i].imag());
     }

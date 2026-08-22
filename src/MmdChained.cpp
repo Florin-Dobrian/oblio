@@ -1,4 +1,4 @@
-#include "oblio/Mmd3B.h"
+#include "oblio/MmdChained.h"
 
 #include "oblio/QuotientGraphChained.h"
 
@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-// Mmd3B.cpp - MmdFlat on GENMMD'S clique storage, everything else identical.
+// MmdChained.cpp - MmdFlat on GENMMD'S clique storage, everything else identical.
 //
 // WHAT IT IS FOR, AND IT IS TWO THINGS. Both are permanent; this file is not an experiment awaiting
 // a verdict and its old stop condition is withdrawn.
@@ -58,8 +58,8 @@
 // note for these types lives in include/oblio/QuotientGraph.h and is authoritative there; reading
 // this file means reading it alongside this one. `Buckets` is that header's `Buckets` too,
 // which is why promoting `QuotientGraphChained` needs no second bucket class. Only the DIFFERENCES
-// are commented here, and at this commit there are none: Mmd3B must return MmdFlat's permutation,
-// which is genmmd's, so `make mmdorder` and `make test` are the acceptance check unchanged.
+// are commented here, and at this commit there are none: MmdChained must return MmdFlat's
+// permutation, which is genmmd's, so `make mmdorder` and `make test` are the acceptance check unchanged.
 //
 // The scheme itself: see the section "The vendored storage scheme, and what it is worth" in
 // experiments/ordering/README.md. In one line, genmmd keeps every clique in the dead segment of
@@ -105,7 +105,7 @@ namespace {
 }  // anonymous namespace
 
 
-std::vector<std::int32_t> orderMmd3B(const std::vector<std::size_t>&  colPtr,
+std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPtr,
                                     const std::vector<std::int32_t>& rowIdx,
                                     std::int32_t delta) {
     if (colPtr.empty()) return std::vector<std::int32_t>();

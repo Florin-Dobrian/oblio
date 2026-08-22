@@ -13,7 +13,8 @@ traversals over one pipeline.
   field, where one is symmetric and the other Hermitian
 - **Three traversal algorithms**: Left-looking, Right-looking, Multifrontal
 - **Two fill-reducing orderings**, both minimum degree: MMD, using the exact degree, and AMD,
-  using an approximate degree bound. `Ordering::MmdVendored` and `Ordering::AmdVendored`
+  using an approximate degree bound. Each has a vendored reference and up to three of our own
+  implementations of it, eight enumerators in all; `AmdCompacted` is the default
 - **One right-hand side per solve**, a `Vector<Val>`, with the factorization reused across as
   many as wanted. Many right-hand sides at once, which is where the solve would become a level-3
   BLAS operation, is the one thing on the roadmap rather than in the library; see Status
@@ -35,7 +36,8 @@ Vector<double> b(n), x(n);
 for (std::size_t i = 0; i < n; ++i) b[i] = 1.0;
 
 // Ordering, factorization, traversal: the pipeline order. Each also has a setter.
-DirectSolver<double> solver(Ordering::MMD3, Factorization::Cholesky, Traversal::LeftLooking);
+DirectSolver<double> solver(Ordering::AmdCompacted, Factorization::Cholesky,
+                            Traversal::LeftLooking);
 
 // The three phases have different lifetimes: analyze depends only on the pattern,
 // factor on the values, solve on the right-hand side.
@@ -303,15 +305,15 @@ include/oblio/      , public headers (declarations only)
   SparseMatrix.h    , sparse symmetric matrix (CSC)
   Vector.h          , dense vector (one right-hand side)
   Permutation.h     , bidirectional index map (oldToNew / newToOld)
-  OrderEngine.h     , fill-reducing ordering, MMD and AMD behind one enum
+  OrderEngine.h     , fill-reducing ordering, both branches behind one enum
   QuotientGraph.h   , the representation Oblio's own orderings run on, and its degree buckets
-  Mmd3.h  Amd3.h    , Oblio's own MMD and AMD orderings, each reproducing its reference's
-                      permutation exactly
+  MmdFlat.h  AmdFlat.h , Oblio's own MMD and AMD orderings on our arena, each reproducing
+                      its reference's permutation exactly
   QuotientGraphCompacted.h  , AMD_2's clique store: one compacted workspace with a free cursor
   QuotientGraphChained.h    , genmmd's: cliques threaded through the runs they came from
-  Mmd3B.h  Mmd3C.h  Amd3B.h , MMD3 and AMD3 on those two VENDORED clique stores. Both keep the
-                      ordering inside O(n + m); ours does not. NOT in the Ordering enum: each is
-                      the same ordering computed differently and must reproduce its original
+  MmdChained.h  MmdCompacted.h  AmdCompacted.h , the same two orderings on those two VENDORED
+                      clique stores. Both keep the ordering inside O(n + m); ours does not. Each
+                      is the same ordering computed differently and must reproduce its original
                       exactly, so each is reached as a free function
   ElmForest.h       , elimination forest and supernodes (data)
   ElmForestEngine.h , builds the elimination forest
@@ -328,8 +330,8 @@ include/oblio/      , public headers (declarations only)
   DirectSolver.h    , the whole pipeline behind one object (analyze / factor / solve)
 src/                , method bodies + explicit instantiations (flat layout)
                       One .cpp per header, plus the vendored orderings, which have none:
-  Amd.cpp           , AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
-  Mmd.cpp           , MMD ordering (Sparspak/Liu, via Oblio 0.9)
+  AmdVendored.cpp   , AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
+  MmdVendored.cpp   , MMD ordering (Sparspak/Liu, via Oblio 0.9)
 tests/              , test suites (251 assertions; see docs/TESTING_SPECIFICATION.md)
   smoke.cpp                    5,  quick end-to-end sanity
   test_order.cpp              59,  the four enum orderings, and each of the three non-enum
@@ -365,29 +367,37 @@ experiments/        , frozen design studies, each answering one question with a 
   openmp/           , how much parallelism Accelerate already supplies, and what is left
 ```
 
-The ordering enum also carries Natural, the identity, and our own minimum-degree implementations
-under the names MMD3 and AMD3, each of which reproduces its reference's permutation exactly. The
-earlier ladder layers, MMD1, MMD2, AMD1 and AMD2, were retired on 2026-08-21 and are in `retired/`;
-the ladder itself lives as working prototypes in `experiments/ordering/`. Three further layers exist
-and are deliberately NOT offered through the enum: MMD3B, MMD3C and AMD3B compute MMD3's and AMD3's
-permutations on the two VENDORED clique stores. Each must reproduce its original entry for entry,
-which is what makes it useful, and each is reached as a free function.
+The ordering enum also carries Natural, the identity, and six implementations of ours. A driver is
+named for its branch and the clique store it runs on: `MmdCompacted` and `AmdCompacted` on
+`AMD_2`'s compacted workspace, `MmdFlat` and `AmdFlat` on our own arena, `MmdChained` on genmmd's
+chained segments. Every mmd driver returns genmmd's permutation exactly and every amd driver
+returns `AMD_2`'s, so the branch decides the ordering and the store decides only what computing it
+costs. The earlier ladder layers, MMD1, MMD2, AMD1 and AMD2, were retired on 2026-08-21 and are in
+`retired/`; the ladder itself lives as working prototypes in `experiments/ordering/`.
 
-**They are kept on purpose rather than pending a verdict.** Both vendored schemes hold the whole
-ordering within `O(n + m)`, and ours does not: given a machine you know whether A fits, but nnz(L)
-depends on the ordering being computed, so only a method that stays in A's space can promise that
-the answer is reachable at all. Ours is the right default for a known shape on a known machine
-solved repeatedly; theirs is the right one when that is the open question. See
-`docs/DESIGN_DECISIONS.md` (2026-08-16). AMD1B and AMD2B were two more until 2026-08-16, when the
-fused schedule they carried measured identical and faster and moved into their originals. MMD3 is the default: it reproduces the vendored MMD's permutation
-exactly, so it behaves as a reference implementation with decades of use behind it rather than as
-a tie-break of our own. AMD3 is its counterpart on the other branch and reproduces the vendored
-AMD's, up to the postorder that routine applies and Oblio does not want, since ElmForest orders
-the supernodal tree later with better information. It is NOT the default, which is MMD3, and the
-reason is not speed: on the 246 matrices in `benchmarks/matrices` the amd branch is 21.8 times
-faster than the mmd one for 1.6 per cent more fill. It is that a default should be an ordering that
-is always there, and reproducing a reference with decades of use behind it is the better bet on the
-cases nobody has run. See `benchmarks/matrices/ORDERING.md`.
+**`AmdCompacted` and `MmdCompacted` are the pair to use**, and they are what the examples show.
+The reason is the bound rather than the clock: a compacted store is sized from the input, our arena
+is not and cannot be, since it grows with a quantity that depends on the ordering being computed.
+Given a machine you can say whether A fits; you cannot say whether the arena will, and on this
+benchmark set two matrices grow it past fifty times `tril(A)`. What makes the bound worth taking is
+that it costs nothing: over the 246 the compacted store is 1.4 per cent either side of the arena on
+both branches. See `benchmarks/matrices/ORDERING.md`.
+
+**`MmdFlat` and `AmdFlat` stay** as the unbounded pair the bounded ones must equal entry for entry,
+which is what makes either checkable, and `MmdChained` stays as the other way of bounding the
+store, which measures 70 per cent worse.
+
+**`AmdCompacted` is the default**, and the branch is the part of that a caller sees. On the 246
+matrices in `benchmarks/matrices` the amd branch orders 21.3 times faster than the mmd one and
+fills 1.6 per cent LESS, 18.11 billion factor entries against 18.41: it wins on both axes rather
+than trading one for the other. The store, compacted over flat, changes nothing a caller sees, the
+two returning one permutation.
+
+A default also has to be an ordering that is always there, since the vendored pair are optional,
+and it should reproduce a reference rather than a tie-break of our own, which is a bet on the cases
+nobody has run. `AmdCompacted` returns `AMD_2`'s permutation exactly, up to the postorder that
+routine applies and Oblio does not want, since ElmForest orders the supernodal tree later with
+better information.
 
 ## History
 

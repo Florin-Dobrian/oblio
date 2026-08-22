@@ -89,7 +89,11 @@ endif
 
 ifneq ($(VENDOR_SRCS),)
   VENDOR_DEFS = -DOBLIO_VENDORED_ORDERINGS
-  VENDOR_OBJS = Amd.o Mmd.o
+  # DERIVED FROM VENDOR_SRCS RATHER THAN SPELLED OUT. `-c` on several sources writes each
+  # object to the basename in the CURRENT directory, so these must track the source names
+  # exactly; they were spelled out until 2026-08-21 and a rename of the sources broke the
+  # link, the compile step having quietly produced objects under the new names.
+  VENDOR_OBJS = $(notdir $(VENDOR_SRCS:.cpp=.o))
   # The hooked copy, for `make amdorder`. It reports the elimination order BEFORE AMD_postorder,
   # which is the order AmdFlat returns, so the fill column can be both routines' as it is on the mmd
   # side. Present only where private/ is, exactly as the vendored objects are. GENERATED from
@@ -198,5 +202,5 @@ performance: matrix_performance_cpp
 clean:
 	rm -f amd_raw.cpp \
 	      mmread_cpp matrix_accuracy_cpp matrix_performance_cpp matrix_ordering_cpp \
-	      Amd.o Mmd.o .build-mode
+	      AmdVendored.o MmdVendored.o .build-mode
 	rm -rf *.dSYM

@@ -89,7 +89,11 @@ $(shell [ "`cat .build-mode 2>/dev/null`" = "$(BUILD_MODE)" ] || rm -f .build-mo
 
 ifneq ($(VENDOR_SRCS),)
   VENDOR_DEFS = -DOBLIO_VENDORED_ORDERINGS
-  VENDOR_OBJS = Amd.o Mmd.o
+  # DERIVED FROM VENDOR_SRCS RATHER THAN SPELLED OUT. `-c` on several sources writes each
+  # object to the basename in the CURRENT directory, so these must track the source names
+  # exactly; they were spelled out until 2026-08-21 and a rename of the sources broke the
+  # link, the compile step having quietly produced objects under the new names.
+  VENDOR_OBJS = $(notdir $(VENDOR_SRCS:.cpp=.o))
   # The hooked copy, for the AMDraw column. Present only where private/ is, exactly as the vendored
   # objects are, and the column disappears from the table with them.
   RAW_SRCS    = amd_raw.cpp
@@ -236,5 +240,5 @@ order_profile_cpp: order_profile.cpp $(OBLIO_SRCS) $(OBLIO_HDRS) $(VENDOR_SRCS) 
 # recipe gets printed in full every time someone types `make clean`.
 clean:
 	rm -f .build-mode order_timing_cpp order_profile_cpp order_digest_cpp .digest-baseline
-	rm -f Amd.o Mmd.o amd_raw.cpp amd_timed.cpp
+	rm -f AmdVendored.o MmdVendored.o amd_raw.cpp amd_timed.cpp
 	rm -rf *.dSYM

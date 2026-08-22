@@ -37,7 +37,7 @@
 // construction. benchmarks/ordering carries an AMDraw column for exactly that reason. What it buys is a smaller multifrontal stack peak, and
 // ElmForest reaches that better from the other side, by Liu's rule on the supernodal tree with
 // real front and update sizes, which DirectSolver turns on whenever the traversal is multifrontal.
-// So AMD's postorder would be work done twice and then overwritten. See experiments/ordering/AmdFlat.md.
+// So AMD's postorder would be work done twice and then overwritten. See experiments/ordering/AMD3.md.
 //
 // AND IT IS A HEURISTIC ONE, which Amd.cpp says itself and which is the stronger half of the
 // argument: mass elimination combined with the approximate degree can merge nodes of lower exact
@@ -77,21 +77,21 @@
 //   a DEFECT rather than a convention and was fixed in Amd2 and Amd2B as well, where it had been
 //   filing every supervariable one bucket too high per vertex a hash merge absorbed.
 //
-// Which of the four is which, and what each cost, is experiments/ordering/AmdFlat.md.
+// Which of the four is which, and what each cost, is experiments/ordering/AMD3.md.
 //
 // THREE THINGS IT ALSO TAKES FROM Amd.cpp THAT ARE NOT ORDERING AT ALL, and so are not ledger
 // entries: the tagged W array, which carries seen, absorbed and value in one place where three
 // were used, and the hoisted stamp in supervariable detection, which stamps the outer vertex once
 // instead of the inner one per pair. Both are pure re-schedules and were landed as a separate
 // driver, AMD3C, until `AMD3C == AmdFlat` had confirmed them; that driver is gone and this is it.
-// experiments/ordering/AmdFlat.md, iteration 15.
+// experiments/ordering/AMD3.md, iteration 15.
 //
 // And the third, added 2026-08-10: THE HASH KEY IS ACCUMULATED IN THE BOUND'S WALKS rather than in
 // a pass of its own, which is `hval += e` and `hval += j` inside Amd.cpp's scan 2. It removes a
 // sweep over C[p] and a second walk of A[u] and I[u], 26.70 of this driver's 149.96 element visits
 // per pivot at 140 a side and 66.77 of 352.57 at 26 cubed. Measured on alpamayo at about 4 to 7
 // percent at six consecutive square grids from 64 to 400 a side and 5 to 14 percent on cubic grids
-// from 12 to 32, with nnz(L) unchanged everywhere. AmdFlat.md iteration 26.
+// from 12 to 32, with nnz(L) unchanged everywhere. AMD3.md iteration 26.
 //
 // THE CAVEAT THAT USED TO END THIS PARAGRAPH IS WITHDRAWN, 2026-08-16. It read that the variant was
 // timed as a free function and this driver through OrderEngine, a bias of up to 2.4 percent in the
@@ -104,7 +104,7 @@
 // reverted once already. The difference is that the earlier version carried the key in an array of
 // size n; this one files each vertex into its bucket where the key completes and stores nothing.
 // The failure was the array rather than the fusion, which is a distinction the four other null
-// results had made it easy to stop looking for. See AmdFlat.md and DESIGN_DECISIONS.md.
+// results had made it easy to stop looking for. See AMD3.md and DESIGN_DECISIONS.md.
 //
 // And the fourth, added later the same day: THE FIRST SCAN IS FOLDED INTO THE PRUNE, through
 // QuotientGraph's TaggedScan overload of `eliminate`. I[u] is walked twice per pivot and A[u]
@@ -116,7 +116,7 @@
 // does. It carries no arrays of
 // its own: the two values crossing from the prune to the bound live in `partial` and `hashNext`,
 // which are dead at that point, and a version with two fresh vectors of size n was 12 percent
-// SLOWER in 2D. AmdFlat.md iteration 26.
+// SLOWER in 2D. AMD3.md iteration 26.
 
 #include "oblio/QuotientGraph.h"
 

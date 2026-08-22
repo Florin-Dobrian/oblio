@@ -270,8 +270,8 @@ public:
     // HOW MANY ENTRIES THE CLIQUE ARENA HOLDS, for the drivers that report it. This is a SIZE and
     // not a capacity: what was written, not what was reserved. Our arena only grows, so it is also
     // the peak; a scheme that COMPACTS would have a final size below its high-water mark, so if
-    // Mmd3B or Amd3B ever answer the same question they must answer it with the peak or the column
-    // will be comparing three different things.
+    // MmdChained or AmdCompacted ever answer the same question they must answer it with the peak or
+    // the column will be comparing three different things.
     std::size_t arenaEntries() const   { return mCliqueArena.size(); }
 
     // MEMBERS, NOT ENTRIES, AND THAT IS THE WHOLE DISTINCTION FROM `arenaEntries` ABOVE. An entry
@@ -574,7 +574,7 @@ public:
     //
     // With this on, eliminate() returns an EMPTY merged list and C[pivot] is reach(pivot) exactly,
     // and the caller must call massEliminate() once it has absorbed. Used by AmdFlat alone. See
-    // experiments/ordering/AmdFlat.md, ledger entry 3.
+    // experiments/ordering/AMD3.md, ledger entry 3.
     void setLateMassElimination(bool on) { mLateMassElimination = on; }
 
     // The half eliminate() no longer does under the flag above: fold into the pivot's supervariable
@@ -694,14 +694,14 @@ private:
     // WHAT IT WAS WORTH, and it was not the storage. Before this, every clique visit in a walk
     // probed two separate n-arrays at a dead pivot's id, scattered across the whole id space, once
     // per clique of every I[u]. Now one 16-byte run gives both, on a line the walk is already
-    // touching. Measured on alpamayo with Amd3B: the amd branch's 2D ratio against the vendored
-    // routine had been RISING with n, 1.11x at 32 a side to 1.49x at 400, and it went FLAT at
+    // touching. Measured on alpamayo with AmdCompacted: the amd branch's 2D ratio against the
+    // vendored routine had been RISING with n, 1.11x at 32 a side to 1.49x at 400, and it went FLAT at
     // 1.38x from 100 a side up. A differential had already shown the two codes doing the same
     // visits per pivot at every size, so the growth was cost per visit, and this was most of it.
     //
     // THE ARENA ITSELF DOES NOT MOVE. Blocks still live in their own storage in elimination
-    // order; only the two words describing them moved. `Mmd3B` priced genmmd's placement, cliques
-    // in the pivot's dead segment, and it lost. See docs/DESIGN_DECISIONS.md.
+    // order; only the two words describing them moved. `MmdChained` priced genmmd's placement,
+    // cliques in the pivot's dead segment, and it lost. See docs/DESIGN_DECISIONS.md.
     // APPENDED BY push_back, NOT written through a cursor, and that was measured. A cursor with
     // an explicit used count removes a capacity test and a size update per clique member, about
     // 46000 of each per ordering, which is what genmmd's `adjncy[rl] = nb; rl++` costs nothing
@@ -818,7 +818,7 @@ private:
 //
 // A GLOBAL RATHER THAN A RETURN VALUE, and deliberately. The figure is a cross-check between
 // implementations rather than a result anyone orders a matrix to obtain, so it does not belong in
-// the public ordering signature; `gAmd3BCompactions` is here for the same reason. Not thread safe,
+// the public ordering signature; `gAmdCompactions` is here for the same reason. Not thread safe,
 // and it does not need to be: nothing writes it outside a test.
 inline std::size_t gPeakCliqueMembers = 0;
 
@@ -1246,8 +1246,8 @@ inline void QuotientGraph::beginEliminationAmd(std::int32_t pivot) {
     // THE STAMPING PASS STAYS, and this is a measured decision rather than an oversight. It looks
     // redundant: reachableSet has just written `mMark[v] = mTag` on every member as it emitted
     // it, so `inClique` could BE that tag and this walk could go, which is what genmmd does and
-    // what Mmd3B does. Built on 2026-08-15, with the weighted size accumulated in reachableSet's
-    // four emit sites so that nothing was lost, and it measured WORSE: 74000 more instructions
+    // what MmdChained does. Built on 2026-08-15, with the weighted size accumulated in
+    // reachableSet's four emit sites so that nothing was lost, and it measured WORSE: 74000 more instructions
     // and 142000 more data reads on a 100x100 grid.
     //
     // The reason is worth keeping, because it is not obvious and it applies to any fold of this
@@ -1365,8 +1365,8 @@ inline void QuotientGraph::beginEliminationMmd(std::int32_t pivot) {
     // THE STAMPING PASS STAYS, and this is a measured decision rather than an oversight. It looks
     // redundant: reachableSet has just written `mMark[v] = mTag` on every member as it emitted
     // it, so `inClique` could BE that tag and this walk could go, which is what genmmd does and
-    // what Mmd3B does. Built on 2026-08-15, with the weighted size accumulated in reachableSet's
-    // four emit sites so that nothing was lost, and it measured WORSE: 74000 more instructions
+    // what MmdChained does. Built on 2026-08-15, with the weighted size accumulated in
+    // reachableSet's four emit sites so that nothing was lost, and it measured WORSE: 74000 more instructions
     // and 142000 more data reads on a 100x100 grid.
     //
     // The reason is worth keeping, because it is not obvious and it applies to any fold of this
@@ -1409,7 +1409,7 @@ inline const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pi
     // rotate per list per reached vertex, which is a whole extra walk of the structure and was
     // measured at about 50 percent of AmdFlat's run time before this was folded in. AMD_2 spends
     // three assignments on it for the same reason, letting the list's start shift rather than
-    // moving a list. See experiments/ordering/AmdFlat.md, ledger entry 5 and iteration 10.
+    // moving a list. See experiments/ordering/AMD3.md, ledger entry 5 and iteration 10.
     for (std::uint32_t ri = 0; ri < reachedSize; ++ri) {
         const std::int32_t u = reached[ri];
         // ONE FETCH OF THE RUN, not three. The three numbers share a 16-byte object, so the
@@ -1639,7 +1639,7 @@ inline const std::vector<std::int32_t>& QuotientGraph::finishElimination(std::in
 //
 // It runs from finishElimination by default and from the driver under mLateMassElimination, and
 // the body is the same either way: what moves is when the question is asked, since aggressive
-// absorption is what makes this cheap test agree with the true one. experiments/ordering/AmdFlat.md, entry 3.
+// absorption is what makes this cheap test agree with the true one. experiments/ordering/AMD3.md, entry 3.
 inline const std::vector<std::int32_t>& QuotientGraph::massEliminate(std::int32_t pivot) {
     std::vector<std::int32_t>& merged = mMerged;   // scratch, kept for its capacity
     merged.clear();
@@ -1727,8 +1727,8 @@ inline const std::vector<std::int32_t>& QuotientGraph::massEliminate(std::int32_
 // every later walk skipping them on the `nv > 0` test, but they are visited, once per walk of that
 // clique for as long as it lives, which on a grid is many.
 //
-// NO CURSOR TO PULL BACK, unlike `AMD_2`'s `if (elenme != 0) pfree = p` and unlike `Amd3B`'s. The
-// arena's length is the vector's own and the clique need not be its last block, so the trimmed
+// NO CURSOR TO PULL BACK, unlike `AMD_2`'s `if (elenme != 0) pfree = p` and unlike
+// `AmdCompacted`'s. The arena's length is the vector's own and the clique need not be its last block, so the trimmed
 // tail is left as a hole like every other dead entry here. This is the arena's whole bargain:
 // nothing is reclaimed, so nothing has to be reclaimable.
 inline void QuotientGraph::trimClique(std::int32_t pivot, std::uint32_t kept) {

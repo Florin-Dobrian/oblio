@@ -293,9 +293,9 @@ Result measure(const SparseMatrix<Val>& A, Ordering ordering, Factorization fact
 // The four orderings, and the three traversals, in the order the tables print them.
 struct Named { Ordering method; const char* name; };
 const Named kOrderings[] = {
-    {Ordering::MmdVendored,  "MMD"},
+    {Ordering::MmdVendored,  "MmdVendored"},
     {Ordering::MmdFlat, "MmdFlat"},
-    {Ordering::AmdVendored,  "AMD"},
+    {Ordering::AmdVendored,  "AmdVendored"},
     {Ordering::AmdFlat, "AmdFlat"},
 };
 const int kNumOrderings = 4;
@@ -379,12 +379,12 @@ int main(int argc, char** argv) {
 
         // The ordering and the analysis read the PATTERN and never a value, so they are timed
         // once per ordering and serve all eight arms.
-        std::printf("  %-6s %12s %10s %10s\n", "order", "nnz(L)", "order", "analyze");
+        std::printf("  %-12s %12s %10s %10s\n", "order", "nnz(L)", "order", "analyze");
         for (int o = 0; o < kNumOrderings; ++o) {
             const OrderEngine oe(kOrderings[o].method);
             Permutation       P;
             if (!oe.compute(A, P)) {
-                std::printf("  %-6s %12s\n", kOrderings[o].name, "refused");
+                std::printf("  %-12s %12s\n", kOrderings[o].name, "refused");
                 continue;
             }
             ElmForest ef;
@@ -398,7 +398,7 @@ int main(int argc, char** argv) {
                                        Traversal::LeftLooking);
                 s.analyze(A);
             });
-            std::printf("  %-6s %12zu %10.2f %10.2f\n", kOrderings[o].name, fill(sf), order,
+            std::printf("  %-12s %12zu %10.2f %10.2f\n", kOrderings[o].name, fill(sf), order,
                         analyze);
         }
         std::fflush(stdout);

@@ -260,9 +260,9 @@ int main(int argc, char** argv) {
     }
 
     const std::vector<std::pair<std::string, Ordering>> methods = {
-        {"Natural", Ordering::Natural}, {"MMD", Ordering::MmdVendored},
+        {"Natural", Ordering::Natural}, {"MmdVendored", Ordering::MmdVendored},
         {"MmdFlat", Ordering::MmdFlat},
-        {"AMD", Ordering::AmdVendored},         {"AmdFlat", Ordering::AmdFlat},
+        {"AmdVendored", Ordering::AmdVendored},         {"AmdFlat", Ordering::AmdFlat},
     };
 
     for (int side : sides) {
@@ -273,14 +273,14 @@ int main(int argc, char** argv) {
         else
             std::printf("\n=== grid %dx%d, n = %d, Cholesky, real ===\n\n", side, side,
                         side * side);
-        std::printf("%-8s %8s %9s %10s %10s %9s %9s %9s %8s\n", "ordering", "order", "analyze",
+        std::printf("%-12s %8s %9s %10s %10s %9s %9s %9s %8s\n", "ordering", "order", "analyze",
                     "analyzeMF", "nnz(L)", "factLL", "factRL", "factMF", "solve");
 
         std::vector<Row> rows;
         for (const auto& m : methods) {
             const Row r = measure(A, m.first, m.second);
             rows.push_back(r);
-            std::printf("%-8s %8.2f %9.2f %10.2f %10zu %9.2f %9.2f %9.2f %8.2f\n", r.name.c_str(),
+            std::printf("%-12s %8.2f %9.2f %10.2f %10zu %9.2f %9.2f %9.2f %8.2f\n", r.name.c_str(),
                         r.order, r.analyze, r.analyzeMf, r.nnzL, r.factLl, r.factRl, r.factMf,
                         r.solve);
         }
@@ -291,17 +291,18 @@ int main(int argc, char** argv) {
         // once per pattern, factor runs per Newton step or per time step.
         const Row* ref = nullptr;
         for (const Row& r : rows)
-            if (r.name == "AMD") ref = &r;
+            if (r.name == "AmdVendored") ref = &r;
         if (ref == nullptr) continue;
 
-        std::printf("\n%-8s %12s %12s %14s   %s\n", "against", "analyze", "factor LL",
+        std::printf("\n%-12s %12s %12s %14s   %s\n", "against", "analyze", "factor LL",
                     "break-even", "reading");
-        std::printf("%-8s %12s %12s %14s\n", "AMD", "saved ms", "cost ms", "factorizations");
+        std::printf("%-12s %12s %12s %14s\n", "AmdVendored",
+                    "saved ms", "cost ms", "factorizations");
         for (const Row& r : rows) {
             if (&r == ref) continue;
             const double saved = ref->analyze - r.analyze;   // positive: this ordering analyzes faster
             const double cost  = r.factLl - ref->factLl;     // positive: and factors slower
-            std::printf("%-8s %12.2f %12.2f", r.name.c_str(), saved, cost);
+            std::printf("%-12s %12.2f %12.2f", r.name.c_str(), saved, cost);
             if (saved > 0 && cost > 0)
                 std::printf(" %14.1f   pays below that many factorizations\n", saved / cost);
             else if (saved < 0 && cost < 0)

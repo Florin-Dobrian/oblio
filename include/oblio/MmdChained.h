@@ -1,11 +1,11 @@
 #pragma once
 
-// Mmd3B.h - MmdFlat on genmmd's dead-segment clique storage. PERMANENT, and for two reasons. It is
-// the ALIGNMENT VEHICLE for a differential against genmmd, holding cliques the way genmmd does so that
+// MmdChained.h - MmdFlat on genmmd's dead-segment clique storage. PERMANENT, and for two reasons.
+// It is the ALIGNMENT VEHICLE for a differential against genmmd, holding cliques the way genmmd does so that
 // whatever still differs is either layout or an improvement to carry back into our own ladder; and
 // it is the PREDICTABLE-SPACE version of MmdFlat, staying inside `O(n + m)` so the answer is
 // reachable whenever the input fits, which our arena cannot promise. It costs 4 to 10 percent. See
-// src/Mmd3B.cpp and docs/DESIGN_DECISIONS.md (2026-08-16).
+// src/MmdChained.cpp and docs/DESIGN_DECISIONS.md (2026-08-16).
 //
 // It returns MmdFlat's permutation, which is genmmd's, so it is an oracle for itself.
 //
@@ -54,7 +54,7 @@ namespace Oblio {
 // true minima, negative takes one pivot per round.
 //
 // It takes A's pattern, which is all an ordering reads, and builds its own quotient graph from it.
-std::vector<std::int32_t> orderMmd3B(const std::vector<std::size_t>&  colPtr,
+std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPtr,
                                     const std::vector<std::int32_t>& rowIdx,
                                     std::int32_t delta = 0);
 

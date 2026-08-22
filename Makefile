@@ -40,12 +40,12 @@ endif
 # Oblio units, full warnings apply.
 #
 # THE THREE NON-ENUM LAYERS ARE IN THIS LIST, AND THIS IS THE WHOLE REASON THE LIST IS EXPLICIT.
-# Mmd3B, Amd3B and Mmd3C are each their original computed differently, and each one's obligation is
-# to reproduce that original's permutation entry for entry. tests/test_order.cpp asserts exactly
+# MmdChained, AmdCompacted and MmdCompacted are each their original computed differently, and each
+# one's obligation is to reproduce that original's permutation entry for entry. tests/test_order.cpp asserts exactly
 # that, so each has to link into the test binaries, and A CHECK THAT NEVER LINKS IS NOT A CHECK.
 #
-# AMD3B WAS MISSING FROM THIS LIST UNTIL 2026-08-17 and the cost was exactly what the warning below
-# predicted. It was reached only through the benchmarks' own glob of src/*.cpp, so it built and ran
+# AmdCompacted WAS MISSING FROM THIS LIST UNTIL 2026-08-17 and the cost was exactly what the warning
+# below predicted. It was reached only through the benchmarks' own glob of src/*.cpp, so it built and ran
 # there while `make test` never saw it; when test_order.cpp gained its assertions the link failed
 # outright, which is the good outcome. The bad one had already happened once: AMD1B and AMD2B were
 # in the same position, their pair check was written, and it never ran under `make test` at all.
@@ -54,7 +54,10 @@ endif
 # about the other. Verifying a new source with `g++ src/*.cpp` cannot see this, being the one form
 # that globs; build through `make` instead.
 #
-# Mmd3C is TRANSITIONAL and leaves this list with the file; Mmd3B and Amd3B are permanent.
+# ALL THREE ARE PERMANENT. `MmdCompacted` was called transitional here until 2026-08-21, which
+# described the PREVIOUS file of that name, mmd on our flat layout, a vehicle for working the amd
+# array folds onto the mmd side. That file was replaced; the current one is mmd on `AMD_2`'s
+# compacted store and is the counterpart of `AmdCompacted`. All three are enumerators now.
 #
 # NO COMMENTS INSIDE THE LIST BELOW. It is one assignment continued with backslashes, so a comment
 # line between entries is swallowed by the continuation and make reports a missing separator.
@@ -64,10 +67,10 @@ OBLIO_SRCS = \
   src/Permutation.cpp \
   src/OrderEngine.cpp \
   src/MmdFlat.cpp \
-  src/Mmd3B.cpp \
-  src/Mmd3C.cpp \
+  src/MmdChained.cpp \
+  src/MmdCompacted.cpp \
   src/AmdFlat.cpp \
-  src/Amd3B.cpp \
+  src/AmdCompacted.cpp \
   src/ElmForestEngine.cpp \
   src/SymFactorEngine.cpp \
   src/BlasLapack.cpp \
@@ -209,5 +212,6 @@ objs: $(LIB_OBJS)
 # is overridable, `make CXXFLAGS="... -g"` produces one on macOS, and clean removes what a build
 # in this directory CAN produce.
 clean:
-	rm -f $(TEST_BINS) $(EXAMPLE_BINS) $(OBLIO_OBJS) private/Amd.o private/Mmd.o .build-mode
+	rm -f $(TEST_BINS) $(EXAMPLE_BINS) $(OBLIO_OBJS) private/AmdVendored.o private/MmdVendored.o \
+	      .build-mode
 	rm -rf *.dSYM

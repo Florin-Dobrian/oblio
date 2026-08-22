@@ -36,8 +36,8 @@ unset(CMAKE_REQUIRED_LIBRARIES)
 #
 # THIS LIST HAD DRIFTED BADLY AND WAS REPAIRED 2026-08-17. It named src/Amd1B.cpp and
 # src/Amd2B.cpp, which were deleted on 2026-08-16, and omitted src/MmdFlat.cpp, which is the DEFAULT
-# ordering, along with Mmd3B, Amd3B and Mmd3C. So this build had been failing to configure for a
-# day and nobody noticed, the Makefile being what the development loop runs.
+# ordering, along with MmdChained, AmdCompacted and MmdCompacted. So this build had been failing to
+# configure for a day and nobody noticed, the Makefile being what the development loop runs.
 #
 # NOTHING DETECTS THE DRIFT, because the two builds share no source list and neither reads the
 # other. Adding or removing a file in src/ means editing BOTH this list and OBLIO_SRCS in the
@@ -46,13 +46,13 @@ unset(CMAKE_REQUIRED_LIBRARIES)
 # README.md, "Which to use".
 add_library(oblio STATIC
     src/AmdFlat.cpp
-    src/Amd3B.cpp
+    src/AmdCompacted.cpp
     src/BlasLapack.cpp
     src/DirectSolver.cpp
     src/ElmForestEngine.cpp
     src/MmdFlat.cpp
-    src/Mmd3B.cpp
-    src/Mmd3C.cpp
+    src/MmdChained.cpp
+    src/MmdCompacted.cpp
     src/MultiplyEngine.cpp
     src/NumFactorDynamic.cpp
     src/NumFactorEngine.cpp

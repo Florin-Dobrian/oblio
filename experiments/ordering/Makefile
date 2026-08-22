@@ -445,5 +445,5 @@ endif
 clean:
 	rm -f $(BINS) vendored_cpp production_cpp width_cpp amdorder_cpp mmdorder_cpp \
 	      mmdmatrices_cpp \
-	      amd_int64.cpp mmd_int64.cpp amd_raw.cpp Amd.o Mmd.o
+	      amd_int64.cpp mmd_int64.cpp amd_raw.cpp AmdVendored.o MmdVendored.o
 	rm -rf *.dSYM

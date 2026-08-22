@@ -259,9 +259,9 @@ struct Method {
 };
 
 const Method kMethods[] = {
-    {Ordering::MmdVendored,  "MMD"},
+    {Ordering::MmdVendored,  "MmdVendored"},
     {Ordering::MmdFlat, "MmdFlat"},
-    {Ordering::AmdVendored,  "AMD"},
+    {Ordering::AmdVendored,  "AmdVendored"},
     {Ordering::AmdFlat, "AmdFlat"},
 };
 const int kNumMethods = 4;
@@ -400,7 +400,7 @@ int main(int argc, char** argv) {
         const double aNorm = infNorm(A);
 
         std::printf("%-36s %8zu %10zu\n", name.c_str(), A.size(), A.nnz());
-        std::printf("  %-6s %11s %8s %8s %8s %8s %8s %8s %8s %9s %9s\n",
+        std::printf("  %-12s %11s %8s %8s %8s %8s %8s %8s %8s %9s %9s\n",
                     "order", "nnz(L)", "order", "anlzLL", "anlzMF", "factLL", "factRL", "factMF",
                     "solve", "bwd", "res");
         std::fflush(stdout);
@@ -413,11 +413,11 @@ int main(int argc, char** argv) {
             record.timing[m] = t;
 
             if (!t.ok) {
-                std::printf("  %-6s %11s\n", kMethods[m].name,
+                std::printf("  %-12s %11s\n", kMethods[m].name,
                             t.nnzL == 0 ? "refused" : "not SPD");
                 continue;
             }
-            std::printf("  %-6s %11zu %8.2f %8.2f %8.2f %8.2f", kMethods[m].name, t.nnzL,
+            std::printf("  %-12s %11zu %8.2f %8.2f %8.2f %8.2f", kMethods[m].name, t.nnzL,
                         t.order, t.analyze, t.analyzeMf, t.factLl);
             if (t.okRl) std::printf(" %8.2f", t.factRl); else std::printf(" %8s", "refused");
             if (t.okMf) std::printf(" %8.2f", t.factMf); else std::printf(" %8s", "refused");
@@ -464,7 +464,7 @@ int main(int argc, char** argv) {
 
         if (!complete.empty()) {
             std::printf("\ngeometric mean relative to the best ordering on each matrix:\n");
-            std::printf("  %-6s %10s %10s %10s %10s\n",
+            std::printf("  %-12s %10s %10s %10s %10s\n",
                         "order", "nnz(L)", "order", "analyze", "factLL");
 
             for (int m = 0; m < kNumMethods; ++m) {
@@ -485,7 +485,7 @@ int main(int argc, char** argv) {
                     if (bestFact > 0)    factRatio.push_back(r->timing[m].factLl / bestFact);
                 }
 
-                std::printf("  %-6s %10.3f %10.3f %10.3f %10.3f\n", kMethods[m].name,
+                std::printf("  %-12s %10.3f %10.3f %10.3f %10.3f\n", kMethods[m].name,
                             geoMean(fillRatio), geoMean(orderRatio), geoMean(analyzeRatio),
                             geoMean(factRatio));
             }

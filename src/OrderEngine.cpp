@@ -1,6 +1,9 @@
 #include "oblio/OrderEngine.h"
 #include "oblio/MmdFlat.h"
 #include "oblio/AmdFlat.h"
+#include "oblio/MmdChained.h"
+#include "oblio/MmdCompacted.h"
+#include "oblio/AmdCompacted.h"
 
 #include <vector>
 
@@ -43,13 +46,16 @@ bool OrderEngine::compute(const std::vector<std::size_t>&  colPtr,
 #else
         case Ordering::MmdVendored:     return false;   // vendored, and private/ is not present
 #endif
-        case Ordering::MmdFlat:    return orderMmdFlat(size, colPtr, rowIdx, P);
+        case Ordering::MmdFlat:      return orderMmdFlat(size, colPtr, rowIdx, P);
+        case Ordering::MmdChained:   return orderMmdChained(size, colPtr, rowIdx, P);
+        case Ordering::MmdCompacted: return orderMmdCompacted(size, colPtr, rowIdx, P);
 #ifdef OBLIO_VENDORED_ORDERINGS
         case Ordering::AmdVendored:     return orderAmdVendored(size, colPtr, rowIdx, P);
 #else
         case Ordering::AmdVendored:     return false;   // vendored, and private/ is not present
 #endif
-        case Ordering::AmdFlat:    return orderAmdFlat(size, colPtr, rowIdx, P);
+        case Ordering::AmdFlat:      return orderAmdFlat(size, colPtr, rowIdx, P);
+        case Ordering::AmdCompacted: return orderAmdCompacted(size, colPtr, rowIdx, P);
     }
     return false;   // unreachable: every enumerator is named above, which is what -Wall checks
 }
@@ -167,6 +173,65 @@ bool OrderEngine::orderAmdFlat(std::size_t size,
     if (size == 0) return true;
 
     const std::vector<std::int32_t> order = Oblio::orderAmdFlat(colPtr, rowIdx);
+    if (order.size() != size) return false;
+
+    for (std::size_t k = 0; k < size; ++k) {
+        P.mNewToOld[k]        = order[k];
+        P.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
+    }
+    return true;
+}
+
+// THE THREE ALTERNATIVE-STORE LAYERS. Each is its branch's algorithm on a different clique store
+// and returns that branch's permutation exactly, so these three bodies differ from the two above
+// in one token: which free function they call. The `Oblio::` qualification is required, not
+// stylistic. The member and the free function share a name, so an unqualified call would resolve
+// to the member and recurse.
+bool OrderEngine::orderMmdChained(std::size_t size,
+                            const std::vector<std::size_t>&  colPtr,
+                            const std::vector<std::int32_t>& rowIdx,
+                            Permutation& P) const {
+    P.mOldToNew.assign(size, 0);
+    P.mNewToOld.assign(size, 0);
+    if (size == 0) return true;
+
+    const std::vector<std::int32_t> order = Oblio::orderMmdChained(colPtr, rowIdx);
+    if (order.size() != size) return false;
+
+    for (std::size_t k = 0; k < size; ++k) {
+        P.mNewToOld[k]        = order[k];
+        P.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
+    }
+    return true;
+}
+
+bool OrderEngine::orderMmdCompacted(std::size_t size,
+                            const std::vector<std::size_t>&  colPtr,
+                            const std::vector<std::int32_t>& rowIdx,
+                            Permutation& P) const {
+    P.mOldToNew.assign(size, 0);
+    P.mNewToOld.assign(size, 0);
+    if (size == 0) return true;
+
+    const std::vector<std::int32_t> order = Oblio::orderMmdCompacted(colPtr, rowIdx);
+    if (order.size() != size) return false;
+
+    for (std::size_t k = 0; k < size; ++k) {
+        P.mNewToOld[k]        = order[k];
+        P.mOldToNew[order[k]] = static_cast<std::int32_t>(k);
+    }
+    return true;
+}
+
+bool OrderEngine::orderAmdCompacted(std::size_t size,
+                            const std::vector<std::size_t>&  colPtr,
+                            const std::vector<std::int32_t>& rowIdx,
+                            Permutation& P) const {
+    P.mOldToNew.assign(size, 0);
+    P.mNewToOld.assign(size, 0);
+    if (size == 0) return true;
+
+    const std::vector<std::int32_t> order = Oblio::orderAmdCompacted(colPtr, rowIdx);
     if (order.size() != size) return false;
 
     for (std::size_t k = 0; k < size; ++k) {

@@ -9,7 +9,7 @@ namespace {
 
 // THE BODY, WITH ONE OPTIONAL OUT-PARAMETER. The public forms are an overload pair rather than one
 // function with another default argument; see MmdFlat.h for why the type must not change.
-std::vector<std::int32_t> orderMmd3Impl(const std::vector<std::size_t>&  colPtr,
+std::vector<std::int32_t> orderMmdFlatImpl(const std::vector<std::size_t>&  colPtr,
                                         const std::vector<std::int32_t>& rowIdx,
                                         std::int32_t delta,
                                         std::size_t* arenaEntries) {
@@ -263,7 +263,7 @@ std::vector<std::int32_t> orderMmd3Impl(const std::vector<std::size_t>&  colPtr,
 std::vector<std::int32_t> orderMmdFlat(const std::vector<std::size_t>&  colPtr,
                                     const std::vector<std::int32_t>& rowIdx,
                                     std::int32_t delta) {
-    return orderMmd3Impl(colPtr, rowIdx, delta, nullptr);
+    return orderMmdFlatImpl(colPtr, rowIdx, delta, nullptr);
 }
 
 // The same ordering, reporting how many entries the clique arena ended up holding. A SIZE, not a
@@ -273,7 +273,7 @@ std::vector<std::int32_t> orderMmdFlat(const std::vector<std::size_t>&  colPtr,
                                     const std::vector<std::int32_t>& rowIdx,
                                     std::int32_t delta,
                                     std::size_t& arenaEntries) {
-    return orderMmd3Impl(colPtr, rowIdx, delta, &arenaEntries);
+    return orderMmdFlatImpl(colPtr, rowIdx, delta, &arenaEntries);
 }
 
 } // namespace Oblio

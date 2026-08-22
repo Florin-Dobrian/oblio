@@ -167,7 +167,7 @@ static bool check(const std::string& name, const Graph& graph) {
     // claim above costs one read. Without it a mis-set threshold shows up as a size mismatch to
     // be diagnosed, which is how the whole of the note above was found; with it, the instrument
     // says what went wrong instead of that something did. An instrument that silently declines
-    // to measure is worse than one that is absent (AmdFlat.md, iteration 12).
+    // to measure is worse than one that is absent (AMD3.md, iteration 12).
     if (info[AMD_NDENSE] != 0) {
         std::printf("  %-22s DENSE ROWS REMOVED: %d. The threshold is wrong, so the oracle\n"
                     "  %-22s ordered a different problem; this is not a divergence.\n",

@@ -2,8 +2,8 @@
 // answer is: the backward error, the residual, and what each factorization had to do to get
 // there. The report drawn from it is ACCURACY.md beside this file.
 //
-// The first pass over real input. Ordering is MmdFlat, the tree's default, and the traversal is
-// left-looking; both are held fixed on purpose, because the question here is whether the
+// The first pass over real input. Ordering is AmdCompacted, the tree's default, and the traversal
+// is left-looking; both are held fixed on purpose, because the question here is whether the
 // pipeline computes correctly on matrices nobody generated, not which ordering is best. The
 // other axes come after this one has been read.
 //

@@ -90,7 +90,7 @@
 #
 #
 # **Entry 4's nature said `convention` here until 2026-08-09, and it is a DEFECT.**
-# The README, `AmdFlat.md` and `docs/DESIGN_DECISIONS.md` have all said DEFECT since
+# The README, `AMD3.md` and `docs/DESIGN_DECISIONS.md` have all said DEFECT since
 # the day it was closed, and it is one by this ledger's own definition: it filed
 # every supervariable one bucket too high per vertex a hash merge absorbed, which
 # is wrong on its own terms with no appeal to AMD_2, and it was fixed in `amd2`,

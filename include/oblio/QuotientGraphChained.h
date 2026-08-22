@@ -17,8 +17,8 @@
 // every walk over one follows links between dead segments, and the reachable set walks cliques.
 // The price is measured and it is large; see docs/DESIGN_DECISIONS.md.
 //
-// ONE DRIVER, `Mmd3B`, AND NO SUFFIXES. This layout is genmmd's alone and no amd driver uses it,
-// so unlike QuotientGraphCompacted.h nothing here is split two ways.
+// ONE DRIVER, `MmdChained`, AND NO SUFFIXES. This layout is genmmd's alone and no amd driver uses
+// it, so unlike QuotientGraphCompacted.h nothing here is split two ways.
 //
 // THE BODIES ARE HERE, NOT IN A SOURCE FILE. A driver that calls out of its own translation unit
 // reloads the run array's base around every call and spills its pivot loop's registers. Every
@@ -143,8 +143,8 @@ public:
     std::uint32_t cliqueWeight() const { return mCliqueWeight; }
 
     // PEAK LIVE CLIQUE MEMBERS, for the cross-driver check in tests/test_order.cpp and in
-    // benchmarks/matrices. `MmdFlat`, `Mmd3B` and `Mmd3C` return the same permutation, so they form
-    // the same cliques and lose the same members at the same moments; this figure MUST be equal
+    // benchmarks/matrices. `MmdFlat`, `MmdChained` and `MmdCompacted` return the same permutation,
+    // so they form the same cliques and lose the same members at the same moments; this figure MUST be equal
     // across the three however differently they store them. The digest says the outputs agree,
     // this says the work behind them agreed too, and on the amd side the same check found two
     // defects in a day.
@@ -172,7 +172,7 @@ public:
     // immediately behind it, which is why the incidence lookup reads the adjacency's length. See
     // the note on the members below.
     // SUFFIXED, and this class has ONE branch so only the mmd half exists. The name is split all
-    // the same, so that `Mmd3B` reads like `MmdFlat` and `Mmd3C`; see QuotientGraph.h.
+    // the same, so that `MmdChained` reads like `MmdFlat` and `MmdCompacted`; see QuotientGraph.h.
     const std::int32_t* adjacencyMmd(std::int32_t u) const {
         return mSource.data() + mRun[u].sourcePtr;
     }
@@ -285,7 +285,7 @@ public:
     //                  `Iw[pn] = Iw[p3]; Iw[p3] = Iw[p1]; Iw[p1] = me`. Our two lists share one
     //                  run exactly as its do, so the same three moves apply unchanged.
     //
-    // See experiments/ordering/AmdFlat.md, ledger entries 2 and 5.
+    // See experiments/ordering/AMD3.md, ledger entries 2 and 5.
     void setVendoredListOrder(bool on) { mVendoredListOrder = on; }
 
     // Stop eliminate() at the prune, leaving mass elimination to the caller. AMD_2 makes the same
@@ -297,7 +297,7 @@ public:
     //
     // With this on, eliminate() returns an EMPTY merged list and C[pivot] is reach(pivot) exactly,
     // and the caller must call massEliminate() once it has absorbed. Used by AmdFlat alone. See
-    // experiments/ordering/AmdFlat.md, ledger entry 3.
+    // experiments/ordering/AMD3.md, ledger entry 3.
     void setLateMassElimination(bool on) { mLateMassElimination = on; }
 
     // The half eliminate() no longer does under the flag above: fold into the pivot's supervariable
@@ -729,7 +729,7 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::eliminate(std::int
     // rotate per list per reached vertex, which is a whole extra walk of the structure and was
     // measured at about 50 percent of AmdFlat's run time before this was folded in. AMD_2 spends
     // three assignments on it for the same reason, letting the list's start shift rather than
-    // moving a list. See experiments/ordering/AmdFlat.md, ledger entry 5 and iteration 10.
+    // moving a list. See experiments/ordering/AMD3.md, ledger entry 5 and iteration 10.
     forEachMember(pivot, [&](std::int32_t u) {
         std::int32_t*     source        = mSource.data() + mRun[u].sourcePtr;
         // The two counters are one-dimensional COUNTS, positions in a list bounded by deg(u) and
@@ -825,7 +825,7 @@ QuotientGraphChained::finishElimination(std::int32_t pivot) {
 //
 // It runs from finishElimination by default and from the driver under mLateMassElimination, and
 // the body is the same either way: what moves is when the question is asked, since aggressive
-// absorption is what makes this cheap test agree with the true one. experiments/ordering/AmdFlat.md, entry 3.
+// absorption is what makes this cheap test agree with the true one. experiments/ordering/AMD3.md, entry 3.
 inline const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std::int32_t pivot) {
     std::vector<std::int32_t>& merged = mMerged;   // scratch, kept for its capacity
     merged.clear();

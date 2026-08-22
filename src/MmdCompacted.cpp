@@ -1,4 +1,4 @@
-#include "oblio/Mmd3C.h"
+#include "oblio/MmdCompacted.h"
 
 #include "oblio/QuotientGraph.h"          // Buckets
 #include "oblio/QuotientGraphCompacted.h"
@@ -9,14 +9,14 @@
 #include <cstdint>
 #include <vector>
 
-// Mmd3C.cpp - MmdFlat on AMD_2'S CLIQUE LAYOUT: one pooled workspace with a free cursor and a
-// compaction, where production keeps a separate append-only arena in elimination order.
+// MmdCompacted.cpp - MmdFlat on AMD_2'S CLIQUE LAYOUT: one pooled workspace with a free cursor and
+// a compaction, where production keeps a separate append-only arena in elimination order.
 //
 // IT IS A CELL OF THE LAYOUT MATRIX, and the matrix is why it exists. Two algorithms and three
 // clique layouts give six cells; with only the diagonal filled, every reading confounds the layout
 // with the algorithm that happens to use it. B is a driver on its OWN branch's vendored layout and
-// C is a driver on the OTHER branch's, so this is the mmd counterpart of Amd3B and pairs with it
-// down a column. See docs/DESIGN_DECISIONS.md (2026-08-16, the layout matrix, and 2026-08-17).
+// C is a driver on the OTHER branch's, so this is the mmd counterpart of AmdCompacted and pairs
+// with it down a column. See docs/DESIGN_DECISIONS.md (2026-08-16, the layout matrix, and 2026-08-17).
 //
 // WHAT IT IS FOR, precisely. With encoding held equal, genmmd's dead-segment scheme COSTS MmdFlat
 // about 8 percent on squares and 29 on cubes, and AMD_2's pool EARNS AmdFlat about 9 percent,
@@ -25,8 +25,8 @@
 // if mmd on it also comes in below 1.0, the pool wins on both algorithms and our arena is the thing
 // to change.
 //
-// IT DOES, BY 5 TO 8 PER CENT. `MMD3C / MmdFlat` on alpamayo reads 0.92 to 0.95 on square grids
-// from 801 to 1601 a side and about 0.91 at 81 cubed, so the pooled workspace beats our append-only
+// IT DOES, BY 5 TO 8 PER CENT. `MmdCompacted / MmdFlat` on alpamayo reads 0.92 to 0.95 on square
+// grids from 801 to 1601 a side and about 0.91 at 81 cubed, so the pooled workspace beats our append-only
 // arena on this branch as it does on the amd one.
 //
 // THE FIGURE WAS 0.90 UNTIL 2026-08-19 AND THAT WAS NOT A FAIR COMPARISON. This file held its own
@@ -34,8 +34,8 @@
 // while `MmdFlat`'s was called across a translation-unit boundary. Build both the same way, either
 // way round, and the answer is 0.92 to 0.95. See docs/DESIGN_DECISIONS.md (2026-08-19).
 //
-// A PREVIOUS Mmd3C HELD THIS NAME AND WAS SOMETHING ELSE. It was mmd on the PRODUCTION layout, a
-// transitional vehicle for working the amd array folds out on the mmd side without disturbing the
+// A PREVIOUS MmdCompacted HELD THIS NAME AND WAS SOMETHING ELSE. It was mmd on the PRODUCTION
+// layout, a transitional vehicle for working the amd array folds out on the mmd side without disturbing the
 // class six drivers run. It did that; the folds are in QuotientGraph and the file was replaced.
 // Nothing of it survives here but the name.
 //
@@ -43,14 +43,14 @@
 // benchmarks/ordering hashes every driver's permutation over 73 grids and names which one moved;
 // `make mmdorder` in experiments/ordering is what says correct. And it must stay ENCODING-IDENTICAL
 // to MmdFlat: a fold that lands in QuotientGraph lands here too, or its time column stops being
-// about storage and starts being about whatever drifted. That is the same obligation Mmd3B carries, and
-// Mmd3B was found to have broken it on 2026-08-17.
+// about storage and starts being about whatever drifted. That is the same obligation MmdChained carries, and
+// MmdChained was found to have broken it on 2026-08-17.
 //
 // NOTHING HERE IS A COPY ANY MORE. This file held its own `QuotientGraphCompacted` and its own
 // `Buckets`, generated from the production ones and then hand edited in the storage layer, until
 // 2026-08-19. The buckets turned out to be `Oblio::Buckets` verbatim, so they are used directly;
-// the graph became the shared `QuotientGraphCompacted`, which `Amd3B` also uses, with a suffix on
-// each method the two vendored routines disagree about. This driver calls the `...Mmd` half of
+// the graph became the shared `QuotientGraphCompacted`, which `AmdCompacted` also uses, with a
+// suffix on each method the two vendored routines disagree about. This driver calls the `...Mmd` half of
 // each pair. Design notes for both types live with them and are authoritative there.
 //
 // THE STORAGE IS COMPLETE AS OF 2026-08-19, in four steps, each verified alone and none of which
@@ -62,15 +62,15 @@
 
 namespace Oblio {
 
-// HOW OFTEN THE POOL RAN OUT, read by tmp/ probes as gAmd3BCompactions is on the amd side. It is
+// HOW OFTEN THE POOL RAN OUT, read by tmp/ probes as gAmdCompactions is on the amd side. It is
 // the one number that says whether `AMD_2`'s elbow room, the pattern plus a fifth plus n, is the
 // right size for MMD's cliques: the two branches fill the pool at different rates, amd absorbing
 // cliques aggressively where mmd does not, so the sizing is the part of this port that is not a
 // copy. Non-zero and growing would mean the room is too small and the compactions are being paid
 // for repeatedly.
 //
-// IT READS 1 AT EVERY SQUARE SIZE FROM 8 TO 401 A SIDE, which is `Amd3B`'s figure exactly, so the
-// vendored headroom suits mmd's cliques as well as amd's. That comparison only became possible on
+// IT READS 1 AT EVERY SQUARE SIZE FROM 8 TO 401 A SIDE, which is `AmdCompacted`'s figure exactly,
+// so the vendored headroom suits mmd's cliques as well as amd's. That comparison only became possible on
 // 2026-08-19: the room here was computed from `nnz` with the diagonal and then rounded up to
 // whatever capacity the allocator had handed back, so it ran about a fifth large and was not a
 // stated figure at all.
@@ -78,7 +78,7 @@ namespace Oblio {
 // AND IT IS WHY THE COMPACTOR HAS TO BE TESTED BY SHRINKING THE POOL. At the shipped room it fires
 // once per ordering, so the mid-walk path is nearly untested by any normal run; sized to exactly
 // `nzaat` it fires 8 to 13 times over the same sizes and every permutation is byte identical.
-std::size_t gMmd3CCompactions = 0;
+std::size_t gMmdCompactions = 0;
 extern std::size_t gPeakCliqueMembers;   // defined in include/oblio/QuotientGraph.h
 
 namespace {
@@ -101,7 +101,7 @@ struct TaggedScanCompacted {
 
 // THE QUOTIENT GRAPH IS THE SHARED `QuotientGraphCompacted`, and this file no longer
 // carries a copy of it. It held one until 2026-08-19, taken into an anonymous namespace so
-// that `Amd3B` could hold another; the two then evolved apart for months, which is exactly
+// that `AmdCompacted` could hold another; the two then evolved apart for months, which is exactly
 // what a private copy is bad at. The class is now one body with a suffix on each method the
 // two vendored routines disagree about, so this driver calls the `...Mmd` half of each pair
 // and nothing else in it changed. See include/oblio/QuotientGraphCompacted.h.
@@ -113,7 +113,7 @@ struct TaggedScanCompacted {
 
 namespace {
 
-std::vector<std::int32_t> orderMmd3CImpl(const std::vector<std::size_t>&  colPtr,
+std::vector<std::int32_t> orderMmdCompactedImpl(const std::vector<std::size_t>&  colPtr,
                                         const std::vector<std::int32_t>& rowIdx,
                                         std::int32_t delta,
                                         std::size_t* arenaEntries) {
@@ -268,24 +268,24 @@ std::vector<std::int32_t> orderMmd3CImpl(const std::vector<std::size_t>&  colPtr
     // into the pivot instead, leaving no one to absorb them, so a few entries legitimately survive.
     assert(qg.cliqueCountBalances() && "clique births and deaths do not balance");
     if (arenaEntries != nullptr) *arenaEntries = qg.arenaEntries();
-    gMmd3CCompactions  = qg.compactions();
+    gMmdCompactions  = qg.compactions();
     gPeakCliqueMembers = qg.numPeakCliqueMembers();   // see include/oblio/QuotientGraph.h
     return qg.orderAscending(pivots);   // genmmd's mmdnum. See the ledger, entry 6.
 }
 
 } // namespace
 
-std::vector<std::int32_t> orderMmd3C(const std::vector<std::size_t>&  colPtr,
+std::vector<std::int32_t> orderMmdCompacted(const std::vector<std::size_t>&  colPtr,
                                     const std::vector<std::int32_t>& rowIdx,
                                     std::int32_t delta) {
-    return orderMmd3CImpl(colPtr, rowIdx, delta, nullptr);
+    return orderMmdCompactedImpl(colPtr, rowIdx, delta, nullptr);
 }
 
-std::vector<std::int32_t> orderMmd3C(const std::vector<std::size_t>&  colPtr,
+std::vector<std::int32_t> orderMmdCompacted(const std::vector<std::size_t>&  colPtr,
                                     const std::vector<std::int32_t>& rowIdx,
                                     std::int32_t delta,
                                     std::size_t& arenaEntries) {
-    return orderMmd3CImpl(colPtr, rowIdx, delta, &arenaEntries);
+    return orderMmdCompactedImpl(colPtr, rowIdx, delta, &arenaEntries);
 }
 
 } // namespace Oblio

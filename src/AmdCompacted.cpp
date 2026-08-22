@@ -1,4 +1,4 @@
-#include "oblio/Amd3B.h"
+#include "oblio/AmdCompacted.h"
 
 #include "oblio/QuotientGraph.h"          // Buckets and TaggedScan
 #include "oblio/QuotientGraphCompacted.h"
@@ -13,11 +13,12 @@
 #include <utility>
 #include <vector>
 
-// Amd3B.cpp - AmdFlat on AMD_2'S CLIQUE STORAGE: one pool with a free cursor and a compaction.
+// AmdCompacted.cpp - AmdFlat on AMD_2'S CLIQUE STORAGE: one pool with a free cursor and a
+// compaction.
 //
 // WHAT IT IS FOR, AND IT IS TWO THINGS. Both are permanent; this file is not an experiment awaiting
-// a verdict and its old stop condition is withdrawn. It is the amd counterpart of Mmd3B, which says
-// the same of itself.
+// a verdict and its old stop condition is withdrawn. It is the amd counterpart of MmdChained, which
+// says the same of itself.
 //
 // FIRST, IT IS THE ALIGNMENT VEHICLE FOR A DIFFERENTIAL. Comparing our ordering against `AMD_2` is
 // only clean when the two hold their cliques the same way; otherwise every difference is confounded
@@ -36,7 +37,7 @@
 // different existing pass serving the same purpose. The detection stamp landed in `AmdFlat` and in
 // `Amd2`, both of which already carried the tagged `w`. `Amd1` needed nothing, having no
 // supervariable detection at all. SO THIS FILE'S TIME COLUMN IS NOW THE STORAGE PRICE ALONE, as
-// Mmd3B's already was, and it reads about 6 to 8 percent below AmdFlat up to 256 a side and 15
+// MmdChained's already was, and it reads about 6 to 8 percent below AmdFlat up to 256 a side and 15
 // percent below it from 400 up, reproduced across two runs.
 //
 // THE FIFTH CANNOT PORT, AND THE REASON IS Mmd1 RATHER THAN THE PREPASS. `eliminated()` answers
@@ -115,13 +116,13 @@
 // NOTHING HERE IS A COPY ANY MORE. This file held its own `QuotientGraphCompacted` and its own
 // `Buckets`, generated from the production ones and then hand edited in the storage layer, until
 // 2026-08-19. The buckets turned out to be `Oblio::Buckets` verbatim, so they are used directly;
-// the graph became the shared `QuotientGraphCompacted`, which `Mmd3C` also uses, with a suffix on
-// each method the two vendored routines disagree about. This driver calls the `...Amd` half of
+// the graph became the shared `QuotientGraphCompacted`, which `MmdCompacted` also uses, with a
+// suffix on each method the two vendored routines disagree about. This driver calls the `...Amd` half of
 // each pair. Design notes for both types live with them and are authoritative there.
 
 namespace Oblio {
 
-std::size_t gAmd3BCompactions = 0;   // read by tmp/ probes; see the note at the return below
+std::size_t gAmdCompactions = 0;   // read by tmp/ probes; see the note at the return below
 extern std::size_t gPeakCliqueMembers;   // defined in include/oblio/QuotientGraph.h
 
 namespace {
@@ -136,7 +137,7 @@ namespace {
 
 
 // THE QUOTIENT GRAPH IS THE SHARED `QuotientGraphCompacted`, and this file no longer carries a
-// copy of it. It held one until 2026-08-19, in an anonymous namespace so that `Mmd3C` could
+// copy of it. It held one until 2026-08-19, in an anonymous namespace so that `MmdCompacted` could
 // hold another; the two then evolved apart for months, which is what a private copy is bad
 // at. The class is now one body with a suffix on each method the two vendored routines
 // disagree about, so this driver calls the `...Amd` half of each pair.
@@ -144,8 +145,8 @@ namespace {
 
 
 // THE ONE BODY, TAKING A POINTER SO THAT BOTH PUBLIC FORMS SHARE IT. The same shape `AmdFlat`,
-// `MmdFlat` and `Mmd3C` use; `Amd3B` was the one driver without it until 2026-08-21.
-std::vector<std::int32_t> orderAmd3BImpl(const std::vector<std::size_t>&  colPtr,
+// `MmdFlat` and `MmdCompacted` use; `AmdCompacted` was the one driver without it until 2026-08-21.
+std::vector<std::int32_t> orderAmdCompactedImpl(const std::vector<std::size_t>&  colPtr,
                                          const std::vector<std::int32_t>& rowIdx,
                                          std::size_t* arenaEntries) {
     if (colPtr.empty()) return std::vector<std::int32_t>();
@@ -438,7 +439,7 @@ std::vector<std::int32_t> orderAmd3BImpl(const std::vector<std::size_t>&  colPtr
     // How often the pool actually needed compacting. `AMD_2` reports the same figure as
     // Info[AMD_NCMPA] and its complexity bound assumes it stays constant; this is where that
     // assumption can be checked for OUR storage rather than for its.
-    gAmd3BCompactions  = qg.compactions();
+    gAmdCompactions  = qg.compactions();
     gPeakCliqueMembers = qg.numPeakCliqueMembers();   // see include/oblio/QuotientGraph.h
     // THE ROWS THE DENSE RULE SET ASIDE GO LAST, in index order, which is where `AMD_2`'s output
     // assembly puts them. They were compacted in an ascending pass, so appending the vector is
@@ -451,17 +452,17 @@ std::vector<std::int32_t> orderAmd3BImpl(const std::vector<std::size_t>&  colPtr
 
 } // namespace
 
-std::vector<std::int32_t> orderAmd3B(const std::vector<std::size_t>&  colPtr,
+std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  colPtr,
                                      const std::vector<std::int32_t>& rowIdx) {
-    return orderAmd3BImpl(colPtr, rowIdx, nullptr);
+    return orderAmdCompactedImpl(colPtr, rowIdx, nullptr);
 }
 
 // The same, reporting the pool's size. See QuotientGraphCompacted::arenaEntries for why that is a
 // different quantity from the flat class's, and AmdFlat.h for why this is an overload.
-std::vector<std::int32_t> orderAmd3B(const std::vector<std::size_t>&  colPtr,
+std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  colPtr,
                                      const std::vector<std::int32_t>& rowIdx,
                                      std::size_t& arenaEntries) {
-    return orderAmd3BImpl(colPtr, rowIdx, &arenaEntries);
+    return orderAmdCompactedImpl(colPtr, rowIdx, &arenaEntries);
 }
 
 } // namespace Oblio

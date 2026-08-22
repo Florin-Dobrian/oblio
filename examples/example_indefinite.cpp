@@ -126,7 +126,7 @@ int main() {
 
     for (Factorization factorization : {Factorization::Cholesky, Factorization::StaticLDLT,
                                         Factorization::DynamicLDLT}) {
-        DirectSolver<Val> solver(Ordering::MmdFlat, factorization);
+        DirectSolver<Val> solver(Ordering::AmdCompacted, factorization);
 
         // Analyze once, on the pattern. Any of the three matrices would do, since they share it.
         if (!solver.analyze(shiftedGrid(side, shift[0]))) {

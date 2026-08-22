@@ -47,10 +47,10 @@
 #endif
 
 #include "oblio/AmdFlat.h"
-#include "oblio/Amd3B.h"
+#include "oblio/AmdCompacted.h"
 #include "oblio/MmdFlat.h"
-#include "oblio/Mmd3B.h"
-#include "oblio/Mmd3C.h"
+#include "oblio/MmdChained.h"
+#include "oblio/MmdCompacted.h"
 #include "oblio/OrderEngine.h"
 #include "oblio/Permutation.h"
 #include "oblio/SparseMatrix.h"
@@ -185,14 +185,14 @@ int main(int argc, char** argv) {
         if      (method == "mmd3") sum += orderMmdFlat(colPtr, rowIdx).size();
         else if (method == "amd3") sum += orderAmdFlat(colPtr, rowIdx).size();
         // THE THREE NON-ENUM LAYERS, added 2026-08-17. Each is its original computed differently,
-        // so each is a thing whose cost is a question in its own right: Mmd3B and Amd3B carry the
-        // vendored clique storage schemes and Mmd3C carries the port of the amd array folds onto
+        // so each is a thing whose cost is a question in its own right: MmdChained and AmdCompacted
+        // carry the vendored clique storage schemes and MmdCompacted carries the port of the amd array folds onto
         // the mmd side. Profiling them through THIS driver rather than another is the same
         // argument the header already makes for the vendored pair: a comparison across two
         // programs measures their differences too.
-        else if (method == "mmd3b") sum += orderMmd3B(colPtr, rowIdx).size();
-        else if (method == "mmd3c") sum += orderMmd3C(colPtr, rowIdx).size();
-        else if (method == "amd3b") sum += orderAmd3B(colPtr, rowIdx).size();
+        else if (method == "mmd3b") sum += orderMmdChained(colPtr, rowIdx).size();
+        else if (method == "mmd3c") sum += orderMmdCompacted(colPtr, rowIdx).size();
+        else if (method == "amd3b") sum += orderAmdCompacted(colPtr, rowIdx).size();
         else if (vendored) { Permutation P; engine.compute(A, P); sum += P.size(); }
     }
     if (cubic)

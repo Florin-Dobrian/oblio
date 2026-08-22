@@ -44,10 +44,13 @@ using Val = double;
 const char* name(Ordering m) {
     switch (m) {
         case Ordering::Natural: return "Natural";
-        case Ordering::MmdVendored:     return "MMD";
-        case Ordering::MmdFlat:    return "MmdFlat";
-        case Ordering::AmdVendored:     return "AMD";
-        case Ordering::AmdFlat:    return "AmdFlat";
+        case Ordering::MmdVendored:  return "MmdVendored";
+        case Ordering::MmdFlat:      return "MmdFlat";
+        case Ordering::MmdChained:   return "MmdChained";
+        case Ordering::MmdCompacted: return "MmdCompacted";
+        case Ordering::AmdVendored:  return "AmdVendored";
+        case Ordering::AmdFlat:      return "AmdFlat";
+        case Ordering::AmdCompacted: return "AmdCompacted";
     }
     return "?";
 }
@@ -101,8 +104,8 @@ int main() {
     // The forest and symbolic factor depend only on the pattern and the ordering, not on the
     // factorization or traversal, so they are computed once per ordering. Only the numeric factor
     // varies inside the inner loops.
-    for (Ordering ordering : {Ordering::Natural, Ordering::MmdVendored, Ordering::MmdFlat,
-                              Ordering::AmdVendored, Ordering::AmdFlat}) {
+    for (Ordering ordering : {Ordering::Natural, Ordering::MmdVendored, Ordering::MmdCompacted,
+                              Ordering::AmdVendored, Ordering::AmdCompacted}) {
         OrderEngine ordEng(ordering);
         Permutation P;
         if (!ordEng.compute(A, P))
@@ -160,7 +163,7 @@ int main() {
 
     // One actual solution, so the example ends on a number a reader can check by hand.
     {
-        OrderEngine ordEng(Ordering::MmdFlat);
+        OrderEngine ordEng(Ordering::AmdCompacted);
         Permutation P;  ordEng.compute(A, P);
         ElmForest ef;   ElmForestEngine efEng;  efEng.compute(A, P, ef);
         SymFactor sf;   SymFactorEngine sfEng;  sfEng.compute(A, P, ef, sf);
@@ -170,7 +173,7 @@ int main() {
         Vector<Val> x(n);
         solEng.compute(P, nf, b, x);
 
-        printf("\nSolution (MmdFlat, Cholesky, LeftLooking):\n");
+        printf("\nSolution (AmdCompacted, Cholesky, LeftLooking):\n");
         for (std::size_t i = 0; i < n; ++i)
             printf("  x[%zu] = %.10f\n", i, x[i]);
     }

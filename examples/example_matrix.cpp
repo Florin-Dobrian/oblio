@@ -126,7 +126,7 @@ bool solveAndPrint(const char* what, const SparseMatrix<Val>& A, Vector<Val>& x)
     Vector<Val> b(A.size());
     for (std::size_t i = 0; i < A.size(); ++i) b[i] = Val(1);
 
-    DirectSolver<Val> solver(Ordering::MmdFlat, Factorization::DynamicLDLT);
+    DirectSolver<Val> solver(Ordering::AmdCompacted, Factorization::DynamicLDLT);
     if (!solver.analyze(A)) { printf("  %-22s analyze refused\n", what); return false; }
     if (!solver.factor(A))  { printf("  %-22s factor refused\n",  what); return false; }
     if (!solver.solve(b, x)) { printf("  %-22s solve refused\n",  what); return false; }

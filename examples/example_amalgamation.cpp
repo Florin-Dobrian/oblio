@@ -103,7 +103,7 @@ int main() {
     };
     const int settings = 6;
 
-    printf("Grid %zux%zu, n = %zu, nnz(A) = %zu. Cholesky, MmdFlat, left-looking.\n\n",
+    printf("Grid %zux%zu, n = %zu, nnz(A) = %zu. Cholesky, AmdCompacted, left-looking.\n\n",
            side, side, size, A.nnz());
     printf("  %-9s %9s %10s %10s %10s %10s %10s\n",
            "threshold", "snodes", "nnz(L)", "numVal", "factor ms", "solve ms", "residual");
@@ -114,8 +114,8 @@ int main() {
     std::size_t nnzAt[settings], snodesAt[settings];
 
     for (int t = 0; t < settings; ++t) {
-        DirectSolver<Val> solver(Ordering::MmdFlat, Factorization::Cholesky, Traversal::LeftLooking,
-                                 Supernodes::Fundamental, threshold[t]);
+        DirectSolver<Val> solver(Ordering::AmdCompacted, Factorization::Cholesky,
+                                 Traversal::LeftLooking, Supernodes::Fundamental, threshold[t]);
         if (!solver.analyze(A)) { printf("  analyze failed\n"); return 1; }
 
         // Warm-up, untimed.

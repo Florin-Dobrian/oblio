@@ -14,7 +14,7 @@ namespace {
 // defaulted parameter here would stop `orderAmdFlat` binding to the plain two-argument function
 // pointer that benchmarks/ordering and the digest harness take its address as. An overload leaves
 // that type intact.
-std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
+std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colPtr,
                                         const std::vector<std::int32_t>& rowIdx,
                                         std::size_t* arenaEntries) {
     if (colPtr.empty()) return std::vector<std::int32_t>();
@@ -25,7 +25,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
 
     // The two shared-class conventions this layer differs by. Both are off for every other driver
     // and neither changes which sets are computed, only which permutation comes out. See the
-    // setters, and experiments/ordering/AmdFlat.md for ledger entries 2, 3 and 5.
+    // setters, and experiments/ordering/AMD3.md for ledger entries 2, 3 and 5.
     qg.setLateMassElimination(true);    // and mass elimination becomes this driver's, below
 
     std::vector<std::int32_t> pivots;               // the order over supervariables
@@ -362,7 +362,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
         // test fail. Amd.cpp says so itself, making the same test in its scan 2 over a clique
         // list absorption has already compacted: with aggressive absorption, `deg == 0` is
         // identical to `Elen[i] == 1 && p3 == pn`. Asking first, as every other driver here does,
-        // declines merges the vendored routine makes. experiments/ordering/AmdFlat.md, ledger
+        // declines merges the vendored routine makes. experiments/ordering/AMD3.md, ledger
         // entry 3.
         const std::vector<std::int32_t>& merged = qg.massEliminate(pivot);
         numEliminated += 1 + static_cast<std::uint32_t>(merged.size());
@@ -400,7 +400,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
         // clique is already trimmed when they take `degme` and their single write is correct. The
         // defect arrived with ledger entry 3, which moved mass elimination out and did not carry
         // the second write that placement is the whole reason for. Half a mechanism, as entry 6
-        // was. See experiments/ordering/AmdFlat.md.
+        // was. See experiments/ordering/AMD3.md.
         degrees[pivot] = degme;
 
         const std::uint32_t numLeft = numLive;
@@ -503,13 +503,13 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
             // 19.0 pairs per pivot against the vendored routine's 0.33, so the pass it shortens
             // was not the one the profile was standing on.
             //
-            // Measured on alpamayo in a scratch Amd3B, 2026-08-10: about 4 to 7 percent faster at
-            // six consecutive square grids from 64 to 400 a side, and 5 to 14 percent on cubic
+            // Measured on alpamayo in a scratch AmdCompacted, 2026-08-10: about 4 to 7 percent
+            // faster at six consecutive square grids from 64 to 400 a side, and 5 to 14 percent on cubic
             // grids from 12 to 32, with nnz(L) identical at every size. APPROXIMATE, both ranges:
             // the variant was timed as a free function and this driver through OrderEngine, which
             // also builds a Permutation, a bias of up to 2.4 percent. It removes a sweep over C[p]
             // and two walks, 26.70 of 149.96 element visits per pivot at 140 a side and 66.77 of
-            // 352.57 at 26 cubed. See benchmarks/ordering/README.md and AmdFlat.md.
+            // 352.57 at 26 cubed. See benchmarks/ordering/README.md and AMD3.md.
             //
             // THE GUARD AND THE DIRECTION ARE THE TWO THINGS THAT HAD TO COME ACROSS. The key pass
             // skipped an eliminated member and this bound pass does not, so the skip moves onto
@@ -658,8 +658,8 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
                 // TWO LOOPS RATHER THAN Amd.cpp's ONE, and that is the layout rather than a
                 // choice. Its run is cliques then variables with the new clique at the front, so
                 // the whole list minus the first entry is one span. Ours is A[u] then I[u] with the
-                // new clique at the front of I[u], so the entry to skip is in the middle. `Amd3B`,
-                // which carries `AMD_2`'s order, does get the single loop.
+                // new clique at the front of I[u], so the entry to skip is in the middle.
+                // `AmdCompacted`, which carries `AMD_2`'s order, does get the single loop.
                 const std::int32_t  other      = ++stamp;
                 const std::uint32_t adjacencyU = qg.adjacencySize(u);
                 const std::uint32_t incidenceU = qg.incidenceSize(u);
@@ -677,7 +677,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
                     //     A[u] == A[v]   and   I[u] == I[v]
                     // against the stamp of u laid down once above. Both walks short-circuit on the
                     // first mismatch, which is what made the comparison cheap and the stamping the
-                    // thing that had to move: see experiments/ordering/AmdFlat.md, iteration 15.
+                    // thing that had to move: see experiments/ordering/AMD3.md, iteration 15.
                     if (qg.adjacencySize(v) != adjacencyU) continue;
                     if (qg.incidenceSize(v) != incidenceU) continue;
 
@@ -833,7 +833,7 @@ std::vector<std::int32_t> orderAmd3Impl(const std::vector<std::size_t>&  colPtr,
 
 std::vector<std::int32_t> orderAmdFlat(const std::vector<std::size_t>&  colPtr,
                                     const std::vector<std::int32_t>& rowIdx) {
-    return orderAmd3Impl(colPtr, rowIdx, nullptr);
+    return orderAmdFlatImpl(colPtr, rowIdx, nullptr);
 }
 
 // The same ordering, reporting how many entries the clique arena ended up holding. A SIZE, not a
@@ -842,7 +842,7 @@ std::vector<std::int32_t> orderAmdFlat(const std::vector<std::size_t>&  colPtr,
 std::vector<std::int32_t> orderAmdFlat(const std::vector<std::size_t>&  colPtr,
                                     const std::vector<std::int32_t>& rowIdx,
                                     std::size_t& arenaEntries) {
-    return orderAmd3Impl(colPtr, rowIdx, &arenaEntries);
+    return orderAmdFlatImpl(colPtr, rowIdx, &arenaEntries);
 }
 
 } // namespace Oblio

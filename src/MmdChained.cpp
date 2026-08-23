@@ -56,10 +56,10 @@
 //
 // THE COPY IS EXACT AS OF THIS COMMIT and the comments were not duplicated with it. Every design
 // note for these types lives in include/oblio/QuotientGraph.h and is authoritative there; reading
-// this file means reading it alongside this one. `Buckets` is that header's `Buckets` too,
-// which is why promoting `QuotientGraphChained` needs no second bucket class. Only the DIFFERENCES
-// are commented here, and at this commit there are none: MmdChained must return MmdFlat's
-// permutation, which is genmmd's, so `make mmdorder` and `make test` are the acceptance check unchanged.
+// this file means reading it alongside this one. `Buckets` is that header's `Buckets` too, which is
+// why promoting `QuotientGraphChained` needs no second bucket class. Only the DIFFERENCES are
+// commented here, and at this commit there are none: MmdChained must return MmdFlat's permutation,
+// which is genmmd's, so `make mmdorder` and `make test` are the acceptance check unchanged.
 //
 // The scheme itself: see the section "The vendored storage scheme, and what it is worth" in
 // experiments/ordering/README.md. In one line, genmmd keeps every clique in the dead segment of
@@ -145,7 +145,7 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
     // emptying it; the prepass now reads each successor before unfiling and needs no list at all.
     // A `touched` list with a `touchedRound` stamp beside it went the same way on 2026-08-15,
     // having been filled once per clique member per pivot and never read on this layer.
-    std::vector<std::int32_t> batch, cliqueMembers, q2h, qxh;
+    std::vector<std::int32_t> batch, cliqueMembers, twoSourceQueue, manySourceQueue;
 
     // NO DRIVER MARK ARRAY. The two levels this refresh needs, one surviving a whole clique and
     // one fresh per vertex, are two tags rather than two arrays, and they go into the graph's own
@@ -216,45 +216,46 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
         // ---- one refresh, walked clique by clique -----------------------------
         // The driver's clique list, genmmd's `list[mn] = ehead; ehead = mn`, so the LAST pivot of
         // a batch is the FIRST clique refreshed.
-        for (auto ee = batch.rbegin(); ee != batch.rend(); ++ee) {
-            const std::int32_t clique = *ee;
+        for (auto cliqueIt = batch.rbegin(); cliqueIt != batch.rend(); ++cliqueIt) {
+            const std::int32_t clique = *cliqueIt;
             cliqueMembers.clear();
             qg.forEachMember(clique, [&](std::int32_t v) {
                 if (!qg.eliminated(v)) cliqueMembers.push_back(v);
             });
 
             const std::int32_t cliqueTag = qg.advanceTag();   // marked once for the clique
-            for (std::int32_t v : cliqueMembers) qg.setMark(v, cliqueTag);
-            std::uint32_t dg0 = 0;
-            for (std::int32_t v : cliqueMembers) dg0 += qg.weight(v);
+            for (std::int32_t u : cliqueMembers) qg.setMark(u, cliqueTag);
+            std::uint32_t cliqueWeight = 0;
+            for (std::int32_t u : cliqueMembers) cliqueWeight += qg.weight(u);
 
             // reach(u) has |A[u]| + |I[u]| sources once the new clique is counted, so one other
-            // source means everything u reaches is in this clique plus that one place. dg0
+            // source means everything u reaches is in this clique plus that one place. cliqueWeight
             // already counts the clique, and the other source is walked directly, so no union is
             // formed at all.
-            q2h.clear();
-            qxh.clear();
+            twoSourceQueue.clear();
+            manySourceQueue.clear();
             for (std::int32_t u : cliqueMembers) {
                 if (buckets.filed(u) || buckets.outmatched(u)) continue;   // done, or withheld
                 const std::uint32_t otherSources = qg.adjacencySize(u) + qg.incidenceSize(u) - 1;
-                (otherSources == 1 ? q2h : qxh).push_back(u);
+                (otherSources == 1 ? twoSourceQueue : manySourceQueue).push_back(u);
             }
 
             // mmdupd's q2h list, `list[nb] = q2h; q2h = nb`.
-            for (auto uu = q2h.rbegin(); uu != q2h.rend(); ++uu) {
-                const std::int32_t u = *uu;
-                if (qg.eliminated(u) || buckets.outmatched(u)) continue; // by an earlier q2h vertex
+            for (auto uit = twoSourceQueue.rbegin(); uit != twoSourceQueue.rend(); ++uit) {
+                const std::int32_t u = *uit;
+                // merged or withheld by an earlier two-source vertex
+                if (qg.eliminated(u) || buckets.outmatched(u)) continue;
                 const std::int32_t vertexTag = qg.advanceTag();
-                // dg0 is kept WHOLE and u's own weight subtracted at the end, which is
+                // cliqueWeight is kept WHOLE and u's own weight subtracted at the end, which is
                 // genmmd's `dg - qsize[en] + 1` and not the same as subtracting it now. The
                 // walk below can MERGE a vertex into u, and genmmd's merge does
                 // `qsize[en] += qsize[nd]` in that same walk, so the weight it subtracts is the
                 // one AFTER the merge. Subtracting first files a supervariable one bucket too
                 // high per merged vertex, so it is not picked as early as its size has earned.
                 // See experiments/ordering/mmd3.py, ledger entry 5.
-                std::uint32_t degree = dg0;
+                std::uint32_t degree = cliqueWeight;
 
-                // NO LOOPS. A q2h vertex has exactly TWO sources and one of them is the new
+                // NO LOOPS. A two-source vertex has exactly TWO sources and one of them is the new
                 // clique, by the test that put it on this list, so the other one is unique and
                 // can be indexed. genmmd does the same and does it in three lines: it reads the
                 // first entry of the segment, steps past it if that is the clique, and branches
@@ -280,7 +281,7 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
                     // anything at or above it is either this pass's own stamp or GONE, and both
                     // mean skip.
                     const std::int32_t m = qg.mark(v);
-                    if (m < vertexTag && m != cliqueTag) {        // not seen, not dead, not dg0's
+                    if (m < vertexTag && m != cliqueTag) {       // not seen, dead, or counted
                         qg.setMark(v, vertexTag);
                         degree += qg.weight(v);
                     }
@@ -313,8 +314,8 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
             }
 
             // mmdupd's qxh list, the same stack.
-            for (auto uu = qxh.rbegin(); uu != qxh.rend(); ++uu) {
-                const std::int32_t u = *uu;                 // the full union, as md5 computes it
+            for (auto uit = manySourceQueue.rbegin(); uit != manySourceQueue.rend(); ++uit) {
+                const std::int32_t u = *uit;                 // the full union, as md5 computes it
                 if (qg.eliminated(u) || buckets.outmatched(u)) continue;
                 const std::uint32_t degree = qg.reachableWeight(u); // reach excludes u already
                 const std::uint32_t filed = std::max<std::uint32_t>(degree + 1, 1);

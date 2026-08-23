@@ -36,11 +36,29 @@ working C++ and Python twins, `md1` through `md5`, `mmd1` to `mmd3`, `amd1` to `
 against the other and against production by `make test` in that directory. That is where the
 pedagogy lives and where it is maintained. These four were a second copy of it in production form.
 
-**WHAT WENT WITH THEM.** Four enumerators, `MMD1`, `MMD2`, `AMD1` and `AMD2`, so `Ordering` is now
-five values. Sixteen validity assertions in `test_order` and twelve more across the other suites,
-which is why the suite reports 251 where it reported 279. The digest went from nine drivers to
-five, 365 digests where it recorded 657, and `.digest-baseline` was re-recorded. Tests and examples
-that named `Ordering::MMD2` because they wanted *an* ordering now name `Ordering::MMD3`.
+**WHAT WENT WITH THEM.** Four enumerators, `MMD1`, `MMD2`, `AMD1` and `AMD2`, so `Ordering` went
+from nine values to five. Sixteen validity assertions in `test_order` and twelve more across the
+other suites, which is why the suite reports 251 where it reported 279. The digest went from nine
+drivers to five, 365 digests where it recorded 657, and `.digest-baseline` was re-recorded. Tests
+and examples that named `Ordering::MMD2` because they wanted *an* ordering were moved onto the
+surviving mmd driver.
+
+**THE SURVIVORS WERE RENAMED LATER THE SAME DAY, and this file keeps the old names because they are
+what these four were called.** Everything else in the tree uses the new ones, so a reader arriving
+here from an older checkout needs the map:
+
+```
+MMD   -> MmdVendored        AMD   -> AmdVendored
+MMD3  -> MmdFlat            AMD3  -> AmdFlat
+MMD3C -> MmdCompacted       AMD3B -> AmdCompacted
+MMD3B -> MmdChained
+```
+
+A driver is now its branch plus the clique store it runs on, and `Ordering` carries eight
+enumerators with `Natural`, `AmdCompacted` being the default. The four retired here predate that
+scheme: each was the base algorithm without its reference's later refinements, so none of them is
+a store variant of anything and none has a name in it. See `docs/DESIGN_DECISIONS.md`
+(2026-08-21), the naming entry.
 
 **IF THEY COME BACK.** The question they would answer is what each mechanism costs in isolation,
 which is a real question and is currently answered on grids only, in `experiments/ordering`. Doing

@@ -230,10 +230,10 @@ void run(const std::string& path, const Options& options) {
     //        capacity above size.
     //
     // pC IS A PROPERTY OF THE ALGORITHM, NOT OF THE LAYOUT. `MmdFlat`, `MmdChained` and
-    // `MmdCompacted` return the same permutation, so they form the same cliques and lose the same members at the same
-    // moments; the figure is identical for all three, and the same holds for `AmdFlat` against
-    // `AmdCompacted`. Neither vendored routine can report one. Only cC is ours, and a chunked
-    // version would show this same pC with a cC of nothing.
+    // `MmdCompacted` return the same permutation, so they form the same cliques and lose the same
+    // members at the same moments; the figure is identical for all three, and the same holds for
+    // `AmdFlat` against `AmdCompacted`. Neither vendored routine can report one. Only cC is ours,
+    // and a chunked version would show this same pC with a cC of nothing.
     std::size_t cC = 0;
     gPeakCliqueMembers = 0;
     const std::vector<std::int32_t> order = amd ? orderAmdFlat(colPtr, rowIdx, cC)
@@ -242,11 +242,11 @@ void run(const std::string& path, const Options& options) {
     const std::size_t nnzL = fillOf(A, order);
 
     // THE B SIBLING RIDES ALONG ON BOTH BRANCHES, and only its time is reported: `AmdCompacted` on
-    // the amd side, `MmdChained` on the mmd side. Each is its branch's driver on a DIFFERENT CLIQUE LAYOUT,
-    // `AMD_2`'s compacting pool and genmmd's chained segments respectively, so in neither case is
-    // there anything for a `cC` column to compare; see experiments/ordering/README.md on the three
-    // layouts. Everything else about a sibling MUST match its driver, the two being the same
-    // algorithm with the same encodings, so the order, the fill and the peak live members are
+    // the amd side, `MmdChained` on the mmd side. Each is its branch's driver on a DIFFERENT CLIQUE
+    // LAYOUT, `AMD_2`'s compacting pool and genmmd's chained segments respectively, so in neither
+    // case is there anything for a `cC` column to compare; see experiments/ordering/README.md on
+    // the three layouts. Everything else about a sibling MUST match its driver, the two being the
+    // same algorithm with the same encodings, so the order, the fill and the peak live members are
     // CHECKED rather than printed and a mismatch is flagged at the end of the row.
     //
     // THE `pC` CHECK IS THE SHARP ONE, and it is why this exists. Peak live clique members is a
@@ -258,8 +258,8 @@ void run(const std::string& path, const Options& options) {
     // agreeing on the answer, so until this check there was nothing watching the thing it varies.
     // TWO SIBLINGS ON THE MMD BRANCH, ONE ON THE AMD BRANCH, and every one of them gets all three
     // checks. `MmdCompacted` is the mmd algorithm on `AMD_2`'s compacting pool, the second layout
-    // this branch has, so it belongs beside `MmdChained` rather than instead of it. There is no
-    // `Amd3C`.
+    // this branch has, so it belongs beside `MmdChained` rather than instead of it. The amd branch
+    // has only one sibling because `AmdChained`, amd on genmmd's chained store, is not built.
     double      sibMs[2] = {0.0, 0.0};
     std::size_t nCmp[2]  = {0, 0};
     const int   sibCount = amd ? 1 : 2;
@@ -458,8 +458,8 @@ int main(int argc, char** argv) {
     // Where the arena is half the factor, and this set has those too, it decides.
     //
     // Each branch's siblings follow its own columns: `MmdChained` and `MmdCompacted` on the mmd
-    // side, `AmdCompacted` on the amd side. Only their times are printed; their order, fill and pC are checked against
-    // the branch driver's and a mismatch is flagged at the end of the row.
+    // side, `AmdCompacted` on the amd side. Only their times are printed; their order, fill and pC
+    // are checked against the branch driver's and a mismatch is flagged at the end of the row.
     // THE DRIVER COLUMNS CARRY THE THREE-LETTER TAGS and the legend above says what each is. A run
     // is mmd or amd, never both, so the branch is not in the tag: it is in the line below and in
     // the title already printed. Tags per the 2026-08-21 naming entry in docs/DESIGN_DECISIONS.md,

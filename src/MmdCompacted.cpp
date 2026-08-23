@@ -16,18 +16,19 @@
 // clique layouts give six cells; with only the diagonal filled, every reading confounds the layout
 // with the algorithm that happens to use it. B is a driver on its OWN branch's vendored layout and
 // C is a driver on the OTHER branch's, so this is the mmd counterpart of AmdCompacted and pairs
-// with it down a column. See docs/DESIGN_DECISIONS.md (2026-08-16, the layout matrix, and 2026-08-17).
+// with it down a column. See docs/DESIGN_DECISIONS.md (2026-08-16, the layout matrix, and
+// 2026-08-17).
 //
 // WHAT IT IS FOR, precisely. With encoding held equal, genmmd's dead-segment scheme COSTS MmdFlat
 // about 8 percent on squares and 29 on cubes, and AMD_2's pool EARNS AmdFlat about 9 percent,
-// rising to 15 at large n. Each of those is a single reading on a single algorithm, so neither can be told
-// apart from something about how that algorithm walks. This file is the second reading of the pool:
-// if mmd on it also comes in below 1.0, the pool wins on both algorithms and our arena is the thing
-// to change.
+// rising to 15 at large n. Each of those is a single reading on a single algorithm, so neither can
+// be told apart from something about how that algorithm walks. This file is the second reading of
+// the pool: if mmd on it also comes in below 1.0, the pool wins on both algorithms and our arena is
+// the thing to change.
 //
 // IT DOES, BY 5 TO 8 PER CENT. `MmdCompacted / MmdFlat` on alpamayo reads 0.92 to 0.95 on square
-// grids from 801 to 1601 a side and about 0.91 at 81 cubed, so the pooled workspace beats our append-only
-// arena on this branch as it does on the amd one.
+// grids from 801 to 1601 a side and about 0.91 at 81 cubed, so the pooled workspace beats our
+// append-only arena on this branch as it does on the amd one.
 //
 // THE FIGURE WAS 0.90 UNTIL 2026-08-19 AND THAT WAS NOT A FAIR COMPARISON. This file held its own
 // quotient graph then, in an anonymous namespace, so the class was inlined into the pivot loop
@@ -35,23 +36,23 @@
 // way round, and the answer is 0.92 to 0.95. See docs/DESIGN_DECISIONS.md (2026-08-19).
 //
 // A PREVIOUS MmdCompacted HELD THIS NAME AND WAS SOMETHING ELSE. It was mmd on the PRODUCTION
-// layout, a transitional vehicle for working the amd array folds out on the mmd side without disturbing the
-// class six drivers run. It did that; the folds are in QuotientGraph and the file was replaced.
-// Nothing of it survives here but the name.
+// layout, a transitional vehicle for working the amd array folds out on the mmd side without
+// disturbing the class six drivers run. It did that; the folds are in QuotientGraph and the file
+// was replaced. Nothing of it survives here but the name.
 //
 // ITS OBLIGATION. It must return MmdFlat's permutation exactly, which is genmmd's. `make digest` in
 // benchmarks/ordering hashes every driver's permutation over 73 grids and names which one moved;
 // `make mmdorder` in experiments/ordering is what says correct. And it must stay ENCODING-IDENTICAL
 // to MmdFlat: a fold that lands in QuotientGraph lands here too, or its time column stops being
-// about storage and starts being about whatever drifted. That is the same obligation MmdChained carries, and
-// MmdChained was found to have broken it on 2026-08-17.
+// about storage and starts being about whatever drifted. That is the same obligation MmdChained
+// carries, and MmdChained was found to have broken it on 2026-08-17.
 //
 // NOTHING HERE IS A COPY ANY MORE. This file held its own `QuotientGraphCompacted` and its own
 // `Buckets`, generated from the production ones and then hand edited in the storage layer, until
 // 2026-08-19. The buckets turned out to be `Oblio::Buckets` verbatim, so they are used directly;
 // the graph became the shared `QuotientGraphCompacted`, which `AmdCompacted` also uses, with a
-// suffix on each method the two vendored routines disagree about. This driver calls the `...Mmd` half of
-// each pair. Design notes for both types live with them and are authoritative there.
+// suffix on each method the two vendored routines disagree about. This driver calls the `...Mmd`
+// half of each pair. Design notes for both types live with them and are authoritative there.
 //
 // THE STORAGE IS COMPLETE AS OF 2026-08-19, in four steps, each verified alone and none of which
 // moved a permutation: the elbow room off `nzaat` rather than off `nnz` with the diagonal, the
@@ -70,10 +71,10 @@ namespace Oblio {
 // for repeatedly.
 //
 // IT READS 1 AT EVERY SQUARE SIZE FROM 8 TO 401 A SIDE, which is `AmdCompacted`'s figure exactly,
-// so the vendored headroom suits mmd's cliques as well as amd's. That comparison only became possible on
-// 2026-08-19: the room here was computed from `nnz` with the diagonal and then rounded up to
-// whatever capacity the allocator had handed back, so it ran about a fifth large and was not a
-// stated figure at all.
+// so the vendored headroom suits mmd's cliques as well as amd's. That comparison only became
+// possible on 2026-08-19: the room here was computed from `nnz` with the diagonal and then rounded
+// up to whatever capacity the allocator had handed back, so it ran about a fifth large and was not
+// a stated figure at all.
 //
 // AND IT IS WHY THE COMPACTOR HAS TO BE TESTED BY SHRINKING THE POOL. At the shipped room it fires
 // once per ordering, so the mid-walk path is nearly untested by any normal run; sized to exactly
@@ -136,7 +137,7 @@ std::vector<std::int32_t> orderMmdCompactedImpl(const std::vector<std::size_t>& 
         minDegree = std::min(minDegree, degree);
     }
 
-    std::vector<std::int32_t> batch, cliqueMembers, q2h, qxh;
+    std::vector<std::int32_t> batch, cliqueMembers, twoSourceQueue, manySourceQueue;
 
     for (std::int32_t u = buckets.head(1); u != NIL; ) {
         const std::int32_t next = buckets.next(u);   // before the unfile invalidates it
@@ -184,51 +185,53 @@ std::vector<std::int32_t> orderMmdCompactedImpl(const std::vector<std::size_t>& 
             if (delta < 0) break;
         }
 
-        for (auto ee = batch.rbegin(); ee != batch.rend(); ++ee) {
-            const std::int32_t clique = *ee;
-            const std::int32_t* members     = qg.clique(clique);
-            const std::uint32_t membersSize = qg.cliqueSize(clique);
+        for (auto cliqueIt = batch.rbegin(); cliqueIt != batch.rend(); ++cliqueIt) {
+            const std::int32_t clique = *cliqueIt;
+            const std::int32_t* refreshedClique     = qg.clique(clique);
+            const std::uint32_t refreshedCliqueSize = qg.cliqueSize(clique);
 
             cliqueMembers.clear();
-            for (std::uint32_t k = 0; k < membersSize; ++k)
-                if (!qg.eliminatedMmd(members[k])) cliqueMembers.push_back(members[k]);
+            for (std::uint32_t k = 0; k < refreshedCliqueSize; ++k)
+                if (!qg.eliminatedMmd(refreshedClique[k]))
+                    cliqueMembers.push_back(refreshedClique[k]);
 
             const std::int32_t cliqueTag = qg.advanceTag();   // marked once for the clique
-            for (std::int32_t v : cliqueMembers) qg.setMark(v, cliqueTag);
-            std::uint32_t dg0 = 0;
-            for (std::int32_t v : cliqueMembers) dg0 += qg.weight(v);
+            for (std::int32_t u : cliqueMembers) qg.setMark(u, cliqueTag);
+            std::uint32_t cliqueWeight = 0;
+            for (std::int32_t u : cliqueMembers) cliqueWeight += qg.weight(u);
 
-            q2h.clear();
-            qxh.clear();
+            twoSourceQueue.clear();
+            manySourceQueue.clear();
             for (std::int32_t u : cliqueMembers) {
                 if (buckets.filed(u) || buckets.outmatched(u)) continue;   // done, or withheld
                 const std::uint32_t otherSources = qg.adjacencySize(u) + qg.incidenceSize(u) - 1;
-                (otherSources == 1 ? q2h : qxh).push_back(u);
+                (otherSources == 1 ? twoSourceQueue : manySourceQueue).push_back(u);
             }
 
-            for (auto uu = q2h.rbegin(); uu != q2h.rend(); ++uu) {
-                const std::int32_t u = *uu;
-                if (qg.eliminatedMmd(u) || buckets.outmatched(u)) continue;   // by an earlier q2h vertex
+            for (auto uit = twoSourceQueue.rbegin(); uit != twoSourceQueue.rend(); ++uit) {
+                const std::int32_t u = *uit;
+                // merged or withheld by an earlier two-source vertex
+                if (qg.eliminatedMmd(u) || buckets.outmatched(u)) continue;
                 const std::int32_t vertexTag = qg.advanceTag();
-                std::uint32_t degree = dg0;
+                std::uint32_t degree = cliqueWeight;
 
                 const std::int32_t* adjacency = qg.adjacencyMmd(u);
-                for (std::uint32_t a = 0; a < qg.adjacencySize(u); ++a) {
-                    const std::int32_t v = adjacency[a];
+                for (std::uint32_t uak = 0; uak < qg.adjacencySize(u); ++uak) {
+                    const std::int32_t v = adjacency[uak];
                     const std::int32_t m = qg.mark(v);
                     if (m >= vertexTag) continue;                  // seen this pass, or dead
-                    if (m == cliqueTag) continue;                 // already counted in dg0
+                    if (m == cliqueTag) continue;                 // already counted in cliqueWeight
                     qg.setMark(v, vertexTag);
                     degree += qg.weight(v);
                 }
                 const std::int32_t* incidence = qg.incidenceMmd(u);
-                for (std::uint32_t i = 0; i < qg.incidenceSize(u); ++i) {
-                    const std::int32_t c = incidence[i];
+                for (std::uint32_t uik = 0; uik < qg.incidenceSize(u); ++uik) {
+                    const std::int32_t c = incidence[uik];
                     if (c == clique) continue;
-                    const std::int32_t* other     = qg.clique(c);
-                    const std::uint32_t otherSize = qg.cliqueSize(c);
-                    for (std::uint32_t k = 0; k < otherSize; ++k) {
-                        const std::int32_t v = other[k];
+                    const std::int32_t* otherClique     = qg.clique(c);
+                    const std::uint32_t otherCliqueSize = qg.cliqueSize(c);
+                    for (std::uint32_t k = 0; k < otherCliqueSize; ++k) {
+                        const std::int32_t v = otherClique[k];
                         const std::int32_t m = qg.mark(v);
                         if (v == u || m >= vertexTag) continue;    // seen this pass, or dead
                         if (m == cliqueTag) {
@@ -251,8 +254,8 @@ std::vector<std::int32_t> orderMmdCompactedImpl(const std::vector<std::size_t>& 
                 minDegree = std::min(minDegree, filed);
             }
 
-            for (auto uu = qxh.rbegin(); uu != qxh.rend(); ++uu) {
-                const std::int32_t u = *uu;                 // the full union, as md5 computes it
+            for (auto uit = manySourceQueue.rbegin(); uit != manySourceQueue.rend(); ++uit) {
+                const std::int32_t u = *uit;                 // the full union, as md5 computes it
                 if (qg.eliminatedMmd(u) || buckets.outmatched(u)) continue;
                 const std::uint32_t degree = qg.reachableWeight(u); // reach excludes u already
                 const std::uint32_t filed = std::max<std::uint32_t>(degree + 1, 1);

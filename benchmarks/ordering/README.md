@@ -164,9 +164,9 @@ which is what a caller selecting `Ordering::AmdVendored` gets; `AMDraw` is the s
 additive hook reporting the order `AMD_2` would emit if it stopped at the end of its main loop,
 before
 `AMD_postorder` relabels it. It is there because `AmdFlat` reproduces that raw order and
-deliberately does not postorder, so `AmdVendored` is the wrong thing for it to sit against: they are different
-permutations and their fill need not agree. It does agree on every size in these tables, and
-differs by one to three entries on cubes of 4, 5 and 6 a side, because a postorder of AMD's
+deliberately does not postorder, so `AmdVendored` is the wrong thing for it to sit against: they are
+different permutations and their fill need not agree. It does agree on every size in these tables,
+and differs by one to three entries on cubes of 4, 5 and 6 a side, because a postorder of AMD's
 ASSEMBLY tree is not fill-neutral. Its own header says that tree need not be the precise supernodal
 elimination tree, mass elimination under an approximate degree merging vertices that were never
 adjacent. Against `AMDraw` the comparison is exact by construction, which is why the fill gap
@@ -848,8 +848,8 @@ with clique size, the fix is a better filter rather than a faster loop.
   states that conclusion without qualification and should not.
 
 **`MmdFlat` and `AmdFlat` are 0.0 percent at every size**, which is the alignment holding on a
-family it was never measured on, and `AMD nnzL == AMDraw nnzL` throughout, which is the postorder being
-fill-neutral at every size a table here reports.
+family it was never measured on, and `AMD nnzL == AMDraw nnzL` throughout, which is the postorder
+being fill-neutral at every size a table here reports.
 
 **And the fill columns reproduce across machines exactly**, digit for digit against a Linux run of
 the same binary. That has always been true of this benchmark's fill and is worth restating for the

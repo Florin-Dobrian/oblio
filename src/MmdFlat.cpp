@@ -51,7 +51,7 @@ std::vector<std::int32_t> orderMmdFlatImpl(const std::vector<std::size_t>&  colP
     // emptying it; the prepass now reads each successor before unfiling and needs no list at all.
     // A `touched` list with a `touchedRound` stamp beside it went the same way on 2026-08-15,
     // having been filled once per clique member per pivot and never read on this layer.
-    std::vector<std::int32_t> batch, cliqueMembers, q2h, qxh;
+    std::vector<std::int32_t> batch, cliqueMembers, twoSourceQueue, manySourceQueue;
 
     // NO DRIVER MARK ARRAY. The two levels this refresh needs, one surviving a whole clique and
     // one fresh per vertex, are two tags rather than two arrays, and they go into the graph's own
@@ -138,73 +138,75 @@ std::vector<std::int32_t> orderMmdFlatImpl(const std::vector<std::size_t>&  colP
         // that day, the stamping fold and the arena cursor, and neither was ever timed.
         // The driver's clique list, genmmd's `list[mn] = ehead; ehead = mn`, so the LAST pivot of
         // a batch is the FIRST clique refreshed.
-        for (auto ee = batch.rbegin(); ee != batch.rend(); ++ee) {
-            const std::int32_t clique = *ee;
-            const std::int32_t* members     = qg.clique(clique);
-            const std::uint32_t membersSize = qg.cliqueSize(clique);
+        for (auto cliqueIt = batch.rbegin(); cliqueIt != batch.rend(); ++cliqueIt) {
+            const std::int32_t clique = *cliqueIt;
+            const std::int32_t* refreshedClique     = qg.clique(clique);
+            const std::uint32_t refreshedCliqueSize = qg.cliqueSize(clique);
 
             cliqueMembers.clear();
-            for (std::uint32_t k = 0; k < membersSize; ++k)
-                if (!qg.eliminatedMmd(members[k])) cliqueMembers.push_back(members[k]);
+            for (std::uint32_t k = 0; k < refreshedCliqueSize; ++k)
+                if (!qg.eliminatedMmd(refreshedClique[k]))
+                    cliqueMembers.push_back(refreshedClique[k]);
 
             const std::int32_t cliqueTag = qg.advanceTag();   // marked once for the clique
-            for (std::int32_t v : cliqueMembers) qg.setMark(v, cliqueTag);
-            std::uint32_t dg0 = 0;
-            for (std::int32_t v : cliqueMembers) dg0 += qg.weight(v);
+            for (std::int32_t u : cliqueMembers) qg.setMark(u, cliqueTag);
+            std::uint32_t cliqueWeight = 0;
+            for (std::int32_t u : cliqueMembers) cliqueWeight += qg.weight(u);
 
             // reach(u) has |A[u]| + |I[u]| sources once the new clique is counted, so one other
-            // source means everything u reaches is in this clique plus that one place. dg0
+            // source means everything u reaches is in this clique plus that one place. cliqueWeight
             // already counts the clique, and the other source is walked directly, so no union is
             // formed at all.
-            q2h.clear();
-            qxh.clear();
+            twoSourceQueue.clear();
+            manySourceQueue.clear();
             for (std::int32_t u : cliqueMembers) {
                 if (buckets.filed(u) || buckets.outmatched(u)) continue;   // done, or withheld
                 const std::uint32_t otherSources = qg.adjacencySize(u) + qg.incidenceSize(u) - 1;
-                (otherSources == 1 ? q2h : qxh).push_back(u);
+                (otherSources == 1 ? twoSourceQueue : manySourceQueue).push_back(u);
             }
 
             // mmdupd's q2h list, `list[nb] = q2h; q2h = nb`.
-            for (auto uu = q2h.rbegin(); uu != q2h.rend(); ++uu) {
-                const std::int32_t u = *uu;
-                // by an earlier q2h vertex
+            for (auto uit = twoSourceQueue.rbegin(); uit != twoSourceQueue.rend(); ++uit) {
+                const std::int32_t u = *uit;
+                // by an earlier two-source vertex
                 if (qg.eliminatedMmd(u) || buckets.outmatched(u)) continue;
                 const std::int32_t vertexTag = qg.advanceTag();
-                // dg0 is kept WHOLE and u's own weight subtracted at the end, which is
+                // cliqueWeight is kept WHOLE and u's own weight subtracted at the end, which is
                 // genmmd's `dg - qsize[en] + 1` and not the same as subtracting it now. The
                 // walk below can MERGE a vertex into u, and genmmd's merge does
                 // `qsize[en] += qsize[nd]` in that same walk, so the weight it subtracts is the
                 // one AFTER the merge. Subtracting first files a supervariable one bucket too
                 // high per merged vertex, so it is not picked as early as its size has earned.
                 // See experiments/ordering/mmd3.py, ledger entry 5.
-                std::uint32_t degree = dg0;
+                std::uint32_t degree = cliqueWeight;
 
-                // Not hoisted, deliberately. A q2h vertex has adjacencySize + incidenceSize == 2
-                // by the test that put it on this list, so these two loops run over at most two
+                // Not hoisted, deliberately. A two-source vertex has adjacencySize +
+                // incidenceSize == 2 by the test that put it on this list, so these two loops run
+                // over at most two
                 // cliques between them and a length loaded up front is overhead rather than a
                 // saving. Hoist where a loop is long; leave it where the loop is short or exits
                 // early. Measured both ways.
                 const std::int32_t* adjacency = qg.adjacencyMmd(u);
-                for (std::uint32_t a = 0; a < qg.adjacencySize(u); ++a) {
-                    const std::int32_t v = adjacency[a];
+                for (std::uint32_t uak = 0; uak < qg.adjacencySize(u); ++uak) {
+                    const std::int32_t v = adjacency[uak];
                     // ONE LOAD FOR BOTH QUESTIONS. `vertexTag` is the newest tag drawn, so
                     // anything at or above it is either this pass's own stamp or GONE, and both
                     // mean skip. This was `qg.eliminatedMmd(v) || mark[v] == vertexTag`, two
                     // arrays.
                     const std::int32_t m = qg.mark(v);
                     if (m >= vertexTag) continue;                  // seen this pass, or dead
-                    if (m == cliqueTag) continue;                 // already counted in dg0
+                    if (m == cliqueTag) continue;                 // already counted in cliqueWeight
                     qg.setMark(v, vertexTag);
                     degree += qg.weight(v);
                 }
                 const std::int32_t* incidence = qg.incidenceMmd(u);
-                for (std::uint32_t i = 0; i < qg.incidenceSize(u); ++i) {
-                    const std::int32_t c = incidence[i];
+                for (std::uint32_t uik = 0; uik < qg.incidenceSize(u); ++uik) {
+                    const std::int32_t c = incidence[uik];
                     if (c == clique) continue;
-                    const std::int32_t* other     = qg.clique(c);
-                    const std::uint32_t otherSize = qg.cliqueSize(c);
-                    for (std::uint32_t k = 0; k < otherSize; ++k) {
-                        const std::int32_t v = other[k];
+                    const std::int32_t* otherClique     = qg.clique(c);
+                    const std::uint32_t otherCliqueSize = qg.cliqueSize(c);
+                    for (std::uint32_t k = 0; k < otherCliqueSize; ++k) {
+                        const std::int32_t v = otherClique[k];
                         const std::int32_t m = qg.mark(v);
                         if (v == u || m >= vertexTag) continue;    // seen this pass, or dead
                         if (m == cliqueTag) {
@@ -230,8 +232,8 @@ std::vector<std::int32_t> orderMmdFlatImpl(const std::vector<std::size_t>&  colP
             }
 
             // mmdupd's qxh list, the same stack.
-            for (auto uu = qxh.rbegin(); uu != qxh.rend(); ++uu) {
-                const std::int32_t u = *uu;                 // the full union, as md5 computes it
+            for (auto uit = manySourceQueue.rbegin(); uit != manySourceQueue.rend(); ++uit) {
+                const std::int32_t u = *uit;                 // the full union, as md5 computes it
                 if (qg.eliminatedMmd(u) || buckets.outmatched(u)) continue;
                 const std::uint32_t degree = qg.reachableWeight(u); // reach excludes u already
                 const std::uint32_t filed = std::max<std::uint32_t>(degree + 1, 1);

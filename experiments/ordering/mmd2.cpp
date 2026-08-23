@@ -31,9 +31,9 @@
 // does.
 //
 // PASS 2, THE TWO-SOURCE SPLIT. mmdupd does not walk a flat list of reached vertices. It
-// walks the ELEMENTS created this iteration, `el = list[el]`, and for each one it
-// computes dg0 once, the weighted size of that element, then visits the element's
-// members. A member is classified by what it has left BESIDES the new element:
+// walks the CLIQUES created this iteration, `el = list[el]`, and for each one it
+// computes cliqueWeight once, the weighted size of that clique, then visits the clique's
+// members. A member is classified by what it has left BESIDES the new clique:
 // mmdelm stashes fwd[rn] = nq + 1 where nq counts the survivors of the compaction,
 // which here is A[u].size() + I[u].size() - 1. nq == 1 puts the vertex on mmdupd's q2h
 // chain, anything else on its qxh, `list[nb] = q2h; q2h = nb`. Ours are twoSourceQueue
@@ -41,14 +41,14 @@
 // vectors rather than chains threaded through list[].
 //
 // The two-source case is answered without a union. Everything the vertex reaches is
-// either inside the element, already counted in dg0, or comes from that one other
+// either inside the clique, already counted in cliqueWeight, or comes from that one other
 // source, so the walk adds only what the other source contributes. Two mark levels
 // keep that straight, as mmdupd's mt and *tag do: cliqueTag says "already in
-// dg0" and survives the whole element, while vertexTag is fresh per vertex, so one
+// cliqueWeight" and survives the whole clique, while vertexTag is fresh per vertex, so one
 // two-source vertex cannot hide a neighbor from the next.
 //
 // The degrees come out identical either way, which is the check on this pass. What
-// does move is the ORDER of the filing, since the refresh is now element by element
+// does move is the ORDER of the filing, since the refresh is now clique by clique
 // with twoSourceQueue before manySourceQueue, and filing order decides what a bucket
 // holds.
 //
@@ -58,14 +58,14 @@
 //
 // PASSES 3 AND 4, THE PAIRWISE MERGE AND OUTMATCHED MARKING. Both live in one branch
 // of the two-source walk, reached when a member of the one other source is ALSO a member
-// of the new element:
+// of the new clique:
 //
 //   else if(bwd[nd]==0){
 //       if(fwd[nd]==2){qsize[en]+=qsize[nd];qsize[nd]=0;marker[nd]=maxint;
 //                      fwd[nd]=-en;bwd[nd]=-maxint;}
 //       else if(bwd[nd]==0)bwd[nd]=-maxint;}
 //
-// MERGE. If nd is two-source too, its only other source is that same element, so en and nd
+// MERGE. If nd is two-source too, its only other source is that same clique, so en and nd
 // reach exactly the same vertices and are indistinguishable. en absorbs nd. This is
 // the first merge in the whole sequence that folds a vertex into a LIVE one, which
 // is why the weight array returns: from here a candidate can stand for several
@@ -793,7 +793,7 @@ std::vector<std::int32_t> mmd2MinimumDegree(const AdjacencyGraph& G, std::int32_
         //
         // No set is built for either side. Membership in filed is the filed flag,
         // and nothing else is needed: unlike mmd1 this layer carries no evicted
-        // list, the refresh below re-deriving its vertices from the elements.
+        // list, the refresh below re-deriving its vertices from the cliques.
         // Clamped: a degree is at most n - 1, so a wider window would walk the
         // bucket array off its end.
         std::size_t batchLimit = minDegree;      // delta > 0 here, so no narrowing
@@ -917,46 +917,46 @@ std::vector<std::int32_t> mmd2MinimumDegree(const AdjacencyGraph& G, std::int32_
             if (delta < 0) break;               // one pivot per iteration, as md5 does
         }
 
-        // ---- one REFRESH, walked ELEMENT BY ELEMENT ------------------------
-        // mmdupd walks the elements this iteration created, not the vertices it
-        // reached, and computes dg0 once per element: the size of that element,
+        // ---- one REFRESH, walked CLIQUE BY CLIQUE ------------------------
+        // mmdupd walks the cliques this iteration created, not the vertices it
+        // reached, and computes cliqueWeight once per clique: the size of that clique,
         // which every member of it reaches in full. A member with exactly one other
-        // source goes on the twoSourceQueue and is answered from dg0 plus that source;
+        // source goes on the twoSourceQueue and is answered from cliqueWeight plus that source;
         // everything else goes on manySourceQueue and pays for the full union. Same degrees,
         // different work, and a different filing order.
         //
         // This is also why no evicted list is carried. mmd1 accumulates one during
-        // the batch and walks it here; walking elements re-derives the same vertices
-        // from C[element], deduplicating with the filed flag, so the list and the
+        // the batch and walks it here; walking cliques re-derives the same vertices
+        // from C[clique], deduplicating with the filed flag, so the list and the
         // second stamp array it needs both go. genmmd makes the same trade, chaining
-        // its new elements in `list` and building no vertex set at all.
+        // its new cliques in `list` and building no vertex set at all.
         std::vector<std::int32_t> refreshedVertices;
         std::vector<std::int32_t> cliqueMembers, twoSourceQueue, manySourceQueue;
-        // The second site, before the refresh, and OUTSIDE the element loop rather
-        // than inside it. cliqueTag is stamped once per element and read all the
-        // way through that element's two-source walk, where it decides both the merge
+        // The second site, before the refresh, and OUTSIDE the clique loop rather
+        // than inside it. cliqueTag is stamped once per clique and read all the
+        // way through that clique's two-source walk, where it decides both the merge
         // and the outmatched case, with vertexTag fresh per vertex nested inside it.
         // Two levels live at once, which is mmdupd's mt against its tag, so a sweep
-        // within an element erases marks about to be read.
+        // within an clique erases marks about to be read.
         if (tag > TAG_CEILING) {
             std::fill(mark.begin(), mark.end(), NIL);
             tag = 0;
             ++numTagSweeps;
         }
-        for (std::int32_t element : batch) {
+        for (std::int32_t clique : batch) {
             cliqueMembers.clear();
-            for (std::int32_t u : C[element])
+            for (std::int32_t u : C[clique])
                 if (!eliminated[u]) cliqueMembers.push_back(u);
-            ++tag;                              // dg0's members, marked once
+            ++tag;                              // cliqueWeight's members, marked once
             const std::int32_t cliqueTag = tag;
-            for (std::int32_t v : cliqueMembers) mark[v] = cliqueTag;
-            std::uint32_t dg0 = 0;
-            for (std::int32_t v : cliqueMembers) dg0 += superMembers[v].size();
+            for (std::int32_t u : cliqueMembers) mark[u] = cliqueTag;
+            std::uint32_t cliqueWeight = 0;
+            for (std::int32_t u : cliqueMembers) cliqueWeight += superMembers[u].size();
 
             // Set view of the split. reach(u) has |A[u]| + |I[u]| sources once the
-            // new element is counted, so |A[u]| + |I[u]| - 1 == 1 says everything u
-            // reaches lies in this element plus ONE other source. That is the case a
-            // union is not needed for: dg0 already counts the element, and the one
+            // new clique is counted, so |A[u]| + |I[u]| - 1 == 1 says everything u
+            // reaches lies in this clique plus ONE other source. That is the case a
+            // union is not needed for: cliqueWeight already counts the clique, and the one
             // other source is walked directly.
             twoSourceQueue.clear();
             manySourceQueue.clear();
@@ -969,14 +969,14 @@ std::vector<std::int32_t> mmd2MinimumDegree(const AdjacencyGraph& G, std::int32_
             for (std::int32_t u : twoSourceQueue) {
                 if (eliminated[u] || outmatched[u]) continue;   // merged or withheld
                                                                // by an earlier two-source
-                // Everything u reaches is in the element or comes from its one
-                // other source. dg0 counts the element, minus u itself. Two mark
-                // levels, as mmdupd has: cliqueTag says "already in dg0" and
-                // survives the whole element, while vertexTag is fresh per vertex,
+                // Everything u reaches is in the clique or comes from its one
+                // other source. cliqueWeight counts the clique, minus u itself. Two mark
+                // levels, as mmdupd has: cliqueTag says "already in cliqueWeight" and
+                // survives the whole clique, while vertexTag is fresh per vertex,
                 // so one two-source vertex cannot hide a neighbor from the next.
                 ++tag;
                 const std::int32_t vertexTag = tag;
-                // dg0 is kept WHOLE and u's own weight subtracted at the end, which is
+                // cliqueWeight is kept WHOLE and u's own weight subtracted at the end, which is
                 // genmmd's `dg - qsize[en] + 1` and NOT the same as subtracting it now. The
                 // walk below can MERGE a vertex into u, and genmmd's merge does
                 // `qsize[en] += qsize[nd]` in that same walk, so the weight it subtracts is
@@ -984,19 +984,19 @@ std::vector<std::int32_t> mmd2MinimumDegree(const AdjacencyGraph& G, std::int32_
                 // too high per merged vertex, so it is never picked as early as its size has
                 // earned. This was a DEFECT here until 2026-08-07, found by aligning mmd3
                 // against genmmd; see that file's ledger, entry 5.
-                std::uint32_t degree = dg0;
+                std::uint32_t degree = cliqueWeight;
                 for (std::int32_t v : A[u]) {
                     if (eliminated[v] || mark[v] == vertexTag) continue;
-                    if (mark[v] == cliqueTag) continue;        // already in dg0
+                    if (mark[v] == cliqueTag) continue;        // already in cliqueWeight
                     mark[v] = vertexTag;
                     degree += superMembers[v].size();
                 }
                 for (std::int32_t c : I[u]) {
-                    if (c == element) continue;
+                    if (c == clique) continue;
                     for (std::int32_t v : C[c]) {
                         if (v == u || eliminated[v] || mark[v] == vertexTag) continue;
                         if (mark[v] == cliqueTag) {
-                            // v is in the new element AND in this same other
+                            // v is in the new clique AND in this same other
                             // source, so it sees at least what u sees.
                             if (buckets.filed(v) || outmatched[v]) continue;
                             if (A[v].size() + I[v].size() - 1 == 1) {
@@ -1183,8 +1183,8 @@ int main(int argc, char** argv) {
     // graph4, eight vertices and fourteen edges. Denser than the others, and here
     // for one specific reason: it is the smallest graph we could find on which
     // AMD's degree BOUND is ever loose. The bound overcounts only when a vertex
-    // belongs to two elements that overlap outside the new one, which needs enough
-    // eliminations to have made several elements and enough fill for them to
+    // belongs to two cliques that overlap outside the new one, which needs enough
+    // eliminations to have made several cliques and enough fill for them to
     // intersect. Every connected graph on five or six vertices is exact (checked
     // exhaustively), and so are graph1 to graph3, so without this one the amd
     // trace would never show the approximation approximating. The other layers use

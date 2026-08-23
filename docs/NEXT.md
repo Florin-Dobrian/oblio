@@ -168,7 +168,8 @@ keeps its place and every later reader skips it on `qsize [nb] != 0`. We had bee
 cost a pass genmmd never pays and saved the skipped entries it pays on every read. Neither is
 visible in a permutation, so no check in this tree would have caught it; it was found by reading
 `mmdelm` while answering a question about clique lifetimes. Measured after: `MmdChained / MMD`
-unchanged within noise, so the two costs are about equal, and the file is now honest rather than faster.
+unchanged within noise, so the two costs are about equal, and the file is now honest rather than
+faster.
 
 **AND THE MMD BRANCH IS NOW THE OPEN FRONT.** `make mmdorder` in benchmarks/matrices has never had
 the marker the amd table has, because genmmd's own order is what `mmd_order` returns and there is
@@ -334,8 +335,9 @@ is the pC check earning itself a second time.
 remained. One line where the truncation happens.
 
 **What is still missing, and it is the lesson.** `AmdCompacted` has no permanent
-`cliqueCountBalances`, the debug recomputation the shared class has. Both bugs were diagnosed by bolting one on
-temporarily; with it in place the second would have been a `test_order` failure rather than a
+`cliqueCountBalances`, the debug recomputation the shared class has. Both bugs were diagnosed by
+bolting one on temporarily; with it in place the second would have been a `test_order` failure
+rather than a
 benchmark marker on a matrix someone happened to send. Adding it is small and is the obvious next
 step.
 
@@ -477,8 +479,8 @@ sides built alike. It did NOT make anything comparable to `MMD` or `AMD`, and th
 predicted there never appeared.
 
 **AND ONE UNEXPLAINED RESULT, worth knowing before trusting any of this.** `MmdChained` did not
-change translation unit at all, only where its class's source sits, and it slowed by 4 to 7 per cent.
-See docs/DESIGN_DECISIONS.md (2026-08-19).
+change translation unit at all, only where its class's source sits, and it slowed by 4 to 7 per
+cent. See docs/DESIGN_DECISIONS.md (2026-08-19).
 
 ## The inlining bias, and the numbers that need re-measuring, 2026-08-19
 
@@ -510,8 +512,8 @@ gives
   **WHAT IS ACTUALLY STALE ABOUT IT IS ONE DAY LATER.** `ORDERING.md` was measured at `19efe5f`
   and so predates `97f4bc6` and `1da85c5`, which means it does not carry the `AmdFlat` speedup from
   alignment item 4. A re-run of `make amdorder` is still wanted; the reason is the alignment
-  commits, not the build arrangement. And the header note in `src/MmdCompacted.cpp` is not
-mixed-build   either: it says outright that its figure was 0.90 until 2026-08-19, that this was not a fair
+  commits, not the build arrangement. And the header note in `src/MmdCompacted.cpp` is not mixed-
+  build either: it says outright that its figure was 0.90 until 2026-08-19, that this was not a fair
   comparison, and that building both sides alike gives 0.92 to 0.95. So the bullet was wrong about
   both files it named.
 - `MmdChained / MmdFlat` at 1.14 to 1.25 is UNDERSTATED, `MmdChained` still being private. Chaining
@@ -695,8 +697,8 @@ ported to `MmdFlat`, an arena cursor in place of `push_back`, raw bases in place
 and q2h indexed rather than looped. Read that entry before reaching for any of them.
 
 **And `MmdChained` has finished answering its question.** It is now genmmd's data structure
-essentially exactly: one array of nnz(A), cliques in their pivot's dead segment, negative links, a value
-terminator, no clique length array, no liveness array, the degree list in one link array. Its
+essentially exactly: one array of nnz(A), cliques in their pivot's dead segment, negative links, a
+value terminator, no clique length array, no liveness array, the degree list in one link array. Its
 obligation from here is to stay ENCODING-IDENTICAL to `MmdFlat`, so that the only difference between
 them is storage; a fold that lands in `QuotientGraph` lands there too, or the comparison quietly
 stops being about storage.

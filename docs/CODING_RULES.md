@@ -447,6 +447,12 @@ softer layer: conventions for consistency, not correctness.
     E.g. `SparseMatrix::colPtr`, `QuotientGraph::mSourcePtr` and `mCliquePtr`, `nnz()`, and every
     fill or storage total.
 
+  **THE NAMES CARRY THE DIMENSION TOO.** A one dimensional index is `i`, `j` or `k`, or a word
+  ending in one of them when several are in scope: `uak` and `uik` walk `A[u]` and `I[u]` in the mmd
+  refresh. A two dimensional position ends in `p` or `Ptr`: `cp` walks `colPtr`, and `mSourcePtr`
+  offsets into the arena. So the letter and the type agree, and a `k` that turned out to need
+  `std::size_t` is a sign the loop is offsetting rather than counting.
+
   **The two dimensions meet only where a difference of positions is written as a size**, which is
   where the narrowing cast belongs. There are exactly two such crossings in `QuotientGraph`, both a
   block being sized from the arena that holds it.

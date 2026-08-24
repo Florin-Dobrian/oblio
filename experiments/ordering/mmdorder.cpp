@@ -1,14 +1,21 @@
-// mmdorder.cpp -- production MmdFlat against genmmd's elimination order.
+// mmdorder.cpp -- production MmdFlat against MmdCorrected's elimination order.
 //
 // THE ACCEPTANCE TEST FOR THE MMD ALIGNMENT, and one of a pair with amdorder.cpp. `MmdFlat` adds no
-// mechanism to `Mmd2`: it exists to return genmmd's permutation, so that a comparison against the
-// vendored routine is an EQUALITY TEST rather than a fill number somebody has to judge. This is
-// what makes that claim checkable.
+// mechanism to `Mmd2`: it exists to return the reference permutation, so that a comparison against
+// the reference routine is an EQUALITY TEST rather than a fill number somebody has to judge. This
+// is what makes that claim checkable.
+//
+// THE REFERENCE IS `MmdCorrected` AND NOT `MmdVendored`, since 2026-08-23. genmmd files a vertex
+// under its degree in `mmdint` and under its degree PLUS ONE in `mmdupd`, two scales live in one
+// bucket array, so a refreshed vertex is penalised by one against a vertex no pivot has reached
+// and the minimum selected is not always the minimum. `private/MmdCorrected.cpp` is genmmd with
+// that repaired; `private/MmdVendored.cpp` stays frozen and nothing compares against it.
 //
 // THE TWO ARE NAMED FOR THE BRANCH, NOT FOR THE MECHANISM, and the mechanisms are not alike:
 //
-//   genmmd emits the order directly.  `mmd_order` returns `perm`, the order it eliminates in, and
-//                                     there is no postorder anywhere in the routine. So the
+//   genmmd emits the order directly.  `mmd_order_corrected` returns `perm`, the order it
+//                                     eliminates in, and there is no postorder anywhere in the
+//                                     routine. So the
 //                                     vendored output vector IS the object to compare: no hook, no
 //                                     generated copy, no anchors to assert, no Control array. This
 //                                     file is the whole of the check.
@@ -43,9 +50,10 @@
 #include <string>
 #include <vector>
 
-// The vendored routine, from private/Mmd.cpp. Linked rather than copied or generated: it emits
-// what we need without alteration, which is exactly why this file has no generator beside it.
-void mmd_order(int n, const int colPtr[], const int rowIdx[], int perm[], int invp[]);
+// The reference routine, from private/MmdCorrected.cpp. Linked rather than copied or generated:
+// it emits what we need without alteration, which is exactly why this file has no generator
+// beside it.
+void mmd_order_corrected(int n, const int colPtr[], const int rowIdx[], int perm[], int invp[]);
 
 // The graphs come from graphs.h, shared with vendored.cpp, production.cpp and amdorder.cpp, so a
 // graph added for one driver is available to the others and none of them can drift.
@@ -54,7 +62,7 @@ using OrderingExperiment::grid3dGraph;
 using OrderingExperiment::gridGraph;
 using OrderingExperiment::randomGraph;
 
-// A graph, two ways: ours takes the diagonal, genmmd takes a pattern without it. Both are the
+// A graph, two ways: ours takes the diagonal, the reference takes a pattern without it. Both are
 // same conversions amdorder.cpp makes, and they stay in each driver rather than moving into
 // graphs.h, since what a driver feeds its routine is the driver's own business.
 static void toCsc(const Graph& graph, std::vector<std::size_t>& colPtr,
@@ -89,16 +97,16 @@ static bool check(const std::string& name, const Graph& graph) {
     toCscNoDiagonal(graph, ap, ai);
     const int n = static_cast<int>(graph.size());
     std::vector<int> perm(n), invp(n);
-    mmd_order(n, ap.data(), ai.data(), perm.data(), invp.data());
+    mmd_order_corrected(n, ap.data(), ai.data(), perm.data(), invp.data());
 
     if (ours.size() != perm.size()) {
-        std::printf("  %-22s SIZE MISMATCH: ours %zu, genmmd %zu\n",
+        std::printf("  %-22s SIZE MISMATCH: ours %zu, reference %zu\n",
                     name.c_str(), ours.size(), perm.size());
         return false;
     }
     for (std::size_t k = 0; k < ours.size(); ++k) {
         if (ours[k] != perm[k]) {
-            std::printf("  %-22s DIFFER at %zu: ours %d, genmmd %d\n",
+            std::printf("  %-22s DIFFER at %zu: ours %d, reference %d\n",
                         name.c_str(), k, ours[k], perm[k]);
             return false;
         }
@@ -108,8 +116,8 @@ static bool check(const std::string& name, const Graph& graph) {
 }
 
 int main(int argc, char** argv) {
-    std::printf("production MmdFlat against genmmd's elimination order\n");
-    std::printf("  (the permutation itself: genmmd emits the order it eliminates in and\n");
+    std::printf("production MmdFlat against MmdCorrected's elimination order\n");
+    std::printf("  (the permutation itself: it emits the order it eliminates in and\n");
     std::printf("   does no postorder, so nothing has to be reconstructed)\n\n");
 
     std::vector<std::pair<std::string, Graph>> cases;

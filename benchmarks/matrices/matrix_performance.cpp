@@ -29,10 +29,22 @@
 // selects the matrices this driver can use, and `performance_candidates.txt` is the list. A matrix
 // that refuses is reported and stepped over, as everywhere in this folder.
 //
-// FOUR ORDERINGS, TWO NAMED. MMD and AMD are the vendored codes and need `../../private`; MmdFlat
-// and AmdFlat are Oblio's. The vendored pair is the reference: it says whether our implementations cost
-// what they should and fill what they should. Where private/ is absent those two rows report a
-// refusal and the other two still run.
+// FOUR ORDERINGS, TWO NAMED. `MmdVendored` and `AmdVendored` are the vendored codes and need
+// `../../private`; `MmdFlat` and `AmdFlat` are Oblio's. Where private/ is absent those two rows
+// report a refusal and the other two still run.
+//
+// THE TWO PAIRS NO LONGER MEAN THE SAME THING, SINCE 2026-08-23. On the AMD side the pair is one
+// ordering computed two ways: `AmdFlat` returns `AMD_2`'s permutation exactly, so its `nnz(L)`,
+// `bwd` and `res` must equal the reference's and only the times may differ. On the MMD side they
+// are TWO DIFFERENT ORDERINGS. `MmdFlat` files a vertex under its true degree where genmmd files
+// under its degree in `mmdint` and its degree PLUS ONE in `mmdupd`, so the two fill differently, on
+// 77 of the 107 matrices in the last run. `private/MmdCorrected.cpp` is the reference `MmdFlat`
+// does reproduce, and it is not in this table because it would duplicate `MmdFlat` in every column
+// but ordering time; benchmarks/matrices/ORDERING.md compares them.
+//
+// So the mmd pair prices the CORRECTION end to end, which is the one measurement no other report
+// here gives: 1.8 per cent more fill and, across all three traversals, no factorization time.
+// A reader comparing those two rows as implementations of one ordering will misread every one.
 
 // ASK FOR A PERFORMANCE CORE, on the one platform where cores differ. Apple Silicon runs a
 // command-line process at QOS_CLASS_DEFAULT, which prefers a performance core but permits the

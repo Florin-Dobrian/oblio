@@ -9,8 +9,8 @@
 //
 // NOT THE TREE'S DEFAULT, AND THAT IS DELIBERATE, 2026-08-21. The default is `AmdCompacted` and
 // this pass ran under mmd from the beginning, so holding mmd keeps every published figure in
-// ACCURACY.md comparable: `MmdCompacted` returns `MmdFlat`'s permutation exactly, which is
-// genmmd's, so switching between those two cannot move a number here.
+// ACCURACY.md comparable: `MmdCompacted` returns `MmdFlat`'s permutation exactly, so switching
+// between those two cannot move a number here.
 //
 // Moving to `AmdCompacted` was tried and it COST A MATRIX. `Oberwolfach/LFAT5000` is killed by the
 // OOM killer under amd where mmd factors it, at a 232-fold fill increase from delayed pivots, and

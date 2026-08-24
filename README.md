@@ -368,12 +368,16 @@ experiments/        , frozen design studies, each answering one question with a 
 ```
 
 The ordering enum also carries Natural, the identity, and six implementations of ours. A driver is
-named for its branch and the clique store it runs on: `MmdCompacted` and `AmdCompacted` on
-`AMD_2`'s compacted workspace, `MmdFlat` and `AmdFlat` on our own arena, `MmdChained` on genmmd's
-chained segments. Every mmd driver returns genmmd's permutation exactly and every amd driver
-returns `AMD_2`'s, so the branch decides the ordering and the store decides only what computing it
-costs. The earlier ladder layers, MMD1, MMD2, AMD1 and AMD2, were retired on 2026-08-21 and are in
-`retired/`; the ladder itself lives as working prototypes in `experiments/ordering/`.
+named for its branch and the clique store it runs on: `MmdCompacted` and `AmdCompacted` on `AMD_2`'s
+compacted workspace, `MmdFlat` and `AmdFlat` on our own arena, `MmdChained` on genmmd's chained
+segments. Every mmd driver returns `MmdCorrected`'s permutation exactly and every amd driver returns
+`AMD_2`'s, so the branch decides the ordering and the store decides only what computing it costs.
+`MmdCorrected` is genmmd with one defect repaired: genmmd files a vertex under its degree in
+`mmdint` and under its degree PLUS ONE in `mmdupd`, two scales in one bucket array, so a vertex the
+refresh has touched is penalised by one against a vertex no pivot has reached and the minimum degree
+selected is not always the minimum. `MmdVendored` keeps the original and stays as the reference. The
+earlier ladder layers, MMD1, MMD2, AMD1 and AMD2, were retired on 2026-08-21 and are in `retired/`;
+the ladder itself lives as working prototypes in `experiments/ordering/`.
 
 **`AmdCompacted` and `MmdCompacted` are the pair to use**, and they are what the examples show.
 The reason is the bound rather than the clock: a compacted store is sized from the input, our arena

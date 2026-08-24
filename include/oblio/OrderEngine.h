@@ -3,18 +3,19 @@
 // OrderEngine.h, computes a fill-reducing permutation of a SparseMatrix.
 //
 //   Natural,       identity (no reordering)
-//   MmdVendored,   Multiple Minimum Degree (Liu/Sparspak, via 0.9)
-//   MmdFlat,       ours, matching MmdVendored's permutation      (src/MmdFlat.cpp)
+//   MmdVendored,   Multiple Minimum Degree (Liu/Sparspak, via 0.9), FROZEN as the reference
+//   MmdCorrected,  the same code with genmmd's degree scale repaired    (private/MmdCorrected.cpp)
+//   MmdFlat,       ours, matching MmdCorrected's permutation      (src/MmdFlat.cpp)
 //   MmdChained,    the same, on genmmd's chained store           (src/MmdChained.cpp)
 //   MmdCompacted,  the same, on AMD_2's compacted store          (src/MmdCompacted.cpp)
 //   AmdVendored,   Approximate Minimum Degree (SuiteSparse 3.3.4, BSD-3)
 //   AmdFlat,       ours, matching AmdVendored's permutation      (src/AmdFlat.cpp)
 //   AmdCompacted,  the same, on AMD_2's compacted store          (src/AmdCompacted.cpp)  DEFAULT
 //
-// EIGHT ENUMERATORS, SIX OF THEM OURS, and TWO AXES rather than one. The BRANCH decides the
-// permutation: every mmd enumerator returns genmmd's and every amd one returns `AMD_2`'s, exactly,
-// on every matrix the benchmarks cover. The STORE decides only what the computation costs. So a
-// caller choosing among the three mmd enumerators, or between the two amd ones, is choosing an
+// NINE ENUMERATORS, SIX OF THEM OURS, and TWO AXES rather than one. The BRANCH decides the
+// permutation: every mmd enumerator returns `MmdCorrected`'s and every amd one returns `AMD_2`'s,
+// exactly, on every matrix the benchmarks cover. The STORE decides only what the computation costs.
+// So a caller choosing among the three mmd enumerators, or between the two amd ones, is choosing an
 // implementation and not an ordering, and the fill is identical by construction.
 //
 // THE EARLIER LADDER LAYERS WERE RETIRED ON 2026-08-21 and are in retired/. `MMD1`, `MMD2`, `AMD1`
@@ -26,7 +27,7 @@
 // THE THREE ALTERNATIVE-STORE LAYERS JOINED THIS ENUM ON 2026-08-21, having been free functions
 // before it. The entry this replaces argued they were measuring instruments rather than orderings
 // and that an enumerator would put a benchmark's oracle into the public enum. The premise was
-// sound and the conclusion did not follow: `MmdFlat` against `MmdVendored` is already the same
+// sound and the conclusion did not follow: `MmdFlat` against `MmdCorrected` is already the same
 // kind of choice, one ordering computed two ways, and it has been offered from the start. What
 // the store changes is cost, which is exactly the sort of thing a caller may want to choose.
 //
@@ -43,10 +44,15 @@
 // over flat is the store decision and changes nothing but time, the two returning one permutation.
 // See benchmarks/matrices/ORDERING.md and docs/DESIGN_DECISIONS.md.
 //
-// Two lineages sit behind these names. `MmdVendored` and `AmdVendored` are vendored, self-contained
-// codes operating on raw int CSC arrays, in private/. The other six are ours, built over the
-// quotient graph classes in include/oblio/. Either way this engine is the seam that reads the
-// matrix structure and fills the Permutation. Returns true on success.
+// Two lineages sit behind these names. `MmdVendored`, `MmdCorrected` and `AmdVendored` operate on
+// raw int CSC arrays and live in private/. The first and third are vendored and untouched; the
+// second is `MmdVendored` with genmmd's degree scale repaired, so it is inherited code we have
+// modified rather than code we wrote, and it is what our three mmd drivers are checked against.
+// genmmd files at the degree in `mmdint` and at the degree PLUS ONE in `mmdupd`, two scales in one
+// bucket array, so a refreshed vertex is penalised by one against one no pivot has reached and the
+// minimum is not always the minimum; see private/MmdCorrected.cpp. The other six are ours, built
+// over the quotient graph classes in include/oblio/. Either way this engine is the seam that reads
+// the matrix structure and fills the Permutation. Returns true on success.
 
 #include "oblio/SparseMatrix.h"
 #include "oblio/Permutation.h"
@@ -59,7 +65,7 @@
 namespace Oblio {
 
 
-enum class Ordering { Natural, MmdVendored, MmdFlat, MmdChained, MmdCompacted,
+enum class Ordering { Natural, MmdVendored, MmdCorrected, MmdFlat, MmdChained, MmdCompacted,
                       AmdVendored, AmdFlat, AmdCompacted };
 
 class OrderEngine {
@@ -107,6 +113,10 @@ private:
     // else here is ours and is always present.
 #ifdef OBLIO_VENDORED_ORDERINGS
     bool orderMmdVendored(std::size_t size,
+                  const std::vector<std::size_t>&  colPtr,
+                  const std::vector<std::int32_t>& rowIdx,
+                  Permutation& P) const;
+    bool orderMmdCorrected(std::size_t size,
                   const std::vector<std::size_t>&  colPtr,
                   const std::vector<std::int32_t>& rowIdx,
                   Permutation& P) const;

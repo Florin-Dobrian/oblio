@@ -13,7 +13,9 @@
 // detection, and docs/DESIGN_DECISIONS.md for why.
 #ifdef OBLIO_VENDORED_ORDERINGS
 extern void mmd_order(int n, const int colPtr[], const int rowIdx[],
-                      int perm[], int invp[]);                         // private/Mmd.cpp
+                      int perm[], int invp[]);            // private/MmdVendored.cpp
+extern void mmd_order_corrected(int n, const int colPtr[], const int rowIdx[],
+                      int perm[], int invp[]);            // private/MmdCorrected.cpp
 extern "C" int amd_order(int n, const int Ap[], const int Ai[],
                          int P[], double Control[], double Info[]);    // private/Amd.cpp
 #endif
@@ -43,8 +45,10 @@ bool OrderEngine::compute(const std::vector<std::size_t>&  colPtr,
         case Ordering::Natural: return orderNatural(size, P);
 #ifdef OBLIO_VENDORED_ORDERINGS
         case Ordering::MmdVendored:     return orderMmdVendored(size, colPtr, rowIdx, P);
+        case Ordering::MmdCorrected:    return orderMmdCorrected(size, colPtr, rowIdx, P);
 #else
         case Ordering::MmdVendored:     return false;   // vendored, and private/ is not present
+        case Ordering::MmdCorrected:    return false;
 #endif
         case Ordering::MmdFlat:      return orderMmdFlat(size, colPtr, rowIdx, P);
         case Ordering::MmdChained:   return orderMmdChained(size, colPtr, rowIdx, P);
@@ -68,12 +72,21 @@ bool OrderEngine::orderNatural(std::size_t size, Permutation& P) const {
 }
 
 #ifdef OBLIO_VENDORED_ORDERINGS
-bool OrderEngine::orderMmdVendored(std::size_t size,
-                           const std::vector<std::size_t>&  colPtr,
-                           const std::vector<std::int32_t>& rowIdx,
-                           Permutation& P) const {
-    P.mOldToNew.assign(size, 0);
-    P.mNewToOld.assign(size, 0);
+namespace {
+
+// ONE BODY FOR BOTH VENDORED MMDs. `MmdVendored` and `MmdCorrected` are the same routine under two
+// entry points, one frozen and one with genmmd's degree scale repaired, so the adapter that strips
+// the diagonal and crosses into the int-based C interface is shared and only the call differs.
+using MmdEntry = void (*)(int, const int[], const int[], int[], int[]);
+
+bool orderMmdRaw(MmdEntry entry,
+                 std::size_t size,
+                 const std::vector<std::size_t>&  colPtr,
+                 const std::vector<std::int32_t>& rowIdx,
+                 std::vector<std::int32_t>& oldToNew,
+                 std::vector<std::int32_t>& newToOld) {
+    oldToNew.assign(size, 0);
+    newToOld.assign(size, 0);
     if (size == 0) return true;
 
     // A is stored full-symmetric; the vendored MMD wants the off-diagonal structure only, so
@@ -104,13 +117,33 @@ bool OrderEngine::orderMmdVendored(std::size_t size,
     for (int k = 0; k < nnz; ++k) ri[k] = static_cast<int>(rowIdxOff[k]);
 
     std::vector<int> perm(N), invp(N);
-    mmd_order(N, cp.data(), ri.data(), perm.data(), invp.data());
+    entry(N, cp.data(), ri.data(), perm.data(), invp.data());
 
     for (int j = 0; j < N; ++j) {
-        P.mOldToNew[j] = static_cast<std::int32_t>(invp[j]);
-        P.mNewToOld[j] = static_cast<std::int32_t>(perm[j]);
+        oldToNew[j] = static_cast<std::int32_t>(invp[j]);
+        newToOld[j] = static_cast<std::int32_t>(perm[j]);
     }
     return true;
+}
+
+} // namespace
+
+bool OrderEngine::orderMmdVendored(std::size_t size,
+                           const std::vector<std::size_t>&  colPtr,
+                           const std::vector<std::int32_t>& rowIdx,
+                           Permutation& P) const {
+    return orderMmdRaw(mmd_order, size, colPtr, rowIdx, P.mOldToNew, P.mNewToOld);
+}
+
+// THE ORACLE FOR THE MMD BRANCH. genmmd files at the degree in `mmdint` and at the degree PLUS ONE
+// in `mmdupd`, so a refreshed vertex is penalised by one against one no pivot has reached and the
+// minimum is not always the minimum. `MmdVendored` keeps that and stays frozen for reference; this
+// one repairs it, and our three mmd drivers match THIS. See private/MmdCorrected.cpp.
+bool OrderEngine::orderMmdCorrected(std::size_t size,
+                           const std::vector<std::size_t>&  colPtr,
+                           const std::vector<std::int32_t>& rowIdx,
+                           Permutation& P) const {
+    return orderMmdRaw(mmd_order_corrected, size, colPtr, rowIdx, P.mOldToNew, P.mNewToOld);
 }
 #endif
 

@@ -730,7 +730,7 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
     // where I[u] == I[v], so every clique holding v holds u and its weighted size
     // does not move.
     std::vector<std::size_t> cliqueDegree(n, 0);
-    Graph hashBucket(n + 1);                      // Amd.cpp's Head[hval], reused
+    Graph hashBucket(n);                      // Amd.cpp's Head[hval], reused
     // The assembly tree, for the postorder. parent[c] is the clique that absorbed
     // c, and frontSize[e] is the front e would form, its pivots plus what it
     // reaches. Amd.cpp keeps the same two in Pe and Elen.
@@ -1022,10 +1022,17 @@ std::vector<std::int32_t> amd4MinimumDegree(const Graph& G, double alpha = 10.0,
             // incidence term is annihilated exactly and the hash came out a function of
             // the ADJACENCY ALONE. Amd.cpp lets a vertex and a clique collide on purpose,
             // the hash being a filter and never the decision. The invariant the two lines
-            // hold TOGETHER is that the modulus must not divide the stride.
+            // hold TOGETHER is that the modulus must not divide the stride, and having no
+            // stride is the cheapest way to hold it.
+            //
+            // THE MODULUS IS n, AS Amd.cpp'S IS AND AS PRODUCTION'S IS. It was n + 1 until
+            // 2026-08-23, left behind when the stride went on 2026-08-09 and never
+            // followed. The hash is a filter, so the two moduli give the same merges and
+            // the same permutation and differ only in how many exact comparisons they
+            // cost.
             for (std::int32_t c : I[u])
                 key += static_cast<std::size_t>(c) + 1;
-            const std::size_t k = key % (n + 1);
+            const std::size_t k = key % n;
             if (hashBucket[k].empty()) usedKeys.push_back(k);
             hashBucket[k].push_back(u);
         }

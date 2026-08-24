@@ -34,14 +34,6 @@ extern std::size_t gAmdCompactions;
 //
 // It takes A's pattern, which is all an ordering reads, and builds its own quotient graph from it.
 std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  colPtr,
-                                     const std::vector<std::int32_t>& rowIdx);
-
-// The same, reporting how many entries the clique store ended up holding. Here that is the POOL'S
-// SIZE, fixed at construction, rather than an arena's final extent; see
-// QuotientGraphCompacted::arenaEntries. An OVERLOAD rather than a defaulted parameter, for the
-// reason AmdFlat.h gives at its own pair.
-std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  colPtr,
-                                     const std::vector<std::int32_t>& rowIdx,
-                                     std::size_t& arenaEntries);
+                                            const std::vector<std::int32_t>& rowIdx);
 
 } // namespace Oblio

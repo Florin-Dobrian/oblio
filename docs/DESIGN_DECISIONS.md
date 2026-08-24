@@ -65,6 +65,246 @@ be real, which requires Hermitian. Once that is on the table, the design collaps
 **Cholesky is `CC^H`, always, and in real that *is* `CC^T`.** No option, no flag, no forbidden
 combination to reject. The answer was not hard. Asking the right question was.
 
+## 2026-08-23: genmmd files on two scales, and we stop copying it
+
+**THE DECISION.** Every mmd driver files a vertex under its TRUE DEGREE, at every site. genmmd does
+not, and the mmd branch's oracle is no longer genmmd but a corrected copy of it,
+`private/MmdCorrected.cpp`. `private/MmdVendored.cpp` is frozen beside it, unmodified, and nothing
+compares against it.
+
+**THE DEFECT.** genmmd files in two places and they disagree by one.
+
+```
+mmdint  line 97   dg = xadj[nd+1] - xadj[nd], with if(dg==0)dg=1     the degree
+mmdupd  line 164  dg = dg - qsize[en] + 1, floored at 1              the degree PLUS ONE
+```
+
+`dg0` at `mmdupd`'s `n400` accumulates the clique's weight INCLUDING `en`, so subtracting
+`qsize[en]` already gives the external degree and the `+ 1` sits on top of it. Both scales are live
+in one `head` array at once, because only the vertices a pivot's clique reaches are refreshed and
+every other vertex keeps its `mmdint` bucket. So a refreshed vertex is penalised by exactly one
+against a vertex no pivot has reached yet.
+
+**IT IS NOT A TIE-BREAK, IT IS A WRONG COMPARISON.** A tie-break decides among equals; this makes
+unequal vertices compare equal, and can prefer the strictly worse one. On a 4 by 4 grid, `MmdFlat`
+pivot by pivot with each vertex's true external degree at the moment it was chosen:
+
+```
+pivot 11  bucket 4  trueExtDeg 3      refreshed, filed at 3 + 1
+pivot  8  bucket 4  trueExtDeg 3
+pivot  2  bucket 4  trueExtDeg 3
+pivot  5  bucket 4  trueExtDeg 4      never refreshed, still filed at 4
+pivot 14  bucket 4  trueExtDeg 3
+```
+
+Bucket 4 holds degree 3 and degree 4 together, LIFO takes vertex 5, and a degree 4 vertex is
+eliminated while a degree 3 vertex is still available. That is minimum degree failing to select the
+minimum degree.
+
+**A UNIFORM SHIFT WOULD BE HARMLESS AND THIS IS NOT ONE**, which is the part worth being sure of.
+Removing the offset from the refresh and adding it to the initial filing are two different edits,
+and they produce the SAME permutation as each other on all 73 grids of the digest sweep, byte for
+byte. Only the mismatch matters. The scale itself does not.
+
+**WHAT IT COSTS AND WHAT IT BUYS.** Fill is a wash: over ten square grids the total moves by -0.58
+per cent, the median by +0.25, better on four of ten, and 3D fill is identical at every size
+measured. What it costs is the equality with genmmd, which was the mmd branch's exact oracle. What
+it buys is an oracle that is correct rather than merely agreed with, and a rule a reader can state
+in one line.
+
+### The corrected copy
+
+`MmdCorrected.cpp` is `MmdVendored.cpp` with five changes, each marked `CORRECTED` at its site.
+Filing at the true degree is the whole of the intent; the rest follows from it.
+
+1. `mmdupd` files at `dg - qsize[en]`, dropping the `+ 1` and the clamp with it.
+2. `mmdint` files at the degree, dropping `if(dg==0)dg=1`, so bucket 0 is in use.
+3. **The head form moves from `-dg` to `-(dg + 1)`.** Forced by 2: genmmd's `bwd` uses 0 for a
+   vertex in no list, so a degree 0 head would encode as `-0` and collide. Three write sites, one
+   decode site in `mmdelm`. This is the same collision our own `Buckets` hits, recorded there as
+   corrupting a bucket list on a 3D grid at 6 a side.
+4. The prepass drains `head[0]` and `head[1]`, which now hold degree 0 and degree 1 separately and
+   both eliminate without fill. genmmd drains one bucket because its floor puts the two together.
+5. `ncsub` adds `mdeg + qsize - 1` rather than `- 2`, `mdeg` no longer carrying the offset. It was
+   already wrong for any pivot the refresh had not touched, and it is a diagnostic the wrapper
+   discards.
+
+**MODIFYING VENDORED CODE IS NEW HERE AND IS DELIBERATE.** The porting discipline is "port, don't
+rewrite", and it governs our own 0.9 code, not code inherited from elsewhere. A reference that is
+wrong is not worth matching. The frozen copy stays so that a future diff against Liu's source still
+lines up and so the defect can be demonstrated rather than only described.
+
+### What moved with it
+
+- **Three drivers**, four sites each: the initial filing, both refresh sites, and the prepass, which
+  now drains buckets 0 and 1. The prepass half is easy to miss and produces a wrong answer on its
+  own.
+- **Four prototypes.** `mmd3.py` and `mmd3.cpp` are production's twins and had the same four sites.
+  `mmd2.py` and `mmd2.cpp` are where the conventions entered the ladder, and their pass 5 is now the
+  ladder's first entry marked `[READ, NOT ADOPTED]` rather than `[done]`, so no step goes backwards:
+  mmd1 already filed at the degree. The measurement mmd2 carried is kept and its conclusion
+  reversed, the evidence being unaffected: same prepass set, identical nnz(L) on 300 random graphs,
+  a different permutation on 212 of them.
+- **The benchmarks.** `order_timing`, `matrix_ordering` and `order_profile` reference
+  `MmdCorrected`, and the mmd column tag is `Cor` where the amd side keeps `Vnd`.
+- **The digest baseline**, re-recorded. The amd drivers are unmoved at 0 of 73 and the three mmd
+  drivers moved identically at 61 of 73, identical because they are one algorithm on three stores.
+
+**AND THE `mPrev` ENCODING NOW FITS.** Earlier the same day, moving `OUTMATCHED` to `INT32_MAX` left
+the head form one value short at `n == MAX_IDX`, and the note there said the offset was the cause
+and removing it the only repair. Both halves check out: a head encodes a degree, which reaches `n -
+1`, so the head form runs to `-(n + 1)` and lands exactly on the type's minimum, while a predecessor
+reaches `n - 1` and leaves `INT32_MAX` free. Nothing to spare at either end.
+
+### How it is checked
+
+`test_order` gains `MmdFlat == MmdCorrected` on four structures, so the oracle is exercised by `make
+test` rather than only by the benchmarks. Beyond that, run rather than recorded:
+
+```
+57 grids, 2D to 45 a side and 3D to 14     3 drivers vs MmdCorrected   0 disagreements
+216 random patterns, n from 1 to 200       3 drivers vs MmdCorrected   0 disagreements
+   covering 2806 isolated and 709 degree-1 vertices
+```
+
+The random patterns are not decoration. A grid has no degree 0 or degree 1 vertex, so it never
+exercises bucket 0 or the second prepass bucket, and the whole of change 2 and change 4 would go
+untested on grids alone.
+
+**ONE PROCESS NOTE.** The first comparison harness reported every position as differing, on every
+grid, including for the unmodified tree. It was comparing old-to-new against new-to-old. A control,
+the unmodified driver against the unmodified reference, must read zero, and running that control is
+what found it. A harness that reports a difference is not evidence until it has been shown capable
+of reporting agreement.
+
+---
+
+## 2026-08-23: name the payload where there is one kind of it, the container where there are several
+
+**THE RULE.** A structure that hands out per-entity blocks is named for **what its blocks contain**
+when the contents are one kind of thing and a word exists for that thing, and for **what the blocks
+are** when the contents are several kinds. Both halves are already in the tree; what was missing is
+the sentence saying they are one rule seen from two sides, and the ordering had drifted to a name
+that fitted neither.
+
+**THE MATRIX SIDE IS THE FIRST HALF, AND IT WORKS.** `colPtr` locates a column; a column holds rows
+and values; `rowIdx` and `val` name those, and the owner is dropped because nothing else in the file
+holds rows. `snodePtr` and `nodeIdx` are the same shape one level up, and `node` was invented for
+exactly this: a row and a column are one object under symmetry, so one word covers both and the
+payload can be named. The 2026-07-17 and 2026-07-19 entries settled those names.
+
+**THE QUOTIENT GRAPH IS THE SECOND HALF, AND THE FIRST DOES NOT REACH IT.** A block there holds one
+of three things, decided by which run it is and by whether its owner has been eliminated:
+
+```
+A[u]    vertex ids
+I[u]    clique ids
+C[c]    vertex ids, which we call the clique's MEMBERS
+```
+
+So the payload slot has nothing single to put in it. The formal spelling exists, `srcPtr` locating a
+`srcIdx`, and it fails at the point the store splits: the flat class would need `adjIncSrcIdx` and
+`cliqueSrcIdx`, the second of which says three words to describe vertex ids we already call members.
+And no `node` is available to rescue it, because the case that made `node` work does not hold here:
+a row and a column really are one object, where a vertex and a clique are not.
+
+**SO THE CONTAINER IS NAMED AND THE KIND IS CARRIED WHERE IT VARIES.** `src` says "the block this
+entity owns", which is true of all three payloads and commits to none, and which of the three a
+caller is looking at is answered by the accessor it reached through, `adjacencyAmd`, `incidenceMmd`
+or `clique`, together with the two lengths.
+
+### What that gives the three classes
+
+```
+compacted, chained     mSrc                     one store, runs and cliques together
+flat                   mAdjIncSrc, mCliqueSrc   two stores, runs in one and cliques in the other
+every class            srcPtr                   the position, one field, one name
+```
+
+`srcPtr` is deliberately spelled the same in all three, because `docs/QUOTIENT_GRAPH_USAGE.md`'s
+whole exercise is that the compacted class should read as the flat one with positions into a
+different layout. A field spelled differently in the two would put a difference in the diff that is
+not a real one.
+
+**ONE FIELD NAMES ONE DESTINATION AT A TIME**, which is what lets a single `srcPtr` array serve
+everything. While a vertex is live the field locates its run; once it has eliminated and formed a
+clique the field locates that clique's block, rewritten at the end of `beginElimination` once both
+readers of the old meaning are past. The two lives never overlap, a clique's id being the id of the
+pivot that formed it and that vertex being dead. `adjacencySize` carries the same double life,
+A[u]'s length for a vertex and a member count for a clique.
+
+**THE FLAT CLASS IS THE ONE PLACE THE FIELD SPANS TWO ADDRESS SPACES**, and nothing in the field
+says which. It is safe because `clique(c)` is the sole accessor adding the clique store's base and
+is called only for ids the driver already knows are cliques. That is an invariant carried by the
+callers, checkable by reading them and by nothing else; the compacted and chained classes do not
+have it, having one store.
+
+### The counter half, which is the same rule doing the other job
+
+A clique's payload IS one kind and does have a word, so the count names the payload:
+`numBornCliqueMembers`, every vertex ever put into a clique. It is the third of a family that
+differs only in WHEN:
+
+```
+born    cumulative, every member ever admitted        only rises
+live    the members of live cliques at this instant   rises and falls
+peak    live's running maximum                        only rises
+```
+
+**THE NAME IT REPLACES WAS WRONG IN BOTH HALVES.** `arenaEntries` named an "arena", which after the
+rename above is a word no member carries, and counted "entries", which suggested a slot that might
+hold something other than a member. Nothing else is ever written to that store: it grows only at a
+clique's birth, by exactly the clique's length, with no header and no padding. So an entry always
+was a member, and the class's own comment defending the distinction, "MEMBERS, NOT ENTRIES, AND THAT
+IS THE WHOLE DISTINCTION", was carrying a difference in TIME under a word that claimed a difference
+in KIND. Its next sentence said so outright, cumulative against rising and falling.
+
+**A comment that has to defend a distinction is evidence about the names above it.** That one had
+been read many times and was believed because it was internally consistent, which is the same shape
+as the fill sign error of 2026-08-21 two days earlier.
+
+**AND THE BODY IS A COINCIDENCE THAT IS RECORDED AT THE DECLARATION.** `numBornCliqueMembers`
+returns the store's length rather than reading a counter, and the two agree only because nothing is
+ever reclaimed: a contraction leaves the members it drops where they lie. `docs/NEXT.md` carries
+reclaiming as a standing item, and the day it lands the two part and this needs a counter of its
+own, incremented at the one site that bears a clique. The declaration says this so that the item
+cannot silently invalidate the figure.
+
+`compactions` became `numCompactions` at the same time, so that every count in the two classes
+carries the prefix and a bare name is always a lookup.
+
+### The reversal that came with it
+
+`QuotientGraphCompacted::arenaEntries` is deleted, with the out-parameter, the two public overloads
+and the `Impl` on both compacted drivers, each of which then collapsed to a single entry point.
+
+**IT WAS ADDED ON 2026-08-21 TO CLOSE ITEM 1 OF THE ALIGNMENT LEDGER, AND THAT WAS THE WRONG
+CLOSE.** The item read as a missing out-parameter, since the other three drivers had one. What was
+made uniform was the SHAPE; the QUANTITY behind it never was. The flat class returns what its clique
+store cost, and the compacted class returned the POOL's size, fixed at construction and derivable
+from nnz(A) without running anything. Its own comment said as much, "Not the same quantity and not
+meant to be", which is a comment apologizing for a name. Nothing ever called it, on the day it
+landed or since.
+
+**THE CORRECT READING IS THAT ONLY A STORE THAT GROWS HAS TO PAY FOR WHAT IT HOLDS.** A compacted
+pool is sized from the input and reused; a chained clique lives in its own pivot's dead segment. So
+neither has a clique-storage quantity that varies, which is the property those layouts were chosen
+for rather than an omission. `numCompactions` is the compacted class's whole storage figure and
+answers the question that layout actually has, whether the fixed pool sufficed.
+
+**WHAT IS NOT RULED OUT.** The other two classes could publish `numBornCliqueMembers` perfectly
+well, the birth site being in all three and already holding the length, and the figure would be
+identical across a branch's pair by construction, exactly as `numPeakCliqueMembers` is. That would
+be a property of the ALGORITHM, checked across the pair rather than printed. What is ruled out is a
+clique-STORAGE column for a layout whose clique storage does not vary.
+
+### Left open
+
+`VertexRun` and `mRun` are named for a concept this entry treats as auxiliary, and `mRun[c].srcPtr`
+therefore names the auxiliary thing twice and the entity not at all. Not decided here.
+
+---
+
 ## 2026-08-21: the compacted pair become the main drivers, and a fill sign error
 
 **THE DECISION.** `AmdCompacted` is the default and `MmdCompacted` is the mmd driver to use.

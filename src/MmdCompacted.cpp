@@ -80,7 +80,6 @@ namespace Oblio {
 // once per ordering, so the mid-walk path is nearly untested by any normal run; sized to exactly
 // `nzaat` it fires 8 to 13 times over the same sizes and every permutation is byte identical.
 std::size_t gMmdCompactions = 0;
-extern std::size_t gPeakCliqueMembers;   // defined in include/oblio/QuotientGraph.h
 
 namespace {
 
@@ -112,12 +111,9 @@ struct TaggedScanCompacted {
 
 } // namespace
 
-namespace {
-
-std::vector<std::int32_t> orderMmdCompactedImpl(const std::vector<std::size_t>&  colPtr,
-                                        const std::vector<std::int32_t>& rowIdx,
-                                        std::int32_t delta,
-                                        std::size_t* arenaEntries) {
+std::vector<std::int32_t> orderMmdCompacted(const std::vector<std::size_t>&  colPtr,
+                                            const std::vector<std::int32_t>& rowIdx,
+                                            std::int32_t delta) {
     if (colPtr.empty()) return std::vector<std::int32_t>();
     const std::size_t size = colPtr.size() - 1;
     if (size == 0) return std::vector<std::int32_t>();
@@ -129,17 +125,24 @@ std::vector<std::int32_t> orderMmdCompactedImpl(const std::vector<std::size_t>& 
     pivots.reserve(size);
     std::uint32_t numEliminated = 0;
 
+    // WE FILE AT THE DEGREE, AT EVERY SITE, where genmmd files at the degree initially and at the
+    // degree plus one on refresh. See MmdFlat.cpp for what that costs it and
+    // private/MmdCorrected.cpp for the repaired reference this matches.
     Buckets buckets(size);
     std::uint32_t minDegree = static_cast<std::uint32_t>(size);
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u) {
-        const std::uint32_t degree = std::max<std::uint32_t>(qg.adjacencySize(u), 1);
+        const std::uint32_t degree = qg.adjacencySize(u);
         buckets.file(degree, u);
         minDegree = std::min(minDegree, degree);
     }
 
     std::vector<std::int32_t> batch, cliqueMembers, twoSourceQueue, manySourceQueue;
 
-    for (std::int32_t u = buckets.head(1); u != NIL; ) {
+    // The prepass. Buckets 0 and 1 hold the isolated and the degree-1 vertices, both of which
+    // eliminate without fill; genmmd has one bucket to drain here, its `if(dg==0)dg=1` putting the
+    // two together, and filing at the true degree separates them.
+    for (std::uint32_t b = 0; b < 2 && b < size; ++b)
+    for (std::int32_t u = buckets.head(b); u != NIL; ) {
         const std::int32_t next = buckets.next(u);   // before the unfile invalidates it
         buckets.unfile(u);
         qg.number(u);
@@ -147,7 +150,7 @@ std::vector<std::int32_t> orderMmdCompactedImpl(const std::vector<std::size_t>& 
         ++numEliminated;
         u = next;
     }
-    if (size > 2) minDegree = 2;                // head[1] is empty now, and mdeg starts at 2
+    if (size > 2) minDegree = 2;                // buckets 0 and 1 are empty now
 
     while (numEliminated < size) {
         while (buckets.empty(minDegree)) ++minDegree;
@@ -173,10 +176,10 @@ std::vector<std::int32_t> orderMmdCompactedImpl(const std::vector<std::size_t>& 
             numEliminated += 1 + static_cast<std::uint32_t>(merged.size());
             for (std::int32_t u : merged) buckets.unfile(u);
 
-            const std::int32_t* clique     = qg.clique(pivot);
-            const std::uint32_t cliqueSize = qg.cliqueSize(pivot);
-            for (std::uint32_t k = 0; k < cliqueSize; ++k) {
-                const std::int32_t u = clique[k];
+            const std::int32_t* newClique     = qg.clique(pivot);
+            const std::uint32_t newCliqueSize = qg.cliqueSize(pivot);
+            for (std::uint32_t k = 0; k < newCliqueSize; ++k) {
+                const std::int32_t u = newClique[k];
                 buckets.unfile(u);                  // evict; mmdelm's bwd[rn] = 0 is both this
                 buckets.restore(u);                 //   and putting a withheld vertex back
             }
@@ -218,9 +221,9 @@ std::vector<std::int32_t> orderMmdCompactedImpl(const std::vector<std::size_t>& 
                 const std::int32_t* adjacency = qg.adjacencyMmd(u);
                 for (std::uint32_t uak = 0; uak < qg.adjacencySize(u); ++uak) {
                     const std::int32_t v = adjacency[uak];
-                    const std::int32_t m = qg.mark(v);
-                    if (m >= vertexTag) continue;                  // seen this pass, or dead
-                    if (m == cliqueTag) continue;                 // already counted in cliqueWeight
+                    const std::int32_t vMark = qg.mark(v);
+                    if (vMark >= vertexTag) continue;              // seen this pass, or dead
+                    if (vMark == cliqueTag) continue;             // already counted in cliqueWeight
                     qg.setMark(v, vertexTag);
                     degree += qg.weight(v);
                 }
@@ -232,9 +235,9 @@ std::vector<std::int32_t> orderMmdCompactedImpl(const std::vector<std::size_t>& 
                     const std::uint32_t otherCliqueSize = qg.cliqueSize(c);
                     for (std::uint32_t k = 0; k < otherCliqueSize; ++k) {
                         const std::int32_t v = otherClique[k];
-                        const std::int32_t m = qg.mark(v);
-                        if (v == u || m >= vertexTag) continue;    // seen this pass, or dead
-                        if (m == cliqueTag) {
+                        const std::int32_t vMark = qg.mark(v);
+                        if (v == u || vMark >= vertexTag) continue;    // seen this pass, or dead
+                        if (vMark == cliqueTag) {
                             if (buckets.filed(v) || buckets.outmatched(v)) continue;
                             if (qg.adjacencySize(v) + qg.incidenceSize(v) - 1 == 1) {
                                 qg.merge(u, v);      // identical reach: u absorbs it
@@ -249,7 +252,7 @@ std::vector<std::int32_t> orderMmdCompactedImpl(const std::vector<std::size_t>& 
                     }
                 }
 
-                const std::uint32_t filed = std::max<std::uint32_t>(degree - qg.weight(u) + 1, 1);
+                const std::uint32_t filed = degree - qg.weight(u);
                 buckets.file(filed, u);
                 minDegree = std::min(minDegree, filed);
             }
@@ -258,7 +261,7 @@ std::vector<std::int32_t> orderMmdCompactedImpl(const std::vector<std::size_t>& 
                 const std::int32_t u = *uit;                 // the full union, as md5 computes it
                 if (qg.eliminatedMmd(u) || buckets.outmatched(u)) continue;
                 const std::uint32_t degree = qg.reachableWeight(u); // reach excludes u already
-                const std::uint32_t filed = std::max<std::uint32_t>(degree + 1, 1);
+                const std::uint32_t filed = degree;
                 buckets.file(filed, u);
                 minDegree = std::min(minDegree, filed);
             }
@@ -270,25 +273,9 @@ std::vector<std::int32_t> orderMmdCompactedImpl(const std::vector<std::size_t>& 
     // pivot, and at the close of a run the last cliques can have had every member mass eliminated
     // into the pivot instead, leaving no one to absorb them, so a few entries legitimately survive.
     assert(qg.cliqueCountBalances() && "clique births and deaths do not balance");
-    if (arenaEntries != nullptr) *arenaEntries = qg.arenaEntries();
-    gMmdCompactions  = qg.compactions();
+    gMmdCompactions  = qg.numCompactions();
     gPeakCliqueMembers = qg.numPeakCliqueMembers();   // see include/oblio/QuotientGraph.h
     return qg.orderAscending(pivots);   // genmmd's mmdnum. See the ledger, entry 6.
-}
-
-} // namespace
-
-std::vector<std::int32_t> orderMmdCompacted(const std::vector<std::size_t>&  colPtr,
-                                    const std::vector<std::int32_t>& rowIdx,
-                                    std::int32_t delta) {
-    return orderMmdCompactedImpl(colPtr, rowIdx, delta, nullptr);
-}
-
-std::vector<std::int32_t> orderMmdCompacted(const std::vector<std::size_t>&  colPtr,
-                                    const std::vector<std::int32_t>& rowIdx,
-                                    std::int32_t delta,
-                                    std::size_t& arenaEntries) {
-    return orderMmdCompactedImpl(colPtr, rowIdx, delta, &arenaEntries);
 }
 
 } // namespace Oblio

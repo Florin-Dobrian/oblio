@@ -236,8 +236,8 @@ using OrderFn = std::vector<std::int32_t>(*)(const std::vector<std::size_t>&,
 
 struct Method {
     std::string name;
-    // THE THREE-LETTER TAG THE SCALE TABLES PRINT. `Vnd`, `Flt`, `Chn`, `Com`, `Raw`, per the
-    // 2026-08-21 naming entry in docs/DESIGN_DECISIONS.md. The full name is what prose and the
+    // THE THREE-LETTER TAG THE SCALE TABLES PRINT. `Cor`, `Vnd`, `Flt`, `Chn`, `Com`, `Raw`, per
+    // the 2026-08-21 naming entry in docs/DESIGN_DECISIONS.md. The full name is what prose and the
     // aggregate tables use; a per-size table is a legend-driven table, as `nnzL` and `n` already
     // are, and a header of `MmdCompacted nnzL` in every column is unreadable. The BRANCH is not in
     // the tag because it is not in the table either: a run is mmd or amd, never both, and the
@@ -692,7 +692,7 @@ int main(int argc, char** argv) {
     // vector per vertex reset per call and a push per member, so timing it would measure our
     // instrumentation rather than AMD. Its fill is exact and is the column AmdFlat must equal.
     const std::vector<Method> allMethods = {
-        {"MmdVendored", "Vnd", Ordering::MmdVendored},  {"MmdFlat", "Flt", Ordering::MmdFlat},
+        {"MmdCorrected", "Cor", Ordering::MmdCorrected},  {"MmdFlat", "Flt", Ordering::MmdFlat},
         {"MmdChained", "Chn", Ordering::MmdFlat, false, true},
         // MmdCompacted WAS CALLED TRANSITIONAL HERE UNTIL 2026-08-21 and the note said its time
         // column was a second reading of MmdFlat's own code. Both described the PREVIOUS file of
@@ -720,7 +720,7 @@ int main(int argc, char** argv) {
     // anyone adds such a control again, and the shape is worth reusing, one function under two
     // names being the only way to hold everything but position fixed.
     const std::vector<Method> mmdMethods = {
-        {"MmdVendored", "Vnd", Ordering::MmdVendored},  {"MmdFlat", "Flt", Ordering::MmdFlat},
+        {"MmdCorrected", "Cor", Ordering::MmdCorrected},  {"MmdFlat", "Flt", Ordering::MmdFlat},
         {"MmdChained", "Chn", Ordering::MmdFlat, false, true},
         {"MmdCompacted", "Com", Ordering::MmdFlat, false, false, mmdCompactedDefault},
     };
@@ -769,9 +769,10 @@ int main(int argc, char** argv) {
 
     // THE BRANCH IS SAID ONCE, HERE, AND NOT AGAIN IN EVERY COLUMN. A run is mmd or amd or both,
     // and when it is one the columns need only the store. The tags are the 2026-08-21 naming
-    // entry's, `Vnd Flt Chn Com`, plus `Raw` for the hooked pre-postorder copy, which is not a
+    // entry's, `Flt Chn Com`, plus the reference each branch is checked against, `Cor` for the mmd
+    // side and `Vnd` for the amd side, and `Raw` for the hooked pre-postorder copy, which is not a
     // store and so is the one tag that names something else. When BOTH branches are shown the
-    // tags would collide, two columns headed `Vnd`, so the full name is printed instead.
+    // full name is printed instead, the stores otherwise colliding.
     // `branchOnly` is the same condition, already computed: tags are usable exactly when one
     // branch is shown. The legend is built from `methods` rather than written out, so a column
     // added or removed cannot leave it describing a table that is not there.

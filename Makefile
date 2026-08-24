@@ -98,7 +98,7 @@ OBLIO_SRCS = \
 ifdef OBLIO_PUBLIC
   VENDOR_SRCS =
 else
-  VENDOR_SRCS = $(wildcard private/AmdVendored.cpp private/MmdVendored.cpp)
+  VENDOR_SRCS = $(wildcard private/AmdVendored.cpp private/MmdVendored.cpp private/MmdCorrected.cpp)
 endif
 
 ifneq ($(VENDOR_SRCS),)
@@ -212,6 +212,7 @@ objs: $(LIB_OBJS)
 # is overridable, `make CXXFLAGS="... -g"` produces one on macOS, and clean removes what a build
 # in this directory CAN produce.
 clean:
-	rm -f $(TEST_BINS) $(EXAMPLE_BINS) $(OBLIO_OBJS) private/AmdVendored.o private/MmdVendored.o \
+	rm -f $(TEST_BINS) $(EXAMPLE_BINS) $(OBLIO_OBJS) private/AmdVendored.o \
+	      private/MmdVendored.o private/MmdCorrected.o \
 	      .build-mode
 	rm -rf *.dSYM

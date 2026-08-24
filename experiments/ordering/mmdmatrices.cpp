@@ -1,4 +1,5 @@
-// mmdmatrices.cpp -- production MmdFlat against genmmd's elimination order, on REAL MATRICES.
+// mmdmatrices.cpp -- production MmdFlat against MmdCorrected's elimination order, on REAL
+// MATRICES.
 //
 // The same assertion mmdorder.cpp makes, on different input, and the difference in input is the
 // whole point. mmdorder runs four shapes: seven hand-built examples, square grids, cubic grids and
@@ -18,7 +19,8 @@
 // that AmdFlat and the vendored AMD already differ on fill on a minority of the 107-matrix
 // performance set, once by 4 percent, and calls it "a divergence the acceptance tests cannot see".
 // This is the check that would see it. The mmd branch is done first because it is the aligned one:
-// MmdFlat reproduces genmmd exactly on all 38 generated cases, so anything this finds is new.
+// MmdFlat reproduces the reference exactly on all 38 generated cases, so anything this finds is
+// new.
 //
 // WHY IT LIVES HERE AND NOT IN benchmarks/matrices, WHERE THE MATRICES ARE. An alignment check is
 // a VERDICT. docs/CODING_RULES.md states that `test` exists exactly where something can fail,
@@ -40,7 +42,7 @@
 // `fromTriplets` deduplicates, sorts, mirrors the stored triangle and inserts a diagonal where
 // nothing landed. Our orderings need all four and do none of them. What is compared here is
 // therefore two orderings of the same CONDITIONED pattern, which is the honest comparison: it
-// asks whether we reproduce genmmd on real structure, not whether either of us survives a
+// asks whether we reproduce the reference on real structure, not whether either of us survives a
 // malformed file.
 //
 // `pattern` files are what this wants and what nothing else could use, so the reader takes them
@@ -62,15 +64,16 @@
 #include <string>
 #include <vector>
 
-// The vendored routine, from private/Mmd.cpp, linked rather than hooked: mmd_order returns the
+// The reference routine, from private/MmdCorrected.cpp, linked rather than hooked: it returns the
 // order it eliminates in and does no postorder, so its output vector IS the object to compare.
 // mmdorder.cpp's header explains why the amd side needs a generated copy and this side does not.
-void mmd_order(int n, const int colPtr[], const int rowIdx[], int perm[], int invp[]);
+void mmd_order_corrected(int n, const int colPtr[], const int rowIdx[], int perm[], int invp[]);
 
 namespace {
 
 // Two caps, and they are about PATIENCE rather than capability. Nothing here cannot order a large
-// matrix: genmmd's `int` arrays would refuse a pattern past 2^31 nonzeros, and the largest file in
+// matrix: the reference's `int` arrays would refuse a pattern past 2^31 nonzeros, and the largest
+// file in
 // the collection as fetched is 28.7 million, seventy times under that. What a cap buys is that one
 // matrix cannot quietly become the whole run, minimum degree paying for fill as it goes and
 // PARSEC/Si87H76 predicting 5.68 billion entries of it under MmdFlat.
@@ -91,7 +94,8 @@ struct Options {
     std::size_t maxNnz = defaultMaxNnz;
 };
 
-// A conditioned SparseMatrix, two ways. Ours takes the pattern with the diagonal present, genmmd
+// A conditioned SparseMatrix, two ways. Ours takes the pattern with the diagonal present, the
+// reference
 // takes it without. These are mmdorder.cpp's two conversions with a matrix in place of a Graph,
 // and they stay in the driver for the same reason they do there: what a driver feeds its routine
 // is the driver's own business.
@@ -112,7 +116,7 @@ void toVendored(const Oblio::SparseMatrix<double>& matrix,
     rowIdx.reserve(ai.size());
     for (std::size_t j = 0; j < size; ++j) {
         for (std::size_t p = ap[j]; p < ap[j + 1]; ++p)
-            if (ai[p] != static_cast<std::int32_t>(j))     // genmmd wants no diagonal
+            if (ai[p] != static_cast<std::int32_t>(j))     // the reference wants no diagonal
                 rowIdx.push_back(ai[p]);
         colPtr[j + 1] = static_cast<int>(rowIdx.size());
     }
@@ -177,10 +181,10 @@ Outcome check(const std::string& path, const Options& options) {
     toVendored(read.matrix, ap, ai);
     const int n = static_cast<int>(size);
     std::vector<int> perm(n), invp(n);
-    mmd_order(n, ap.data(), ai.data(), perm.data(), invp.data());
+    mmd_order_corrected(n, ap.data(), ai.data(), perm.data(), invp.data());
 
     if (ours.size() != perm.size()) {
-        std::printf("  %-38s %8zu %11zu %13s  SIZE MISMATCH: ours %zu, genmmd %zu\n",
+        std::printf("  %-38s %8zu %11zu %13s  SIZE MISMATCH: ours %zu, reference %zu\n",
                     name.c_str(), size, nnz, "-", ours.size(), perm.size());
         return Outcome::Differed;
     }
@@ -204,8 +208,8 @@ Outcome check(const std::string& path, const Options& options) {
         if (ours[k] != perm[k]) { firstDiffer = k; break; }
 
     if (firstDiffer != ours.size()) {
-        std::printf("  %-38s %8zu %11zu   nnz(L) ours %zu genmmd %zu"
-                    "  DIFFER at pivot %zu of %zu: ours %d, genmmd %d\n",
+        std::printf("  %-38s %8zu %11zu   nnz(L) ours %zu reference %zu"
+                    "  DIFFER at pivot %zu of %zu: ours %d, reference %d\n",
                     name.c_str(), size, nnz, fillOurs, fillVendor,
                     firstDiffer, ours.size(), ours[firstDiffer], perm[firstDiffer]);
         return Outcome::Differed;
@@ -215,7 +219,8 @@ Outcome check(const std::string& path, const Options& options) {
 }
 
 void usage() {
-    std::printf("production MmdFlat against genmmd's elimination order, on real matrices\n\n");
+    std::printf("production MmdFlat against MmdCorrected's elimination order, "
+                "on real matrices\n\n");
     std::printf("  ./mmdmatrices_cpp [--max-n=N] [--max-nnz=N] <file.mtx> ...\n\n");
     std::printf("  The matrices are not in the repository. From benchmarks/matrices:\n");
     std::printf("      ./ssget.py list --max-nnz 500000 > candidates.txt\n");
@@ -251,7 +256,7 @@ int main(int argc, char** argv) {
 
     std::sort(paths.begin(), paths.end());
 
-    std::printf("production MmdFlat against genmmd's elimination order, on real matrices\n");
+    std::printf("production MmdFlat against MmdCorrected's elimination order, on real matrices\n");
     std::printf("  (the permutation itself, entry for entry; see mmdorder.cpp for why the mmd\n");
     std::printf("   side needs no hook, and this file's header for what real structure adds)\n\n");
     // A matching row carries one fill, the two being equal by construction; a differing row

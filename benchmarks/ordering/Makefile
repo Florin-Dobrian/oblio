@@ -75,7 +75,8 @@ OBLIO_HDRS  = $(wildcard ../../include/oblio/*.h)
 ifdef OBLIO_PUBLIC
   VENDOR_SRCS =
 else
-  VENDOR_SRCS = $(wildcard ../../private/AmdVendored.cpp ../../private/MmdVendored.cpp)
+  VENDOR_SRCS = $(wildcard ../../private/AmdVendored.cpp ../../private/MmdVendored.cpp \
+                          ../../private/MmdCorrected.cpp)
 endif
 # Which configuration this directory is built in. The two differ by a macro, so a binary from one
 # is wrong for the other and no timestamp would say so. The $(shell) deletes the stamp when the
@@ -240,5 +241,5 @@ order_profile_cpp: order_profile.cpp $(OBLIO_SRCS) $(OBLIO_HDRS) $(VENDOR_SRCS) 
 # recipe gets printed in full every time someone types `make clean`.
 clean:
 	rm -f .build-mode order_timing_cpp order_profile_cpp order_digest_cpp .digest-baseline
-	rm -f AmdVendored.o MmdVendored.o amd_raw.cpp amd_timed.cpp
+	rm -f AmdVendored.o MmdVendored.o MmdCorrected.o amd_raw.cpp amd_timed.cpp
 	rm -rf *.dSYM

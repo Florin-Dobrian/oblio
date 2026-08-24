@@ -176,7 +176,8 @@ PROD_HDRS   = $(wildcard ../../include/oblio/*.h)
 ifdef OBLIO_PUBLIC
   VENDOR_SRCS =
 else
-  VENDOR_SRCS = $(wildcard ../../private/AmdVendored.cpp ../../private/MmdVendored.cpp)
+  VENDOR_SRCS = $(wildcard ../../private/AmdVendored.cpp ../../private/MmdVendored.cpp \
+                          ../../private/MmdCorrected.cpp)
 endif
 
 .PHONY: all test production vendored width amdorder mmdorder mmdmatrices aligned clean help
@@ -445,5 +446,5 @@ endif
 clean:
 	rm -f $(BINS) vendored_cpp production_cpp width_cpp amdorder_cpp mmdorder_cpp \
 	      mmdmatrices_cpp \
-	      amd_int64.cpp mmd_int64.cpp amd_raw.cpp AmdVendored.o MmdVendored.o
+	      amd_int64.cpp mmd_int64.cpp amd_raw.cpp AmdVendored.o MmdVendored.o MmdCorrected.o
 	rm -rf *.dSYM

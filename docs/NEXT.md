@@ -1,4 +1,31 @@
-# NEXT: the drivers are renamed and the default moved; one regression is open
+# NEXT: the mmd branch left genmmd; one regression is open
+
+## DONE 2026-08-23: the mmd branch files at the true degree, and the oracle changed
+
+**Our three mmd drivers no longer return genmmd's permutation, deliberately.** genmmd files a
+vertex under its degree in `mmdint` and under its degree PLUS ONE in `mmdupd`, two scales live in
+one bucket array, so a refreshed vertex is penalised by one against a vertex no pivot has reached
+and the minimum selected is not always the minimum. `private/MmdCorrected.cpp` is genmmd with that
+repaired and is the branch's oracle from here; `private/MmdVendored.cpp` is frozen beside it and
+nothing compares against it. `docs/DESIGN_DECISIONS.md` (2026-08-23) has the account, the 4 by 4
+evidence and the five changes in the corrected copy.
+
+**MEASURED ON REAL STRUCTURE THE SAME DAY, AND IT IS A WASH.** `ORDERING.md` and `ACCURACY.md` have
+both been re-run and rewritten. Against the frozen genmmd over the 246, the corrected rule fills
+LESS on 92 matrices and MORE on 83, with a median ratio of exactly 1.0000; the total goes the other
+way at +1.8 per cent and three PARSEC-class matrices are 98.9 per cent of that. `PERFORMANCE.md`'s
+run says the fill difference costs no factorization time at all, a half per cent on the faster side
+across all three traversals.
+
+**WHAT THIS LEAVES FOR THE NEXT SESSION.**
+
+- **`PERFORMANCE.md` has not been redone.** Its run is on disk. Its mmd pair is now two different
+  ORDERINGS rather than one computed two ways, which `matrix_performance.cpp`'s header explains;
+  the report's prose has not caught up. Florin also wants `MmdChained` and `MmdCompacted` rows
+  there, which is a benchmark change and a longer run.
+- Nothing else. `experiments/ordering/README.md`'s 246-matrix claim was checked and holds: `make
+  mmdorder` makes the same per-matrix comparison against `MmdCorrected` and its 2026-08-23 pass
+  flagged nothing on any of the three mmd drivers.
 
 ## OPEN, FOUND 2026-08-21: the amd default costs `Oberwolfach/LFAT5000`
 
@@ -7,30 +34,55 @@ factors it.** It is the one open defect from this session and nothing else in th
 
 ```
                         predicted fill   actual        ratio     delayed     outcome
-MmdCompacted                 67 463      15 678 721    232.4x    3 128 750   bwd 9.7e-20
-AmdCompacted                 54 978          -            -          -       KILLED, signal 9
+MmdCompacted, 08-21          67 463      15 678 721    232.4x    3 128 750   bwd 9.7e-20
+MmdCompacted, 08-23          59 972      18 797 474    313.4x    6 250 000   bwd 7.6e-20
+AmdCompacted, 08-21          54 978          -            -          -       KILLED, signal 9
 ```
 
 **Amd predicts LESS fill on this matrix and still dies**, so the cause is the delayed-pivot cascade
 rather than the ordering's fill. `LFAT5000` is positive definite, every pivot acceptable, and
-dynamic LDL delayed 3.1 million columns anyway under mmd; under amd it delays past the memory
-budget. `benchmarks/matrices/ACCURACY.md` has the mmd account, in "The cost of accuracy".
+dynamic LDL delayed millions of columns anyway under mmd, 3.1 in the 2026-08-21 run and 6.25 in the
+2026-08-23 one; under amd it delays past the memory budget. `benchmarks/matrices/ACCURACY.md` has
+the mmd account, in "The cost of accuracy".
+
+**AND THE 2026-08-23 ROW IS THE SHARPEST EVIDENCE YET, FOUND BY ACCIDENT.** The mmd branch left
+genmmd's degree scale that day for reasons that had nothing to do with this matrix. On `LFAT5000`
+the new rule predicts ELEVEN PER CENT LESS fill and the factorization produces TWENTY PER CENT MORE,
+with the delay count almost exactly doubling, 1.998x.
+
+**So predicted fill and delay count have now moved in opposite directions three times on this one
+matrix, and the third time nothing but the ordering changed WITHIN a branch.** The first two
+readings could be argued to be a difference between amd and mmd. This one cannot: same code path,
+same numeric phase, same input, a better ordering by the rule's own definition, and twice the
+delays. Whatever drives the cascade here is not the quantity the analysis minimises.
+
+**Worth one look before it is reasoned about further:** 6 250 000 is 312.5 delays per column over
+n = 19994, and 1.998 times the previous count. Round numbers in a delay count may be a cap, a growth
+policy or coincidence, and nobody has checked which.
 
 **The accuracy pass is held at `MmdCompacted` meanwhile**, not at the tree's default, and
 `benchmarks/matrices/matrix_accuracy.cpp` says why at its head. `MmdCompacted` returns `MmdFlat`'s
-permutation exactly, so every published figure in that report stays comparable.
+permutation exactly, so every published figure in that report stays comparable to the others.
 
-**THE CONTROL IS DONE AND IT ISOLATES THE ORDERING.** `make accuracy` under `MmdCompacted`, same
-119 files, reproduces the published run exactly: 106 solved, 12 singular, 1 killed, the same
-30/18/56/2 classification, and the same eight residual rows to every digit. `LFAT5000` factors
-there at 232.4x with 3 128 750 delays. So the two runs differ in the ordering and in nothing else,
-and the matrix was lost to amd rather than to a changed input set. It also confirms in passing that
+**THAT PERMUTATION MOVED ON 2026-08-23 AND `ACCURACY.md` HAS BEEN RE-RUN AND REWRITTEN.** The hold
+on `MmdCompacted` still makes sense and the three mmd drivers still agree with each other. The
+classification held exactly, 106 solved and the same 30/18/56/2, with Cholesky agreeing with the
+inertia on every row for the fourth consecutive sample; residuals and delay counts moved, `LFAT5000`
+most of all. The amd row above is still from 2026-08-21 and has NOT been repeated since the branch
+changed, so that one comparison is between two things of different ages.
+
+**THE CONTROL WAS DONE ON 2026-08-21 AND IT ISOLATED THE ORDERING.** `make accuracy` under
+`MmdCompacted`, same 119 files, reproduced the published run exactly: 106 solved, 12 singular, 1
+killed, the same 30/18/56/2 classification, and the same eight residual rows to every digit. That
+was against the old mmd ordering, and `LFAT5000` factored there at 232.4x with 3 128 750 delays. So
+the two runs differ in the ordering and in nothing else, and the matrix was lost to amd rather than
+to a changed input set. It also confirms in passing that
 `MmdCompacted` and `MmdFlat` are interchangeable here, which is what let the accuracy pass move
 onto the compacted store without re-measuring anything.
 
 **WHAT WOULD SETTLE THE MECHANISM.** Whether the cascade is amd-specific or a threshold effect mmd
 happens to sit under: run the amd pass with a raised memory ceiling and read the delay count
-against mmd's 3.1 million. If amd merely delays somewhat more, this is a tuning question and
+against mmd's, now 6.25 million. If amd merely delays somewhat more, this is a tuning question and
 `docs/TODO.md`'s dynamic-pivoting entries are where it belongs. If it delays an order of magnitude
 more, the interaction between an approximate-degree ordering and delayed pivots is a real finding
 and nobody here has looked at it. `matrix_accuracy_cpp --max-fill=2e8` is the flag.

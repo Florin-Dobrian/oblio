@@ -164,7 +164,9 @@ int main(int argc, char** argv) {
         for (std::size_t cp = colPtr[aj]; cp < colPtr[aj + 1]; ++cp)
             if (rowIdx[cp] == static_cast<std::int32_t>(aj)) val[cp] = 100.0;
     const SparseMatrix<double> A(colPtr.size() - 1, colPtr, rowIdx, val);
-    const OrderEngine engine(method == "mmd" ? Ordering::MmdVendored : Ordering::AmdVendored);
+    // `mmd` PROFILES `MmdCorrected`, not `MmdVendored`: the reference our drivers match is the
+    // corrected one, and a profile of the frozen copy would describe code nothing compares to.
+    const OrderEngine engine(method == "mmd" ? Ordering::MmdCorrected : Ordering::AmdVendored);
 
     // Refuse an unknown method rather than falling through it. A profile of a method that never
     // ran is not empty, it is a trace of dyld and process startup, and it reads as a real one.

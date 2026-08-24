@@ -22,9 +22,11 @@
 //   nothing is pruned, and the neighbors keep degrees that still count these vertices. The
 //   staleness is deliberate and is what genmmd does.
 //
-//   THE FILING CONVENTION. mmdint files a degree-0 vertex under degree 1 and a refreshed vertex
-//   under its degree plus one, so the bucket a vertex sits in is not its degree. Every comparison
-//   and every walk uses the filed value.
+//   THE FILING CONVENTION, READ AND NOT TAKEN. mmdint files a degree-0 vertex under degree 1 and
+//   a refreshed vertex under its degree PLUS ONE, two scales in one bucket array, so a vertex the
+//   refresh has touched is penalised by one against a vertex no pivot has reached. WE FILE AT THE
+//   TRUE DEGREE at every site and the bucket a vertex sits in IS its degree. See
+//   private/MmdCorrected.cpp, which is the reference this driver matches.
 //
 //   THE CLIQUE-BY-CLIQUE REFRESH. mmdupd walks the cliques the round created rather than the
 //   vertices they reached, and computes dg0 once per clique: the weight of that clique, which
@@ -55,7 +57,7 @@ namespace Oblio {
 //
 // It takes A's pattern, which is all an ordering reads, and builds its own quotient graph from it.
 std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPtr,
-                                    const std::vector<std::int32_t>& rowIdx,
-                                    std::int32_t delta = 0);
+                                          const std::vector<std::int32_t>& rowIdx,
+                                          std::int32_t delta = 0);
 
 } // namespace Oblio

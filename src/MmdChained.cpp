@@ -69,7 +69,6 @@
 
 namespace Oblio {
 
-extern std::size_t gPeakCliqueMembers;   // defined in include/oblio/QuotientGraph.h
 namespace {
 
 // `Buckets` IS PRODUCTION'S, NOT A COPY. This file held a `Buckets` that was
@@ -106,8 +105,8 @@ namespace {
 
 
 std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPtr,
-                                    const std::vector<std::int32_t>& rowIdx,
-                                    std::int32_t delta) {
+                                          const std::vector<std::int32_t>& rowIdx,
+                                          std::int32_t delta) {
     if (colPtr.empty()) return std::vector<std::int32_t>();
     const std::size_t size = colPtr.size() - 1;
     if (size == 0) return std::vector<std::int32_t>();
@@ -124,10 +123,10 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
     std::uint32_t numEliminated = 0;
 
     // NO `degrees` ARRAY AND NO `outmatched` ARRAY. Both live in Buckets::mPrev now, on
-    // genmmd's `bwd` encoding; see the class. The filed value was never the degree anyway
-    // (mmdint files a
-    // degree-0 vertex under 1 and the refresh files under degree plus one), and the only reader
-    // that needed it kept was `unfile`, which now recovers the bucket from the link itself.
+    // genmmd's `bwd` encoding; see the class. The only reader that needed a `degrees` array kept
+    // was `unfile`, which recovers the bucket from the link itself. We file at the DEGREE at every
+    // site, where genmmd files at the degree initially and at the degree plus one on refresh; see
+    // MmdFlat.cpp and private/MmdCorrected.cpp.
     //
     // The running minimum moves with it. It was recomputed after each round from a `refreshed`
     // list, which existed only to be walked once for this; genmmd instead does `if(dg<*mdeg)
@@ -136,7 +135,7 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
     Buckets buckets(size);
     std::uint32_t minDegree = static_cast<std::uint32_t>(size);
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u) {
-        const std::uint32_t degree = std::max<std::uint32_t>(qg.adjacencySize(u), 1);
+        const std::uint32_t degree = qg.adjacencySize(u);
         buckets.file(degree, u);
         minDegree = std::min(minDegree, degree);
     }
@@ -155,8 +154,10 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
     // comparison against a captured tag means what it says and nothing else.
 
     // ---- the prepass ------------------------------------------------------------
-    // Bucket 1 holds the isolated and the degree-1 vertices together, by the convention above.
-    // Number them and leave the bucket empty. Nothing is eliminated in the quotient-graph sense.
+    // Buckets 0 and 1 hold the isolated and the degree-1 vertices, and both eliminate without
+    // fill. Number them and leave both empty. Nothing is eliminated in the quotient-graph sense.
+    // genmmd has ONE bucket to drain here, its `if(dg==0)dg=1` putting degree 0 and degree 1
+    // together; filing at the true degree separates them and this loop takes both.
     //
     // ONE PASS AND NO LIST. This was a compact loop into `prepassVertices` followed by a walk of
     // it, and the list existed only because unfiling a vertex while walking the bucket destroys
@@ -169,7 +170,8 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
     // every vertex goes through here and nothing else runs, so this loop IS the ordering. Measured
     // on MmdFlat: 8.6 percent of a pure-diagonal ordering at n = 46772, and 0.2 percent of a
     // 100x100 grid. See benchmarks/matrices, `make ordering`.
-    for (std::int32_t u = buckets.head(1); u != NIL; ) {
+    for (std::uint32_t b = 0; b < 2 && b < size; ++b)
+    for (std::int32_t u = buckets.head(b); u != NIL; ) {
         const std::int32_t next = buckets.next(u);   // before the unfile invalidates it
         buckets.unfile(u);
         qg.number(u);
@@ -177,7 +179,7 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
         ++numEliminated;
         u = next;
     }
-    if (size > 2) minDegree = 2;                // head[1] is empty now, and mdeg starts at 2
+    if (size > 2) minDegree = 2;                // buckets 0 and 1 are empty now
 
     while (numEliminated < size) {
         while (buckets.empty(minDegree)) ++minDegree;
@@ -280,8 +282,8 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
                     // ONE LOAD FOR BOTH QUESTIONS. `vertexTag` is the newest tag drawn, so
                     // anything at or above it is either this pass's own stamp or GONE, and both
                     // mean skip.
-                    const std::int32_t m = qg.mark(v);
-                    if (m < vertexTag && m != cliqueTag) {       // not seen, dead, or counted
+                    const std::int32_t vMark = qg.mark(v);
+                    if (vMark < vertexTag && vMark != cliqueTag) {   // not seen, dead, or counted
                         qg.setMark(v, vertexTag);
                         degree += qg.weight(v);
                     }
@@ -289,9 +291,9 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
                     const std::int32_t* incidence = qg.incidenceMmd(u);
                     const std::int32_t  c = (incidence[0] == clique) ? incidence[1] : incidence[0];
                     qg.forEachMember(c, [&](std::int32_t v) {
-                        const std::int32_t m = qg.mark(v);
-                        if (v == u || m >= vertexTag) return;      // seen this pass, or dead
-                        if (m == cliqueTag) {
+                        const std::int32_t vMark = qg.mark(v);
+                        if (v == u || vMark >= vertexTag) return;  // seen this pass, or dead
+                        if (vMark == cliqueTag) {
                             // v is in the new clique and in this same other source, so it sees
                             // at least what u sees.
                             if (buckets.filed(v) || buckets.outmatched(v)) return;
@@ -308,7 +310,7 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
                     });
                 }
 
-                const std::uint32_t filed = std::max<std::uint32_t>(degree - qg.weight(u) + 1, 1);
+                const std::uint32_t filed = degree - qg.weight(u);
                 buckets.file(filed, u);
                 minDegree = std::min(minDegree, filed);
             }
@@ -318,7 +320,7 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
                 const std::int32_t u = *uit;                 // the full union, as md5 computes it
                 if (qg.eliminated(u) || buckets.outmatched(u)) continue;
                 const std::uint32_t degree = qg.reachableWeight(u); // reach excludes u already
-                const std::uint32_t filed = std::max<std::uint32_t>(degree + 1, 1);
+                const std::uint32_t filed = degree;
                 buckets.file(filed, u);
                 minDegree = std::min(minDegree, filed);
             }

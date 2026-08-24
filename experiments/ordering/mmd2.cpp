@@ -13,7 +13,7 @@
 //   3. the pairwise merge inside the two-source walk, which folds a vertex into a
 //      LIVE one, so a candidate can stand for several vertices             [done]
 //   4. OUTMATCHED marking, bwd[nd] = -maxint                              [done]
-//   5. the filing convention, dg - qsize[en] + 1 floored at 1             [done]
+//   5. the filing convention, dg - qsize[en] + 1 floored at 1   [READ, NOT ADOPTED]
 //   6. the counters: ncsub, and the early termination on num + qsize      [done]
 //
 // PASS 1, THE PREPASS. genmmd numbers every vertex in the degree-1 list before the
@@ -21,7 +21,9 @@
 // neighbor. Two things travel with it. mmdint files a degree-0 vertex under degree
 // 1, `if(dg==0)dg=1`, so isolated and degree-1 vertices are numbered together, and
 // the bucket a vertex sits in stops being its true degree. And head[1] = 0
-// afterwards, with the main loop starting at mdeg = 2.
+// afterwards, with the main loop starting at mdeg = 2. We take the prepass and
+// not the floor: filing at the true degree separates the two degrees, so we drain
+// buckets 0 and 1 and number the same set. See pass 5.
 //
 // A prepass vertex is NOT eliminated in the quotient-graph sense: no clique is
 // formed, nothing is pruned, and its neighbors keep degrees that still count it.
@@ -90,6 +92,13 @@
 // hold degrees, every refiled bucket holds degree + 1. That is genuine, not a
 // misreading, and it tilts the pivot choice slightly against refreshed vertices,
 // which sit one bucket higher than an untouched vertex of the same reach.
+// 
+// WE DO NOT ADOPT IT, and this is the one pass on the list that is read rather
+// than taken. Two scales in one bucket array is not a tie-break, it is a wrong
+// comparison: on a 4 by 4 grid it puts a degree 4 vertex in the same bucket as
+// four degree 3 vertices and eliminates the degree 4 one. We file at the true
+// degree at every site, which is what private/MmdCorrected.cpp does and what
+// production matches; private/MmdVendored.cpp keeps the original as reference.
 //
 // From here degrees[] holds the FILED value, which is what the picker compares and
 // what minDegree tracks. The nnz(L) accounting does not use it: that sums weights
@@ -699,34 +708,30 @@ std::vector<std::int32_t> mmd2MinimumDegree(const AdjacencyGraph& G, std::int32_
     // is here as the witness that the guard is inert rather than as a statistic.
     std::size_t numTagSweeps = 0;
 
-    // mmdint files a degree-0 vertex under degree 1, `if(dg==0)dg=1`, so the
-    // bucket a vertex sits in is max(degree, 1) rather than its degree. From here
-    // degrees[] holds that filed value, which is what MMD compares and files by.
-    //
-    // THE FLOOR IS HERE TO MATCH THE VENDORED OUTPUT, not to find the prepass
-    // vertices. Taking bucket 0 and then bucket 1 finds the same vertices, and the
-    // fill comes out identical; what changes is the ORDER within the prepass, since
-    // the floor puts both degrees on ONE list where they interleave by insertion and
-    // separate buckets group them by degree. Measured: same prepass set and same
-    // nnz(L) on all 300 random graphs tried, different permutation on 212 of them.
-    // So this is a tie-break of the same kind as mmd3's four, and dropping it would
-    // be a fifth alignment defect that no fill check could see.
-    // n + 1 and not n, which is how production sizes it: `mHead(size + 1, NIL)` beside
-    // `mNext(size, NIL)`, because a head is indexed by a DEGREE and a link by a VERTEX.
-    // The two index spaces are not the same size, and the floor above is what makes the
-    // difference bite: it files a degree-0 vertex under 1, so at n = 1 index 1 has to
-    // exist and holds the only vertex there is. Bucket 0 goes unused from here on, the
-    // floor having taken it out of the range.
+    // WE FILE AT THE DEGREE, HERE AND AT EVERY REFRESH. See pass 5 above: genmmd
+    // files a degree-0 vertex under 1 in mmdint and every refreshed vertex under its
+    // degree plus one in mmdupd, and this layer reads that convention without adopting
+    // it. degrees[] holds the true degree, which is what the picker compares and what
+    // min_degree tracks.
+    // 
+    // THE FLOOR USED TO BE HERE, to match the vendored output. The measurement it
+    // carried still holds and is now the record of what dropping it does: same prepass
+    // set and identical nnz(L) on all 300 random graphs tried, a different permutation
+    // on 212 of them. The prepass below takes bucket 0 and then bucket 1.
+    // 
+    // n and not n + 1, which is how production sizes it. A head is indexed by a DEGREE
+    // and a link by a VERTEX, and filing at the true degree makes those two ranges the
+    // same extent: a degree reaches n - 1. The extra slot went on 2026-08-23 with the
+    // bound on the prepass below, which used to read bucket 1 before knowing whether
+    // any vertex had degree 1 and so read past the end at n == 1.
     //
     // This layer's Buckets sizes all four of its arrays from the one argument, so the
     // three vertex-indexed ones come out a slot longer than they need. Production does
     // not, and the honest repair is there rather than here; the cost of the slack is one
     // int32 per array on a structure built once per ordering.
-    Buckets buckets(n + 1);
-    for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u) {
-        degrees[u] = std::max<std::uint32_t>(degrees[u], 1);
+    Buckets buckets(n);
+    for (std::int32_t u = 0; u < static_cast<std::int32_t>(n); ++u)
         buckets.file(degrees[u], u);
-    }
     std::uint32_t minDegree = n > 0 ? *std::min_element(degrees.begin(), degrees.end()) : 0;
     std::size_t numBucketProbes = 0;
     std::size_t ncsub = 0;                        // genmmd's subscript estimate
@@ -741,14 +746,18 @@ std::vector<std::int32_t> mmd2MinimumDegree(const AdjacencyGraph& G, std::int32_
     }
 
     // ---- the PREPASS -------------------------------------------------------
-    // Number everything in bucket 1, which after the floor above holds the
-    // isolated and the degree-1 vertices together, and then leave the bucket
-    // empty. Nothing is eliminated in the quotient-graph sense: no clique is
-    // formed, nothing is pruned, and the neighbors keep degrees that still count
-    // these vertices. That staleness is the point, and it is what genmmd does.
+    // Number everything in buckets 0 and 1, the isolated and the degree-1
+    // vertices, both of which eliminate without fill, and leave both empty.
+    // genmmd drains ONE bucket here, its floor putting the two degrees
+    // together; filing at the true degree separates them.
+    // 
+    // Nothing is eliminated in the quotient-graph sense: no clique is formed,
+    // nothing is pruned, and the neighbors keep degrees that still count these
+    // vertices. That staleness is the point, and it is what genmmd does.
     std::vector<std::int32_t> prepassVertices;
-    for (std::int32_t v = buckets.head(1); v != NIL; v = buckets.next(v))
-        prepassVertices.push_back(v);
+    for (std::uint32_t b = 0; b < 2 && b < n; ++b)
+        for (std::int32_t v = buckets.head(b); v != NIL; v = buckets.next(v))
+            prepassVertices.push_back(v);
     for (std::int32_t u : prepassVertices) {
         buckets.unfile(degrees[u], u);
         std::uint32_t externalDegree = 0;
@@ -1027,8 +1036,7 @@ std::vector<std::int32_t> mmd2MinimumDegree(const AdjacencyGraph& G, std::int32_
                         degree += superMembers[v].size();
                     }
                 }
-                degrees[u] = std::max<std::uint32_t>(
-                    degree - static_cast<std::uint32_t>(superMembers[u].size()) + 1, 1);
+                degrees[u] = degree - static_cast<std::uint32_t>(superMembers[u].size());
                 buckets.file(degrees[u], u);
                 refreshedVertices.push_back(u);
             }
@@ -1036,7 +1044,7 @@ std::vector<std::int32_t> mmd2MinimumDegree(const AdjacencyGraph& G, std::int32_
             for (std::int32_t u : manySourceQueue) {
                 if (eliminated[u] || outmatched[u]) continue;
                 std::uint32_t degree = mmd2Degree(A, I, C, eliminated, superMembers, mark, tag, u);
-                degrees[u] = std::max<std::size_t>(degree + 1, 1);  // dg - qsize + 1
+                degrees[u] = degree;                               // dg - qsize
                 buckets.file(degrees[u], u);
                 refreshedVertices.push_back(u);
             }

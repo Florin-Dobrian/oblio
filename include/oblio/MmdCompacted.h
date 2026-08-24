@@ -35,14 +35,7 @@ extern std::size_t gMmdCompactions;
 //
 // It takes A's pattern, which is all an ordering reads, and builds its own quotient graph from it.
 std::vector<std::int32_t> orderMmdCompacted(const std::vector<std::size_t>&  colPtr,
-                                     const std::vector<std::int32_t>& rowIdx,
-                                     std::int32_t delta = 0);
-
-// The same, reporting how many entries the clique arena ended up holding. An OVERLOAD rather than a
-// fourth defaulted parameter, for the reason MmdFlat.h gives at its own pair.
-std::vector<std::int32_t> orderMmdCompacted(const std::vector<std::size_t>&  colPtr,
-                                     const std::vector<std::int32_t>& rowIdx,
-                                     std::int32_t delta,
-                                     std::size_t& arenaEntries);
+                                            const std::vector<std::int32_t>& rowIdx,
+                                            std::int32_t delta = 0);
 
 } // namespace Oblio

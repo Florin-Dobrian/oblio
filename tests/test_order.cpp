@@ -77,6 +77,17 @@ template<class Val> static void checkSameOrderFn(const SparseMatrix<Val>& A, Ord
         same = (pa.newToOld()[k] == order[k]);
     if (same && peakEngine != 0 && peakFn != 0) same = (peakEngine == peakFn);
     ck(same, lbl); }
+// TWO ENUMERATORS, ONE PERMUTATION. The mmd branch's oracle: our drivers must return exactly what
+// `MmdCorrected` returns, which is genmmd with its degree scale repaired. `MmdVendored` keeps the
+// original and is reference only, so nothing here compares against it.
+template<class Val> static void checkSameOrder(const SparseMatrix<Val>& A, Ordering m, Ordering r,
+                                               const std::string& lbl){
+    OrderEngine em(m); Permutation pm;
+    OrderEngine er(r); Permutation pr;
+    bool same = em.compute(A,pm) && er.compute(A,pr) && pm.size()==pr.size();
+    for (std::size_t k = 0; same && k < pm.size(); ++k)
+        same = (pm.newToOld()[k] == pr.newToOld()[k]);
+    ck(same, lbl); }
 template<class Val> static void reqSym(const SparseMatrix<Val>& A, const std::string& lbl){
     ck(OblioTest::isStructurallySymmetric(A), lbl); }
 static SparseMatrix<double> tridiagFull(std::size_t size){
@@ -106,6 +117,9 @@ int main(){
 #ifdef OBLIO_VENDORED_ORDERINGS
       checkOrder(A,Ordering::AmdVendored,"arrow 6x6      : AMD valid");
       checkOrder(A,Ordering::MmdVendored,"arrow 6x6      : MMD valid");
+      checkOrder(A,Ordering::MmdCorrected,"arrow 6x6      : MmdCorrected valid");
+      checkSameOrder(A,Ordering::MmdFlat,Ordering::MmdCorrected,
+                     "arrow 6x6      : MmdFlat == MmdCorrected");
 #endif
       checkOrder(A,Ordering::MmdFlat,"arrow 6x6      : MmdFlat valid");
       checkOrder(A,Ordering::AmdFlat,"arrow 6x6      : AmdFlat valid");
@@ -134,6 +148,10 @@ int main(){
 #ifdef OBLIO_VENDORED_ORDERINGS
       checkOrder(A,Ordering::AmdVendored,"tridiag n="+std::to_string(size)+" : AMD valid");
       checkOrder(A,Ordering::MmdVendored,"tridiag n="+std::to_string(size)+" : MMD valid");
+      checkOrder(A,Ordering::MmdCorrected,
+                 "tridiag n="+std::to_string(size)+" : MmdCorrected valid");
+      checkSameOrder(A,Ordering::MmdFlat,Ordering::MmdCorrected,
+                     "tridiag n="+std::to_string(size)+" : MmdFlat == MmdCorrected");
 #endif
       checkOrder(A,Ordering::MmdFlat,"tridiag n="+std::to_string(size)+" : MmdFlat valid");
       checkOrder(A,Ordering::AmdFlat,"tridiag n="+std::to_string(size)+" : AmdFlat valid");
@@ -150,6 +168,9 @@ int main(){
 #ifdef OBLIO_VENDORED_ORDERINGS
       checkOrder(A,Ordering::AmdVendored,"diagonal 5x5   : AMD valid");
       checkOrder(A,Ordering::MmdVendored,"diagonal 5x5   : MMD valid");
+      checkOrder(A,Ordering::MmdCorrected,"diagonal 5x5   : MmdCorrected valid");
+      checkSameOrder(A,Ordering::MmdFlat,Ordering::MmdCorrected,
+                     "diagonal 5x5   : MmdFlat == MmdCorrected");
 #endif
       checkOrder(A,Ordering::MmdFlat,"diagonal 5x5   : MmdFlat valid");
       checkOrder(A,Ordering::AmdFlat,"diagonal 5x5   : AmdFlat valid");
@@ -169,6 +190,9 @@ int main(){
 #ifdef OBLIO_VENDORED_ORDERINGS
       checkOrder(C,Ordering::AmdVendored,"arrow complex  : AMD valid");
       checkOrder(C,Ordering::MmdVendored,"arrow complex  : MMD valid");
+      checkOrder(C,Ordering::MmdCorrected,"arrow complex  : MmdCorrected valid");
+      checkSameOrder(C,Ordering::MmdFlat,Ordering::MmdCorrected,
+                     "arrow complex  : MmdFlat == MmdCorrected");
 #endif
       checkOrder(C,Ordering::MmdFlat,"arrow complex  : MmdFlat valid");
       checkOrder(C,Ordering::AmdFlat,"arrow complex  : AmdFlat valid");

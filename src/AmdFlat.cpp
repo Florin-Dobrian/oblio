@@ -15,8 +15,8 @@ namespace {
 // pointer that benchmarks/ordering and the digest harness take its address as. An overload leaves
 // that type intact.
 std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colPtr,
-                                        const std::vector<std::int32_t>& rowIdx,
-                                        std::size_t* arenaEntries) {
+                                           const std::vector<std::int32_t>& rowIdx,
+                                           std::size_t* numBornCliqueMembers) {
     if (colPtr.empty()) return std::vector<std::int32_t>();
     const std::size_t size = colPtr.size() - 1;
     if (size == 0) return std::vector<std::int32_t>();
@@ -144,22 +144,24 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
     // constructed and destroyed per ordering plus one allocation per bucket the step used, which
     // was 16855 of AMD2's 16911 allocations at 140x140.
     //
-    // hashNext is indexed by VERTEX and hashHead by hash, which is why they have different lengths;
-    // the same asymmetry Buckets carries between its links and its heads.
+    // hashNext is indexed by VERTEX and hashHead by a hash, two index spaces that happen to have
+    // the same extent: the key is reduced `% size`, so the hash is in [0, n). `Buckets` carries
+    // the same coincidence between its links and its heads, a degree also reaching n - 1.
     // ONE ARRAY WHERE THERE WERE THREE. `hashNext` held the chain and the half-built key; both
     // now ride in the buckets' own links, free for exactly the span that needs them because
     // `eliminate` takes every member of C[pivot] out of the lists. `usedKeys` recorded which
     // buckets to clear afterwards; AMD_2 clears a bucket by EMPTYING IT AS IT FINDS IT, so there
     // is nothing to record and no clearing pass.
     //
-    // `hashHead` STAYS, and that is where the alignment stops. AMD_2 overlays its hash heads on
-    // Head[], the degree-list heads, with FLIP marking which kind a slot holds, and parks a second
-    // head in Last[Head[hval]] when both kinds are live at one index. We cannot: Buckets carries
-    // genmmd's `bwd` encoding, in which a head's mPrev holds -(degree + 1) rather than being free,
-    // so the slot AMD_2 parks its second head in is already spoken for. Two encodings, each
-    // coherent, that do not compose. DESIGN_DECISIONS.md calls FLIP an anti-model, and n int32 to
-    // keep the two list kinds apart is the cheaper side of that trade.
-    std::vector<std::int32_t> hashHead(size + 1, NIL);
+    // `hashHead` STAYS, AND IT IS SIZE n, AS AMD_2's `Head` IS. That is where the alignment stops.
+    // AMD_2 overlays its hash heads on Head[], the degree-list heads, with FLIP marking which kind
+    // a slot holds, and parks a second head in Last[Head[hval]] when both kinds are live at one
+    // index. We cannot: Buckets carries genmmd's `bwd` encoding, in which a head's mPrev holds
+    // -(degree + 2) rather than being free, so the slot AMD_2 parks its second head in is already
+    // spoken for. Two encodings, each coherent, that do not compose. DESIGN_DECISIONS.md calls FLIP
+    // an anti-model, and n int32 to keep the two list kinds apart is the cheaper side of that
+    // trade.
+    std::vector<std::int32_t> hashHead(size, NIL);
 
     // |C[c] - C[p]| per clique, indexed by clique id and hoisted out of the loop. The prototype
     // allocates and zeroes it per pivot, which reads better and is O(n) per step, O(n^2) over the
@@ -819,7 +821,7 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
     // of entries survive, 1 to 3 on grids from 2 to 5 a side.
     assert(qg.cliqueCountBalances() && "clique births and deaths do not balance");
     gPeakCliqueMembers = qg.numPeakCliqueMembers();   // see include/oblio/QuotientGraph.h
-    if (arenaEntries != nullptr) *arenaEntries = qg.arenaEntries();
+    if (numBornCliqueMembers != nullptr) *numBornCliqueMembers = qg.numBornCliqueMembers();
     // THE ROWS THE DENSE RULE SET ASIDE GO LAST, in index order, which is where `AMD_2`'s output
     // assembly puts them. They were collected in an ascending pass, so appending the vector is
     // that order; each stands only for itself, having been set aside before it could absorb
@@ -832,17 +834,16 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
 } // namespace
 
 std::vector<std::int32_t> orderAmdFlat(const std::vector<std::size_t>&  colPtr,
-                                    const std::vector<std::int32_t>& rowIdx) {
+                                       const std::vector<std::int32_t>& rowIdx) {
     return orderAmdFlatImpl(colPtr, rowIdx, nullptr);
 }
 
-// The same ordering, reporting how many entries the clique arena ended up holding. A SIZE, not a
-// capacity, and for this scheme also the peak, the arena never shrinking. `benchmarks/matrices`
-// prints it beside nnz(L); see QuotientGraph::arenaEntries.
+// The same ordering, reporting every member ever put into a clique. `benchmarks/matrices` prints
+// it beside nnz(L) as `cC`; see QuotientGraph::numBornCliqueMembers.
 std::vector<std::int32_t> orderAmdFlat(const std::vector<std::size_t>&  colPtr,
-                                    const std::vector<std::int32_t>& rowIdx,
-                                    std::size_t& arenaEntries) {
-    return orderAmdFlatImpl(colPtr, rowIdx, &arenaEntries);
+                                       const std::vector<std::int32_t>& rowIdx,
+                                       std::size_t& numBornCliqueMembers) {
+    return orderAmdFlatImpl(colPtr, rowIdx, &numBornCliqueMembers);
 }
 
 } // namespace Oblio

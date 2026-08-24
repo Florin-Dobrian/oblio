@@ -709,7 +709,7 @@ def amd3_minimum_degree(G):
     # pair per pivot; before the fix it read 19 on a 140x140 grid and 155 at 26 cubed, against
     # the vendored routine's 0.33 and 0.48 for the same merges.
     num_hash_pairs = 0                         # pairs the exact test was run on
-    hash_bucket = [[] for _ in range(n + 1)]   # Amd.cpp's Head[hval]
+    hash_bucket = [[] for _ in range(n)]       # Amd.cpp's Head[hval]
     num_bound_checks = 0
     num_loose_bounds = 0
     num_bounds_below_exact = 0             # an invariant, not a measurement
@@ -971,10 +971,17 @@ def amd3_minimum_degree(G):
             # out a function of the ADJACENCY ALONE. Amd.cpp lets a vertex and a
             # clique collide on purpose, the hash being a filter and never the
             # decision. The invariant the two lines hold TOGETHER is that the
-            # modulus must not divide the stride.
+            # modulus must not divide the stride, and having no stride is the
+            # cheapest way to hold it.
+            #
+            # THE MODULUS IS n, AS Amd.cpp'S IS AND AS PRODUCTION'S IS. It was
+            # n + 1 until 2026-08-23, left behind when the stride went on
+            # 2026-08-09 and never followed. The hash is a filter, so the two
+            # moduli give the same merges and the same permutation and differ
+            # only in how many exact comparisons they cost.
             for c in I[u]:
                 key += c + 1
-            k = key % (n + 1)
+            k = key % n
             if not hash_bucket[k]:
                 used_keys.append(k)
             hash_bucket[k].append(u)

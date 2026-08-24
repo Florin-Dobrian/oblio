@@ -1,4 +1,5 @@
-// matrix_ordering.cpp -- what the ordering step alone costs on real matrices, genmmd against ours.
+// matrix_ordering.cpp -- what the ordering step alone costs on real matrices, the references
+// against ours.
 //
 // ONE PHASE, TWO ROUTINES, AND NOTHING ELSE TIMED. matrix_performance.cpp already reports an
 // ordering column, and it is a different measurement for a different purpose: it prices ordering
@@ -61,9 +62,19 @@
 
 using namespace Oblio;
 
-// The vendored routine, from ../../private/Mmd.cpp. Absent, this file still builds and the MMD
-// column reports a refusal, which is how every driver in this folder treats private/.
+// THE MMD REFERENCE IS `MmdCorrected`, from ../../private/MmdCorrected.cpp: genmmd with its
+// degree scale repaired, which is what our three mmd drivers match. `MmdVendored` keeps the
+// original and is not compared against here. Absent, this file still builds and the MMD column
+// reports a refusal, which is how every driver in this folder treats private/.
 #ifdef OBLIO_VENDORED_ORDERINGS
+void mmd_order_corrected(int n, const int colPtr[], const int rowIdx[], int perm[], int invp[]);
+
+// THE FROZEN ROUTINE, FOR ONE COMPARISON AND NO OTHER. `MmdVendored` is genmmd unmodified, and the
+// only question asked of it here is what its FILL is against the corrected rule's: it is never
+// timed, never the order anything is checked against, and no driver is compared to it. genmmd
+// files a vertex under its degree in `mmdint` and under its degree PLUS ONE in `mmdupd`, so the
+// minimum it selects is not always the minimum; the two fill columns are what that is worth on
+// real structure. See private/MmdCorrected.cpp.
 void mmd_order(int n, const int colPtr[], const int rowIdx[], int perm[], int invp[]);
 
 // TWO ENTRY POINTS ON THE AMD SIDE, AND THEY MEASURE DIFFERENT THINGS.
@@ -118,7 +129,7 @@ int repeatsFor(double oneMs, double targetMs) {
     return std::min(std::max(wanted, 1), 200);
 }
 
-// nnz(L) with the diagonal. C is NOT taken from here: the ordering reports its own arena size, and
+// nnz(L) with the diagonal. C is NOT taken from here: the ordering reports its own count, and
 // this used to approximate it by summing update parts over supernodes, which overcounted by 12 to
 // 18 percent in 2D and up to 40 on cubes. The two groupings differ, supernodes being found from L's
 // structure and supervariables during the ordering, and a clique's entries are supervariable
@@ -135,7 +146,7 @@ std::size_t fillOf(const SparseMatrix<double>& matrix, const std::vector<std::in
 // n and m, from the pattern rather than from a formula: a Matrix Market file may or may not carry
 // every diagonal entry, so `m` is counted off the off-diagonal entries and halved, each edge
 // appearing in both endpoints' lists. `tril(A) = n + m` is A in its stored form and `A+I = 2m` is
-// what mSource holds.
+// what the adjacency and incidence lists hold.
 std::size_t edgesOf(const SparseMatrix<double>& matrix) {
     std::size_t offDiagonal = 0;
     const std::vector<std::size_t>&  colPtr = matrix.colPtr();
@@ -220,10 +231,10 @@ void run(const std::string& path, const Options& options) {
         : bestOf([&] { const auto p = orderMmdFlat(colPtr, rowIdx); (void) p; }, repeats);
     // TWO CLIQUE FIGURES, AND THEY ANSWER DIFFERENT QUESTIONS.
     //
-    //   cC   CUMULATIVE, from the ordering's own arena-reporting overload: every entry the arena
-    //        ever handed
-    //        out. Nothing here is reclaimed, so it holds dead cliques AND the members that
-    //        contractions dropped out of live ones. It is what the flat layout actually costs.
+    //   cC   MEMBERS BORN, from the ordering's own reporting overload: every vertex ever put into
+    //        a clique. Nothing here is reclaimed, so the flat store still holds all of them, dead
+    //        cliques AND the members that contractions dropped out of live ones, which is what
+    //        makes this figure what the flat layout actually costs.
     //   pC   PEAK LIVE MEMBERS, read from `gPeakCliqueMembers`: the most that was alive at any one
     //        instant. It is what a CHUNKED clique store would ask the allocator for at its worst
     //        moment, and PAYLOAD ONLY, with no per-clique header, no allocator rounding and no
@@ -298,6 +309,7 @@ void run(const std::string& path, const Options& options) {
     std::vector<int> perm(n), invp(n);
     double      vendored    = 0.0;
     std::size_t vendoredCmp = 0;
+    std::size_t frozenFill  = 0;      // MmdVendored's nnz(L); mmd branch only, see its declaration
     if (amd) {
         // THE CLOCK IS ON `amd_order` WHOLE and everything else comes from the raw copy; see the
         // note beside the declarations. The raw copy is called once, outside the timed loop.
@@ -315,7 +327,13 @@ void run(const std::string& path, const Options& options) {
         amd_order_raw(n, ap.data(), ai.data(), perm.data(), nullptr, nullptr);
     } else {
         vendored = bestOf(
-            [&] { mmd_order(n, ap.data(), ai.data(), perm.data(), invp.data()); }, repeats);
+            [&] { mmd_order_corrected(n, ap.data(), ai.data(), perm.data(), invp.data()); },
+            repeats);
+        // The frozen routine, ONCE and OUTSIDE the clock, for its fill alone.
+        std::vector<int> fperm(n), finvp(n);
+        mmd_order(n, ap.data(), ai.data(), fperm.data(), finvp.data());
+        std::vector<std::int32_t> frozenOrder(fperm.begin(), fperm.end());
+        frozenFill = fillOf(A, frozenOrder);
     }
 
     // AND THE FILL COLUMN'S PREMISE IS CHECKED RATHER THAN ASSUMED, ON BOTH BRANCHES. It is printed
@@ -327,7 +345,7 @@ void run(const std::string& path, const Options& options) {
     // WHAT IS COMPARED DIFFERS BY BRANCH, and the asymmetry is genmmd's rather than ours. `AMD_2`
     // relabels its output through `AMD_postorder`, so the comparable object has to be
     // reconstructed upstream of it by the hooked copy. genmmd does no postorder at all, so
-    // `mmd_order`'s own `perm` IS the elimination order, 0-based new-to-old exactly as
+    // `mmd_order_corrected`'s own `perm` IS the elimination order, 0-based new-to-old exactly as
     // `orderMmdFlat` returns it. Same reasoning as experiments/ordering's two checkers; see the
     // header of mmdorder.cpp there.
     const std::vector<int>& theirs = amd ? gRawOrder : perm;
@@ -359,6 +377,13 @@ void run(const std::string& path, const Options& options) {
     // the reference is genmmd, which chains and has no such figure, so only ours is printed.
     if (amd) std::printf(" %8zu %8zu", vendoredCmp, nCmp[0]);
     else     std::printf(" %8s %8zu", "-", nCmp[1]);
+    // AND THE FROZEN ROUTINE'S FILL, mmd only. Cor/Vnd above 1 means the corrected rule fills MORE.
+    if (!amd) {
+        char fr[16] = "-";
+        if (frozenFill != 0)
+            std::snprintf(fr, sizeof fr, "%.4f", (double) nnzL / (double) frozenFill);
+        std::printf(" %13zu %9s", frozenFill, fr);
+    }
     std::printf("%s\n", note.c_str());
 #else
     std::printf("  %-38s %8zu %10zu %11zu %11zu %11zu %11zu %13zu %8s %8s %7s %9s %9.3f %8s",
@@ -374,7 +399,7 @@ void usage() {
     std::printf("the ordering step alone, a vendored routine against ours, on real matrices\n\n");
     std::printf("  ./matrix_ordering_cpp mmd|amd [--repeats=N] [--target-ms=X]\n");
     std::printf("                        [--max-n=N] [--max-nnz=N] <file.mtx> ...\n\n");
-    std::printf("  mmd  genmmd against MmdFlat. They return the same permutation on every "
+    std::printf("  mmd  MmdCorrected against MmdFlat. They return the same permutation on every "
                 "matrix\n");
     std::printf("       here, checked per matrix below, so the fill column is both of theirs\n");
     std::printf("       and the only difference between them is time.\n");
@@ -434,19 +459,20 @@ int main(int argc, char** argv) {
                     "below 1 is\n");
         std::printf("   ours faster)\n\n");
     } else {
-        std::printf("the ordering step alone, genmmd against MmdFlat, on real matrices\n");
+        std::printf("the ordering step alone, MmdCorrected against MmdFlat, on real matrices\n");
         std::printf("  (best of N after a warm-up, both through the same helper; nnz(L) is both\n");
-        std::printf("   routines', the two returning the same permutation. Flt/Vnd "
+        std::printf("   routines', the two returning the same permutation. Flt/Cor "
                     "below 1 is\n");
         std::printf("   ours faster)\n\n");
     }
     // THE SPACE COLUMNS COME FIRST because they are a property of the matrix and the ordering, not
-    // of a run: `tril(A) = n + m` is A in its stored form, `A+I = 2m` is what mSource holds, `cC`
-    // and `pC` are the clique figures described where they are computed, and `nnz(L)` includes the
-    // diagonal. cC/tril(A) and cC/nnz(L) say whether our arena tracked the input or the factor on
-    // this matrix. On grids it is about 2x tril(A) in 2D and up to 4.5x on cubes; the compression
-    // is bought by mass elimination and so is a property of the MATRIX, which is exactly why a
-    // real set is worth measuring. See docs/DESIGN_DECISIONS.md (2026-08-16).
+    // of a run: `tril(A) = n + m` is A in its stored form, `A+I = 2m` is what the adjacency and
+    // incidence lists hold, `cC` and `pC` are the clique figures described where they are computed,
+    // and `nnz(L)` includes the diagonal. cC/tril(A) and cC/nnz(L) say whether our arena tracked
+    // the input or the factor on this matrix. On grids it is about 2x tril(A) in 2D and up to 4.5x
+    // on cubes; the compression is bought by mass elimination and so is a property of the MATRIX,
+    // which is exactly why a real set is worth measuring. See docs/DESIGN_DECISIONS.md
+    // (2026-08-16).
     //
     // pC/cC IS THE ONE THAT DECIDES ANYTHING: the fraction of the flat arena a CHUNKED clique store
     // would hold at its worst moment, and so the saving that scheme would buy. On grids it is
@@ -463,17 +489,32 @@ int main(int argc, char** argv) {
     // THE DRIVER COLUMNS CARRY THE THREE-LETTER TAGS and the legend above says what each is. A run
     // is mmd or amd, never both, so the branch is not in the tag: it is in the line below and in
     // the title already printed. Tags per the 2026-08-21 naming entry in docs/DESIGN_DECISIONS.md,
-    // `Vnd` `Flt` `Chn` `Com`; `Raw` does not appear here, matrix_ordering having no such column.
+    // `Flt` `Chn` `Com`, plus the reference each branch is checked against, `Cor` for mmd and `Vnd`
+    // for amd; `Raw` does not appear here, matrix_ordering having no such column.
     // The full names are what prose and the aggregate tables in ORDERING.md use.
     if (amd) std::printf("  Vnd AmdVendored. Flt AmdFlat. Com AmdCompacted.\n\n");
-    else     std::printf("  Vnd MmdVendored. Flt MmdFlat. Chn MmdChained. Com MmdCompacted.\n\n");
+    else {
+        std::printf("  Cor MmdCorrected. Flt MmdFlat. Chn MmdChained. Com MmdCompacted.\n");
+        std::printf("  Vnd MmdVendored, FILL ONLY: genmmd unmodified, never timed and never\n");
+        std::printf("  compared against. Cor/Vnd above 1 means the corrected rule fills more.\n\n");
+    }
 
+    // The reference tag differs by branch, `Vnd` for amd_order and `Cor` for MmdCorrected, so the
+    // ratio headers are built rather than written out.
+    const char* const ref = amd ? "Vnd" : "Cor";
+    char refMs[12], fltRef[12], sibRef[12], comRef[12], refCmp[12];
+    std::snprintf(refMs,  sizeof refMs,  "%s ms", ref);
+    std::snprintf(fltRef, sizeof fltRef, "Flt/%s", ref);
+    std::snprintf(sibRef, sizeof sibRef, "%s/%s", amd ? "Com" : "Chn", ref);
+    std::snprintf(comRef, sizeof comRef, "Com/%s", ref);
+    std::snprintf(refCmp, sizeof refCmp, "%s cmp", ref);
     std::printf("  %-38s %8s %10s %11s %11s %11s %11s %13s %8s %8s %7s %9s %9s %8s",
                 "matrix", "n", "m", "tril(A)", "A+I", "cC", "pC", "nnz(L)", "cC/tril", "cC/nnzL",
-                "pC/cC", "Vnd ms", "Flt ms", "Flt/Vnd");
-    std::printf(" %9s %9s", amd ? "Com ms" : "Chn ms", amd ? "Com/Vnd" : "Chn/Vnd");
-    if (!amd) std::printf(" %9s %9s", "Com ms", "Com/Vnd");
-    std::printf(" %8s %8s", amd ? "Vnd cmp" : "-", "Com cmp");
+                "pC/cC", refMs, "Flt ms", fltRef);
+    std::printf(" %9s %9s", amd ? "Com ms" : "Chn ms", sibRef);
+    if (!amd) std::printf(" %9s %9s", "Com ms", comRef);
+    std::printf(" %8s %8s", amd ? refCmp : "-", "Com cmp");
+    if (!amd) std::printf(" %13s %9s", "Vnd nnz(L)", "Cor/Vnd");
     std::printf("\n");
 
     for (const std::string& path : paths) run(path, options);

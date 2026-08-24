@@ -73,7 +73,7 @@ as long as both classes agree about it, which is the usual case and the expected
 | `setReverseIncidence` | x |  | aligned |  |
 | `setLateMassElimination` |  | x | aligned |  |
 | **counters** | | | | |
-| `arenaEntries` | x | x | done | 2026-08-21 |
+| `numBornCliqueMembers` | x | x | `layout` |  |
 | `numPeakCliqueMembers` | x | x | aligned |  |
 | `cliqueCountBalances` | x | x | aligned |  |
 
@@ -121,8 +121,7 @@ where the vendored routines disagree.
 | `setReverseIncidence` | x |  | aligned |  |
 | `setLateMassElimination` |  | x | aligned |  |
 | **counters** | | | | |
-| `arenaEntries` | x | x | done | 2026-08-21 |
-| `compactions` | x | x | layout |  |
+| `numCompactions` | x | x | `layout` |  |
 | `numPeakCliqueMembers` | x | x | aligned |  |
 | `cliqueCountBalances` | x | x | aligned |  |
 
@@ -174,8 +173,8 @@ Both shapes are kept deliberately, to see which is the more useful to work from.
 | setLateMassElimination |  | x |  | x | aligned |  |  |
 | which half of the run comes first |  |  |  |  | done | 2026-08-21 | the flag went |
 | **counters** | | | | | | | |
-| arenaEntries | x | x | x | x | done | 2026-08-21 | closed 2026-08-21 |
-| compactions |  |  | x | x | layout |  | the two stores report different things |
+| numBornCliqueMembers | x | x |  |  | layout |  | only a growing store has to pay for it |
+| numCompactions |  |  | x | x | layout |  | the compacted class's whole storage figure |
 | numPeakCliqueMembers | x | x | x | x | aligned |  |  |
 | cliqueCountBalances | x | x | x | x | aligned |  |  |
 
@@ -251,10 +250,12 @@ section below.
 **`setVendoredListOrder` is flat-only.** The compacted class has no such flag: the walk order is a
 suffixed pair instead. `Mmd3C` carried a dead copy of the flag until 2026-08-19.
 
-**`arenaEntries` was called by three of the four and not by `Amd3B` until 2026-08-21.** That was an
-oversight rather than a design difference: `orderAmd3B` had no out-parameter for it where the other
-three drivers all had one. Closed; the driver now has the `Impl`-plus-two-overloads shape the others
-use.
+**`numBornCliqueMembers` is flat-only, and the compacted drivers had a version of it briefly.** It
+answers how many members were ever put into a clique, which the benchmark prints as `cC`. The other
+two classes could compute the same number, the birth site being in all three; what is flat-only is
+having to PAY for it, since a compacted pool is sized at construction and reused. Their method
+reported the POOL's size instead, a different question with no caller, and both lost it.
+`numCompactions` is that class's storage figure alone.
 
 ## Aligning the two classes
 
@@ -264,9 +265,9 @@ should be traceable to arena against pool, and where it is not, it is an acciden
 were written and is worth removing. The compacted class is the flat one with positions into a
 different layout, and it should not differ from it at an algorithmic level.
 
-**Genuinely layout-driven, and to be left alone.** `arenaEntries` against `compactions`: one class
-has a store that only grows and the other a workspace that is compacted, so they report different
-quantities. Nothing else in either table is of this kind.
+**Genuinely layout-driven, and to be left alone.** `numBornCliqueMembers` against `numCompactions`:
+one class has a store that only grows and the other a workspace that is compacted, so what each has
+to report about its storage is a different quantity. Nothing else in either table is of this kind.
 
 ### The ledger
 
@@ -275,12 +276,12 @@ column is the `align` value the tables carry.
 
 | | difference | at `97f4bc6` | now | since |
 |---|---|---|---|---|
-| 1, `done` | `arenaEntries` unreported by `Amd3B` | apart | **aligned** | 2026-08-21 |
+| 1, `layout` | `arenaEntries` unreported by `Amd3B` | apart | apart, by design | 2026-08-23 |
 | 2, `done` | `restoreWeight`, `restorePivotWeight` | apart | **aligned** | 2026-08-21 |
 | 3, `done` | the `eliminate` wrapper | apart | **aligned** | 2026-08-21 |
 | 4, `done` | `eliminated` split, with `enableMarks` | apart | **aligned** | 2026-08-21 |
 | 5, `done` | `setVendoredListOrder` against the suffixes | apart | **aligned** | 2026-08-21 |
-| `layout` | `arenaEntries` against `compactions` | apart | apart, by design | |
+| `layout` | `numBornCliqueMembers` against `numCompactions` | apart | apart, by design | |
 
 **A closed item keeps its number and its row**, showing `done` in the tables rather than
 disappearing, so the numbering never shifts under a reader who has been following it.
@@ -288,10 +289,40 @@ disappearing, so the numbering never shifts under a reader who has been followin
 **The differences, in the order it makes sense to take them**, smallest and most independent first.
 The number is the `align` value the tables carry.
 
-**1. `arenaEntries` unreported by `Amd3B`. CLOSED 2026-08-21.** A missing out-parameter and simply
-an oversight: the other three drivers all have an `Impl` taking a pointer plus two public overloads,
-and `Amd3B` had a single entry point. It now has the same shape. Both compacted drivers report a
-pool of 9088 entries on a 40-square grid, which is the check that the figure means the same thing.
+**1. `arenaEntries` unreported by `Amd3B`. CLOSED 2026-08-21 AND REOPENED AND REVERSED 2026-08-23,
+which makes it the one item here that was closed the wrong way.** It was read as a missing
+out-parameter: the other three drivers had an `Impl` taking a pointer plus two public overloads and
+`Amd3B` had a single entry point, so `Amd3B` was given the same shape.
+
+**The shape was uniform and the QUANTITY behind it never was.** The flat class returns the clique
+store's size, which is what that store cost and which the benchmark prints as `cC`. The compacted
+class returned the POOL's size, fixed at construction and derivable from nnz(A) without running
+anything. The compacted class's own comment said as much, "Not the same quantity and not meant to
+be", which is a comment apologizing for a name.
+
+**And nothing ever called it.** `matrix_ordering.cpp` reads `cC` from the flat pair; the compacted
+drivers are reached through the plain overload. So the shape bought here had no consumer on the day
+it landed or since.
+
+**The correct reading is that only a store that GROWS has to pay for what it holds.** The compacted
+pool is reused, and a chained clique lives in its own pivot's dead segment and costs nothing extra,
+so neither has a clique-storage quantity that varies. That is the property the compacted layout was
+chosen for rather than an omission. `QuotientGraphCompacted::arenaEntries` is deleted, with the
+`Impl` and the two public overloads on both compacted drivers, each of which then collapsed to one
+entry point; `numCompactions` is that class's whole storage figure and says whether the fixed pool
+sufficed.
+
+**AND THE FLAT METHOD IS NOW `numBornCliqueMembers`, renamed the same day.** `arenaEntries` named
+neither a member that still exists nor the quantity it returns: every entry of the store is a clique
+member and nothing else is ever written there, so the count is members born, exactly. That makes it
+the third of a family, born, live and peak, differing only in WHEN rather than in what is counted.
+It reads the store's length rather than a counter, which is a coincidence of nothing ever being
+reclaimed and would need a counter the day that changes.
+
+**Which also means the other two classes COULD publish it**, the birth site being in all three, and
+it would be identical across a branch's pair by construction, exactly as `numPeakCliqueMembers` is.
+That is not ruled out by any of this. What is ruled out is a clique-STORAGE column for a layout
+whose clique storage does not vary.
 
 **2. `restoreWeight` and `restorePivotWeight`. CLOSED 2026-08-21.** Both classes negate weights to
 mark membership in the clique being built, and the question was who undoes it. The answer is
@@ -352,9 +383,10 @@ difference of its own to record.
 **Every step must leave every permutation unmoved**, so `make digest` and the two alignment checks
 are the gate at each one, and the baseline below is the second gate.
 
-**ALL FIVE ARE CLOSED AS OF 2026-08-21.** What remains between the two classes is `compactions`
-against `arenaEntries`, which is layout, and two `adjacencyAmd` calls in `Amd3`'s hash-detection
-block that `Amd3B` does not make.
+**FOUR OF THE FIVE ARE CLOSED AS OF 2026-08-21, AND THE FIFTH WAS REVERSED ON 2026-08-23**, item 1
+having been a difference the layout causes rather than an accident; see its entry. What remains
+between the two classes is `numBornCliqueMembers` against `numCompactions`, which is layout, and two
+`adjacencyAmd` calls in `Amd3`'s hash-detection block that `Amd3B` does not make.
 
 **THE COUNTS THIS PARAGRAPH CARRIED WERE TOO HIGH, corrected 2026-08-21.** It said the mmd pair
 differs in three calls of about forty and the amd pair in nine of about thirty-eight. Both figures
@@ -370,9 +402,9 @@ Amd3 vs Amd3B        9 calls      2 calls
 The three mmd differences are `qg.mark(v)`, `qg.weight(v)` and `qg.eliminatedMmd(v)` written into
 comments in `Mmd3.cpp` that `Mmd3C` does not carry, and one of the nine is `qg.cliqueBase()` named
 in the comment that records its removal. **Stripped of comments the mmd pair's call sequences are
-IDENTICAL apart from `compactions`, and the amd pair's differ only in the two `adjacencyAmd` calls
-named above and the order of two adjacent rejects.** So the sentence above the table was right and
-the arithmetic beside it was not.
+IDENTICAL apart from `numCompactions`, and the amd pair's differ only in the two `adjacencyAmd`
+calls named above and the order of two adjacent rejects.** So the sentence above the table was right
+and the arithmetic beside it was not.
 
 **One residual the tables do not show, and it is the tail.** Three of the four drivers publish
 their counters in the same order and `Mmd3C` does not:

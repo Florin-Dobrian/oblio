@@ -504,9 +504,15 @@ already being reported.
 ### The two alignment checks, and why one needs a hook and the other does not
 
 The pair is `make amdorder` and `make mmdorder`, with `make aligned` running both. They ask the
-same question of the two branches, does our layer still compute what the vendored routine
+same question of the two branches, does our layer still compute what the reference routine
 computes, so they are **named for the branch and not for the mechanism**. The mechanisms are not
-alike, and the difference is the vendored routines' rather than ours:
+alike, and the difference is the reference routines' rather than ours:
+
+**THE MMD REFERENCE IS `MmdCorrected` SINCE 2026-08-23**, not `MmdVendored`. genmmd files a vertex
+under its degree in `mmdint` and under its degree PLUS ONE in `mmdupd`, so the minimum it selects
+is not always the minimum; `private/MmdCorrected.cpp` is genmmd with that repaired and is what our
+drivers match. The frozen copy stays and nothing compares against it. The amd reference is
+unchanged.
 
 ```
 genmmd emits the order DIRECTLY   mmd_order returns perm, the order it eliminates in, and there
@@ -763,10 +769,11 @@ presented as a tie-break, which is what the other five were.
 make mmdorder
 ```
 
-Production `Mmd3` against genmmd's elimination order, on the same four shapes `make amdorder` uses:
+Production `MmdFlat` against `MmdCorrected`'s elimination order, on the same four shapes
+`make amdorder` uses:
 the seven examples, 2D grids from 4 a side to 140, 3D grids from 2 to 24, and nine random patterns
 at n = 2000. 38 cases. `make aligned` runs this and the amd one together, which is the one word for
-"is either ordering still what the vendored routine computes".
+"is either ordering still what its reference computes".
 
 ### And the same check on real matrices, 2026-08-15
 
@@ -777,6 +784,13 @@ make mmdmatrices
 `mmdmatrices.cpp` makes the identical assertion on matrices from the SuiteSparse Matrix
 Collection, read through `benchmarks/matrices/MatrixMarket.h`. **246 matched, 0 differed, 0
 skipped**, over `data/*/*.mtx` as fetched for the accuracy and performance sets.
+
+**THAT RUN WAS AGAINST genmmd AND THE ASSERTION STILL HOLDS AGAINST `MmdCorrected`.** The reference
+moved on 2026-08-23 and the 38 generated cases here were rerun and all match. The 246 have not been
+rerun through this file, and did not need to be: `benchmarks/matrices`' `make mmdorder` makes the
+same per-matrix comparison inside its own run, against `MmdCorrected` since that day, and its
+2026-08-23 pass over the same 246 flagged nothing on any of the three mmd drivers. See
+`benchmarks/matrices/ORDERING.md`.
 
 The first run read 243 with 3 skipped, the three largest sitting past caps carried over from
 `benchmarks/matrices`, which excludes them because a FACTORIZATION of them does not fit. That
@@ -7308,6 +7322,198 @@ already under suspicion and did not count the pass that builds `C[pivot]` at all
 that a 0.95 ratio looked like agreement by coincidence. Each omission was found by asking what a
 flat table could still be hiding rather than by reading it. A differential is only as good as its
 least-considered counter, and the counters worth adding are the ones for passes nobody suspects.
+
+## The special encodings, and the list-status dimension, 2026-08-23
+
+`Buckets` is one class shared by all five drivers, and it holds three arrays of `n` `std::int32_t`
+where a naive implementation holds five or six. What was folded away is a `degrees` array, an
+`outmatched` flag on the mmd side and a `filed` flag, and what pays for the fold is a set of
+reserved values in `mPrev`. This section is the whole encoding in one place.
+
+**THE DIMENSION THAT ORGANISES IT IS LIST STATUS**, not the branch. In a list the two branches are
+identical and the encoding is closed. Out of every list they diverge, and everything either branch
+adds is added there.
+
+```
+                                  mmd                          amd
+IN A LIST
+  mNext[u]   successor, or NIL                 same
+  mPrev[u]   [0, n-1]         predecessor      same
+             [-(n+1), -2]     head             same
+                              d = -mPrev[u] - 2
+
+OUT OF EVERY LIST
+  mNext[u]   NIL, left by unfile               NIL, or the HASH CHAIN link
+  mPrev[u]   -1               UNFILED          -1  UNFILED
+             INT32_MAX        OUTMATCHED       a raw HASH KEY
+
+EITHER WAY
+  mHead[d]   a vertex id, or NIL               same
+```
+
+### The head form carries the bucket, and that is what deletes the degree array
+
+A head has no predecessor, so its `mPrev` slot is otherwise wasted. It spends it on the one fact the
+head alone knows and nothing else records: which bucket the list belongs to. `unfile` needs `d` to
+write `mHead[d]`, and takes no degree argument because it reads it back out of the slot.
+
+```
+d           0             1        ...   n-2          n-1
+mPrev[u]   -2            -3        ...  -n           -(n+1)
+```
+
+so the head range is `[-(n+1), -2]`, contiguous, one value per degree, `n` values for `n` degrees.
+
+**THE SHIFT IS BY TWO AND NOT BY ONE, AND DEGREE 0 IS WHY.** An isolated vertex is real and files at
+0, so a shift of one would put its head at `-1`, which is `UNFILED`. Shifting by two keeps the head
+range clear of it. This is not hypothetical: a scheme with no shift at all was tried, it builds and
+passes every 2D case, and it corrupts a bucket list on a 3D grid at 6 a side.
+
+**AND THE BOTTOM IS EXACT.** At the largest admissible `n`, which is `MAX_IDX = 2147483647`, degree
+`n - 1 = 2147483646` encodes as `-2147483648`, which is `INT32_MIN` precisely. One more degree would
+leave the type. On the other side a predecessor tops at `2147483646`, leaving `INT32_MAX` free for
+`OUTMATCHED`. Both ends are reached and neither is exceeded.
+
+That is only true because every branch now files at the TRUE DEGREE. While the mmd refresh filed at
+the degree plus one the bucket index reached `n`, the head range was one value too long, and no
+arrangement of the two sentinels covered it: putting `OUTMATCHED` at the bottom made it collide
+there instead of overflow. See `private/MmdCorrected.cpp` and the 2026-08-23 entry in
+`docs/DESIGN_DECISIONS.md`.
+
+### The two sentinels are equality-only, and that is what let them move
+
+Nothing in `Buckets` orders `mPrev` against `UNFILED` or `OUTMATCHED`; every use is `==` or `!=`. So
+they sit at the two values a predecessor and a head cannot take rather than at either end of a
+scale, and `UNFILED` at `-1` is what removes the bias that used to sit on every predecessor. genmmd
+biases by one instead, storing `u + 1`, because its ids are 1-based and zero is therefore free to
+mean unfiled; ours are 0-based, so copying that would cost a `+ 1` on every predecessor store and a
+`- 1` on every read.
+
+**CONTRAST `GONE`, WHICH IS ORDERED AND CANNOT MOVE.** It lives in `mMark`, not here, and the hot
+line is `mMark[v] < mTag`: one load answering two questions, not seen this step and not dead. That
+works only if every tag sorts above the initial value and below the dead value, so `NIL` is the
+floor, the tags are the middle and `GONE` is the ceiling. A negative `GONE` would sort with `NIL`
+and a dead vertex would read as live-and-unseen. `GONE` and `OUTMATCHED` are both `INT32_MAX` today,
+in different arrays, and only one of them had a choice about it.
+
+### Each branch adds exactly one thing, out of list, and they are mutually exclusive
+
+**mmd adds `OUTMATCHED`**, genmmd's `bwd[nd] = -maxint`: a vertex withheld from the buckets while
+still live and reachable, so it cannot be the minimum before the vertex that outmatched it. It
+returns to `UNFILED` when an elimination reaches it, which `restore` does. No amd driver calls
+`outmatch`.
+
+**amd adds the hash overlay**, `AMD_2`'s supervariable detection reusing `Last` and `Next`:
+`setKey`/`key` on `mPrev` and `setChain`/`chain` on `mNext`. No mmd driver touches them.
+
+**ONLY AMD OVERLOADS `mNext`.** On the mmd side it is a pure link with one meaning; on the amd side
+it is a link while filed and a chain link while not.
+
+**AND THE AMD OVERLAY IS NOT SENTINEL-ENCODED, IT IS STATE-SCOPED**, which is the sharpest
+difference in this section. A hash key is an arbitrary `int32` with no reserved range, so it can
+look like a predecessor, like a head, or like `OUTMATCHED`. What keeps it safe is not its value but
+when it is written: only after every member of `C[pivot]` has been unfiled, and read before any of
+them is filed again. mmd's meanings are told apart by the value itself and need no such rule.
+
+That asymmetry explains a detail in `unfile`, which returns early on both `UNFILED` and `OUTMATCHED`
+and has no guard against a hash key. Those two are out-of-list values it can recognise; a key is one
+it cannot. Calling `unfile` on a vertex holding a key would read the key as a predecessor and splice
+a list that does not exist.
+
+### The same slot in `AMD_2`, and where the two encodings part
+
+`AMD_2`'s `Last[]` is our `mPrev`: one `Int` per supervariable, carrying the backward link of the
+degree lists. Reading the two against each other is the clearest way to see what our encoding buys
+and what it costs.
+
+```
+                              AMD_2  Last[i]              ours  mPrev[u]
+
+IN A LIST
+  predecessor                 a supervariable id          [0, n-1], a vertex id
+  at the head of its list     EMPTY (-1)                  [-(n+1), -2], and it
+                                                          encodes the bucket:
+                                                          d = -mPrev[u] - 2
+
+OUT OF EVERY LIST
+  unfiled                     not represented             -1  UNFILED
+  withheld                    no such state               INT32_MAX  OUTMATCHED
+  holding a hash key          an arbitrary hval           an arbitrary key
+```
+
+Two meanings against four, in one slot of the same width.
+
+**A HEAD IS WHERE THEY PART FIRST.** `AMD_2` writes `EMPTY` and finds the bucket somewhere else,
+`Head [Degree [i]] = inext` at line 1510 of `private/AmdVendored.cpp`: the degree comes from
+`Degree[i]`, which is live. We write `-(d + 2)` and read the bucket back out of the slot itself,
+which is why `unfile` takes no degree argument and why the mmd side carries no `degrees` array.
+
+**THE FOLD IS NOT AVAILABLE TO `AMD_2` AND WOULD NOT PAY IF IT WERE.** It keeps `Degree` regardless,
+because its degree BOUND reads the value rather than merely filing by it, so removing the array is
+not on the table. Our mmd side had no other reader once `unfile` stopped needing one, which is what
+made the fold worth doing there and pointless here. The same fold reaches our amd drivers only
+because they share the class.
+
+**OUT OF A LIST, `AMD_2` REPRESENTS NOTHING.** Whether `i` is in a degree list is not answered from
+`Last` at all; the walks know from context and from `Nv`'s sign. There is no unfiled value and no
+withheld value, the second because `AMD_2` has no outmatching at all: aggressive absorption does
+that work by another route entirely.
+
+### The hash overlay, which is the one place they agree, and where `AMD_2` goes further
+
+The idea is `AMD_2`'s and ours is copied from it. During supervariable detection a vertex is out of
+every degree list, so both slots are free, and both codes park the hash there: the KEY in the
+`Last`/`mPrev` slot and the CHAIN LINK in the `Next`/`mNext` slot. `Last [i] = hval` is line 1936;
+ours is `setKey(u, hash)` beside `setChain(u, hashHead[hash])`.
+
+**WHERE THE BUCKET HEADS GO IS THE DIFFERENCE.** `AMD_2` refuses to spend an array on them and
+overlays `Head` itself, which is already the degree-list head array, telling the two apart by sign:
+
+```
+Head [hval] == EMPTY        no hash bucket and no degree list there
+Head [hval] <  EMPTY        FLIP(i), a hash head, the degree list being empty
+Head [hval] >= 0            a degree-list head j, so the hash head is parked in Last [j]
+                            instead, that slot being free while j heads a list
+```
+
+Lines 1916 to 1929 write it and 1973 to 1990 read it back, restoring `Last [j] = EMPTY` when the
+bucket is emptied. So in the third case `Last` carries a fourth meaning of its own, a borrowed hash
+head, and it is legal only because a degree-list head's `Last` is `EMPTY` and therefore spare.
+
+**THAT IS EXACTLY THE SLOT OUR HEAD FORM OCCUPIES**, so the trick does not compose with our
+encoding: a head's `mPrev` holds `-(d + 2)` and is not free. `AmdFlat` therefore keeps a separate
+`hashHead` array, which is `AMD_2`'s own alternative, present in that file as a commented-out
+`Hhead` variant. Two coherent encodings that cannot be combined, and `n` `int32` is the cheaper side
+of the trade; `src/AmdFlat.cpp` states this at the allocation.
+
+**AND THE OVERLAY IS STATE-SCOPED IN BOTH CODES, NOT SENTINEL-ENCODED.** A key is an arbitrary value
+with no reserved range: it can look like a predecessor, like a head, or like `OUTMATCHED`. Neither
+code makes it distinguishable and neither needs to, because it exists only between the unfiling of
+`C[pivot]`'s members and their refiling. `AMD_2` clears the borrowed slot back to `EMPTY` when done,
+which is the same discipline written as an operation.
+
+**ONE FALSE FRIEND.** `FLIP` appears in both codes and in three unrelated places: `AMD_2` uses it
+for the hash head above and for its own pool compaction, and our `QuotientGraphCompacted::FLIPPED`
+uses it for pool compaction only. Same `-x - 2` arithmetic, three separate jobs, no shared
+invariant. `docs/DESIGN_DECISIONS.md` calls it an anti-model for that reason.
+
+### Why the arrays are `n` and not `n + 1`
+
+The heads are indexed by a DEGREE and the links by a VERTEX, two ranges of the same extent now that
+filing is at the true degree: a degree reaches `n - 1`.
+
+The heads were `n + 1` until 2026-08-23 and the extra slot answered two different questions at two
+different times. It was needed while the mmd refresh filed at the degree plus one, the index then
+reaching `n`. After that stopped it was still needed, for a reason nothing about filing explains:
+the mmd PREPASS read `head(1)` unconditionally, before knowing whether any vertex has degree 1, so
+at `n == 1` it read a bucket that did not exist. Shrinking the array without bounding that loop
+builds, passes every other case, and dies in ASan on the one-vertex tridiagonal in `test_order`. The
+loop is bounded now and the array is `n`.
+
+**MEASURED AT BOTH STAGES RATHER THAN ARGUED.** Probing all three of `file`, `head` and `empty`
+across 57 grids and 216 random patterns, five drivers each, the largest index ever passed to `mHead`
+was `n - 1`, and every exception was `n == 1` in the mmd prepass. The amd drivers never appeared
+once, which is what identified the loop as the cause rather than the array.
 
 ## What each file is, and what it adds
 

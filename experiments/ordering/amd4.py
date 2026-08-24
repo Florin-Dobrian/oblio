@@ -563,7 +563,7 @@ def amd4_minimum_degree(G, alpha=10.0, aggressive=True):
     # into u where I[u] == I[v], so every clique holding v holds u and its
     # weighted size does not move.
     clique_degree = [0] * n
-    hash_bucket = [[] for _ in range(n + 1)]   # Amd.cpp's Head[hval], reused
+    hash_bucket = [[] for _ in range(n)]       # Amd.cpp's Head[hval], reused
     # The assembly tree, for the postorder. parent[c] is the clique that absorbed
     # c, and front_size[e] is the front e would form, its pivots plus what it
     # reaches. Amd.cpp keeps the same two in Pe and Elen.
@@ -837,10 +837,17 @@ def amd4_minimum_degree(G, alpha=10.0, aggressive=True):
             # out a function of the ADJACENCY ALONE. Amd.cpp lets a vertex and a
             # clique collide on purpose, the hash being a filter and never the
             # decision. The invariant the two lines hold TOGETHER is that the
-            # modulus must not divide the stride.
+            # modulus must not divide the stride, and having no stride is the
+            # cheapest way to hold it.
+            #
+            # THE MODULUS IS n, AS Amd.cpp'S IS AND AS PRODUCTION'S IS. It was
+            # n + 1 until 2026-08-23, left behind when the stride went on
+            # 2026-08-09 and never followed. The hash is a filter, so the two
+            # moduli give the same merges and the same permutation and differ
+            # only in how many exact comparisons they cost.
             for c in I[u]:
                 key += c + 1
-            k = key % (n + 1)
+            k = key % n
             if not hash_bucket[k]:
                 used_keys.append(k)
             hash_bucket[k].append(u)

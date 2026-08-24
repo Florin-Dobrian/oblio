@@ -33,6 +33,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <functional>
 #include <vector>
 
@@ -49,7 +50,7 @@ public:
     QuotientGraphChained(const std::vector<std::size_t>&  colPtr,
                   const std::vector<std::int32_t>& rowIdx);
 
-    std::size_t size() const           { return (mRun.size() - 1); }
+    std::size_t size() const           { return (mSegment.size() - 1); }
     // GONE, and it is genmmd's `marker[v] = maxint` exactly. One value reserved above every tag
     // makes the stamp array answer "is v dead" on the load it was making anyway, which is why
     // genmmd spends no array on liveness at any of its walk sites.
@@ -62,7 +63,8 @@ public:
     // set, which is 201 entries for 200 vertices on a random mmd2 pattern.
     //
     // Safe only because clique ids no longer share this array; see beginElimination.
-    static constexpr std::int32_t GONE = 2147483647;   // INT32_MAX, above every reachable tag
+    static constexpr std::int32_t GONE =
+        std::numeric_limits<std::int32_t>::max();   // above every reachable tag
 
     bool eliminated(std::int32_t u) const { return mMark[u] == GONE; }
 
@@ -71,8 +73,8 @@ public:
     // `mt = tag + md0`, one array and one counter for both. Ours is one counter likewise, so two
     // tags can never collide, and a comparison against a captured tag means what it says.
     std::int32_t advanceTag()                          { return ++mTag; }
-    std::int32_t mark(std::int32_t v) const            { return mMark[v]; }
-    void setMark(std::int32_t v, std::int32_t t)       { mMark[v] = t; }
+    std::int32_t mark(std::int32_t u) const            { return mMark[u]; }
+    void setMark(std::int32_t u, std::int32_t tag)     { mMark[u] = tag; }
 
     // The members of clique c, which after eliminate(p) is the pattern of p's column of L: the
     // vertices the pivot reached, less those it absorbed. A pointer and a length, as the
@@ -83,7 +85,7 @@ public:
     // taken beforehand does not. Read a clique at the moment of use, which is the same rule the
     // numeric factor's blocks live by.
     const std::int32_t* clique(std::int32_t c) const {
-        return mSource.data() + mRun[c].sourcePtr;
+        return mSrc.data() + mSegment[c].srcPtr;
     }
     // NO CLIQUE SIZE ARRAY. A clique ends where genmmd's ends: at a TERMINATOR value, or at the
     // end of its last segment when the members fill it exactly. `mmdelm` writes
@@ -92,7 +94,7 @@ public:
     // 1-based so zero is free to mean "end"; ours are 0-based and vertex 0 is a real member, so
     // the terminator has to be a value no member and no link can take. A link is `-(c + 1)` and so
     // lies in [-n, -1], which leaves the bottom of the range.
-    static constexpr std::int32_t TERMINATOR = -2147483647 - 1;   // INT32_MIN
+    static constexpr std::int32_t TERMINATOR = std::numeric_limits<std::int32_t>::lowest();
 
     // Every read of a clique goes through here, because a clique is no longer one flat run. The
     // walk runs to the end of the current segment, follows any link it meets, and stops at the
@@ -107,15 +109,15 @@ public:
     // std::function or a virtual would cost more than the whole scheme saves.
     template <class F>
     void forEachMember(std::int32_t c, F f) const {
-        std::size_t p   = mRun[c].sourcePtr;
-        std::size_t end = mRun[c + 1].sourcePtr;
+        std::size_t p   = mSegment[c].srcPtr;
+        std::size_t end = mSegment[c + 1].srcPtr;
         while (p != end) {
-            const std::int32_t v = mSource[p];
+            const std::int32_t v = mSrc[p];
             if (v >= 0) { f(v); ++p; continue; }
             if (v == TERMINATOR) return;
             const std::int32_t d = -v - 1;             // a link, to clique d's segment
-            p   = mRun[d].sourcePtr;
-            end = mRun[d + 1].sourcePtr;
+            p   = mSegment[d].srcPtr;
+            end = mSegment[d + 1].srcPtr;
         }
     }
 
@@ -156,9 +158,9 @@ public:
     // is possible at all. Reading it as a description of the chained store is a mistake.
     //
     // AND IT COSTS AN ARRAY, which the flat drivers do not pay: they read a clique's size from
-    // `mRun[c].adjacencySize`, a descriptor they keep anyway, and this file keeps no clique length
-    // at all. INSTRUMENTATION rather than mechanism, and it is present in release because the
-    // benchmark that reads it builds with NDEBUG. It should not be counted against this file's
+    // `mSegment[c].adjacencySize`, a descriptor they keep anyway, and this file keeps no clique
+    // length at all. INSTRUMENTATION rather than mechanism, and it is present in release because
+    // the benchmark that reads it builds with NDEBUG. It should not be counted against this file's
     // argument about how many arrays a vertex's state lives in.
     std::size_t numPeakCliqueMembers() const { return mNumPeakCliqueMembers; }
 
@@ -174,14 +176,14 @@ public:
     // SUFFIXED, and this class has ONE branch so only the mmd half exists. The name is split all
     // the same, so that `MmdChained` reads like `MmdFlat` and `MmdCompacted`; see QuotientGraph.h.
     const std::int32_t* adjacencyMmd(std::int32_t u) const {
-        return mSource.data() + mRun[u].sourcePtr;
+        return mSrc.data() + mSegment[u].srcPtr;
     }
-    std::uint32_t adjacencySize(std::int32_t u) const { return mRun[u].adjacencySize; }
+    std::uint32_t adjacencySize(std::int32_t u) const { return mSegment[u].adjacencySize; }
 
     const std::int32_t* incidenceMmd(std::int32_t u) const {
-        return mSource.data() + mRun[u].sourcePtr + mRun[u].adjacencySize;
+        return mSrc.data() + mSegment[u].srcPtr + mSegment[u].adjacencySize;
     }
-    std::uint32_t incidenceSize(std::int32_t u) const { return mRun[u].incidenceSize; }
+    std::uint32_t incidenceSize(std::int32_t u) const { return mSegment[u].incidenceSize; }
 
     // How many original vertices u stands for. One until mass elimination merges into it, so a
     // degree that counts vertices has to count this rather than entries.
@@ -357,7 +359,7 @@ private:
     //
     // C[c] gets none of this and needs its own arena below: a clique's members are its pivot's
     // reach, which nothing about the pivot's own column bounds.
-    // ONE DIMENSIONAL SIZES ARE `std::uint32_t`, POSITIONS ARE `std::size_t`. `sourcePtr` offsets
+    // ONE DIMENSIONAL SIZES ARE `std::uint32_t`, POSITIONS ARE `std::size_t`. `srcPtr` offsets
     // into the pool and is bounded by nnz(A), so it is two dimensional and stays wide; the two
     // lengths are bounded by deg(u) and so by n, which the constructor caps at `MAX_IDX`. The two
     // kinds meet at exactly one place, the constructor's crossing, where a difference of positions
@@ -367,19 +369,31 @@ private:
     // The CONSERVATION LEMMA is why one uint32 covers both. Their sum is bounded by u's column of
     // A for the whole run, so neither can reach n on its own where the other is nonzero, and
     // `adjacencySize(u) + incidenceSize(u)` cannot overflow either.
-    std::vector<std::int32_t>  mSource;         // every A[u] then I[u], run after run
+    std::vector<std::int32_t>  mSrc;            // every A[u] then I[u], run after run
 
     // ONE OBJECT PER VERTEX, NOT THREE ARRAYS, and the shared QuotientGraph carries the same
     // struct with the same reasoning; read its member for the argument and the measurement. The
     // one difference is the LENGTH. This scheme addresses a clique by the pivot that formed it
-    // and needs the END of that pivot's segment, `mRun[c + 1].sourcePtr`, so the array has n + 1
+    // and needs the END of that pivot's segment, `mSegment[c + 1].srcPtr`, so the array has n + 1
     // entries where the shared class has n. The extra entry's two lengths are never read.
-    struct VertexRun {
-        std::size_t   sourcePtr;       // where u's run starts in mSource, fixed at construction
-        std::uint32_t adjacencySize;   // A[u]'s length, from the run's start
-        std::uint32_t incidenceSize;   // I[u]'s length, immediately behind A[u]
+    // TWO LIVES, AND THIS CLASS IS THE ONE WHERE ONLY `srcPtr` HAS THE SECOND. A clique lives in
+    // the dead segment of the pivot that formed it, so the position is not rewritten at all and
+    // serves both; the two lengths are ZEROED at elimination and mean nothing for a clique, its
+    // extent being found by walking to a link or to the terminator. That is what it costs to keep
+    // no clique length: `clique(c)` can give the start but not the end, so the extent comes from
+    // the walk, which is what `forEachMember` exists for.
+    struct Segment {
+        // WHERE u'S SEGMENT STARTS in `mSrc`, fixed at construction and never moved. It is also
+        // where the clique formed by u begins, once u has eliminated.
+        std::size_t   srcPtr;
+        // A[u]'S LENGTH, and zero means the adjacency is EMPTY, which `massEliminate`'s first
+        // conjunct tests. It is zeroed at elimination beside `incidenceSize`, so on a clique it
+        // carries nothing and is not the member count the other two classes keep here.
+        std::uint32_t adjacencySize;
+        // I[u]'S LENGTH, immediately behind A[u], and zeroed at elimination with the other.
+        std::uint32_t incidenceSize;
     };
-    std::vector<VertexRun> mRun;
+    std::vector<Segment> mSegment;
 
     // C[c] is flat too, and for a second property rather than the adjacency's. Its members are
     // not known in advance, so its block cannot be placed at construction; but they are known
@@ -393,7 +407,7 @@ private:
     // we run. The offsets being indices rather than pointers is what lets the arena simply grow
     // instead, since a reallocation leaves every offset valid.
     // THE CHANGE UNDER TEST. There is no clique arena. C[c] lives in the segment of the vertex
-    // that formed it, mSource[mRun[c].sourcePtr ...], which is dead the moment c is eliminated, so a
+    // that formed it, mSrc[mSegment[c].srcPtr ...], which is dead the moment c is eliminated, so a
     // clique costs no storage and is addressed by its pivot. When the reach outgrows that segment
     // the list CONTINUES in the segment of a clique the pivot has just absorbed, and the last
     // entry of the segment being filled holds a LINK to it.
@@ -479,31 +493,31 @@ private:
 
 inline QuotientGraphChained::QuotientGraphChained(const std::vector<std::size_t>&  colPtr,
                              const std::vector<std::int32_t>& rowIdx)
-    : mRun(colPtr.empty() ? 1 : colPtr.size()),
-      mCliqueLiveMembers(mRun.size() - 1, 0),
-      mMark(2 * (mRun.size() - 1), NIL) {
-    const std::int32_t size = static_cast<std::int32_t>((mRun.size() - 1));
+    : mSegment(colPtr.empty() ? 1 : colPtr.size()),
+      mCliqueLiveMembers(mSegment.size() - 1, 0),
+      mMark(2 * (mSegment.size() - 1), NIL) {
+    const std::int32_t size = static_cast<std::int32_t>((mSegment.size() - 1));
 
     // One pass to place each column's run, dropping the diagonal. The runs are laid out in column
     // order and never move afterwards, so the offsets are written once here and only the lengths
     // change. The run is u's whole allowance: A[u] fills it now and I[u] grows into the room A[u]
-    // gives up, never past mRun[u + 1].sourcePtr.
-    mSource.reserve(colPtr.empty() ? 0 : colPtr.back());
-    mRun[0].sourcePtr = 0;
+    // gives up, never past mSegment[u + 1].srcPtr.
+    mSrc.reserve(colPtr.empty() ? 0 : colPtr.back());
+    mSegment[0].srcPtr = 0;
     for (std::int32_t aj = 0; aj < size; ++aj) {
         for (std::size_t cp = colPtr[aj]; cp < colPtr[aj + 1]; ++cp)
-            if (rowIdx[cp] != aj) mSource.push_back(rowIdx[cp]);
-        mRun[aj + 1].sourcePtr = mSource.size();
+            if (rowIdx[cp] != aj) mSrc.push_back(rowIdx[cp]);
+        mSegment[aj + 1].srcPtr = mSrc.size();
         // THE ONE CROSSING. A difference of two positions is a count, so this is the single place
         // in the class where a two-dimensional quantity is written into a one-dimensional one. It
         // is bounded by deg(aj) and so by n, which the SparseMatrix constructor has already capped
         // at MAX_IDX, but the cast is written rather than left implicit because that bound is an
         // argument and not something the types say.
-        mRun[aj].adjacencySize = static_cast<std::uint32_t>(mRun[aj + 1].sourcePtr
-                                                            - mRun[aj].sourcePtr);
+        mSegment[aj].adjacencySize = static_cast<std::uint32_t>(mSegment[aj + 1].srcPtr
+                                                            - mSegment[aj].srcPtr);
     }
 
-    // There is no second arena to reserve: cliques live in mSource, in the segments their
+    // There is no second arena to reserve: cliques live in mSrc, in the segments their
     // pivots vacate. That is the change this file exists to measure.
 
     // Every vertex begins as a supervariable of one: a chain holding itself, so next is NIL and
@@ -522,9 +536,9 @@ inline std::uint32_t QuotientGraphChained::reachableWeight(std::int32_t u) {
     // below store through mMark, which the compiler cannot prove does not alias the sizes, so a
     // bound left in the condition is re-loaded once per clique. Measured at 300 ms of AMD1's
     // 6.31 s on alpamayo, in the one accessor that reads as though it were free.
-    const std::int32_t* source        = mSource.data() + mRun[u].sourcePtr;
-    const std::uint32_t adjacencySize = mRun[u].adjacencySize;
-    const std::uint32_t incidenceSize = mRun[u].incidenceSize;
+    const std::int32_t* source        = mSrc.data() + mSegment[u].srcPtr;
+    const std::uint32_t adjacencySize = mSegment[u].adjacencySize;
+    const std::uint32_t incidenceSize = mSegment[u].incidenceSize;
     for (std::uint32_t k = 0; k < adjacencySize; ++k) {
         const std::int32_t v = source[k];
         if (mMark[v] != GONE) { mMark[v] = mTag; reached += static_cast<std::uint32_t>(mWeight[v]); }
@@ -595,16 +609,16 @@ inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int3
     // read, and within that segment writes trail reads because every entry written was read first.
     const bool reverse = mReverseIncidence;
 
-    const std::size_t   base = mRun[pivot].sourcePtr;
-    const std::uint32_t adjN = mRun[pivot].adjacencySize;
-    const std::uint32_t incN = mRun[pivot].incidenceSize;
+    const std::size_t   base = mSegment[pivot].srcPtr;
+    const std::uint32_t adjN = mSegment[pivot].adjacencySize;
+    const std::uint32_t incN = mSegment[pivot].incidenceSize;
 
     // I[pivot] must be copied out before the segment holding it is overwritten. genmmd threads the
     // same list through its `list[]` array; a small vector kept for its capacity costs no
     // allocation after the first few pivots and keeps the walk order explicit.
     mAbsorbed.clear();
     for (std::uint32_t ii = 0; ii < incN; ++ii)
-        mAbsorbed.push_back(mSource[base + adjN + (reverse ? incN - 1 - ii : ii)]);
+        mAbsorbed.push_back(mSrc[base + adjN + (reverse ? incN - 1 - ii : ii)]);
 
     // THE SIGN OF THE WEIGHT IS THE MEMBERSHIP MARK, mirroring QuotientGraph. The negation IS the
     // insertion, and it is undone in massEliminate, which walks this same set. The pivot is
@@ -618,17 +632,17 @@ inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int3
     mWeight[pivot] = -mWeight[pivot];          // never its own neighbor
 
     std::size_t   rl    = base;                        // write cursor
-    std::size_t   rm    = mRun[pivot + 1].sourcePtr - 1;   // last entry of the segment being filled
+    std::size_t   rm    = mSegment[pivot + 1].srcPtr - 1;   // last entry of the segment filled
 
     // One member written, following a link first if the segment is full. The link can only be
     // there to be followed: it is written before the walk that can reach it.
     const auto emit = [&](std::int32_t v) {
         while (rl >= rm) {
-            const std::int32_t l = mSource[rm];         // -(c + 1); see the link encoding above
-            rl = mRun[-l - 1].sourcePtr;
-            rm = mRun[-l].sourcePtr - 1;
+            const std::int32_t l = mSrc[rm];            // -(c + 1); see the link encoding above
+            rl = mSegment[-l - 1].srcPtr;
+            rm = mSegment[-l].srcPtr - 1;
         }
-        mSource[rl++] = v;
+        mSrc[rl++] = v;
     };
     // THE LIVE NEIGHBORS FIRST, AND WITHOUT THE BOUND CHECK. They are a subset of A[pivot], which
     // was read from this same segment, so the cursor cannot pass the reader and cannot leave the
@@ -638,11 +652,11 @@ inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int3
     // would read it as a link that was never written. Found by ASan on a 2 by 2 grid.
     std::uint32_t born = 0;                     // the clique's size; see numPeakCliqueMembers
     for (std::uint32_t k = 0; k < adjN; ++k) {
-        const std::int32_t v  = mSource[base + k];
+        const std::int32_t v  = mSrc[base + k];
         const std::int32_t nv = mWeight[v];
         if (nv > 0 && !(mHasNumbered && mMark[v] == GONE)) {
             mWeight[v] = -nv;
-            mSource[rl++] = v;
+            mSrc[rl++] = v;
             ++born;
         }
     }
@@ -657,7 +671,7 @@ inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int3
         mNumLiveCliqueMembers -= mCliqueLiveMembers[c];
         mCliqueLiveMembers[c]  = 0;                 // so a second sighting subtracts nothing
 
-        mSource[rm] = -(c + 1);                     // the continuation, before it can be read
+        mSrc[rm] = -(c + 1);                        // the continuation, before it can be read
         forEachMember(c, [&](std::int32_t v) {
             const std::int32_t nv = mWeight[v];        // one load; see the note above the walk
             if (nv > 0) { mWeight[v] = -nv; emit(v); ++born; }
@@ -673,7 +687,7 @@ inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int3
     // exactly this reason. Comparing against the pivot's own segment end instead leaves a chain
     // unterminated and the walk runs off into whatever the next segment holds, which on a 2x2
     // grid is an immediate hang.
-    if (rl <= rm) mSource[rl] = TERMINATOR;
+    if (rl <= rm) mSrc[rl] = TERMINATOR;
 
     // The absorbed cliques die only now: they were being READ until the loop above finished, and
     // their segments now hold part of the new clique, so nothing can be written into them to say
@@ -700,14 +714,14 @@ inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int3
 
     ++mTag;
     absorbed = mTag;
-    const std::size_t cliqueBase = mRun.size() - 1;
+    const std::size_t cliqueBase = mSegment.size() - 1;
     for (const std::int32_t c : mAbsorbed) mMark[cliqueBase + static_cast<std::size_t>(c)] = absorbed;
 }
 
 inline const std::vector<std::int32_t>& QuotientGraphChained::eliminate(std::int32_t pivot) {
     std::int32_t absorbed = NIL;
     beginElimination(pivot, absorbed);
-    const std::size_t cliqueBase = mRun.size() - 1;
+    const std::size_t cliqueBase = mSegment.size() - 1;
     // C[pivot] IS the reach here: beginElimination wrote it there and nothing has trimmed it yet
     // (massEliminate does, and runs after). So the prune walks the arena block rather than a copy.
     const bool amdOrder = mVendoredListOrder;      // hoisted, as the other flags are
@@ -731,7 +745,7 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::eliminate(std::int
     // three assignments on it for the same reason, letting the list's start shift rather than
     // moving a list. See experiments/ordering/AMD3.md, ledger entry 5 and iteration 10.
     forEachMember(pivot, [&](std::int32_t u) {
-        std::int32_t*     source        = mSource.data() + mRun[u].sourcePtr;
+        std::int32_t*     source        = mSrc.data() + mSegment[u].srcPtr;
         // The two counters are one-dimensional COUNTS, positions in a list bounded by deg(u) and
         // so by n, where std::size_t is for a position into an n x n object. They take the type of
         // what they count, so they move with the array: `std::uint32_t`, and the cast that used to
@@ -741,7 +755,7 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::eliminate(std::int
         // 277 ms of an 8.53 s run on the incidence loop's header.
         //
         // `heldVertex` is a VERTEX and stays std::int32_t, carrying NIL.
-        const std::uint32_t adjacencySize = mRun[u].adjacencySize;
+        const std::uint32_t adjacencySize = mSegment[u].adjacencySize;
         std::uint32_t       kept          = 0;
         std::int32_t        heldVertex    = NIL;        // the first survivor, appended last
         for (std::uint32_t k = 0; k < adjacencySize; ++k) {
@@ -756,7 +770,7 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::eliminate(std::int
             source[kept++] = v;
         }
         if (heldVertex != NIL) source[kept++] = heldVertex;
-        mRun[u].adjacencySize = kept;                      // A[u] - C[pivot] - {pivot}
+        mSegment[u].adjacencySize = kept;                      // A[u] - C[pivot] - {pivot}
 
         // The read cursor is a hoisted POINTER, not source[adjacencySize + i]. The base and the
         // offset were being added per iteration on a loop whose body is one compare and one
@@ -770,7 +784,7 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::eliminate(std::int
         // and pays the same; it is the price of not allocating a scratch, which the note above
         // explains is the right trade here.
         const std::int32_t* incidence     = source + adjacencySize;
-        const std::uint32_t incidenceSize = mRun[u].incidenceSize;
+        const std::uint32_t incidenceSize = mSegment[u].incidenceSize;
         std::uint32_t       write         = kept;      // follows `kept`; see the note above
         for (std::uint32_t i = 0; i < incidenceSize; ++i) {
             const std::int32_t c = incidence[i];
@@ -778,7 +792,7 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::eliminate(std::int
                 source[write++] = c;
         }
         source[write++]   = pivot;                     // u joins the new clique, id = pivot
-        mRun[u].incidenceSize = write - kept;
+        mSegment[u].incidenceSize = write - kept;
         // [c1, ..., ck, pivot] to [pivot, c2, ..., ck, c1], which is a SWAP of the two boundary
         // entries: only they move and c2..ck stay put. The pivot cannot be written first, which
         // is what the loop above would otherwise allow: the write cursor starts at `kept` and the
@@ -810,8 +824,8 @@ QuotientGraphChained::finishElimination(std::int32_t pivot) {
         massEliminate(pivot);
     }
 
-    mRun[pivot].adjacencySize = 0;
-    mRun[pivot].incidenceSize = 0;
+    mSegment[pivot].adjacencySize = 0;
+    mSegment[pivot].incidenceSize = 0;
     mMark[pivot]          = GONE;
     return mMerged;
 }
@@ -843,9 +857,9 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std:
         // so the single remaining entry is at the head of the incidence run either way: with A[u]
         // empty the run starts with I[u], and with one clique there is only one position. The
         // test therefore needs no branch on the flag.
-        if (mRun[u].adjacencySize == 0 && mRun[u].incidenceSize == 1 &&
-            mSource[mRun[u].sourcePtr] == pivot) {         // A[u] empty, so I[u] starts at the run
-            mRun[u].incidenceSize = 0;
+        if (mSegment[u].adjacencySize == 0 && mSegment[u].incidenceSize == 1 &&
+            mSrc[mSegment[u].srcPtr] == pivot) {         // A[u] empty, so I[u] starts at the run
+            mSegment[u].incidenceSize = 0;
             mMark[u]          = GONE;
             merged.push_back(u);
         }
@@ -911,8 +925,8 @@ inline void QuotientGraphChained::merge(std::int32_t u, std::int32_t v) {
     mWeight[u] += mWeight[v];
     mWeight[v] = 0;
 
-    mRun[v].adjacencySize = 0;
-    mRun[v].incidenceSize = 0;
+    mSegment[v].adjacencySize = 0;
+    mSegment[v].incidenceSize = 0;
     mMark[v]          = GONE;
 }
 

@@ -123,9 +123,6 @@
 namespace Oblio {
 
 std::size_t gAmdCompactions = 0;   // read by tmp/ probes; see the note at the return below
-extern std::size_t gPeakCliqueMembers;   // defined in include/oblio/QuotientGraph.h
-
-namespace {
 
 // `Buckets` AND `TaggedScan` ARE PRODUCTION'S, NOT COPIES. This file held a `Buckets`
 // and a `TaggedScan` that were include/oblio/QuotientGraph.h's two types verbatim,
@@ -144,11 +141,8 @@ namespace {
 // See include/oblio/QuotientGraphCompacted.h.
 
 
-// THE ONE BODY, TAKING A POINTER SO THAT BOTH PUBLIC FORMS SHARE IT. The same shape `AmdFlat`,
-// `MmdFlat` and `MmdCompacted` use; `AmdCompacted` was the one driver without it until 2026-08-21.
-std::vector<std::int32_t> orderAmdCompactedImpl(const std::vector<std::size_t>&  colPtr,
-                                         const std::vector<std::int32_t>& rowIdx,
-                                         std::size_t* arenaEntries) {
+std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  colPtr,
+                                            const std::vector<std::int32_t>& rowIdx) {
     if (colPtr.empty()) return std::vector<std::int32_t>();
     const std::size_t size = colPtr.size() - 1;
     if (size == 0) return std::vector<std::int32_t>();
@@ -214,7 +208,7 @@ std::vector<std::int32_t> orderAmdCompactedImpl(const std::vector<std::size_t>& 
     std::uint32_t minDegree = *std::min_element(degrees.begin(), degrees.end());
 
 
-    std::vector<std::int32_t> hashHead(size + 1, NIL);
+    std::vector<std::int32_t> hashHead(size, NIL);
 
     std::vector<std::int32_t> touchedCliques;
     std::vector<std::int32_t> deadCliques;
@@ -439,30 +433,14 @@ std::vector<std::int32_t> orderAmdCompactedImpl(const std::vector<std::size_t>& 
     // How often the pool actually needed compacting. `AMD_2` reports the same figure as
     // Info[AMD_NCMPA] and its complexity bound assumes it stays constant; this is where that
     // assumption can be checked for OUR storage rather than for its.
-    gAmdCompactions  = qg.compactions();
+    gAmdCompactions  = qg.numCompactions();
     gPeakCliqueMembers = qg.numPeakCliqueMembers();   // see include/oblio/QuotientGraph.h
     // THE ROWS THE DENSE RULE SET ASIDE GO LAST, in index order, which is where `AMD_2`'s output
     // assembly puts them. They were compacted in an ascending pass, so appending the vector is
     // that order; each stands only for itself, having been set aside before it could absorb
     // anything, so `order` expands a chain of one.
-    if (arenaEntries != nullptr) *arenaEntries = qg.arenaEntries();
     pivots.insert(pivots.end(), denseRows.begin(), denseRows.end());
     return qg.order(pivots);
-}
-
-} // namespace
-
-std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  colPtr,
-                                     const std::vector<std::int32_t>& rowIdx) {
-    return orderAmdCompactedImpl(colPtr, rowIdx, nullptr);
-}
-
-// The same, reporting the pool's size. See QuotientGraphCompacted::arenaEntries for why that is a
-// different quantity from the flat class's, and AmdFlat.h for why this is an overload.
-std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  colPtr,
-                                     const std::vector<std::int32_t>& rowIdx,
-                                     std::size_t& arenaEntries) {
-    return orderAmdCompactedImpl(colPtr, rowIdx, &arenaEntries);
 }
 
 } // namespace Oblio

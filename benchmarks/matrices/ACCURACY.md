@@ -38,19 +38,26 @@ report and would only distract from this one.
 
 **THE ORDERING IS `MmdCompacted` AND THE TREE'S DEFAULT IS `AmdCompacted`.** This pass has run
 under mmd since it was written, and holding it there keeps every figure below comparable across
-re-runs. `MmdCompacted` returns `MmdFlat`'s permutation exactly, which is genmmd's, so the change
-of store made on 2026-08-21 cannot move a number here.
+re-runs. `MmdCompacted` returns `MmdFlat`'s permutation exactly, so the change of store made on
+2026-08-21 cannot move a number here.
+
+**THAT PERMUTATION MOVED ON 2026-08-23 AND THE FIGURES BELOW ARE THE RE-RUN.** The mmd branch left
+genmmd's degree scale: genmmd files a vertex under its degree in `mmdint` and under its degree PLUS
+ONE in `mmdupd`, so the minimum it selects is not always the minimum, and our drivers now file at
+the true degree throughout. `docs/DESIGN_DECISIONS.md` (2026-08-23) has the account. The
+classification is unchanged, 106 solved and the same 30/18/56/2, and Cholesky still agrees with the
+inertia on every row; individual residuals and delay counts moved, and the largest movement is on
+`LFAT5000` and is reported below rather than smoothed over.
 
 **Running it under `AmdCompacted` was tried on 2026-08-21 and it cost a matrix.**
-`Oberwolfach/LFAT5000` is killed by the OOM killer under amd where mmd factors it at 232.4x fill,
-and the section below on the cost of accuracy is largely about that matrix. Amd's PREDICTED fill on
-it is LOWER than mmd's, 54978 against 67463, so the loss is in the delayed-pivot cascade rather
-than in the ordering's fill.
+`Oberwolfach/LFAT5000` is killed by the OOM killer under amd where mmd factors it, and the section
+below on the cost of accuracy is largely about that matrix. Amd's PREDICTED fill on it is LOWER than
+mmd's, 54978 against 67463 in that run, so the loss is in the delayed-pivot cascade rather than in
+the ordering's fill.
 
-**The two runs differ in the ordering and in nothing else**, which is checked rather than assumed:
-the mmd run reproduces every figure in this report exactly, 106 solved, the same 30/18/56/2
-classification and the same eight residual rows. So the matrix was lost to the ordering and not to
-a change of input set. It is an open question rather than a reason to prefer mmd generally;
+**That comparison was made against the older mmd ordering** and has not been repeated since the
+branch changed. What the new run adds is a third reading of the same phenomenon and it points the
+same way; see below. It remains an open question rather than a reason to prefer mmd generally;
 `docs/NEXT.md` carries it.
 
 | | |
@@ -217,14 +224,14 @@ factorizations on each measure:
 
 | matrix | best res | best bwd | perturbed | zero eig |
 |---|---|---|---|---|
-| eurqsa | 2.0e+16 | 5.8e-18 | 2084 | 8 |
-| TEM27623 | 1.1e+04 | 3.5e-18 | 79 | 0 |
-| sit100 | 2.6e+03 | 9.6e-15 | 1063 | 0 |
-| t2dal_bci | 1.4e+03 | 1.1e-16 | 0 | 0 |
-| plat1919 | 1.5e+02 | 7.3e-17 | 1 | 0 |
-| vibrobox | 1.4e+02 | 6.3e-18 | 0 | 0 |
+| eurqsa | 3.1e+16 | 1.2e-18 | 2083 | 5 |
+| TEM27623 | 5.7e+03 | 9.5e-19 | 83 | 0 |
+| t2dal_bci | 2.4e+03 | 1.3e-16 | 0 | 0 |
+| sit100 | 6.4e+02 | 1.7e-14 | 891 | 0 |
+| plat1919 | 4.3e+02 | 7.1e-17 | 1 | 0 |
+| vibrobox | 6.8e+01 | 2.1e-18 | 0 | 0 |
 | t2dah_a | 1.7e+01 | 1.3e-16 | 0 | 0 |
-| crystk01 | 2.8e+00 | 8.1e-17 | 6 | 0 |
+| crystk01 | 2.5e+00 | 7.2e-17 | 6 | 0 |
 
 **Read the second column.** Every one of these is backward stable. The large residuals are
 conditioning and rank, which is what the pair of measures exists to distinguish. **A large residual
@@ -239,14 +246,14 @@ the pivoting is for. A few representative rows:
 | matrix | static bwd | dynamic bwd | delayed |
 |---|---|---|---|
 | G32 | 1.0e-02 | 4.3e-15 | 4017 |
-| c-18 | 4.1e-16 | 2.6e-22 | 2603 |
-| mice_10NN | 1.1e-03 | 7.2e-17 | 242 |
-| OPF_6000 | 1.0e+00 | 3.5e-19 | 10684 |
-| nasa1824 | 4.6e-11 | 7.9e-18 | 55 |
-| ex32 | 1.5e-07 | 8.0e-19 | 1329 |
+| c-18 | 4.6e-16 | 2.1e-22 | 2468 |
+| mice_10NN | 1.7e-03 | 4.9e-17 | 255 |
+| OPF_6000 | 1.0e+00 | 3.9e-19 | 10347 |
+| nasa1824 | 1.2e-10 | 1.6e-17 | 45 |
+| ex32 | 1.4e-07 | 5.9e-19 | 1272 |
 
-On `OPF_6000`, a 29902-column power-flow system, static LDL perturbs 3020 pivots and returns a
-backward error of 1. Dynamic LDL delays 10684 columns and returns 3.5e-19. **That is seventeen
+On `OPF_6000`, a 29902-column power-flow system, static LDL perturbs 2783 pivots and returns a
+backward error of 1. Dynamic LDL delays 10347 columns and returns 3.9e-19. **That is nineteen
 orders of magnitude, on a matrix a static factorization simply cannot handle.**
 
 ## Three cases worth knowing
@@ -254,13 +261,14 @@ orders of magnitude, on a matrix a static factorization simply cannot handle.**
 ### `HB/saylr3`: numerically singular, and a control beside it
 
 `saylr3` and `sherman1` are the same 10x10x10 grid problem from two different authors, identical in
-`n`, in `nnz(A)`, in `nnz(L)` at 9872, in diagonal range and in norm. One solves cleanly and the
+`n`, in `nnz(A)`, in `nnz(L)` at 10198, in diagonal range and in norm. One solves cleanly and the
 other does not:
 
 ```
 saylr3    static   bwd 1.9e-15   res 2.0e+00   2 perturbed
           dynamic  bwd 8.9e-05   res 2.0e+00   inertia 0 / 998 / 2
-sherman1  both     bwd 8.1e-17   res 1.8e-12   inertia 0 / 1000 / 0
+sherman1  static   bwd 3.0e-17   res 6.8e-13   inertia 0 / 1000 / 0
+          dynamic  bwd 4.1e-17   res 9.2e-13
 ```
 
 `saylr3` is numerically singular with rank 998, and three independent witnesses agree: the inertia
@@ -296,9 +304,9 @@ A time-series reconciliation problem, structurally nonsingular, with 2121 zero d
 diagonal of 1 to 2 where present, and off-diagonals reaching 1.19e6. Its smallest singular value is
 around 1e-11 against a norm of 6.4e6.
 
-Static LDL perturbs 2084 pivots and reaches a backward error of 4.0e-02, which is the honest cost
-of refusing to pivot on a matrix that needs it. **Dynamic LDL reaches 5.8e-18**, at a cost of 40294
-delayed columns and a factor 19.9 times larger than the analysis predicted. Both numbers are the
+Static LDL perturbs 2083 pivots and reaches a backward error of 5.0e-03, which is the honest cost
+of refusing to pivot on a matrix that needs it. **Dynamic LDL reaches 1.2e-18**, at a cost of 38121
+delayed columns and a factor 20.4 times larger than the analysis predicted. Both numbers are the
 strategy working as designed, and the pair is the trade stated plainly.
 
 ## The cost of accuracy, and one matrix Oblio could not factor
@@ -309,10 +317,10 @@ factorization actually held, so the cost is visible per matrix:
 
 | matrix | n | predicted | actual | ratio | delayed |
 |---|---|---|---|---|---|
-| LFAT5000 | 19994 | 67463 | 15678721 | **232.4x** | 3128750 |
-| eurqsa | 7245 | 156243 | 3101991 | 19.9x | 40294 |
-| c-66b | 49989 | 1121278 | 3927468 | 3.5x | 319743 |
-| vibrobox | 12328 | 2332570 | 7113191 | 3.0x | 29296 |
+| LFAT5000 | 19994 | 59972 | 18797474 | **313.4x** | 6250000 |
+| eurqsa | 7245 | 153379 | 3125812 | 20.4x | 38121 |
+| c-66b | 49989 | 1102175 | 4005321 | 3.6x | 308772 |
+| vibrobox | 12328 | 2108026 | 6810142 | 3.2x | 30608 |
 
 **On the great majority of the set the ratio is exactly 1.0 and nothing was delayed**, meaning
 dynamic pivoting cost nothing at all in fill. Where it costs, it can cost a great deal.
@@ -361,10 +369,31 @@ None of these is implemented in Oblio yet, and the matrix is reported here rathe
 skipped because a report that hides its hard case is worth less than one that explains it.
 
 `Oberwolfach/LFAT5000` is the same mechanism inside the memory budget, and it sharpens the
-question: it is **positive definite**, every pivot acceptable, and dynamic LDL delayed 3.1 million
-columns anyway for a 232-fold increase in fill, reaching a backward error of 9.7e-20. Definiteness
+question: it is **positive definite**, every pivot acceptable, and dynamic LDL delayed 6.25 million
+columns anyway for a 313-fold increase in fill, reaching a backward error of 7.6e-20. Definiteness
 alone does not prevent the cascade, so the tuning above is a real avenue rather than a
 rationalization.
+
+**AND THE ORDERING CHANGE OF 2026-08-23 MADE IT WORSE, WHILE PREDICTING BETTER.** The mmd branch
+left genmmd's degree scale that day and now files at the true degree, which is the more defensible
+rule; on this matrix it predicts eleven per cent LESS fill and the factorization produces twenty per
+cent MORE, with the delay count almost exactly doubling.
+
+| `LFAT5000`, `MmdCompacted` | predicted | actual | ratio | delayed |
+|---|---:|---:|---:|---:|
+| 2026-08-21, genmmd's scale | 67463 | 15678721 | 232.4x | 3128750 |
+| 2026-08-23, the true degree | 59972 | 18797474 | **313.4x** | **6250000** |
+
+**That is the third reading of the same phenomenon on this one matrix and they all point one way:
+predicted fill and delay count move in OPPOSITE directions here.** Amd predicts less than mmd and
+dies; the corrected mmd predicts less than the old mmd and delays twice as much. Whatever drives the
+cascade on `LFAT5000` is not the quantity the analysis is minimising, and the two earlier readings
+could be read as a difference between branches where this one cannot: nothing but the ordering
+changed, and it changed within a branch.
+
+The doubling is close enough to exact to be worth naming rather than rounding away: 6250000 against
+3128750 is 1.998, and 6250000 is 312.5 per column over n = 19994. Nobody has looked at whether that
+is a cap, a growth policy or coincidence.
 
 ## What this report does not establish
 
@@ -379,7 +408,7 @@ Stated plainly, because the boundaries matter more than the headline.
   port from its predecessor, so it is the part that most wants outside evidence.
 - **One right-hand side per matrix**, all ones, with no iterative refinement and no scaling or
   equilibration applied. Several matrices here would improve substantially with either.
-- **Sizes to about 70000 columns and 15.7 million factor entries.** The larger end of the
+- **Sizes to about 70000 columns and 18.8 million factor entries.** The larger end of the
   collection is untouched.
 - **Numerical singularity is marked, not proved.** The zero count from the inertia is a marker: a
   matrix singular to within rounding may show no exactly zero eigenvalue at all. It is a proof when

@@ -65,6 +65,20 @@ softer layer: conventions for consistency, not correctness.
   `sortIdx`. Loop-local variables go the other way and abbreviate freely (`sfp`, `sp`, `lk`),
   because there they are read a hundred times and written once.
 
+- **A store of per-entity blocks is named for its PAYLOAD where there is one kind of it, and for
+  the BLOCK where there are several.** `colPtr` locates a column and the column's contents are
+  named directly, `rowIdx` and `val`; `snodePtr` and `nodeIdx` do the same one level up, `node`
+  existing so that one word covers a row and a column. Where no such word exists the block is
+  named instead and the kind is carried by the accessor: a quotient graph's `srcPtr` locates a
+  block holding vertex ids, clique ids or a clique's members depending on the run and on whether
+  its owner has eliminated, and `adjacencyAmd`, `incidenceMmd` and `clique` say which.
+
+  **The test is whether one word covers every payload the structure can hold**, not how many
+  payloads there happen to be today. A row and a column really are one object under symmetry; a
+  vertex and a clique are not, so no `node` can be invented for the second case. Counts follow the
+  same rule, which is why the clique store's is `numBornCliqueMembers`: a clique's contents ARE
+  one kind and do have a word. Reasoning in `docs/DESIGN_DECISIONS.md` (2026-08-23).
+
 - **The quotient graphs are header-only: `QuotientGraph`, `QuotientGraphCompacted` and, when
   it is promoted, `QuotientGraphChained` keep their bodies in their headers.** Two reasons, and
   neither is about how the code reads:
@@ -444,12 +458,12 @@ softer layer: conventions for consistency, not correctness.
     is never read, if one ever appears.
   - **A two dimensional size or position is a `std::size_t`.** It measures or offsets into an
     object sized by an AREA, so it is bounded by nnz rather than by n and routinely exceeds 2^31.
-    E.g. `SparseMatrix::colPtr`, `QuotientGraph::mSourcePtr` and `mCliquePtr`, `nnz()`, and every
-    fill or storage total.
+    E.g. `SparseMatrix::colPtr`, `QuotientGraph::VertexRun::srcPtr`, `nnz()`, and every fill or
+    storage total.
 
   **THE NAMES CARRY THE DIMENSION TOO.** A one dimensional index is `i`, `j` or `k`, or a word
   ending in one of them when several are in scope: `uak` and `uik` walk `A[u]` and `I[u]` in the mmd
-  refresh. A two dimensional position ends in `p` or `Ptr`: `cp` walks `colPtr`, and `mSourcePtr`
+  refresh. A two dimensional position ends in `p` or `Ptr`: `cp` walks `colPtr`, and `srcPtr`
   offsets into the arena. So the letter and the type agree, and a `k` that turned out to need
   `std::size_t` is a sign the loop is offsetting rather than counting.
 

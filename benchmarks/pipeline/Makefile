@@ -66,7 +66,8 @@ OBLIO_HDRS  = $(wildcard ../../include/oblio/*.h)
 ifdef OBLIO_PUBLIC
   VENDOR_SRCS =
 else
-  VENDOR_SRCS = $(wildcard ../../private/AmdVendored.cpp ../../private/MmdVendored.cpp)
+  VENDOR_SRCS = $(wildcard ../../private/AmdVendored.cpp ../../private/MmdVendored.cpp \
+                          ../../private/MmdCorrected.cpp)
 endif
 # Which configuration this directory is built in. The two differ by a macro, so a binary from one
 # is wrong for the other and no timestamp would say so. The $(shell) deletes the stamp when the
@@ -129,5 +130,6 @@ scale3d: pipeline_scaling_cpp
 # is overridable, `make CXXFLAGS="... -g"` produces one on macOS, and clean removes what a build
 # in this directory CAN produce.
 clean:
-	rm -f .build-mode pipeline_timing_cpp pipeline_scaling_cpp AmdVendored.o MmdVendored.o
+	rm -f .build-mode pipeline_timing_cpp pipeline_scaling_cpp \
+	      AmdVendored.o MmdVendored.o MmdCorrected.o
 	rm -rf *.dSYM

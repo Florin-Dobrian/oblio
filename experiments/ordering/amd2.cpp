@@ -587,7 +587,7 @@ std::vector<std::int32_t> amd2MinimumDegree(const Graph& G) {
     // pivot; before the fix it read 19 on a 140x140 grid and 155 at 26 cubed, against the vendored
     // routine's 0.33 and 0.48 for the same merges.
     std::size_t numHashPairs = 0;                // pairs the exact test was run on
-    std::vector<std::vector<std::int32_t>> hashBucket(n + 1);   // Amd.cpp's Head[hval]
+    std::vector<std::vector<std::int32_t>> hashBucket(n);   // Amd.cpp's Head[hval]
     std::size_t numBoundChecks = 0;
     std::size_t numLooseBounds = 0;
     std::size_t numBoundsBelowExact = 0;   // an invariant, not a measurement
@@ -802,10 +802,17 @@ std::vector<std::int32_t> amd2MinimumDegree(const Graph& G) {
             // incidence term is annihilated exactly and the hash came out a function of
             // the ADJACENCY ALONE. Amd.cpp lets a vertex and a clique collide on purpose,
             // the hash being a filter and never the decision. The invariant the two lines
-            // hold TOGETHER is that the modulus must not divide the stride.
+            // hold TOGETHER is that the modulus must not divide the stride, and having no
+            // stride is the cheapest way to hold it.
+            //
+            // THE MODULUS IS n, AS Amd.cpp'S IS AND AS PRODUCTION'S IS. It was n + 1 until
+            // 2026-08-23, left behind when the stride went on 2026-08-09 and never
+            // followed. The hash is a filter, so the two moduli give the same merges and
+            // the same permutation and differ only in how many exact comparisons they
+            // cost.
             for (std::int32_t c : I[u])
                 key += static_cast<std::size_t>(c) + 1;
-            const std::size_t k = key % (n + 1);
+            const std::size_t k = key % n;
             if (hashBucket[k].empty()) usedKeys.push_back(k);
             hashBucket[k].push_back(u);
         }

@@ -84,7 +84,8 @@ OBLIO_HDRS = $(wildcard ../../include/oblio/*.h)
 ifdef OBLIO_PUBLIC
   VENDOR_SRCS =
 else
-  VENDOR_SRCS = $(wildcard ../../private/AmdVendored.cpp ../../private/MmdVendored.cpp)
+  VENDOR_SRCS = $(wildcard ../../private/AmdVendored.cpp ../../private/MmdVendored.cpp \
+                          ../../private/MmdCorrected.cpp)
 endif
 
 ifneq ($(VENDOR_SRCS),)
@@ -202,5 +203,5 @@ performance: matrix_performance_cpp
 clean:
 	rm -f amd_raw.cpp \
 	      mmread_cpp matrix_accuracy_cpp matrix_performance_cpp matrix_ordering_cpp \
-	      AmdVendored.o MmdVendored.o .build-mode
+	      AmdVendored.o MmdVendored.o MmdCorrected.o .build-mode
 	rm -rf *.dSYM

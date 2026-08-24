@@ -135,7 +135,9 @@
 # neighbor. Two things travel with it. mmdint files a degree-0 vertex under degree
 # 1, `if(dg==0)dg=1`, so isolated and degree-1 vertices are numbered together, and
 # the bucket a vertex sits in stops being its true degree. And head[1] = 0
-# afterwards, with the main loop starting at mdeg = 2.
+# afterwards, with the main loop starting at mdeg = 2. We drain buckets 0 and 1
+# instead, filing at the true degree, which separates the two degrees; the set
+# numbered is the same and the fill is identical.
 #
 # A prepass vertex is NOT eliminated in the quotient-graph sense: no clique is
 # formed, nothing is pruned, and its neighbors keep degrees that still count it.
@@ -204,6 +206,10 @@
 # hold degrees, every refiled bucket holds degree + 1. That is genuine, not a
 # misreading, and it tilts the pivot choice slightly against refreshed vertices,
 # which sit one bucket higher than an untouched vertex of the same reach.
+# 
+# WE NO LONGER DO THIS. Filing at the true degree at every site is the whole of
+# the departure; see the note at the initial filing. This pass now describes
+# private/MmdVendored.cpp, which is reference only, and NOT what we match.
 #
 # From here degrees[] holds the FILED value, which is what the picker compares and
 # what min_degree tracks. The nnz(L) accounting does not use it: that sums weights
@@ -593,28 +599,28 @@ def mmd3_minimum_degree(G, delta=0):
     # is here as the witness that the guard is inert rather than as a statistic.
     num_tag_sweeps = 0
 
-    # mmdint files a degree-0 vertex under degree 1, `if(dg==0)dg=1`, so the
-    # bucket a vertex sits in is max(degree, 1) rather than its degree. From here
-    # degrees[] holds that filed value, which is what MMD compares and files by.
+    # WE FILE AT THE DEGREE, HERE AND AT EVERY REFRESH. genmmd does not: mmdint
+    # files a degree-0 vertex under 1, `if(dg==0)dg=1`, and mmdupd files every
+    # vertex under its degree PLUS ONE. Two scales in one bucket array, so a
+    # refreshed vertex is penalised by exactly one against one no pivot has
+    # reached, and the minimum is not always the minimum. private/MmdCorrected.cpp
+    # is genmmd with that repaired, and it is what this prototype and production
+    # both match; private/MmdVendored.cpp keeps the original as reference.
     #
-    # THE FLOOR IS HERE TO MATCH THE VENDORED OUTPUT, not to find the prepass
-    # vertices. Taking bucket 0 and then bucket 1 finds the same vertices, and the
-    # fill comes out identical; what changes is the ORDER within the prepass, since
-    # the floor puts both degrees on ONE list where they interleave by insertion and
-    # separate buckets group them by degree. Measured: same prepass set and same
-    # nnz(L) on all 300 random graphs tried, different permutation on 212 of them.
-    # So this is a tie-break of the same kind as mmd3's four, and dropping it would
-    # be a fifth alignment defect that no fill check could see.
-    # n + 1 and not n, which is how production sizes it: `mHead(size + 1, NIL)` beside
-    # `mNext(size, NIL)`, because a head is indexed by a DEGREE and a link by a VERTEX.
-    # The two index spaces are not the same size, and the floor above is what makes the
-    # difference bite: it files a degree-0 vertex under 1, so at n = 1 index 1 has to
-    # exist and holds the only vertex there is. Bucket 0 goes unused from here on, the
-    # floor having taken it out of the range.
-    buckets = [[] for _ in range(n + 1)]       # buckets[d] holds the live degree-d
+    # THE FLOOR USED TO BE HERE, and this comment used to say it existed to match
+    # the vendored output. The measurement it carried still holds and is now the
+    # record of what dropping it does: same prepass set and identical nnz(L) on
+    # all 300 random graphs tried, a different permutation on 212 of them. The
+    # prepass below therefore takes bucket 0 and then bucket 1.
+    #
+    # n and not n + 1, which is how production sizes it. A head is indexed by a DEGREE
+    # and a link by a VERTEX, and filing at the true degree makes those two ranges the
+    # same extent: a degree reaches n - 1. The extra slot went on 2026-08-23 with the
+    # bound on the prepass below, which used to read bucket 1 before knowing whether
+    # any vertex had degree 1 and so read past the end at n == 1.
+    buckets = [[] for _ in range(n)]       # buckets[d] holds the live degree-d
     filed = [False] * n                        # whether u is in a bucket at all
     for u in range(n):
-        degrees[u] = max(degrees[u], 1)
         mmd3_file(buckets, filed, degrees[u], u)
     min_degree = min(degrees) if n else 0
     num_bucket_probes = 0
@@ -630,12 +636,15 @@ def mmd3_minimum_degree(G, delta=0):
         mmd3_show_state(degrees, buckets, min_degree, super_members, eliminated, pivots)
 
     # ---- the PREPASS -------------------------------------------------------
-    # Number everything in bucket 1, which after the floor above holds the
-    # isolated and the degree-1 vertices together, and then leave the bucket
-    # empty. Nothing is eliminated in the quotient-graph sense: no clique is
-    # formed, nothing is pruned, and the neighbors keep degrees that still count
-    # these vertices. That staleness is the point, and it is what genmmd does.
-    prepass_vertices = list(buckets[1])
+    # Number everything in buckets 0 and 1, the isolated and the degree-1
+    # vertices, both of which eliminate without fill, and leave both empty.
+    # genmmd drains ONE bucket here, its floor putting the two degrees
+    # together; filing at the true degree separates them.
+    # 
+    # Nothing is eliminated in the quotient-graph sense: no clique is formed,
+    # nothing is pruned, and the neighbors keep degrees that still count these
+    # vertices. That staleness is the point, and it is what genmmd does.
+    prepass_vertices = [u for b in range(min(2, n)) for u in buckets[b]]
     for u in prepass_vertices:
         mmd3_unfile(buckets, filed, degrees[u], u)
         external_degree = sum(1 for v in A[u] if not eliminated[v])
@@ -848,7 +857,7 @@ def mmd3_minimum_degree(G, delta=0):
                             continue
                         mark[v] = vertex_tag
                         degree += len(super_members[v])
-                degrees[u] = max(degree - len(super_members[u]) + 1, 1)   # dg - qsize[en] + 1
+                degrees[u] = degree - len(super_members[u])              # dg - qsize[en]
                 mmd3_file(buckets, filed, degrees[u], u)
                 refreshed_vertices.append(u)
 
@@ -857,7 +866,7 @@ def mmd3_minimum_degree(G, delta=0):
                 if eliminated[u] or outmatched[u]:
                     continue
                 degree, tag = mmd3_degree(A, I, C, eliminated, super_members, mark, tag, u)
-                degrees[u] = max(degree + 1, 1)   # dg - qsize[en] + 1, floored
+                degrees[u] = degree               # dg - qsize[en]
                 mmd3_file(buckets, filed, degrees[u], u)
                 refreshed_vertices.append(u)
 

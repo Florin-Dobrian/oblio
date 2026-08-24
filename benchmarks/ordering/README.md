@@ -125,10 +125,10 @@ shape as the two dead-code leftovers that survived a counter-based revert check 
 instrument measuring the wrong thing, confidently. Record first; re-anchor with `make amdorder` and
 `make mmdorder` at the start and end of a stretch of work.
 
-**Two drivers are a partial exception.** `MmdFlat` reproduces genmmd's permutation exactly and
-`AmdFlat`
-reproduces `AMD_2`'s, so for those two a baseline recorded from a state that passed the anchor runs
-IS a proxy for the vendored answer. The other six have no such anchor and are only ever "unmoved".
+**Two drivers are a partial exception.** `MmdFlat` reproduces `MmdCorrected`'s permutation exactly
+and `AmdFlat` reproduces `AMD_2`'s, so for those two a baseline recorded from a state that passed
+the anchor runs IS a proxy for the reference answer. The other six have no such anchor and are only
+ever "unmoved".
 
 ### Why small grids, and why the baseline is gitignored
 

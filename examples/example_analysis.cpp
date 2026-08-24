@@ -46,6 +46,7 @@ const char* name(Ordering ordering) {
     switch (ordering) {
         case Ordering::Natural: return "Natural";
         case Ordering::MmdVendored:  return "MmdVendored";
+        case Ordering::MmdCorrected: return "MmdCorrected";
         case Ordering::MmdFlat:      return "MmdFlat";
         case Ordering::MmdChained:   return "MmdChained";
         case Ordering::MmdCompacted: return "MmdCompacted";

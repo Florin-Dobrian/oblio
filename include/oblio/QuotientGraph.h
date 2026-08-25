@@ -86,8 +86,8 @@ public:
     // touches. Amd.cpp has Head, Next and Last and no flag, for the same reason.
     // A DEGREE IS ONE DIMENSIONAL and so `std::uint32_t` in every signature here. The links stay
     // `std::int32_t`, carrying NIL and UNFILED; only the key does not. The heads are indexed by
-    // degree and the links by vertex, which are not the same range: a degree reaches n - 1, so
-    // the heads need n slots where the links need n, and the array is sized n + 1 for slack.
+    // degree and the links by vertex, two ranges of the same extent, so all three arrays are n and
+    // none carries slack.
     // FOUR FACTS IN `mPrev[u]`, told apart by sign, which is what lets three arrays be one. This is
     // genmmd's `bwd` scheme, `private/Mmd.cpp` lines 81 to 84 and 98, with our own value choices.
     //
@@ -160,16 +160,6 @@ public:
     void outmatch(std::int32_t u)         { unfile(u); mPrev[u] = OUTMATCHED; }
     void restore(std::int32_t u)          { if (mPrev[u] == OUTMATCHED) mPrev[u] = UNFILED; }
     bool outmatched(std::int32_t u) const { return mPrev[u] == OUTMATCHED; }
-
-    // Move u to the bucket for newDegree, carrying the cached degree with it. The three steps go
-    // together, which is why this is one call: the bucket a vertex sits in is read from its
-    // degree, so writing the degree first would erase it from the wrong list. A vertex whose
-    // degree did not change is removed and reinserted into the same list, which is harmless.
-    void refile(std::vector<std::uint32_t>& degrees, std::int32_t u, std::uint32_t newDegree) {
-        unfile(u);
-        degrees[u] = newDegree;
-        file(newDegree, u);
-    }
 
     // The next vertex in the same bucket, and whether u is filed at all. MMD reads both: it
     // walks a whole bucket in the prepass, and its refresh asks whether a vertex it reached has
@@ -269,7 +259,7 @@ struct TaggedScan {
 
 // The quotient graph itself: the three lists above, the liveness flags, and the supervariable
 // members that mass elimination grows. A driver owns one of these, picks a pivot, calls
-// eliminate, and refreshes whatever the elimination reached.
+// the eliminator, and refreshes whatever the elimination reached.
 class QuotientGraph {
 public:
     // Built straight from A's pattern. A is stored with both triangles, so a column's rows are
@@ -286,7 +276,7 @@ public:
     QuotientGraph(const std::vector<std::size_t>&  colPtr,
                   const std::vector<std::int32_t>& rowIdx);
 
-    std::size_t size() const           { return mSegment.size(); }
+    std::size_t size() const { return mSegment.size(); }
 
     // EVERY MEMBER EVER PUT INTO A CLIQUE, which the benchmark prints as `cC`. Third of the three
     // member counters below, and they differ only in WHEN: born is cumulative and only rises, live
@@ -385,11 +375,11 @@ public:
     std::int32_t mark(std::int32_t u) const          { return mMark[u]; }
     void setMark(std::int32_t u, std::int32_t tag)   { mMark[u] = tag; }
 
-    // The members of clique c, which after eliminate(p) is the pattern of p's column of L: the
+    // The members of clique c, which after eliminating p is the pattern of p's column of L: the
     // vertices the pivot reached, less those it absorbed. A pointer and a length, as the
     // adjacency is, for the same reason.
     //
-    // **Valid until the next eliminate.** The members live in one arena that grows as cliques are
+    // **Valid until the next elimination.** The members live in one arena that grows as cliques are
     // formed, so a reallocation moves them; the offsets are indices and survive it, but a pointer
     // taken beforehand does not. Read a clique at the moment of use, which is the same rule the
     // numeric factor's blocks live by.
@@ -424,7 +414,7 @@ public:
     // be cited as one. `benchmarks/ordering/README.md` (2026-08-09) has the numbers.
     //
     // VALID UNTIL THE NEXT ELIMINATION, and a scalar rather than an array for that reason: it is
-    // read immediately after `eliminate` and never afterwards. Same contract as the pointer
+    // read immediately after the eliminator and never afterwards. Same contract as the pointer
     // `clique()` returns, and stated here because a scalar carrying per-pivot state is the kind
     // of thing that goes stale silently.
     //
@@ -513,7 +503,7 @@ public:
     // Returns the vertices merged into the pivot's supervariable, which the caller needs in
     // order to take them out of its own bookkeeping.
     //
-    // **The returned reference is valid until the next eliminate**, being a scratch buffer whose
+    // **The returned reference is valid until the next elimination**, being a scratch buffer whose
     // capacity survives from pivot to pivot. Returning by value cost one allocation per
     // elimination that merged anything, about 1700 per ordering at 140x140. A caller that needs
     // the list to outlive the next call copies it.
@@ -536,7 +526,7 @@ public:
     // read as what an elimination is: the pivot stops being a vertex with a reachable set and
     // becomes a clique holding that same set. Not one of the three differences builds a set;
     // each is a stamp of the subtrahend and one compaction pass over the minuend.
-    const std::vector<std::int32_t>& eliminate(std::int32_t pivot);
+    const std::vector<std::int32_t>& eliminateMmd(std::int32_t pivot);
 
     // The same elimination, with an approximate-degree driver's first scan folded into it.
     //
@@ -565,7 +555,7 @@ public:
     // overload above says about why the fold is sound applies here unchanged; only the three-facts
     // array differs. It also fills the hash key's adjacency half, which that overload has no need
     // of because its callers keep a separate walk of A[u].
-    const std::vector<std::int32_t>& eliminate(std::int32_t pivot, TaggedScan& scan);
+    const std::vector<std::int32_t>& eliminateAmd(std::int32_t pivot, TaggedScan& scan);
 
 
     // Fold v into u, the two having been found indistinguishable from EACH OTHER rather than
@@ -597,26 +587,28 @@ public:
     // computed. See the member's note.
     void setReverseIncidence(bool on) { mReverseIncidence = on; }
 
-    // Stop eliminate() at the prune, leaving mass elimination to the caller. AMD_2 makes the same
-    // test in its scan 2, AFTER aggressive absorption has dropped every clique lying inside the
-    // new one, and says why in its own comment: with aggressive absorption, `deg == 0` is
-    // identical to the structural test. Asking first, which is what eliminate() does by default,
+    // Stop the eliminator at the prune, leaving mass elimination to the caller. AMD_2 makes the
+    // same test in its scan 2, AFTER aggressive absorption has dropped every clique lying inside
+    // the new one, and says why in its own comment: with aggressive absorption, `deg == 0` is
+    // identical to the structural test. Asking first, which is what the eliminator does by
+    // default,
     // asks it of an I[u] that still holds cliques about to be removed, so the cheap test declines
     // vertices AMD merges.
     //
-    // With this on, eliminate() returns an EMPTY merged list and C[pivot] is reach(pivot) exactly,
+    // With this on, eliminateAmd returns an EMPTY merged list and C[pivot] is reach(pivot) exactly,
     // and the caller must call massEliminate() once it has absorbed. Used by AmdFlat alone. See
     // experiments/ordering/AMD3.md, ledger entry 3.
     void setLateMassElimination(bool on) { mLateMassElimination = on; }
 
-    // The half eliminate() no longer does under the flag above: fold into the pivot's supervariable
-    // every member of C[pivot] that the new clique now accounts for entirely, and trim C[pivot] of
-    // them. Returns the merged vertices, from a member scratch as eliminate() does.
+    // The half eliminateAmd no longer does under the flag above: fold into the pivot's
+    // supervariable every member of C[pivot] that the new clique now accounts for entirely, and
+    // trim C[pivot] of them. Returns the merged vertices, from a member scratch as the
+    // eliminator does.
     //
     //     merged   = { u in C[pivot] : A[u] == {} and I[u] == {pivot} }
     //     C[pivot] = C[pivot] - merged
     //
-    // Calling it without the flag is a caller error and not guarded: eliminate() will already have
+    // Calling it without the flag is a caller error and not guarded: eliminateAmd will already have
     // merged, so this would find nothing and cost a pass.
     const std::vector<std::int32_t>& massEliminate(std::int32_t pivot);
 
@@ -639,12 +631,22 @@ public:
     std::vector<std::int32_t> orderAscending(const std::vector<std::int32_t>& pivots) const;
 
 private:
-    // The head and tail of an elimination, shared by the two overloads above and private because
-    // between them the graph is half eliminated: the clique is written and stamped but the reached
-    // vertices still name the pivot as a variable. Nothing outside may observe that state, which is
-    // why the seam is two private calls rather than a public begin and end.
-    void beginEliminationAmd(std::int32_t pivot);
+    // THE THREE STEPS OF AN ELIMINATION, private because between them the graph is half
+    // eliminated: the clique is written and stamped but the reached vertices still name the pivot
+    // as a variable. Nothing outside may observe that state, which is why the seam is private
+    // calls rather than a public begin and end. The two wrappers above are the only callers, and
+    // their value is that the ORDER of the three lives here where nothing in a driver could
+    // enforce it.
+    //
+    // ONLY THE AMD BEGIN TAKES THE SCAN, and it can because the begin is already split by branch:
+    // the mmd driver reaches `beginEliminationMmd` and never sees a `TaggedScan`. That was not
+    // true while there was one `beginElimination`, which is why the store it now carries used to
+    // stand in a walk of its own.
+    void beginEliminationAmd(std::int32_t pivot, TaggedScan& scan);
     void beginEliminationMmd(std::int32_t pivot);
+
+    void pruneAmd(std::int32_t pivot, TaggedScan& scan);
+    void pruneMmd(std::int32_t pivot);
 
     const std::vector<std::int32_t>& finishElimination(std::int32_t pivot);
 
@@ -677,7 +679,7 @@ private:
     // The CONSERVATION LEMMA is why one uint32 covers both. Their sum is bounded by u's column of
     // A for the whole run, so neither can reach n on its own where the other is nonzero, and
     // `adjacencySize(u) + incidenceSize(u)` cannot overflow either.
-    std::vector<std::int32_t>  mAdjIncSrc;      // every A[u] then I[u], run after run
+    std::vector<std::int32_t> mAdjIncSrc;   // every A[u] then I[u], run after run
     // ONE OBJECT PER VERTEX, NOT THREE ARRAYS. These three numbers are never useful apart: any
     // walk of u needs where its run starts and at least one of the two lengths, and the prune
     // needs all three. Held as three arrays they sit at three unrelated addresses, so a walk of
@@ -770,7 +772,7 @@ private:
     // Every array in this class is its own vector, so nothing here has that property. Which is
     // worth stating where a later reader might be tempted to consolidate them for locality: the
     // consolidation is what creates the hazard. See docs/DESIGN_DECISIONS.md (2026-08-16, later).
-    std::vector<std::int32_t>  mCliqueSrc;    // every C[c] ever formed, end to end
+    std::vector<std::int32_t> mCliqueSrc;   // every C[c] ever formed, end to end
 
     // See `numPeakCliqueMembers`. Maintained by `killClique`, by `trimClique`, and by the one
     // place a clique is born, which is why all three are funnelled rather than written where they
@@ -807,9 +809,9 @@ private:
     // AT THIS COMMIT NOTHING NEGATES IT. The type is landed on its own so that the encoding, which
     // changes what several hot loops read, arrives against a tree where the width is already
     // settled and the digest has already said so.
-    std::vector<std::int32_t>  mSuperNext;
-    std::vector<std::int32_t>  mSuperLast;
-    std::vector<std::int32_t>  mWeight;
+    std::vector<std::int32_t> mSuperNext;
+    std::vector<std::int32_t> mSuperLast;
+    std::vector<std::int32_t> mWeight;
     std::uint32_t              mCliqueWeight = 0;  // see cliqueWeight(); per-pivot, not per-vertex
 
     std::vector<std::int32_t> mMerged;   // scratch for the vertices an elimination merges away
@@ -823,7 +825,7 @@ private:
     // experiments/ordering/mmd3.py, where the same four walks are reversed together.
     bool mReverseIncidence = false;
 
-    // Whether eliminate() stops at the prune and leaves mass elimination to the caller. Off by
+    // Whether the eliminator stops at the prune and leaves mass elimination to the caller. Off by
     // default. See the setter, and massEliminate() for the half it hands over.
     bool mLateMassElimination = false;
 
@@ -843,7 +845,7 @@ private:
     // in step, and a driver that gains a prepass later gets the correct behavior for free.
     // GONE IF THE ARRAY EXISTS, a no-op if it does not, which is what lets the sites that retire
     // a vertex be shared across the branches. The amd branch never enables marks.
-    void markGone(std::int32_t v) { if (!mMark.empty()) mMark[v] = GONE; }
+    void markGone(std::int32_t u) { if (!mMark.empty()) mMark[u] = GONE; }
 
     bool mHasNumbered = false;
 
@@ -1197,7 +1199,7 @@ inline void QuotientGraph::setAside(std::int32_t u) {
     markGone(u);
 }
 
-inline void QuotientGraph::beginEliminationAmd(std::int32_t pivot) {
+inline void QuotientGraph::beginEliminationAmd(std::int32_t pivot, TaggedScan& scan) {
     // The reach is written STRAIGHT INTO THE ARENA, with no scratch and no copy. C[pivot] is the
     // reach, so the block the walk fills is already the clique's own block; there was never a
     // reason for the set to exist anywhere else first.
@@ -1263,11 +1265,20 @@ inline void QuotientGraph::beginEliminationAmd(std::int32_t pivot) {
     // The absorbed cliques are I[pivot], read where they lie. Nothing below writes the pivot's run
     // (the prune rewrites the runs of C[pivot]'s members, and the pivot is not one of them), so no
     // copy and no scratch is needed to keep them alive across the passes that follow.
+    //
+    // A CLIQUE DIES TWO WAYS AND THE TAGGED W MUST LEARN ABOUT BOTH. Aggressive absorption zeroes
+    // `w[c]` in the driver; elimination-time absorption is this list. `AMD_2` writes both deaths
+    // into W, `Pe[e] = FLIP(me)` with `W[e] = 0`, and its scan then tests `we != 0` off the load
+    // it already needs for the value. The store rides on the walk that kills the clique, so one
+    // read of the entry records both facts.
     const std::int32_t* absorbedCliques =
         mAdjIncSrc.data() + mSegment[pivot].srcPtr + mSegment[pivot].adjacencySize;
     const std::uint32_t absorbedSize    = mSegment[pivot].incidenceSize;
-    for (std::uint32_t i = 0; i < absorbedSize; ++i)
-        killClique(absorbedCliques[i]);              // dead, its block left behind
+    for (std::uint32_t i = 0; i < absorbedSize; ++i) {
+        const std::int32_t c = absorbedCliques[i];
+        killClique(c);                               // dead, its block left behind
+        scan.w[c] = 0;                               // and dead to the scan; see above
+    }
 
     // Both readers of the pivot's own run are past, so the run becomes the clique's descriptor.
     mSegment[pivot].srcPtr     = cliqueStart;
@@ -1435,8 +1446,7 @@ inline void QuotientGraph::beginEliminationMmd(std::int32_t pivot) {
     mCliqueWeight = cliqueWeight;
 }
 
-inline const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pivot) {
-    beginEliminationMmd(pivot);
+inline void QuotientGraph::pruneMmd(std::int32_t pivot) {
     // C[pivot] IS the reach here: beginElimination wrote it there and nothing has trimmed it yet
     // (massEliminate does, and runs after). So the prune walks the arena block rather than a copy.
     const std::int32_t* reached     = mCliqueSrc.data() + mSegment[pivot].srcPtr;
@@ -1519,31 +1529,9 @@ inline const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pi
         // A[u], so an extra write before the reads finish clobbers an unread entry. AMD_2 makes
         // its three assignments after both compactions for exactly this reason.
     }
-
-    return finishElimination(pivot);
 }
 
-inline const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pivot,
-                                                                 TaggedScan& scan) {
-    // A CLIQUE DIES TWO WAYS AND THE TAGGED W MUST LEARN ABOUT BOTH. Aggressive absorption zeroes
-    // `w[c]` in the driver; elimination-time absorption, which is I[pivot], happens inside
-    // `beginElimination` and used to be recorded only as a zero size. So the prune could test
-    // neither alone and tested the size, an array it reads for nothing else, once per incidence
-    // clique on every reached vertex. `AMD_2` writes both deaths into W, `Pe[e] = FLIP(me)` with
-    // `W[e] = 0`, and its scan tests `we != 0` off the load it already needs for the value.
-    //
-    // Done HERE rather than inside beginElimination, which is the only reason it is a separate
-    // walk. beginElimination is shared with the mmd drivers and they have no W; giving it a `w`
-    // parameter would push an amd concept through mmd's path for nothing. I[pivot] is still intact
-    // at this point, so this walks the same short list beginElimination is about to read.
-    {
-        const std::int32_t* absorbed = mAdjIncSrc.data() + mSegment[pivot].srcPtr
-                                                      + mSegment[pivot].adjacencySize;
-        const std::uint32_t count    = mSegment[pivot].incidenceSize;
-        for (std::uint32_t i = 0; i < count; ++i) scan.w[absorbed[i]] = 0;
-    }
-
-    beginEliminationAmd(pivot);
+inline void QuotientGraph::pruneAmd(std::int32_t pivot, TaggedScan& scan) {
     const std::int32_t* reached     = mCliqueSrc.data() + mSegment[pivot].srcPtr;
     const std::uint32_t reachedSize = mSegment[pivot].adjacencySize;
 
@@ -1659,8 +1647,6 @@ inline const std::vector<std::int32_t>& QuotientGraph::eliminate(std::int32_t pi
         mSegment[u].incidenceSize = write - kept;
         if (write - kept > 1) std::swap(source[kept], source[write - 1]);
     }
-
-    return finishElimination(pivot);
 }
 
 inline const std::vector<std::int32_t>& QuotientGraph::finishElimination(std::int32_t pivot) {
@@ -1678,6 +1664,19 @@ inline const std::vector<std::int32_t>& QuotientGraph::finishElimination(std::in
     mSegment[pivot].incidenceSize = 0;
     markGone(pivot);
     return mMerged;
+}
+
+inline const std::vector<std::int32_t>& QuotientGraph::eliminateMmd(std::int32_t pivot) {
+    beginEliminationMmd(pivot);
+    pruneMmd(pivot);
+    return finishElimination(pivot);
+}
+
+inline const std::vector<std::int32_t>& QuotientGraph::eliminateAmd(std::int32_t pivot,
+                                                                    TaggedScan& scan) {
+    beginEliminationAmd(pivot, scan);
+    pruneAmd(pivot, scan);
+    return finishElimination(pivot);
 }
 
 // Mass elimination. u is indistinguishable from the pivot when the two had the same closed

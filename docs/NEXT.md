@@ -1,4 +1,118 @@
-# NEXT: the mmd branch left genmmd; one regression is open
+# NEXT: the mmd and amd branches are being aligned against each other; one regression is open
+
+## DONE 2026-08-24: the branch alignment starts, and the documentation was corrected first
+
+**THE FRONT IS NOW mmd AGAINST amd**, which is a different axis from the flat-against-compacted work
+`docs/QUOTIENT_GRAPH_USAGE.md` records. That one asks whether two STORES do the same thing the same
+way; this one asks whether the two BRANCHES do, wherever nothing about minimum degree against
+approximate minimum degree forces them apart. The test is the same and it is worth stating once: a
+difference should be traceable to a vendored routine or to the algorithm, and where it is not, it is
+an accident of how the two files were written.
+
+**THREE ITEMS CLOSED, none of which moves a permutation.** `docs/DESIGN_DECISIONS.md` (2026-08-24)
+has the account.
+
+- **The minimum-degree seed.** `AmdFlat` and `AmdCompacted` computed it with a `min_element` pass of
+  their own, which is neither `AMD_2`'s `mindeg = 0` nor the mmd branch's minimum-at-filing, and
+  which answers for buckets that do not exist: the degree-zero and dense rows are numbered or set
+  aside rather than filed, so one isolated vertex puts the seed at 0 with bucket 0 empty. Both amd
+  drivers now take the minimum in the filing loop, over the vertices actually filed, which is
+  genmmd's shape and the mmd drivers'.
+- **`Buckets::refile` deleted.** No caller in the built tree since the 2026-08-21 retirement, and it
+  was the only member of `Buckets` that named a `degrees` array, which is the amd branch's and which
+  the mmd branch does not have. The class is now a list structure and nothing else.
+- **A stale sentence in `Buckets`**, saying the heads are sized `n + 1` for slack, three lines above
+  a constructor that sizes them `n`. Left behind by the 2026-08-23 change to file at the true
+  degree.
+
+**WHAT IS NEXT ON THIS AXIS, and the first item is a fork rather than a step.**
+
+- **mmd HAS NO DENSE-ROW RULE.** `setAside` is called by `AmdFlat` and `AmdCompacted` and by nothing
+  else. Item 3 below measures MMD at 70.7 ms against 0.83 on `GHS_indef/bloweybq` for want of it.
+  Read that item's figures with its date: they are 2026-08-11, so its `AmdFlat` pair, 470 against
+  1.5, describes a driver that got the rule on 2026-08-18 and no longer exists. The mmd pair is
+  still current, no mmd driver having the rule.
+
+  **THE MECHANISM IS ALREADY BRANCH-NEUTRAL AND THE SHARED CLASS NEEDS NOTHING**, checked
+  2026-08-24. `setAside` does two things and each branch reads a different one: `mWeight[u] = 0`,
+  which amd's `reachableSet` and prune skip on `nv > 0`, and `markGone(u)`, which mmd's
+  `eliminatedMmd` skips on `mMark[u] == GONE`. Both halves are there because one class serves both,
+  and each is inert on the branch that does not read it.
+
+  **THREE THINGS TO SETTLE, none of them the mechanism.**
+
+  - **The oracle, which is the fork.** `MmdCorrected` has no such rule, so the moment an mmd driver
+    sets a row aside its permutation leaves the oracle and `make mmdorder` fails on every matrix
+    with a hub. Either `MmdCorrected` gets the rule, a second deliberate edit to vendored code after
+    the degree-scale repair, or the mmd branch stops being checkable by equality.
+  - **The output path differs and would fail SILENTLY.** amd appends `denseRows` to `pivots` and
+    calls `order`; mmd calls `orderAscending`, which reserves a supervariable's room with `pos +=
+    mWeight[pivot]`, so a set-aside row arriving in the pivot list with weight 0 reserves nothing
+    and drops out of the permutation. It has to be appended after the fact, as amd does.
+  - **The threshold would be OURS on the mmd side.** `max(16, 10 * sqrt(n))` is `AMD_2`'s and we
+    match it because it is the thing being matched. genmmd defines nothing, so the same constant on
+    the mmd branch is a choice rather than a port, which is a different kind of claim to defend.
+    Worth knowing what it is: a fraction that shrinks with n, 32 per cent of n at 1000 and 1 per
+    cent at a million, so it fires well below a full row.
+
+- **`unfile(u); restore(u);` WANTS TO BE ONE METHOD, and it is the cheapest item here.** Every mmd
+  driver writes the pair adjacent and unconditional over each member of the new clique, which is
+  genmmd's single store `bwd[rn] = 0` at `private/MmdVendored.cpp` line 89 spelled as two calls.
+  Ours costs an extra load of `mPrev` and an extra branch per member, since each call guards its own
+  entry condition: `unfile` reads the slot to decide the splice and returns early on `OUTMATCHED`,
+  then `restore` reads it again to decide whether it says `OUTMATCHED`. genmmd asks once, knowing
+  the state at the call site.
+
+  **THE NAME AND THE BODY BOTH ALREADY EXISTED.** `BucketsChained` carried `evict(u)` defined as
+  exactly those two lines, and went when that class turned out to be production's `Buckets`
+  verbatim; the 2026-08-19 note below records it. Reviving it on `Buckets` decides both states from
+  one load and reads as the single operation genmmd treats it as. One method, one call site per mmd
+  driver, and no permutation can move.
+
+  **NOT MEASURED, and the size of it should not be oversold**: a load and a branch in a loop over
+  clique members, which is below what alpamayo can see on its own. The case for it is that it makes
+  our code say what the vendored code says, and the guard in `unfile` stays either way, being there
+  for the batch hazard rather than for this.
+
+- **The two prepasses differ in three ways that are not cosmetic**, written up in
+  `experiments/ordering/README.md` under "The two prepasses". That section concludes they are not
+  the same idea, so it is a place to check the conclusion still holds rather than a place to align.
+  One thread to pull: `Buckets::next` is called by the mmd drivers and by no amd driver, because the
+  mmd prepass walks a whole bucket and the amd prepass walks nothing. Whether that is forced or is
+  an artifact of the two prepasses coming from different codes has not been asked.
+- **The rest of the driver-level inventory has not been taken.** What exists is a reading of
+  `src/MmdFlat.cpp` against `src/AmdFlat.cpp`, 289 lines against 849, which produced the three
+  closed items above and the fork. Nothing systematic, no table, and no equivalent of
+  `QUOTIENT_GRAPH_USAGE.md` for this axis. **The one table that does exist** is
+  `experiments/ordering/README.md`, "The interface each branch actually uses", which is every
+  `Buckets` entry point against the two branches and is where both items above were found.
+
+**AND THE DOCUMENTATION WAS CORRECTED BEFORE ANY OF IT**, six files, all uncommitted with the three
+above. Two were stale, four were wrong.
+
+- `docs/QUOTIENT_GRAPH_USAGE.md` was entirely in the pre-2026-08-21 driver names, `Mmd3`, `Amd3`,
+  `Mmd3C`, `Amd3B`, in all three tables and the ledger.
+- `README.md` carried the enum count, the assertion counts, the vendored files under `src/` rather
+  than `private/`, `MmdCorrected.cpp` nowhere, the alternative-store drivers described as free
+  functions, and four ordering figures predating the 2026-08-23 re-run of `ORDERING.md`.
+- **`CMakeLists.txt` DID NOT BUILD**, and this is the one that mattered. Its vendored glob named
+  `AmdVendored.cpp` and `MmdVendored.cpp` and never gained `MmdCorrected.cpp`, while
+  `OrderEngine.cpp` calls all three entry points under one macro, so every executable failed to link
+  on any tree with `private/` present. Reproduced and then fixed and verified both ways. The
+  Makefile's list was correct and its comment still said two files.
+- **THE ASSERTION COUNTS WERE WRONG IN CLAUDE.md AND IN `docs/TESTING_SPECIFICATION.md`**, and they
+  are now MEASURED: 265 with `private/` and 237 without, `test_order` at 73 or 45. `CLAUDE.md` said
+  251 and 265, which read as the public build having more assertions than the private one. The two
+  halves went stale two days apart rather than being swapped, and the impossible pairing went
+  unremarked, which is the third instance of the count drift that file already documents twice.
+
+**ONE GAP FOUND WHILE REWRITING THE TEST SPECIFICATION, not acted on.** `AmdCompacted` is the
+default ordering and NO SUITE RUNS A WHOLE SOLVE THROUGH IT: `test_pipeline`'s sweep names five
+enumerators by hand and `AmdFlat` is the amd one in it. The two return one permutation, so nothing
+about the ordering is unchecked; what is unchecked is the default as a default. Adding it is one
+list entry and one constant, and the comment there says an added enumerator is meant to make the
+assertion fail until someone has ruled on it, which `MmdCorrected` did not trip because both are
+hardcoded.
 
 ## DONE 2026-08-23: the mmd branch files at the true degree, and the oracle changed
 

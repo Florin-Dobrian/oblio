@@ -14,7 +14,8 @@ traversals over one pipeline.
 - **Three traversal algorithms**: Left-looking, Right-looking, Multifrontal
 - **Two fill-reducing orderings**, both minimum degree: MMD, using the exact degree, and AMD,
   using an approximate degree bound. Each has a vendored reference and up to three of our own
-  implementations of it, eight enumerators in all; `AmdCompacted` is the default
+  implementations of it, and MMD has a second reference besides, a corrected copy of the first
+  which is the branch's oracle. Nine enumerators in all; `AmdCompacted` is the default
 - **One right-hand side per solve**, a `Vector<Val>`, with the factorization reused across as
   many as wanted. Many right-hand sides at once, which is where the solve would become a level-3
   BLAS operation, is the one thing on the roadmap rather than in the library; see Status
@@ -314,7 +315,7 @@ include/oblio/      , public headers (declarations only)
   MmdChained.h  MmdCompacted.h  AmdCompacted.h , the same two orderings on those two VENDORED
                       clique stores. Both keep the ordering inside O(n + m); ours does not. Each
                       is the same ordering computed differently and must reproduce its original
-                      exactly, so each is reached as a free function
+                      exactly, which is what makes either checkable
   ElmForest.h       , elimination forest and supernodes (data)
   ElmForestEngine.h , builds the elimination forest
   SymFactor.h       , symbolic factor: supernodal index structure (data)
@@ -329,13 +330,21 @@ include/oblio/      , public headers (declarations only)
   SolveEngine.h     , triangular solves and right-hand-side permutation
   DirectSolver.h    , the whole pipeline behind one object (analyze / factor / solve)
 src/                , method bodies + explicit instantiations (flat layout)
-                      One .cpp per header, plus the vendored orderings, which have none:
+                      One .cpp per header that needs one; the three quotient graphs are
+                      header-only and the two data classes have no bodies
+private/            , the vendored orderings, unpublished and optional. Both builds detect the
+                      directory rather than requiring it; without it the three enumerators below
+                      refuse:
   AmdVendored.cpp   , AMD ordering (SuiteSparse 3.3.4, Davis/Amestoy/Duff, BSD-3-clause)
-  MmdVendored.cpp   , MMD ordering (Sparspak/Liu, via Oblio 0.9)
-tests/              , test suites (251 assertions; see docs/TESTING_SPECIFICATION.md)
+  MmdVendored.cpp   , MMD ordering (Sparspak/Liu, via Oblio 0.9), frozen and compared against
+                      by nothing
+  MmdCorrected.cpp  , the same routine with its degree scale repaired, and the mmd branch's
+                      oracle
+tests/              , test suites (265 assertions, 237 without private/; see
+                      docs/TESTING_SPECIFICATION.md)
   smoke.cpp                    5,  quick end-to-end sanity
-  test_order.cpp              59,  the four enum orderings, and each of the three non-enum
-                                   layers against its original entry for entry
+  test_order.cpp              73,  every ordering returns a valid permutation, and each driver
+                                   of ours matches its branch's reference entry for entry
   test_permutation.cpp        11,  permutation maps
   test_forest.cpp             29,  elimination forest and supernodes
   test_symfactor.cpp          29,  symbolic factorization
@@ -357,8 +366,9 @@ benchmarks/         , measurement against the current tree, expected to keep com
   ordering/         , one phase against itself: what each ordering costs, in time and in fill
   pipeline/         , the phases against each other, and how the cost grows with problem size
                       (SCALING.md)
-  matrices/         , the pipeline on real matrices from SuiteSparse, accuracy and performance
-                      (ACCURACY.md, PERFORMANCE.md)
+  matrices/         , the pipeline on real matrices from SuiteSparse: what the orderings cost,
+                      and the accuracy and performance of the whole solve
+                      (ORDERING.md, ACCURACY.md, PERFORMANCE.md)
 experiments/        , frozen design studies, each answering one question with a measurement
   ordering/         , the minimum-degree family rebuilt one mechanism at a time, in C++ and Python
   storage-options/  , flat against vector-of-vectors, and the accessor that spans both
@@ -367,40 +377,41 @@ experiments/        , frozen design studies, each answering one question with a 
   openmp/           , how much parallelism Accelerate already supplies, and what is left
 ```
 
-The ordering enum also carries Natural, the identity, and six implementations of ours. A driver is
-named for its branch and the clique store it runs on: `MmdCompacted` and `AmdCompacted` on `AMD_2`'s
-compacted workspace, `MmdFlat` and `AmdFlat` on our own arena, `MmdChained` on genmmd's chained
-segments. Every mmd driver returns `MmdCorrected`'s permutation exactly and every amd driver returns
-`AMD_2`'s, so the branch decides the ordering and the store decides only what computing it costs.
-`MmdCorrected` is genmmd with one defect repaired: genmmd files a vertex under its degree in
-`mmdint` and under its degree PLUS ONE in `mmdupd`, two scales in one bucket array, so a vertex the
-refresh has touched is penalised by one against a vertex no pivot has reached and the minimum degree
-selected is not always the minimum. `MmdVendored` keeps the original and stays as the reference. The
-earlier ladder layers, MMD1, MMD2, AMD1 and AMD2, were retired on 2026-08-21 and are in `retired/`;
-the ladder itself lives as working prototypes in `experiments/ordering/`.
+The ordering enum also carries Natural, the identity, three vendored references and five
+implementations of ours. A driver is named for its branch and the clique store it runs on:
+`MmdCompacted` and `AmdCompacted` on `AMD_2`'s compacted workspace, `MmdFlat` and `AmdFlat` on our
+own arena, `MmdChained` on genmmd's chained segments. Every mmd driver returns `MmdCorrected`'s
+permutation exactly and every amd driver returns `AMD_2`'s, so the branch decides the ordering and
+the store decides only what computing it costs. `MmdCorrected` is genmmd with one defect repaired:
+genmmd files a vertex under its degree in `mmdint` and under its degree PLUS ONE in `mmdupd`, two
+scales in one bucket array, so a vertex the refresh has touched is penalised by one against a vertex
+no pivot has reached and the minimum degree selected is not always the minimum. `MmdVendored` keeps
+the original and stays frozen beside it. The earlier ladder layers, MMD1, MMD2, AMD1 and AMD2, were
+retired on 2026-08-21 and are in `retired/`; the ladder itself lives as working prototypes in
+`experiments/ordering/`.
 
 **`AmdCompacted` and `MmdCompacted` are the pair to use**, and they are what the examples show.
 The reason is the bound rather than the clock: a compacted store is sized from the input, our arena
 is not and cannot be, since it grows with a quantity that depends on the ordering being computed.
-Given a machine you can say whether A fits; you cannot say whether the arena will, and on this
+Given a machine we can say whether A fits; we cannot say whether the arena will, and on this
 benchmark set two matrices grow it past fifty times `tril(A)`. What makes the bound worth taking is
-that it costs nothing: over the 246 the compacted store is 1.4 per cent either side of the arena on
-both branches. See `benchmarks/matrices/ORDERING.md`.
+that it costs nothing: over the 246 the compacted store is level with the arena on both branches,
+1.001 on amd and 0.997 on mmd. See `benchmarks/matrices/ORDERING.md`.
 
 **`MmdFlat` and `AmdFlat` stay** as the unbounded pair the bounded ones must equal entry for entry,
 which is what makes either checkable, and `MmdChained` stays as the other way of bounding the
-store, which measures 70 per cent worse.
+store, which measures 64 per cent worse.
 
 **`AmdCompacted` is the default**, and the branch is the part of that a caller sees. On the 246
-matrices in `benchmarks/matrices` the amd branch orders 21.3 times faster than the mmd one and
-fills 1.6 per cent LESS, 18.11 billion factor entries against 18.41: it wins on both axes rather
+matrices in `benchmarks/matrices` the amd branch orders 21 times faster than the mmd one and
+fills 3.5 per cent LESS, 18.11 billion factor entries against 18.74: it wins on both axes rather
 than trading one for the other. The store, compacted over flat, changes nothing a caller sees, the
 two returning one permutation.
 
-A default also has to be an ordering that is always there, since the vendored pair are optional,
-and it should reproduce a reference rather than a tie-break of our own, which is a bet on the cases
-nobody has run. `AmdCompacted` returns `AMD_2`'s permutation exactly, up to the postorder that
-routine applies and Oblio does not want, since ElmForest orders the supernodal tree later with
+A default also has to be an ordering that is always there, since the vendored orderings are
+optional, and it should reproduce a reference rather than a tie-break of our own, which is a bet on
+the cases nobody has run. `AmdCompacted` returns `AMD_2`'s permutation exactly, up to the postorder
+that routine applies and Oblio does not want, since ElmForest orders the supernodal tree later with
 better information.
 
 ## History
@@ -448,6 +459,9 @@ OrderEngine -> ElmForestEngine -> SymFactorEngine -> NumFactorEngine -> SolveEng
 Done:
 
 - [x] MMD and AMD ordering, vendored (AMD from SuiteSparse 3.3.4; MMD via Oblio 0.9)
+- [x] Oblio's own MMD and AMD, five drivers over three clique stores, each reproducing its
+      branch's reference permutation exactly. `AmdCompacted` is the default, so a build without
+      the vendored pair orders with ours
 - [x] Supernodal symbolic factorization (elimination forest + symbolic factor, ported from 0.9)
 - [x] Cholesky and static LDL, both LDL^T and LDL^H, left-looking and right-looking
 - [x] Single-RHS triangular solve (`Vector`)
@@ -455,7 +469,7 @@ Done:
 - [x] Namespaced headers (`include/oblio/`), explicit instantiation throughout
 - [x] Validated against Oblio 0.9 as oracle; end-to-end residual at machine precision
 - [x] `DirectSolver<Val>`, the top-level analyze / factor / solve driver
-- [x] 251 assertions across 8 suites
+- [x] 265 assertions across 8 suites, 237 of them without the vendored orderings
 - [x] Dynamic LDL, threshold 1x1 / 2x2 pivots: all three traversals, delayed columns and all, at
       machine precision. Non-root supernodes follow Ashcraft, Grimes and Lewis (1998) Figure 3.4
       with the Figure 3.3 acceptance test; roots, which cannot delay, use bounded Bunch-Kaufman

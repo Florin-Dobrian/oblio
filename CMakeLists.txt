@@ -30,7 +30,7 @@ check_c_source_compiles("
 unset(CMAKE_REQUIRED_LIBRARIES)
 
 # ----- Library ---------------------------------------------------------------
-# Source list matches src/*.cpp. The two vendored ordering codes are not
+# Source list matches src/*.cpp. The three vendored ordering codes are not
 # here: they live in private/, which is not part of the published tree, and are
 # added below only when that directory exists.
 #
@@ -70,20 +70,27 @@ add_library(oblio STATIC
 
 # Users #include the "oblio/..." headers (namespaced). PUBLIC so tests/examples
 # that link oblio inherit the include path, so no separate global include is needed.
-# The vendored orderings, optional. Present, Ordering::MmdVendored and Ordering::AmdVendored
-# work; absent, the library still builds and those two enumerators refuse. Detected rather than
-# configured, so a
-# tree that has the directory needs no flag and a clone needs no edit. Warnings are off for these
-# two files only, since they are copied verbatim and not maintained here.
+# The vendored orderings, optional. Present, Ordering::MmdVendored, Ordering::MmdCorrected and
+# Ordering::AmdVendored work; absent, the library still builds and those three enumerators refuse.
+# Detected rather than configured, so a tree that has the directory needs no flag and a clone needs
+# no edit. Warnings are off for these three files only, since they are copied verbatim and not
+# maintained here.
+#
+# NAMED RATHER THAN GLOBBED AS private/*.cpp, since private/ is untracked and may hold anything.
+# The same three names are in the Makefile's VENDOR_SRCS and the two lists must move together;
+# nothing detects a disagreement. All three must be here: OrderEngine.cpp calls all three entry
+# points under OBLIO_VENDORED_ORDERINGS, so a missing name is a link error in every executable
+# rather than one refusing enumerator.
 file(GLOB OBLIO_VENDOR_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/private/AmdVendored.cpp
-                            ${CMAKE_CURRENT_SOURCE_DIR}/private/MmdVendored.cpp)
+                            ${CMAKE_CURRENT_SOURCE_DIR}/private/MmdVendored.cpp
+                            ${CMAKE_CURRENT_SOURCE_DIR}/private/MmdCorrected.cpp)
 if(OBLIO_VENDOR_SRCS)
     target_sources(oblio PRIVATE ${OBLIO_VENDOR_SRCS})
     set_source_files_properties(${OBLIO_VENDOR_SRCS} PROPERTIES COMPILE_OPTIONS "-w")
     target_compile_definitions(oblio PUBLIC OBLIO_VENDORED_ORDERINGS)
-    message(STATUS "Vendored orderings: found in private/, MmdVendored and AmdVendored enabled")
+    message(STATUS "Vendored orderings: found in private/, all three enabled")
 else()
-    message(STATUS "Vendored orderings: private/ absent, MmdVendored and AmdVendored will refuse")
+    message(STATUS "Vendored orderings: private/ absent, all three will refuse")
 endif()
 
 target_include_directories(oblio PUBLIC include)

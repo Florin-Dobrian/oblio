@@ -65,6 +65,89 @@ be real, which requires Hermitian. Once that is on the table, the design collaps
 **Cholesky is `CC^H`, always, and in real that *is* `CC^T`.** No option, no flag, no forbidden
 combination to reject. The answer was not hard. Asking the right question was.
 
+## 2026-08-24: the amd branch takes the mmd branch's minimum-degree seed
+
+**THE DECISION.** Three small changes on one axis, the alignment of the mmd and amd branches against
+each other rather than either against its reference. None of them moves a permutation and none was
+expected to. They are recorded because each was a choice among alternatives that all work, which is
+the kind of thing nothing in the tree would otherwise remember.
+
+### 1. Where the minimum-degree seed comes from
+
+`minDegree` seeds the walk up to the first live bucket, `while (buckets.empty(minDegree))
+++minDegree`, and nothing else reads it. So it has only to be a LOWER BOUND on the first live
+bucket, and a wrong-but-low value costs a few iterations of that walk rather than an answer. There
+were three conventions in the tree for producing it:
+
+```
+genmmd      if(dg<*mdeg)*mdeg=dg  at the moment of filing    private/MmdVendored.cpp line 164
+MmdFlat     the same, in the filing loop
+AMD_2       mindeg = 0                                       private/AmdVendored.cpp line 1302
+AmdFlat     *std::min_element(degrees.begin(), ...)          a pass of its own
+```
+
+**THE AMD ONE MATCHED NEITHER ITS OWN REFERENCE NOR THE SIBLING BRANCH**, which is what made it
+worth looking at. It also answers a slightly different question from the one being asked: the
+degree-zero rows and the dense rows are numbered or set aside rather than filed, so a pass over
+every vertex's degree reports a bucket that does not exist. One isolated vertex anywhere puts the
+seed at 0 with bucket 0 empty, and the walk starts from there.
+
+**WE TOOK THE MMD SHAPE**, the minimum accumulated in the filing loop over the vertices actually
+filed, in `AmdFlat` and `AmdCompacted` alike. `AMD_2`'s `mindeg = 0` was the other candidate and is
+equally correct; the mmd shape is at least as tight, costs no separate pass, and leaves the two
+branches reading the same at a place where nothing forces them to differ. That last is the whole
+reason, and it should be said plainly: this is an alignment, not a speed change, and it was not
+measured because there is nothing here a measurement would resolve.
+
+**WHAT MAKES IT SAFE IS THE LOWER-BOUND PROPERTY AND NOT THE ARITHMETIC.** Any value at or below the
+first live bucket produces the same pivot; the walk finds the bucket either way. That is why the
+digest is the gate rather than the evidence: it says the permutations did not move, which is what a
+change with no observable content has to demonstrate.
+
+### 2. `Buckets::refile` is deleted
+
+It had no caller anywhere in the built tree, only in comments and in `retired/Amd2.cpp` and
+`retired/Amd2B.cpp`, which are out of the build. `docs/NEXT.md` had it on the dead-code list since
+2026-08-14 as one of three inherited-and-redundant constructs, alongside the evicted list and an
+inert ternary, and it outlived both.
+
+**IT WAS ALSO THE ONLY MEMBER OF `Buckets` THAT NAMED A DEGREE ARRAY**, taking
+`std::vector<std::uint32_t>& degrees` so it could write the cached degree between the unfile and the
+file. That array is the amd branch's, `AMD_2`'s `Degree`; the mmd branch has none, the head form
+carrying the bucket instead. So a class shared by both branches carried one entry point shaped for
+one of them, and the class is now a list structure and nothing else. That is the same test the
+flat-against-compacted work applies, asked on the other axis: a difference should be traceable to
+something real, and this one was traceable to a driver that no longer exists.
+
+### 3. A comment that survived the change it described
+
+`Buckets` still said "the heads need n slots where the links need n, and the array is sized n + 1
+for slack", twenty lines below the block explaining that all three arrays are `n` and three lines
+above a constructor that sizes them `n`. The 2026-08-23 change to file at the true degree is what
+made the arrays the same extent, and it corrected the block and the constructor and left this
+sentence.
+
+**THIS IS THE THIRD RECORDED INSTANCE OF THE SAME SHAPE IN THIS TREE**, after the assertion counts
+and the `arenaEntries` comment: an edit that is correct everywhere it is checked, leaving a
+statement about itself somewhere nothing checks. All three read as internally consistent to anyone
+who did not go looking, and none of them is a thing a build or a test can catch. The only defence is
+that a change to an encoding obliges a reading of everything that describes the encoding, which is a
+habit rather than a mechanism.
+
+### How it was checked
+
+Recorded from the tree BEFORE the edits and compared after, which is the order that matters:
+
+```
+make digest        365 digests over 5 drivers, all identical
+make test          265/265, and 237/237 in the public build
+make amdorder      38 cases, 0 failed
+make mmdorder      38 cases, 0 failed
+ASan and UBSan     test_order and the digest, both clean, assertions live
+```
+
+---
+
 ## 2026-08-23: genmmd files on two scales, and we stop copying it
 
 **THE DECISION.** Every mmd driver files a vertex under its TRUE DEGREE, at every site. genmmd does

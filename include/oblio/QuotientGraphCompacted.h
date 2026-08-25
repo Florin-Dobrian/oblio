@@ -192,10 +192,13 @@ public:
 
     // ------------------------------------------------------------------ elimination
 
-    // THE THREE STEPS OF AN ELIMINATION, called in this order by both drivers. There is no
-    // `eliminate` wrapper: amd's prune computes the degree bound and the hash key in the same pass
-    // and mmd's does neither, so one signature would have to carry a parameter one branch ignores.
-    // Spelling the sequence at the call site costs two lines and invents nothing.
+    // THE THREE STEPS OF AN ELIMINATION, and the pair of wrappers over them. A driver calls one
+    // wrapper; the steps stay public because the wrapper is a sequence rather than a replacement,
+    // and its value is that the ORDER lives here where nothing in a driver could enforce it.
+    //
+    // TWO WRAPPERS AND NOT ONE, which is why they carry the branch in the name: amd's prune
+    // computes the degree bound and the hash key in the same pass and mmd's does neither, so one
+    // signature would have to carry a parameter one branch ignores.
     //
     // THE FIRST STEP SPLITS AND IT IS THE COSTLIEST OF THE SUFFIXES, because the placement rule it
     // holds is genuinely common: build in place when the incidence list is empty, otherwise at the
@@ -219,8 +222,8 @@ public:
     // branch. The value of the wrapper is that the ORDER of the three steps lives here rather
     // than in each driver, where nothing could enforce it. The three remain public and remain
     // suffixed; this is a sequence rather than a replacement.
-    const std::vector<std::int32_t>& eliminate(std::int32_t pivot);
-    const std::vector<std::int32_t>& eliminate(std::int32_t pivot, TaggedScan& scan);
+    const std::vector<std::int32_t>& eliminateMmd(std::int32_t pivot);
+    const std::vector<std::int32_t>& eliminateAmd(std::int32_t pivot, TaggedScan& scan);
 
     // MASS ELIMINATION, one method for both branches. Whoever runs it restores the negated
     // weights: this method when the eliminator runs it eagerly, the driver when it runs it late.
@@ -307,7 +310,7 @@ private:
 
     // GONE IF THE ARRAY EXISTS, a no-op if it does not, which is what lets the three bodies that
     // retire a vertex be shared across the branches. The amd branch never enables marks.
-    void markGone(std::int32_t v) { if (!mMark.empty()) mMark[v] = GONE; }
+    void markGone(std::int32_t u) { if (!mMark.empty()) mMark[u] = GONE; }
 
     // THE POOL. Every vertex's segment and every live clique, end to end, sized once at
     // construction to `nzaat + nzaat/5 + n` and never grown. `mFree` is `AMD_2`'s `pfree`.
@@ -738,13 +741,13 @@ QuotientGraphCompacted::finishElimination(std::int32_t pivot) {
     return mMerged;
 }
 
-inline const std::vector<std::int32_t>& QuotientGraphCompacted::eliminate(std::int32_t pivot) {
+inline const std::vector<std::int32_t>& QuotientGraphCompacted::eliminateMmd(std::int32_t pivot) {
     beginEliminationMmd(pivot);
     pruneMmd(pivot);
     return finishElimination(pivot);
 }
 
-inline const std::vector<std::int32_t>& QuotientGraphCompacted::eliminate(std::int32_t pivot,
+inline const std::vector<std::int32_t>& QuotientGraphCompacted::eliminateAmd(std::int32_t pivot,
                                                                           TaggedScan& scan) {
     beginEliminationAmd(pivot);
     pruneAmd(pivot, scan);

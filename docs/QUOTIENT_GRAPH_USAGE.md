@@ -1,8 +1,9 @@
 # Quotient graph usage: which driver calls what
 
-Two quotient graph classes and four drivers, and the drivers PARTITION across the classes: `Mmd3`
-and `Amd3` use `QuotientGraph` and nothing else, `Mmd3C` and `Amd3B` use `QuotientGraphCompacted`
-and nothing else. So there are two tables and neither loses anything to the other.
+Two quotient graph classes and four drivers, and the drivers PARTITION across the classes: `MmdFlat`
+and `AmdFlat` use `QuotientGraph` and nothing else, `MmdCompacted` and `AmdCompacted` use
+`QuotientGraphCompacted` and nothing else. So there are two tables and neither loses anything to the
+other.
 
 **WHAT THIS DOCUMENT IS FOR.** Not the interfaces, which are in the headers and are authoritative
 there. This is the usage: which of each class's entry points each driver actually reaches, so that
@@ -14,8 +15,8 @@ three carry an `align` column so progress is visible wherever you happen to be r
 generated from one list and every cell is checked against the four drivers' call sites, so they
 cannot drift apart; if one is edited by hand the others must be edited with it.
 
-`QuotientGraphChained` and `Mmd3B` are out of scope. Chaining lost the layout comparison and is kept
-as a permanent alternative rather than a candidate, so aligning it buys nothing.
+`QuotientGraphChained` and `MmdChained` are out of scope. Chaining lost the layout comparison and is
+kept as a permanent alternative rather than a candidate, so aligning it buys nothing.
 
 **A blank cell means the driver does not call that entry point.** It does not mean the class lacks
 it: every method in the flat table exists in `QuotientGraph`, and every method in the compacted
@@ -36,7 +37,7 @@ as long as both classes agree about it, which is the usual case and the expected
 
 ## The flat class: `QuotientGraph`
 
-| API | `Mmd3` | `Amd3` | align | since |
+| API | `MmdFlat` | `AmdFlat` | align | since |
 |---|:---:|:---:|:---:|:---:|
 | **layout accessors** | | | | |
 | `adjacencyMmd` / `adjacencyAmd` | x | x | done | 2026-08-21 |
@@ -59,7 +60,7 @@ as long as both classes agree about it, which is the usual case and the expected
 | `number` | x |  | aligned |  |
 | `eliminatedMmd` / `eliminatedAmd` | x | x | done | 2026-08-21 |
 | **elimination** | | | | |
-| `eliminate` | x | x | done | 2026-08-21 |
+| `eliminateMmd` / `eliminateAmd` | x | x | done | 2026-08-24 |
 | `massEliminate` |  | x | aligned |  |
 | **merging and absorption** | | | | |
 | `merge` | x | x | aligned |  |
@@ -77,14 +78,14 @@ as long as both classes agree about it, which is the usual case and the expected
 | `numPeakCliqueMembers` | x | x | aligned |  |
 | `cliqueCountBalances` | x | x | aligned |  |
 
-Fourteen entry points are called by both, six by `Mmd3` alone and eight by `Amd3` alone.
+Fourteen entry points are called by both, six by `MmdFlat` alone and eight by `AmdFlat` alone.
 
 ## The compacted class: `QuotientGraphCompacted`
 
 Where a name is suffixed the two halves share a row, since they are the same entry point split
 where the vendored routines disagree.
 
-| API | `Mmd3C` | `Amd3B` | align | since |
+| API | `MmdCompacted` | `AmdCompacted` | align | since |
 |---|:---:|:---:|:---:|:---:|
 | **layout accessors** | | | | |
 | `adjacencyMmd` / `adjacencyAmd` | x |  | done | 2026-08-21 |
@@ -107,7 +108,7 @@ where the vendored routines disagree.
 | `number` | x |  | aligned |  |
 | `eliminatedMmd` / `eliminatedAmd` | x | x | done | 2026-08-21 |
 | **elimination** | | | | |
-| `eliminate` | x | x | done | 2026-08-21 |
+| `eliminateMmd` / `eliminateAmd` | x | x | done | 2026-08-24 |
 | `massEliminate` |  | x | aligned |  |
 | **merging and absorption** | | | | |
 | `merge` | x | x | aligned |  |
@@ -135,7 +136,7 @@ they differ, the `align` column carries the item's position in the ledger below,
 
 Both shapes are kept deliberately, to see which is the more useful to work from.
 
-| what | `Mmd3` | `Amd3` | `Mmd3C` | `Amd3B` | align | since | note |
+| what | `MmdFlat` | `AmdFlat` | `MmdCompacted` | `AmdCompacted` | align | since | note |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|---|
 | **layout accessors** | | | | | | | |
 | adjacency accessor | x | x | x |  | done | 2026-08-21 | identical in flat, not in compacted |
@@ -185,8 +186,8 @@ The concept rows above hide the spellings. In full, where they differ between th
 | adjacency accessor | `adjacency` | `adjacencyMmd`, `adjacencyAmd` |
 | incidence accessor | `incidence` | `incidenceMmd`, `incidenceAmd` |
 | eliminated | `eliminated` | `eliminatedMmd`, `eliminatedAmd` |
-| performing an elimination | `eliminate` | `beginEliminationMmd`, `beginEliminationAmd`, |
-| | | `pruneMmd`, `pruneAmd`, `finishElimination` |
+| performing an elimination | `eliminateMmd`, `eliminateAmd` | the same pair, over |
+| | | `beginElimination*`, `prune*`, `finishElimination` |
 | which half of the run comes first | `setVendoredListOrder` | the suffixed accessors and walks |
 | mark array on demand | always allocated | `enableMarks` |
 
@@ -201,26 +202,30 @@ of what an ordering driver over a quotient graph needs whatever branch and whate
 `trimClique`, `setAside`, `cliqueWeight`, `order` and `setLateMassElimination` are amd's on both.
 Moving between layouts changed the storage, not who wants what.
 
-**And the class split is one idea**: the flat pair calls `eliminate`, the compacted pair spells the
-three steps, `beginElimination`, prune, `finishElimination`. That wrapper is the only entry point in
-either table that exists on one side and not the other for a reason that is not the layout. It went
+**And the class split WAS one idea**: the flat pair called `eliminate` where the compacted pair
+spelled the three steps, `beginElimination`, prune, `finishElimination`. That was the only entry
+point in either table existing on one side and not the other for a reason that is not the layout,
+and it closed on 2026-08-21, both classes now carrying the wrapper. The wrapper is a suffixed PAIR
+rather than an overload as of 2026-08-24, so a reader can tell from a call site which branch is
+running; the three steps stay public. It went
 when the classes merged, because amd's prune takes a `TaggedScan` and mmd's takes nothing.
 
 ### Five blanks that are not what they look like
 
 Each of these was checked rather than assumed.
 
-**`Amd3B` does not call `adjacencyAmd`.** SUPERVARIABLE DETECTION IS THE WHOLE OF IT, and this entry
-said something else until 2026-08-21: it blamed the prune moving into the class, which is not the
-reason and was probably true of an earlier arrangement. Both drivers reach the prune through one
-`eliminate` call today and neither walks an adjacency in it. `Amd3`'s only two `adjacencyAmd` calls
-in the file are in the hash block.
+**`AmdCompacted` does not call `adjacencyAmd`.** SUPERVARIABLE DETECTION IS THE WHOLE OF IT, and
+this entry said something else until 2026-08-21: it blamed the prune moving into the class, which is
+not the reason and was probably true of an earlier arrangement. Both drivers reach the prune through
+one `eliminate` call today and neither walks an adjacency in it. `AmdFlat`'s only two
+`adjacencyAmd` calls in the file are in the hash block.
 
 What the layout decides there is where the entry to skip sits. Under `AMD_2`'s order the new clique
 is rotated to index 0, so the run minus its first entry is ONE SPAN and the walk is a single loop
 off the run's base, which under that order is the incidence accessor. The flat class puts the new
-clique at the front of `I[u]`, which is the MIDDLE of the run, so `Amd3` stamps in two loops and
-names both accessors. The same asymmetry gives `Amd3` a second `adjacencyAmd` on the candidate side.
+clique at the front of `I[u]`, which is the MIDDLE of the run, so `AmdFlat` stamps in two loops and
+names both accessors. The same asymmetry gives `AmdFlat` a second `adjacencyAmd` on the candidate
+side.
 
 **Detection is the only operation in either driver that is blind to the kind of an entry**, which is
 why it is the only one the run order reaches. Everywhere else a clique id is looked up in the store
@@ -229,10 +234,10 @@ asks only whether two vertices name the same set, so the halves being one span i
 It is sound because the two id populations cannot collide inside one run: a clique's id is the pivot
 that formed it, and if that pivot were in `A[u]` then `u` was in its reach and the prune removed it.
 
-**`Mmd3C` does not call `massEliminate`.** Mmd is not late, so `finishElimination` calls it
-internally. `Amd3B` calls it from the driver because absorption has to run first; see
-`experiments/ordering/README.md`. `Mmd3` and `Amd3` divide the same way, which is why the row is
-`aligned`.
+**`MmdCompacted` does not call `massEliminate`.** Mmd is not late, so `finishElimination` calls it
+internally. `AmdCompacted` calls it from the driver because absorption has to run first; see
+`experiments/ordering/README.md`. `MmdFlat` and `AmdFlat` divide the same way, which is why the row
+is `aligned`.
 
 **`restoreWeight` and `restorePivotWeight` are compacted-only, and both classes negate.** Membership
 in the clique being built is marked by flipping a weight's sign in both. The difference is only who
@@ -248,7 +253,7 @@ n int32 on the amd branch, and it is the clearest candidate in either table for 
 section below.
 
 **`setVendoredListOrder` is flat-only.** The compacted class has no such flag: the walk order is a
-suffixed pair instead. `Mmd3C` carried a dead copy of the flag until 2026-08-19.
+suffixed pair instead. `MmdCompacted` carried a dead copy of the flag until 2026-08-19.
 
 **`numBornCliqueMembers` is flat-only, and the compacted drivers had a version of it briefly.** It
 answers how many members were ever put into a clique, which the benchmark prints as `cC`. The other
@@ -276,7 +281,7 @@ column is the `align` value the tables carry.
 
 | | difference | at `97f4bc6` | now | since |
 |---|---|---|---|---|
-| 1, `layout` | `arenaEntries` unreported by `Amd3B` | apart | apart, by design | 2026-08-23 |
+| 1, `layout` | `arenaEntries` unreported by `AmdCompacted` | apart | apart, by design | 2026-08-23 |
 | 2, `done` | `restoreWeight`, `restorePivotWeight` | apart | **aligned** | 2026-08-21 |
 | 3, `done` | the `eliminate` wrapper | apart | **aligned** | 2026-08-21 |
 | 4, `done` | `eliminated` split, with `enableMarks` | apart | **aligned** | 2026-08-21 |
@@ -289,10 +294,10 @@ disappearing, so the numbering never shifts under a reader who has been followin
 **The differences, in the order it makes sense to take them**, smallest and most independent first.
 The number is the `align` value the tables carry.
 
-**1. `arenaEntries` unreported by `Amd3B`. CLOSED 2026-08-21 AND REOPENED AND REVERSED 2026-08-23,
-which makes it the one item here that was closed the wrong way.** It was read as a missing
-out-parameter: the other three drivers had an `Impl` taking a pointer plus two public overloads and
-`Amd3B` had a single entry point, so `Amd3B` was given the same shape.
+**1. `arenaEntries` unreported by `AmdCompacted`. CLOSED 2026-08-21 AND REOPENED AND REVERSED
+2026-08-23, which makes it the one item here that was closed the wrong way.** It was read as a
+missing out-parameter: the other three drivers had an `Impl` taking a pointer plus two public
+overloads and `AmdCompacted` had a single entry point, so `AmdCompacted` was given the same shape.
 
 **The shape was uniform and the QUANTITY behind it never was.** The flat class returns the clique
 store's size, which is what that store cost and which the benchmark prints as `cC`. The compacted
@@ -329,7 +334,7 @@ mark membership in the clique being built, and the question was who undoes it. T
 neither branch nor class: WHOEVER RUNS MASS ELIMINATION restores, the eliminator when it runs
 eagerly and the driver when it runs late and has a refile pass to ride the store on. `AMD_2` is the
 late case, mass-eliminating with the weights still negative and restoring under RESTORE DEGREE
-LISTS, and `Amd3` now matches it as `Amd3B` already did.
+LISTS, and `AmdFlat` now matches it as `AmdCompacted` already did.
 
 The rule is `mLateMassElimination`, which already existed and already meant exactly this, so both
 classes now have ONE `massEliminate` and the compacted class LOSES a suffixed pair. Its
@@ -349,16 +354,16 @@ class where nothing in a driver could enforce it.
 **4. `eliminated` split in two, and `enableMarks` with it. CLOSED 2026-08-21.** The flat class
 answered "is u dead" with `mMark[u] == GONE` for both branches and allocated the array always; it
 now does what the compacted class does, a zero weight on the amd branch and the tag on the mmd one,
-with the array allocated by `enableMarks`. `Amd3` drops n int32 it never read.
+with the array allocated by `enableMarks`. `AmdFlat` drops n int32 it never read.
 
 **The two predicates are NOT equivalent, which is why this needed checking rather than renaming.**
 They differ on a vertex `number` retired, which is mmd's alone, and on a PIVOT, which is retired
 with its weight intact because that weight is the supervariable's and `order` needs it. So the amd
 predicate is correct only if the amd driver never asks about a pivot. It does not, a pivot being
 unfiled when chosen and never revisited, and that was established by asserting the two agree on
-every call `Amd3` makes and running it: the digest's 73 grids at `-O0`, cubes to 33 a side, random
-patterns at degree 6, 12 and 40, a star, a diagonal, a dense block that fires the dense-row rule,
-and `test_order`. No disagreement anywhere.
+every call `AmdFlat` makes and running it: the digest's 73 grids at `-O0`, cubes to 33 a side,
+random patterns at degree 6, 12 and 40, a star, a diagonal, a dense block that fires the dense-row
+rule, and `test_order`. No disagreement anywhere.
 
 **5. `setVendoredListOrder` against the suffixed accessors. CLOSED 2026-08-21.** The flat class
 selected the branch with a flag where the compacted one names it. The flag is deleted:
@@ -375,9 +380,9 @@ same two the compacted class does.
 **And the accessors were suffixed in all three classes**, `adjacencyAmd` and `adjacencyMmd` with
 the incidence twins. Only the compacted class's halves differ, since it reproduces `AMD_2`'s run
 order and genmmd's. The flat class has one physical layout, so its four names sit over two
-identical bodies; the chained class has one layout AND one driver, `Mmd3B`, so it carries the mmd
-half alone and there is nothing there to duplicate. **The names are split so that a driver and its
-counterpart read the same**, which is what they are bought for, the flat class having no layout
+identical bodies; the chained class has one layout AND one driver, `MmdChained`, so it carries the
+mmd half alone and there is nothing there to duplicate. **The names are split so that a driver and
+its counterpart read the same**, which is what they are bought for, the flat class having no layout
 difference of its own to record.
 
 **Every step must leave every permutation unmoved**, so `make digest` and the two alignment checks
@@ -386,7 +391,7 @@ are the gate at each one, and the baseline below is the second gate.
 **FOUR OF THE FIVE ARE CLOSED AS OF 2026-08-21, AND THE FIFTH WAS REVERSED ON 2026-08-23**, item 1
 having been a difference the layout causes rather than an accident; see its entry. What remains
 between the two classes is `numBornCliqueMembers` against `numCompactions`, which is layout, and two
-`adjacencyAmd` calls in `Amd3`'s hash-detection block that `Amd3B` does not make.
+`adjacencyAmd` calls in `AmdFlat`'s hash-detection block that `AmdCompacted` does not make.
 
 **THE COUNTS THIS PARAGRAPH CARRIED WERE TOO HIGH, corrected 2026-08-21.** It said the mmd pair
 differs in three calls of about forty and the amd pair in nine of about thirty-eight. Both figures
@@ -394,31 +399,31 @@ came from extracting `qg.<method>` from the sources without stripping comments f
 naming a method counted as a call:
 
 ```
-                comments in    comments out
-Mmd3 vs Mmd3C        3 calls      0 calls
-Amd3 vs Amd3B        9 calls      2 calls
+                         comments in    comments out
+MmdFlat vs MmdCompacted        3 calls        0 calls
+AmdFlat vs AmdCompacted        9 calls        2 calls
 ```
 
 The three mmd differences are `qg.mark(v)`, `qg.weight(v)` and `qg.eliminatedMmd(v)` written into
-comments in `Mmd3.cpp` that `Mmd3C` does not carry, and one of the nine is `qg.cliqueBase()` named
-in the comment that records its removal. **Stripped of comments the mmd pair's call sequences are
-IDENTICAL apart from `numCompactions`, and the amd pair's differ only in the two `adjacencyAmd`
-calls named above and the order of two adjacent rejects.** So the sentence above the table was right
-and the arithmetic beside it was not.
+comments in `MmdFlat.cpp` that `MmdCompacted` does not carry, and one of the nine is
+`qg.cliqueBase()` named in the comment that records its removal. **Stripped of comments the mmd
+pair's call sequences are IDENTICAL apart from `numCompactions`, and the amd pair's differ only in
+the two `adjacencyAmd` calls named above and the order of two adjacent rejects.** So the sentence
+above the table was right and the arithmetic beside it was not.
 
 **One residual the tables do not show, and it is the tail.** Three of the four drivers publish
-their counters in the same order and `Mmd3C` does not:
+their counters in the same order and `MmdCompacted` does not:
 
 ```
-Mmd3    balances, peak, arena
-Amd3    balances, peak, arena
-Amd3B   balances, compactions, peak, arena
-Mmd3C   balances, arena, compactions, peak
+MmdFlat         balances, peak, arena
+AmdFlat         balances, peak, arena
+AmdCompacted    balances, compactions, peak, arena
+MmdCompacted    balances, arena, compactions, peak
 ```
 
-`Amd3B` is `Amd3` with one line inserted; `Mmd3C` is neither `Mmd3` with one line inserted nor a
-match for `Amd3B`. Nothing observable turns on it, which is exactly what the five closed items had
-in common.
+`AmdCompacted` is `AmdFlat` with one line inserted; `MmdCompacted` is neither `MmdFlat` with one
+line inserted nor a match for `AmdCompacted`. Nothing observable turns on it, which is exactly what
+the five closed items had in common.
 
 ### Baseline before alignment, 2026-08-21
 

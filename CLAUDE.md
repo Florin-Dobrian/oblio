@@ -162,18 +162,19 @@ names it explicitly.
 
 Note that `src/*.cpp` no longer picks up the vendored orderings: they live in `private/`, which is
 gitignored. A by-hand command line like the one above therefore builds without them, and
-`Ordering::MmdVendored` and `Ordering::AmdVendored` refuse. Add `private/*.cpp` and
+`Ordering::MmdVendored`, `Ordering::MmdCorrected` and `Ordering::AmdVendored` refuse. Add
+`private/*.cpp` and
 `-DOBLIO_VENDORED_ORDERINGS` to include them, or use the Makefile, which detects the directory
 itself.
 
 ### Building the way everyone else does
 
-`private/` holds the two vendored orderings and is not published, so this machine builds something
+`private/` holds the three vendored orderings and is not published, so this machine builds something
 nobody else can. To build as they do, put `OBLIO_PUBLIC=1` in front of any make command:
 
 ```
-make test                          # this machine: 251 assertions
-OBLIO_PUBLIC=1 make test           # everyone else:  265
+make test                          # this machine: 265 assertions
+OBLIO_PUBLIC=1 make test           # everyone else: 237
 ```
 
 `make help` in any of those directories prints its target list and this note, so the reminder is a
@@ -209,7 +210,7 @@ cd /tmp/oblio-clone
 make test
 ```
 
-Expect `237/237 assertions across 8 suites, 8 examples run`, against 251 in the working tree. Then
+Expect `237/237 assertions across 8 suites, 8 examples run`, against 265 in the working tree. Then
 
 ```
 cd -
@@ -217,15 +218,22 @@ rm -rf /tmp/oblio-clone
 ```
 
 Run 2026-08-04 on alpamayo, after making the vendored orderings private: 252 in the tree, 238 in
-the clone, as expected. The counts are now 251 and 237: they grew to 279 and 265 with `MmdFlat`,
-`AmdFlat`, the amd alignment work and the uniform coverage of the three non-enum layers, then fell
-on
+the clone, as expected. The counts are now 265 and 237: they grew to 279 and 265 with `MmdFlat`,
+`AmdFlat`, the amd alignment work and the uniform coverage of the three alternative-store drivers,
+then fell on
 2026-08-21 when `MMD1`, `MMD2`, `AMD1` and `AMD2` were retired to `retired/` and took 28 assertions
-with them.
+with them, and rose again on 2026-08-23 when `MmdCorrected` joined the enum with 14 assertions of
+its own, all of them inside `private/`, which is why only the first figure moved.
 
-**They did not only grow, and this file was wrong about them until 2026-08-17.** It said 283 and
-269 while the suite ran 261 and 247, because retiring `AMD1B` and `AMD2B` on 2026-08-15 took 28
-assertions and no count moved with them. Nothing detects that: every figure was internally
+**They did not only grow, and this file has been wrong about them twice.** It said 283 and
+269 while the suite ran 261 and 247, corrected 2026-08-17, because retiring `AMD1B` and `AMD2B` on
+2026-08-15 took 28
+assertions and no count moved with them. The pair of figures under "Building the way everyone else
+does" then read 251 and 265 until 2026-08-24, and the two halves had gone stale separately: 265 was
+the public count before the 2026-08-21 retirement and was left behind by it, and 251 was the private
+count until `MmdCorrected` landed. Neither is a transcription slip, and read together they said the
+public build has MORE assertions than the private one, which is impossible and went unremarked.
+Nothing detects that: every figure was internally
 consistent and the suite passes whatever a document claims. `docs/TESTING_SPECIFICATION.md` carries
 the full account. **The check is to run the suites and count, which is one command**, and it is
 worth doing whenever these numbers are quoted rather than trusting them.
@@ -240,8 +248,8 @@ cd /tmp/oblio-clone/benchmarks/pipeline  && make all     # builds both drivers
 cd /tmp/oblio-clone && cmake -S . -B bld && cmake --build bld && (cd bld && ctest)
 ```
 
-The CMake configure line prints which mode it chose, so `private/ absent, MmdVendored and
-AmdVendored will refuse` is itself a check.
+The CMake configure line prints which mode it chose, so `Vendored orderings: private/ absent, all
+three will refuse` is itself a check.
 
 Once before a release rather than per push: `make test` and `OBLIO_PUBLIC=1 make test` cover the
 day to day.

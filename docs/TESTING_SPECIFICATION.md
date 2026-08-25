@@ -25,8 +25,8 @@ below: it catches an example that crashes, that returns a failure, or that has q
 being built, and says nothing about whether the numbers it prints are right. The stronger version,
 checking deterministic output, is open in docs/TODO.md and is awkward while residuals are in the
 output, since those legitimately differ in the last bits across BLAS
-implementations. Totals today: **251 assertions across 8 suites** with the vendored orderings
-present, **237 without**.
+implementations. Totals today: **265 assertions across 8 suites** with the vendored orderings
+present, **237 without**. Measured 2026-08-24 by building and running both modes.
 
 **RETIRED 2026-08-21: MMD1, MMD2, AMD1 AND AMD2.** Those four drivers are in `retired/`, out of the
 build and out of the `Ordering` enum, which is now five values. Sixteen validity assertions in
@@ -47,10 +47,13 @@ assertions it has. This is the second recorded instance, after the 2026-08-08 on
 have the same shape: a test removed or added and a count left behind. The only reliable check is to
 run the suites and count, which takes one command.
 
-**The count depends on the build, and that is deliberate.** The vendored MMD and AMD live in
-`private/`, which is not published, and both builds detect rather than require it. Fourteen
-assertions in `test_order` check those two routines and compile only when they are there, so that
-suite reports 59 or 45. Nothing else varies: every other suite asserts the same thing either way,
+**The count depends on the build, and that is deliberate.** The vendored MMD, the corrected MMD and
+the vendored AMD live in
+`private/`, which is not published, and both builds detect rather than require it. Twenty-eight
+assertions in `test_order` check those three routines and compile only when they are there, so that
+suite reports 73 or 45. It was fourteen and 59 until `MmdCorrected` arrived on 2026-08-23, which
+brought a validity assertion and a `MmdFlat == MmdCorrected` assertion on each of the seven
+matrices. Nothing else varies: every other suite asserts the same thing either way,
 everything they use being ours. The one place the difference shows outside `test_order` is the
 ordering sweep in `test_pipeline`, which expects every ordering the build has rather than a fixed
 number. That sweep covers three orderings without `private/` and five with it, having dropped
@@ -60,7 +63,7 @@ AMD1B and AMD2B on 2026-08-15 and MMD1, MMD2, AMD1 and AMD2 on 2026-08-21 when t
 |---|---|---|
 | `smoke` | 5 | the tree builds and the basic objects work |
 | `test_permutation` | 11 | the index map and its composition |
-| `test_order` | 59 / 45 | the orderings are valid, and each non-enum layer reproduces its original (73 without `private/`) |
+| `test_order` | 73 / 45 | the orderings are valid, and each driver of ours reproduces its branch's reference |
 | `test_forest` | 29 | elimination forest, supernodes, amalgamation, multifrontal child order |
 | `test_symfactor` | 29 | supernodal index sets against a dense oracle |
 | `test_numfactor` | 18 | the numeric factor, by oracle and by reconstruction |
@@ -185,29 +188,40 @@ inverse it gives the identity, it is order sensitive in both directions, it is n
 identity on either side is neutral, and a size mismatch is refused. A random sweep of 500 checks
 composition against direct application and the inverse against the identity.
 
-### test_order, 59 assertions (14 of them the vendored pair's, and optional)
+### test_order, 73 assertions (28 of them the vendored routines', and optional)
 
-Seven matrices, each checked for structural symmetry and then ordered by all four non-trivial enum
-methods and checked for validity as a permutation: AmdVendored, AmdFlat, MmdVendored and MmdFlat.
+Seven matrices, each checked for structural symmetry and then ordered by five enum methods and
+checked for validity as a permutation: AmdVendored, MmdVendored, MmdCorrected, MmdFlat and AmdFlat.
 Matrices: a 6x6 arrow, tridiagonals at n = 1, 2, 10 and 100, a 5x5 diagonal, and a complex arrow.
 
-**Three further layers are reached as FREE FUNCTIONS and are the strongest oracle in this suite**,
-because each must reproduce its original ENTRY FOR ENTRY. Every other pair of orderings here can
+**`MmdFlat == MmdCorrected` is asserted on all seven**, which is the mmd branch's oracle in the
+suite rather than only in the benchmarks. `MmdCorrected` is genmmd with its degree scale repaired
+and is what our three mmd drivers reproduce; `MmdVendored` is the frozen original and nothing is
+compared against it. That pair of assertions per matrix is 14 of the 28 that need `private/`.
+
+**Three drivers are reached as FREE FUNCTIONS here and are the strongest oracle in this suite**,
+because each must reproduce its arena twin ENTRY FOR ENTRY. Every other pair of orderings here can
 only be checked for validity, each being a different ordering whose permutation legitimately
-differs; a layer that is its original computed differently has no such licence, so an identical
+differs; a driver that is its twin computed differently has no such licence, so an identical
 permutation is a requirement and any difference is a defect in one of the two.
 
-| layer | is | permanent |
+| driver | is | permanent |
 |---|---|---|
 | `MmdChained` | MmdFlat on genmmd's dead-segment clique storage | yes |
 | `AmdCompacted` | AmdFlat on AMD_2's compacted storage | yes |
 | `MmdCompacted` | MmdFlat on AMD_2's compacted storage | yes |
 
-None is in the `Ordering` enum, so none is reached by `test_pipeline`'s sweep, and none has a
-prototype in `experiments/ordering` or appears in its `PORTED` list. **This suite and `make digest`
-in `benchmarks/ordering` are the only things that check them at all**, which is why the coverage is
-uniform rather than sampled: one validity assertion per layer on the arrow, and one sameness
-assertion per layer on every one of the seven matrices, 24 in all.
+All three joined the `Ordering` enum on 2026-08-21 and this suite still reaches them as free
+functions, deliberately: the free function is the entry point the comparison wants, with no
+`Permutation` built around it. **None of the three is in `test_pipeline`'s ordering sweep**, which
+names five enumerators by hand, so this suite and `make digest` in `benchmarks/ordering` remain the
+only things checking them end to end. That is why the coverage here is uniform rather than sampled:
+one validity assertion per driver on the arrow, and one sameness assertion per driver on every one
+of the seven matrices, 24 in all.
+
+**`AmdCompacted` is the default ordering and no suite runs a whole solve through it**, the sweep
+naming `AmdFlat` instead. The two return one permutation, so nothing is unchecked in the ordering;
+what is unchecked is the default as a default.
 
 **That uniformity is new on 2026-08-17 and it closed two real gaps.** `MmdChained` ran on five of
 the
@@ -227,9 +241,10 @@ validity ones went with them, which is the drift corrected at the top of this fi
 in `retired/README.md`; the short version is that the flat quotient graph was serving six drivers
 across three list-order conventions, and the third one blocked aligning the two that ship.
 
-The distinction the suffixes carry is worth restating here because the test depends on it: a
-trailing digit means a different ordering, a trailing B or C means the same ordering computed over
-a different clique store.
+The distinction the old suffixes carried is worth restating here because the test depended on it: a
+trailing digit meant a different ordering, a trailing B or C the same ordering computed over
+a different clique store. A driver is now named for its branch and its store, so the name says it
+outright.
 
 The orderings are checked for *validity*, not against 0.9's output, and not for quality. Nothing
 asserts that any method reduces fill, ours included: each is a new ordering rather

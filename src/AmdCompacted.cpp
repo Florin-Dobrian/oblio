@@ -189,6 +189,13 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
         16.0, 10.0 * std::sqrt(static_cast<double>(size))));
     std::vector<std::int32_t> denseRows;             // ascending by construction; see the tail
     Buckets buckets(size);
+    // THE MINIMUM IS TAKEN AS VERTICES ARE FILED, over the vertices that are actually filed. It
+    // seeds the upward walk below and nothing else reads it, so it has only to be a LOWER BOUND on
+    // the first live bucket. The empty rows and the dense rows are numbered or set aside rather
+    // than filed, so a pass over every degree would answer for buckets that do not exist.
+    // `AMD_2` seeds it at 0 outright, `mindeg = 0`; this is the mmd branch's shape, which is
+    // genmmd's minimum taken at the moment of filing. See src/AmdFlat.cpp.
+    std::uint32_t minDegree = static_cast<std::uint32_t>(size);
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u) {
         if (degrees[u] == 0) {
             pivots.push_back(u);
@@ -204,9 +211,8 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
             continue;
         }
         buckets.file(degrees[u], u);
+        minDegree = std::min(minDegree, degrees[u]);
     }
-    std::uint32_t minDegree = *std::min_element(degrees.begin(), degrees.end());
-
 
     std::vector<std::int32_t> hashHead(size, NIL);
 
@@ -238,7 +244,7 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
         touchedCliques.clear();
         TaggedScan scan{&buckets, w, degrees, touchedCliques, wflg,
                         static_cast<std::int32_t>(size + 1)};
-        qg.eliminate(pivot, scan);
+        qg.eliminateAmd(pivot, scan);
         pivots.push_back(pivot);
 
         buckets.unfile(pivot);
@@ -246,10 +252,13 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
         const std::int32_t* pivotClique     = qg.clique(pivot);
         std::uint32_t       pivotCliqueSize = qg.cliqueSize(pivot);
 
-        std::uint32_t degme = qg.cliqueWeight();
-        degrees[pivot] = degme;                     // what the scan below subtracts from
+        // |C[p]| weighted, which is AMD_2's `degme`, "degree of me". The WEIGHTED size of
+        // C[pivot] against `pivotCliqueSize`'s entry count: a degree counts original vertices and
+        // a clique holds supervariables. Taken twice per pivot; see src/AmdFlat.cpp.
+        std::uint32_t pivotCliqueWeight = qg.cliqueWeight();
+        degrees[pivot] = pivotCliqueWeight;       // what the scan below subtracts from
 
-        lemax = std::max(lemax, static_cast<std::int32_t>(degme));
+        lemax = std::max(lemax, static_cast<std::int32_t>(pivotCliqueWeight));
 
         deadCliques.clear();
         for (std::int32_t c : touchedCliques)
@@ -260,15 +269,16 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
         numEliminated += 1 + static_cast<std::uint32_t>(merged.size());
         numLive -= qg.weight(pivot);                // every original the pivot stands for
         for (std::int32_t u : merged) {
-            degrees[u] = 0;                         // already out of the lists; see eliminate()
+            degrees[u] = 0;                         // already out of the lists; see eliminateAmd()
         }
 
         pivotClique     = qg.clique(pivot);
         pivotCliqueSize = qg.cliqueSize(pivot);
-        degme = 0;
-        for (std::uint32_t k = 0; k < pivotCliqueSize; ++k) degme += qg.weight(pivotClique[k]);
+        pivotCliqueWeight = 0;
+        for (std::uint32_t k = 0; k < pivotCliqueSize; ++k)
+            pivotCliqueWeight += qg.weight(pivotClique[k]);
 
-        degrees[pivot] = degme;
+        degrees[pivot] = pivotCliqueWeight;
 
         const std::uint32_t numLeft = numLive;
 
@@ -407,7 +417,7 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
             const std::int32_t u = pivotClique[k];
             if (qg.eliminatedAmd(u)) continue;         // absorbed by the hash a moment ago
             const std::uint32_t weightU = qg.restoreWeight(u);   // POST-merge, and un-negated here
-            std::size_t bound = static_cast<std::size_t>(w[u]) + degme - weightU;
+            std::size_t bound = static_cast<std::size_t>(w[u]) + pivotCliqueWeight - weightU;
             w[u] = 1;
             bound = std::min<std::size_t>(bound, numLeft - weightU);
             const std::uint32_t filed = static_cast<std::uint32_t>(bound);

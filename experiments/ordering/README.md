@@ -7330,6 +7330,71 @@ where a naive implementation holds five or six. What was folded away is a `degre
 `outmatched` flag on the mmd side and a `filed` flag, and what pays for the fold is a set of
 reserved values in `mPrev`. This section is the whole encoding in one place.
 
+### The three arrays, and what each code calls them
+
+All three codes keep the same structure, a doubly linked list per degree pushed and read at the
+head, in the same three arrays. Only the names differ, and two of them are misleading enough to be
+worth a table before anything else in this section is read.
+
+```
+                        ours              AMD_2         genmmd
+                        Buckets           AmdVendored   MmdVendored
+
+  head per degree       mHead[d]          Head[deg]     head[dg]
+  successor             mNext[u]          Next[i]       fwd[nd]
+  predecessor           mPrev[u]          Last[i]       bwd[nd]
+
+  indexed by            degree, vertex,   same          same
+                        vertex
+  size                  n, n, n           n, n, n       n+1 each, 1-based
+  filing site           file()            line 1401     line 98
+                                          and 2101
+  unfiling site         unfile()          line 1500     lines 81 to 84
+                                          and 1644
+```
+
+**`Last` IS THE PREDECESSOR, NOT THE TAIL**, which is the name most likely to send a reader looking
+for something that is not there. `AMD_2`'s filing at line 1401 is our `file` with the names changed,
+and its unfiling at 1500 is our `unfile`. `fwd` and `bwd` are forward and backward, the C port's
+spelling of Liu's `DFORW` and `DBAKW`.
+
+**AND BOTH VENDORED CODES PARK A LINK IN AN OUTPUT ARRAY, which is where the odd names come from.**
+Neither allocates the link arrays at all. `AMD_2` declares `Int Last[]` as `/* the output
+permutation */` and uses it as the predecessor link for the whole run, writing the permutation over
+it at the end, `Last [k] = i` at line 2428. genmmd does the same thing twice over: `genmmd` calls
+`mmdint(neqns, xadj, head, invp, perm, ...)` against a signature reading
+`mmdint(..., int head[], int fwd[], int bwd[], ...)`, so **`fwd` is the caller's `invp` and `bwd` is
+the caller's `perm`**, and `mmdnum(neqns, perm, invp, qsize)` at line 49 reads them back as the
+permutation once the ordering is done. So each of those two arrays is named for its SECOND job and
+used for its first.
+
+We do not do this and the cost is visible: `Buckets` owns 3n of its own, the drivers carry a
+`pivots` list, and the permutation is built from it by `order` or `orderAscending`. The vendored
+codes get the links inside storage the caller supplied anyway. It is an aliasing trade rather than
+an encoding one, so it sits outside the rest of this section, and it is recorded because "why is the
+predecessor called `Last`" has no answer inside the degree lists and an obvious one outside them.
+
+### Reading genmmd's names
+
+The C port shortened Liu's Fortran identifiers to two letters and kept nothing that says so. The
+expansions below are inferred from the Fortran rather than documented in the file, and they are
+worth having because the two-letter forms are unreadable on first contact:
+
+```
+nd   NODE       the vertex being visited, and the loop variable over 1..neqns
+nb   NABOR      a neighbor of it
+en   ENODE      the eliminated node whose clique is being walked
+rn   RNODE      the node reached through it
+md   MDNODE     the minimum degree node, the pivot
+mn   MDNODE     the same, in genmmd's own pivot loop
+pv   PVNODE     the previous node in a degree list, our mPrev's value
+nx   NXNODE     the next node in one
+fn   FNODE      the first node, the old head a filing pushes in front of
+dg   DEG        a degree
+nq   NQNBRS     the number of qualifying neighbors, and the value fwd carries
+el   ELMNT      an element, which is our clique
+```
+
 **THE DIMENSION THAT ORGANISES IT IS LIST STATUS**, not the branch. In a list the two branches are
 identical and the encoding is closed. Out of every list they diverge, and everything either branch
 adds is added there.
@@ -7514,6 +7579,61 @@ loop is bounded now and the array is `n`.
 across 57 grids and 216 random patterns, five drivers each, the largest index ever passed to `mHead`
 was `n - 1`, and every exception was `n == 1` in the mmd prepass. The amd drivers never appeared
 once, which is what identified the loop as the cause rather than the array.
+
+### The interface each branch actually uses, 2026-08-24
+
+The sections above describe what the slots MEAN. This one is what the drivers CALL, which is the
+same division seen from the other side and is the shorter statement of it.
+
+```
+                        mmd       amd      slot        what it is
+
+  MUTATORS
+    file(d, u)           x         x       both        into bucket d, at the head
+    unfile(u)            x         x       both        out, bucket read from mPrev
+    outmatch(u)          x         .       mPrev       withheld, still live
+    restore(u)           x         .       mPrev       withheld -> unfiled
+    setKey(u, k)         .         x       mPrev       hash key, while out of list
+    setChain(u, v)       .         x       mNext       hash chain, while out of list
+
+  QUERIES
+    head(d)              x         x       mHead       first vertex of bucket d
+    empty(d)             x         x       mHead       is bucket d empty
+    next(u)              x         .       mNext       successor, for the prepass walk
+    filed(u)             x         .       mPrev       is u in any list
+    outmatched(u)        x         .       mPrev       is u withheld
+    key(u)               .         x       mPrev       the stored hash key
+    chain(u)             .         x       mNext       the next vertex in the hash bucket
+```
+
+**UNIFORM WITHIN EACH BRANCH.** All three mmd drivers call the same nine entry points and both amd
+drivers call the same eight, so no driver differs from its branch sibling. That is what the clique
+store not mattering here should look like, and it is worth checking after a change rather than
+assumed: `MmdFlat`, `MmdChained` and `MmdCompacted` reach this class identically, and so do
+`AmdFlat` and `AmdCompacted`.
+
+**FOUR ARE SHARED AND THEY ARE THE LIST ITSELF**, `file`, `unfile`, `head` and `empty`. Whatever
+else a minimum degree ordering does, it puts a vertex in a bucket, takes it out, and asks the lowest
+bucket for a candidate.
+
+**AND THE REST DIVIDES ON ONE LINE, THE SAME LINE THE ENCODING DIVIDES ON.** Every branch-specific
+entry point reads or writes `mPrev` or `mNext` while the vertex is OUT of every list. mmd spends
+that window on withholding and amd spends it on the hash. Neither branch can want both, since a
+withheld vertex is not in a hash bucket and a hashed one is not withheld, which is the whole reason
+one slot can serve two branches with no arbitration and no flag.
+
+`next` is the one entry point that does not fit that reading. It is a plain successor read on a
+FILED vertex, and only mmd makes it, in the prepass, taking the successor before the unfile
+invalidates the link it is standing on. So the honest statement is that the shared part is the list,
+the divided part is the out-of-list window, and one query sits outside both because a walk of a
+whole bucket is an mmd-only shape.
+
+**HOW THE TABLE WAS BUILT, because the obvious way is wrong.** Extracting `buckets.<method>` from
+the five sources reports `refile` as an `AmdFlat` call, and `refile` was deleted on 2026-08-24 and
+has no caller anywhere. It is a comment at `src/AmdFlat.cpp` naming the method to explain why the
+driver does NOT use it. Comments have to be stripped before the match, which is the identical trap
+`docs/QUOTIENT_GRAPH_USAGE.md` records against itself: it published call-difference counts of three
+and nine that were really zero and two, from prose naming a method.
 
 ## What each file is, and what it adds
 

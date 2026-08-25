@@ -170,7 +170,7 @@ std::vector<std::int32_t> orderMmdCompacted(const std::vector<std::size_t>&  col
             const std::int32_t pivot = buckets.head(minDegree);
             buckets.unfile(pivot);
 
-            const std::vector<std::int32_t>& merged = qg.eliminate(pivot);
+            const std::vector<std::int32_t>& merged = qg.eliminateMmd(pivot);
             batch.push_back(pivot);
             pivots.push_back(pivot);
             numEliminated += 1 + static_cast<std::uint32_t>(merged.size());

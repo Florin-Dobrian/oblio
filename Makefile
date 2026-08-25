@@ -84,12 +84,14 @@ OBLIO_SRCS = \
   src/SolveEngine.cpp \
   src/DirectSolver.cpp
 
-# Vendored ordering codes (SuiteSparse AMD, Sparspak MMD), copied verbatim, not maintained here,
-# so warnings are silenced (-w) for these two files only.
+# Vendored ordering codes (SuiteSparse AMD, Sparspak MMD, and the corrected MMD that is the mmd
+# branch's oracle), copied verbatim or nearly so, not maintained here, so warnings are silenced
+# (-w) for these three files only.
 #
 # They live in private/, which is not tracked, and are optional: the build detects them rather than
-# requiring them. Present, Ordering::MmdVendored and Ordering::AmdVendored work as they always
-# have. Absent, the library still builds and those two enumerators refuse, everything else being
+# requiring them. Present, Ordering::MmdVendored, Ordering::MmdCorrected and
+# Ordering::AmdVendored work as they always
+# have. Absent, the library still builds and those three enumerators refuse, everything else being
 # unaffected. Nothing
 # is switched by hand and there is no flag to remember; a tree that has the directory behaves one
 # way and a clone behaves the other. See docs/DESIGN_DECISIONS.md.

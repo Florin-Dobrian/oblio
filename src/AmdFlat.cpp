@@ -107,6 +107,17 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         16.0, 10.0 * std::sqrt(static_cast<double>(size))));
     std::vector<std::int32_t> denseRows;             // ascending by construction; see the tail
     Buckets buckets(size);
+    // THE MINIMUM IS TAKEN AS VERTICES ARE FILED, over the vertices that are actually filed. It
+    // seeds the upward walk below and nothing else reads it, so it has only to be a LOWER BOUND on
+    // the first live bucket; what a tighter one buys is that the walk starts where the work is.
+    // The empty rows and the dense rows are numbered or set aside rather than filed, so a pass over
+    // every degree would answer for buckets that do not exist: one isolated vertex anywhere puts
+    // this at 0 with bucket 0 empty.
+    //
+    // `AMD_2` seeds it at 0 outright, `mindeg = 0` at its line 1302, and walks up from there. Both
+    // are correct and neither is observable. This is the mmd branch's shape, which is genmmd's
+    // `if(dg<*mdeg)*mdeg=dg` at the moment of filing, so the two branches now read the same here.
+    std::uint32_t minDegree = static_cast<std::uint32_t>(size);
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u) {
         if (degrees[u] == 0) {
             pivots.push_back(u);
@@ -122,8 +133,8 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
             continue;
         }
         buckets.file(degrees[u], u);
+        minDegree = std::min(minDegree, degrees[u]);
     }
-    std::uint32_t minDegree = *std::min_element(degrees.begin(), degrees.end());
 
     // NO SEPARATE MEMBERSHIP SCRATCH AT ALL, 2026-08-17. The driver's own `mark` and `tag` went
     // first, folded into the quotient graph's; then the graph's mark stopped answering membership,
@@ -149,7 +160,7 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
     // the same coincidence between its links and its heads, a degree also reaching n - 1.
     // ONE ARRAY WHERE THERE WERE THREE. `hashNext` held the chain and the half-built key; both
     // now ride in the buckets' own links, free for exactly the span that needs them because
-    // `eliminate` takes every member of C[pivot] out of the lists. `usedKeys` recorded which
+    // `eliminateAmd` takes every member of C[pivot] out of the lists. `usedKeys` recorded which
     // buckets to clear afterwards; AMD_2 clears a bucket by EMPTYING IT AS IT FINDS IT, so there
     // is nothing to record and no clearing pass.
     //
@@ -293,7 +304,7 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         // arrays gone the 2D penalty went with them.
         TaggedScan scan{&buckets, w, degrees, touchedCliques, wflg,
                         static_cast<std::int32_t>(size + 1)};
-        qg.eliminate(pivot, scan);
+        qg.eliminateAmd(pivot, scan);
         pivots.push_back(pivot);
 
         // The pivot leaves the lists. The zeroing that used to follow is gone: under the fold
@@ -327,8 +338,13 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         // accumulates `degme += nvi` while building the clique and this is that. The second
         // computation below is NOT removable: it runs after mass elimination has trimmed the
         // clique, which is ledger entry 7, and this one is deliberately over the untrimmed one.
-        std::uint32_t degme = qg.cliqueWeight();
-        degrees[pivot] = degme;                     // what the scan below subtracts from
+        //
+        // `degme` IS AMD_2'S NAME FOR THIS, "degree of me", `me` being its name for the pivot, and
+        // the comments below quote it. It is the WEIGHTED size of C[pivot] against
+        // `pivotCliqueSize`'s entry count, which is what a degree needs: a degree counts original
+        // vertices and a clique holds supervariables.
+        std::uint32_t pivotCliqueWeight = qg.cliqueWeight();
+        degrees[pivot] = pivotCliqueWeight;       // what the scan below subtracts from
 
         // |C[c] - C[p]| once per clique. This is the whole reason the bound is cheap: the
         // quantity depends on c alone, so every vertex whose incidence list holds c reads it
@@ -346,7 +362,7 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         // 272646, which is most of the reason this branch used to run three times slower than the
         // vendored routine. `Amd.cpp` does the same thing at `we = Degree[e] + wnvi`, then
         // `we -= nvi`, and it is the amd2 layer's pass 3.
-        lemax = std::max(lemax, static_cast<std::int32_t>(degme));
+        lemax = std::max(lemax, static_cast<std::int32_t>(pivotCliqueWeight));
 
         // AGGRESSIVE ABSORPTION. w[c] - wflg == 0 says C[c] lies wholly inside the new clique, so
         // it can never contribute anything again and its entries in the incidence lists are pure
@@ -370,7 +386,7 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         numEliminated += 1 + static_cast<std::uint32_t>(merged.size());
         numLive -= qg.weight(pivot);                // every original the pivot stands for
         for (std::int32_t u : merged) {
-            degrees[u] = 0;                         // already out of the lists; see eliminate()
+            degrees[u] = 0;                         // already out of the lists; see eliminateAmd()
         }
 
         // The clique and its weight are re-read, both having moved: massEliminate trims C[p] of
@@ -381,8 +397,9 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         // the same number, which is what re-taking it here gives.
         pivotClique     = qg.clique(pivot);
         pivotCliqueSize = qg.cliqueSize(pivot);
-        degme = 0;
-        for (std::uint32_t k = 0; k < pivotCliqueSize; ++k) degme += qg.weight(pivotClique[k]);
+        pivotCliqueWeight = 0;
+        for (std::uint32_t k = 0; k < pivotCliqueSize; ++k)
+            pivotCliqueWeight += qg.weight(pivotClique[k]);
 
         // AND THE STORED CLIQUE DEGREE IS WRITTEN AGAIN, which is not a tidy-up. `Amd.cpp` writes
         // `Degree [me] = degme` TWICE, at its lines 1676 and 1940, and the second write is the
@@ -403,7 +420,7 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         // defect arrived with ledger entry 3, which moved mass elimination out and did not carry
         // the second write that placement is the whole reason for. Half a mechanism, as entry 6
         // was. See experiments/ordering/AMD3.md.
-        degrees[pivot] = degme;
+        degrees[pivot] = pivotCliqueWeight;
 
         const std::uint32_t numLeft = numLive;
 
@@ -768,7 +785,7 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
             // on why widening cannot be done after the addition the way narrowing is done after
             // the subtraction. `partial[u]` and `degme` each reach n, so the sum reaches 2n, and
             // in 32 bits that would fit only because n is capped at 2^31 - 1.
-            std::size_t bound = static_cast<std::size_t>(w[u]) + degme - weightU;
+            std::size_t bound = static_cast<std::size_t>(w[u]) + pivotCliqueWeight - weightU;
             // THE SLOT GOES BACK TO ALIVE-AND-UNSEEN, the last read having just happened. Without
             // it a survivor later chosen as pivot would form a clique whose w already held a
             // bound, which the next step's prune would read as a running value above the tag or as

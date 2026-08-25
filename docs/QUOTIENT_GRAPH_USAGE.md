@@ -425,7 +425,47 @@ MmdCompacted    balances, arena, compactions, peak
 line inserted nor a match for `AmdCompacted`. Nothing observable turns on it, which is exactly what
 the five closed items had in common.
 
+### The current reading, 2026-08-24, and it supersedes the baseline below
+
+Taken at `937fb30` on alpamayo, `make scale2d` and `make scale3d`, TWO consecutive runs so that each
+figure carries a spread rather than a point.
+
+| | 801^2 | 1025^2 | 1601^2 | 65^3 | 81^3 |
+|---|---:|---:|---:|---:|---:|
+| `MmdCompacted / MmdFlat` | 0.931-0.939 | 0.927-0.935 | 0.914-0.916 | 0.948-0.955 | 0.920-0.938 |
+| `AmdCompacted / AmdFlat` | 0.912-0.927 | 0.935-0.960 | 0.955-0.995 | 0.916-0.930 | 0.943-0.957 |
+| `MmdChained / MmdFlat` | 1.135-1.141 | 1.221-1.224 | 1.157 | 1.316-1.354 | 1.503-1.566 |
+
+**THE MMD PAIR AND THE CHAINED CONTROL HAVE NOT MOVED** since 2026-08-21, both sitting inside the
+harness floor against the table below. **The AMD PAIR HAS**, from 0.83-0.90 to 0.91-0.99, and the
+cause is the denominator: `AmdFlat` got faster over the six commits between the two tables, where
+`AmdCompacted` did not. **Which commit is not established here**, and this table cannot say: it
+spans `1da85c5` through `937fb30`.
+
+**AND THE RUN-TO-RUN SPREAD IS MEASURED RATHER THAN ASSUMED**, which is the more useful half. Two
+runs of the same binaries on the same machine, per driver over the five sizes:
+
+```
+MmdCorrected   0.957 to 1.000        AmdVendored    0.953 to 1.033
+MmdFlat        0.982 to 1.043        AmdFlat        0.996 to 1.006
+MmdChained     0.977 to 1.031        AmdCompacted   0.956 to 1.013
+MmdCompacted   0.986 to 1.023
+```
+
+So the floor is 4 to 8 per cent on most columns, which is wider than the 3 per cent this file has
+been quoting, and the vendored columns are among the noisiest, which is the standing caution in
+`docs/NEXT.md` about quoting `AmdFlat / AMD` per row. `AmdFlat`'s one per cent is the outlier and
+should not be read as the general case.
+
+**A RATIO BETWEEN TWO OF OUR OWN DRIVERS IS THE THING TO WATCH**, since both move together with the
+machine and the common term cancels. A ratio against a vendored routine carries that routine's noise
+in full.
+
 ### Baseline before alignment, 2026-08-21
+
+**HISTORICAL, and no longer a control.** It was taken at `97f4bc6`, six commits back, and the tree
+has moved for reasons that are not alignment steps; the current reading is above. Kept because a
+dated measurement is a record of a run.
 
 Taken at `97f4bc6`, before any alignment step, on alpamayo, all drivers in the same translation unit
 as their quotient graph. **Alignment changes nothing a permutation can see, so these ratios should

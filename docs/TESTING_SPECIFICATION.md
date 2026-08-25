@@ -138,9 +138,26 @@ vendored routine relabels its result with a postorder that Oblio deliberately do
 the output vectors differ by construction. The fill agrees anyway, 206332 at 100 a side and 474995
 at 140, but NOT by construction, which is a correction made on 2026-08-09. A postorder of the
 elimination tree cannot change fill; AMD postorders its assembly tree, which its own header says
-need not be that tree, so its relabeling is not guaranteed fill-neutral. It agrees on every square
-grid and on cubic grids from 7 a side up, and differs by one to three entries at 4^3, 5^3 and 6^3.
-The acceptance test compares the PERMUTATION, so none of this reaches it.
+need not be that tree, so its relabeling is not guaranteed fill-neutral.
+
+**AND IT IS NOT FILL-NEUTRAL AT LARGE SIZES EITHER, corrected 2026-08-24.** This paragraph said the
+two agree "on every square grid and on cubic grids from 7 a side up", differing by one to three
+entries at 4^3, 5^3 and 6^3 alone. `make scale3d` on alpamayo disagrees at 81 a side:
+
+```
+81^3    AmdVendored  628021440       the postordered output
+        AMDraw       628021443       the raw elimination order, and ours
+```
+
+Three entries, reproduced in two consecutive runs, with `AmdFlat` and `AmdCompacted` matching
+`AMDraw` exactly as they must. So the difference is a property of the vendored postorder and not of
+ours, it is not confined to tiny cubes, and it is not monotone in size: 65^3 agrees in the same
+runs.
+
+The safe statement is the one the paragraph opens with, that the relabeling is not guaranteed
+fill-neutral, and the list of sizes where it happens not to be is an observation about the sizes
+measured rather than a rule. The acceptance test compares the PERMUTATION, so none of this reaches
+it.
 
 Anyone extending the suite should know that the strongest evidence for the two orderings'
 correctness is not in it.

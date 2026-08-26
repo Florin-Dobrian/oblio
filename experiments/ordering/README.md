@@ -8106,6 +8106,205 @@ aggressive absorption kills a clique whose members all lie inside the new one, f
 indistinguishable from each other rather than from the pivot. The section above walks the AMD pair
 in detail and contrasts it with the MMD route.
 
+## One example end to end: the 3 by 3 grid, 2026-08-26
+
+The sections above describe the supervariable encodings a piece at a time. This one runs a single
+graph all the way through, from the prototypes' containers to the production arrays to the
+permutation, so the pieces can be read against each other rather than in turn.
+
+**One example, not one per branch.** The elimination below is `MmdFlat`'s on this grid. Both output
+functions are then applied to that same state, including the one the mmd drivers do not call, so
+that `order` and `orderAscending` differ in the emission and in nothing else. Running the amd
+drivers on this grid would give a different pivot sequence and a different chain, since the branches
+select differently, and comparing two states would put a real difference in selection next to the
+one point at issue here. The hypothetical is only that a state mmd produced is handed to the
+function amd calls. Nothing in either function knows or cares which branch built the arrays.
+
+The graph is a five-point square grid at 3 a side, which `gridGraph` builds and every layer here
+already runs:
+
+```
+0 1 2
+3 4 5
+6 7 8
+```
+
+The elimination takes pivots 8, 6, 2, 0, 7, 1 and then 5, at which point vertices 3, 4 and 5 have
+become indistinguishable and 5 absorbs 4 and then 3.
+
+### The prototypes
+
+`super_members` is a list of lists indexed by root, and `pivots` is the order over supervariables.
+`python3 mmd3.py grid 3` prints both at every iteration, and after the last elimination:
+
+```
+members: [[0] [1] [2] [] [] [5 4 3] [6] [7] [8]]
+pivots:  [8, 6, 2, 0, 7, 1, 5]
+```
+
+One list is non-trivial, `[5 4 3]`, holding its root first and then the vertices absorbed into it,
+in the order they were absorbed. It is not ascending, and that is the whole reason the two output
+functions can be told apart on this example. The absorbed vertices are left as `[]`.
+
+### Production
+
+The same fact is three arrays plus the driver's pivot vector:
+
+```
+                       v =   0   1   2   3   4   5   6   7   8
+
+mSuperNext:                 -1  -1  -1  -1   3   4  -1  -1  -1
+mSuperLast:                  0   1   2   3   4   3   6   7   8
+mWeight:                     1   1   1   0   0   3   1   1   1
+
+pivots, positional and not indexed by v:  [8, 6, 2, 0, 7, 1, 5]
+```
+
+The list `[5 4 3]` is four entries across two arrays:
+
+```
+mSuperNext[5] = 4          head                          tail
+mSuperNext[4] = 3            5 -----> 4 -----> 3 -----> NIL
+mSuperNext[3] = NIL          ^                 ^
+mSuperLast[5] = 3            |                 |
+                             the root          mSuperLast[5]
+```
+
+No element of the list is stored as an element. Each is stored as the successor of the one before
+it, at the index of the one before it, so 4 lives at `mSuperNext[5]` and 3 lives at `mSuperNext[4]`.
+
+**The head lives nowhere in the three arrays, and that is what `pivots` is for.** Nothing marks a
+root and no member points back to one, so `mSuperNext` on its own is a set of links with no entry
+points. Read in index order it gives `3` at slot 4 and `4` at slot 5, which is neither the list nor
+its reverse. The pivot vector supplies the heads, and only then does the row resolve into chains.
+
+Note what `pivots` is NOT indexed by. It is dense and positional, one entry per elimination in
+elimination order, where the three arrays are indexed by vertex. Its fifth entry being 7 says the
+fifth pivot was vertex 7, and says nothing about vertex 5. Mixing the two readings is the easiest
+mistake to make against a dump like this, which is why it is not aligned under the `v =` columns.
+
+Term for term:
+
+```
+prototype                   production
+
+super_members[u]            the chain from u through mSuperNext, NIL-terminated,
+                            with mSuperLast[u] naming its tail
+len(super_members[u])       mWeight[u]
+super_members[u] == []      mWeight[u] == 0
+pivots                      pivots, the driver's own vector, identical
+```
+
+Three things the arrays say that the lists do not have to.
+
+- **The root is an index, not a value.** `super_members[5]` is a lookup by root in the prototype and
+  the three arrays are the same lookup: 5 being the root means slot 5 is where the chain begins and
+  where the tail and the weight live. There is no root flag and no back-pointer from a member, which
+  is why `orderAscending` has to build one for the length of one call and `mmd3.py` builds `root_of`
+  in the same shape. Both construct, temporarily, an inverse the data structure does not keep.
+- **`mWeight` is `len()` made affordable.** A list knows its own length and a chain does not, and
+  the degree computation asks for it once per reached vertex. `mmd3.py` says this where it declines
+  to keep a weight array of its own: MMD keeps `qsize` because its members are a chain, not a list.
+  It doubles as the liveness test, `mWeight[u] += mWeight[v]; mWeight[v] = 0;` making the size of
+  the absorbing list and the emptiness of the absorbed one one pair of stores.
+- **`mSuperLast` is the splice made affordable.** The prototype's `super_members[u] +=
+  super_members[v]` attaches at a tail Python already holds. Production needs BOTH tails at once,
+  `u`'s to attach to and `v`'s to inherit, which is exactly the two lines of `merge`:
+  `mSuperNext[mSuperLast[u]] = v; mSuperLast[u] = mSuperLast[v];`. Two stores whatever the sizes,
+  order preserved on both sides by construction. This is the one array with no counterpart in the
+  prototypes at all, and a member's stale entry never has to be cleared because the value is copied
+  out of it and the entry is then never read again. In the dump above `mSuperLast[4]` still reads 4
+  and `mSuperLast[3]` still reads 3.
+
+### The final order
+
+Both functions do conceptually the same thing: walk `pivots` in order and splice in each pivot's
+members after it. They differ in the member order, and in how each avoids an actual insertion.
+
+**`order`, which the two amd drivers call.** One pass, appending. For each pivot, walk its chain
+from the pivot to NIL and push. The chain is already root-then-members, so the members arrive in
+merge order because that is the order the chain holds:
+
+```
+8 | 6 | 2 | 0 | 7 | 1 | 5 4 3
+```
+
+```
+8 6 2 0 7 1 5 4 3
+```
+
+**`orderAscending`, which the three mmd drivers call.** Two passes, and it never walks a chain to
+emit. The first reserves: place each pivot, advance the cursor by `mWeight[pivot]` to leave a gap of
+exactly the right size behind it, and stamp each member of that chain with the pivot it belongs to,
+as `slot[u] = -(pivot + 1)`.
+
+```
+pivot   placed at   room reserved   members stamped
+8       0           1
+6       1           1
+2       2           1
+0       3           1
+7       4           1
+1       5           1
+5       6           3               slot[4] = slot[3] = -6
+```
+
+The second fills: sweep `v = 0 .. n - 1` and drop each stamped vertex into its root's advancing
+cursor. Vertex 3 is reached before vertex 4, so 3 takes position 7 and 4 takes position 8:
+
+```
+8 | 6 | 2 | 0 | 7 | 1 | 5 3 4
+```
+
+```
+8 6 2 0 7 1 5 3 4
+```
+
+The ascending order is not sorted for and is not chosen at the chain. It falls out of the sweep's
+direction, which is `mmdnum` exactly: genmmd gets the same result from a `1 .. neqns` scan chasing
+parent pointers. And the reservation is needed because the function must know where a pivot's
+members will end up before it has seen any of them, which `mWeight` answers in one load instead of
+a walk.
+
+So the two differ in one transposition on this example, `5 4 3` against `5 3 4`, and in nothing
+else. Same pivots, same chains, same fill of 5, same forest, since the members of a supervariable
+are indistinguishable by construction. Only the permutation moves.
+
+### Why the branches close differently
+
+This is a question about the oracles, not about the branches. `genmmd` returns its own numbering and
+`mmdnum` produces the ascending member order, so the mmd drivers reproduce it. The amd oracle is not
+`amd_order`'s output but the raw order the hook reconstructs upstream of `AMD_postorder`, and the
+hook emits each pivot's membership in the order it accumulated it, which is merge order. `AMD_2`'s
+own output assembly, `Next[i] = Next[e]; Next[e]++` walked over `i` ascending, numbers non-principal
+variables ascending and places the element last within its supervariable. So on this one point the
+two vendored routines agree with each other and our amd drivers are the odd ones out, because the
+amd oracle is taken at the finalize marker, upstream of an output assembly we do not reproduce, and
+the hook had to invent a member order there.
+
+### Reproducing it
+
+```
+python3 mmd3.py grid 3
+./production_cpp mmd3 grid 3
+```
+
+`MmdCompacted` and `MmdChained` return what `MmdFlat` returns here, and `AmdCompacted` returns what
+`AmdFlat` returns; the store is not what this section is about. To see the amd branch's own
+elimination on this grid rather than the emission studied above, run `python3 amd3.py grid 3` and
+`./production_cpp amd3 grid 3`, which take pivots 8, 6, 2, 0, 3, 4 and leave the single chain
+`4 -> 1 -> 7 -> 5`, mass-eliminated rather than merged in pairs.
+
+**The input convention is load-bearing and this example is small enough to get it wrong by hand.**
+`gridGraph` emits each adjacency list in ascending order and `toCsc` writes the diagonal in its
+sorted position rather than at the front. A hand-built driver that pushes the four neighbors in
+compass order, or the diagonal first, gives a different graph in the only sense that matters here.
+mmd is insensitive to it on this grid and amd is not: the wrong list order takes pivot 1 where the
+right one takes pivot 3. Same fill, different permutation, and nothing in the output says which
+convention produced it. See the note above `gridGraph` on ascending order, which is the 3D builder's
+version of the same trap.
+
+
 ## Related
 
 - `archive/sparse_factorization.md` section 5, the prose, pseudocode and worked examples.

@@ -61,7 +61,7 @@ public:
     QuotientGraphCompacted(const std::vector<std::size_t>&  colPtr,
                            const std::vector<std::int32_t>& rowIdx);
 
-    std::size_t size() const { return mSegment.size(); }
+    std::size_t size() const { return mSize; }
 
     // HOW MANY TIMES THE POOL WAS COMPACTED, `AMD_2`'s `Info [AMD_NCMPA]`. This is the class's
     // whole storage figure, and there is deliberately no second one: the pool is sized at
@@ -287,6 +287,9 @@ private:
     // retire a vertex be shared across the branches. The amd branch never enables marks.
     void markGone(std::int32_t u) { if (!mMark.empty()) mMark[u] = GONE; }
 
+    // Dimensions.
+    std::size_t mSize = 0;   // number of vertices
+
     // THE POOL. Every vertex's segment and every live clique, end to end, sized once at
     // construction to `nzaat + nzaat/5 + n` and never grown. `mFree` is `AMD_2`'s `pfree`.
     std::vector<std::int32_t> mSrc;
@@ -417,9 +420,10 @@ inline void padded(std::vector<T>& v, std::size_t size, std::size_t which) {
 } // namespace detail
 
 inline QuotientGraphCompacted::QuotientGraphCompacted(const std::vector<std::size_t>&  colPtr,
-                             const std::vector<std::int32_t>& rowIdx) {
-    detail::padded(mSegment, colPtr.empty() ? 0 : colPtr.size() - 1, 0);
-    const std::int32_t size = static_cast<std::int32_t>(mSegment.size());
+                             const std::vector<std::int32_t>& rowIdx)
+    : mSize(colPtr.empty() ? 0 : colPtr.size() - 1) {
+    detail::padded(mSegment, mSize, 0);
+    const std::int32_t size = static_cast<std::int32_t>(mSize);
 
     // ELBOW ROOM, `AMD_2`'S EXACTLY. It sizes `slen = nzaat + nzaat/5 + 7n` and hands
     // `iwlen = slen - 6n` to the main loop, so the pool is `nzaat + nzaat/5 + n` where `nzaat` is
@@ -435,7 +439,7 @@ inline QuotientGraphCompacted::QuotientGraphCompacted(const std::vector<std::siz
     // is written by cliques and read by nothing until it is, and a cursor into a vector's unused
     // capacity would be undefined.
     const std::size_t nnz = colPtr.empty() ? 0 : colPtr.back();
-    mSrc.reserve(nnz + nnz / 5 + mSegment.size() + detail::kOrderingPad);
+    mSrc.reserve(nnz + nnz / 5 + mSize + detail::kOrderingPad);
     for (std::int32_t aj = 0; aj < size; ++aj) {
         mSegment[aj].srcPtr = mSrc.size();
         for (std::size_t cp = colPtr[aj]; cp < colPtr[aj + 1]; ++cp)
@@ -446,7 +450,7 @@ inline QuotientGraphCompacted::QuotientGraphCompacted(const std::vector<std::siz
     // The runs are laid out; everything past them is free space the cliques will use.
     const std::size_t nzaat = mSrc.size();
     mFree = nzaat;
-    mSrc.resize(nzaat + nzaat / 5 + mSegment.size());
+    mSrc.resize(nzaat + nzaat / 5 + mSize);
 
     detail::padded(mSuperNext, static_cast<std::size_t>(size), 1);
     detail::padded(mSuperLast, static_cast<std::size_t>(size), 2);
@@ -487,7 +491,7 @@ inline void QuotientGraphCompacted::killClique(std::int32_t c) {
 // stamp, since zero is a tag a walk can reach and this array's whole job is to answer "have I seen
 // v this step" against `mTag`, which starts there.
 inline void QuotientGraphCompacted::enableMarks() {
-    detail::padded(mMark, mSegment.size(), 4);
+    detail::padded(mMark, mSize, 4);
     std::fill(mMark.begin(), mMark.end(), NIL);
 }
 
@@ -1156,7 +1160,7 @@ inline bool QuotientGraphCompacted::cliqueCountBalances() const {
 inline std::vector<std::int32_t> QuotientGraphCompacted::order(
         const std::vector<std::int32_t>& pivots) const {
     std::vector<std::int32_t> order;
-    order.reserve(size());
+    order.reserve(mSize);
     for (std::int32_t pivot : pivots)
         for (std::int32_t u = pivot; u != NIL; u = mSuperNext[u]) order.push_back(u);
     return order;
@@ -1164,23 +1168,27 @@ inline std::vector<std::int32_t> QuotientGraphCompacted::order(
 
 inline std::vector<std::int32_t> QuotientGraphCompacted::orderAscending(
         const std::vector<std::int32_t>& pivots) const {
-    const std::size_t n = size();
-    std::vector<std::int32_t> order(n);
-    std::vector<std::int32_t> slot(n, 0);
+    std::vector<std::int32_t> order(mSize);
+    std::vector<std::int32_t> cursor(mSize, 0);
 
-    std::size_t pos = 0;
+    std::uint32_t k = 0;
     for (std::int32_t pivot : pivots) {
-        for (std::int32_t u = mSuperNext[pivot]; u != NIL; u = mSuperNext[u]) slot[u] = -(pivot + 1);
-        order[pos]  = pivot;
-        slot[pivot] = static_cast<std::int32_t>(pos) + 1;   // where its first member goes
-        pos += static_cast<std::uint32_t>(mWeight[pivot]);  // the whole supervariable's room
+        order[k]      = pivot;
+        cursor[pivot] = static_cast<std::int32_t>(k + 1);   // where its first member goes
+        k += static_cast<std::uint32_t>(mWeight[pivot]);    // the whole supervariable's room
+        // The chain starts at mSuperNext[pivot], the pivot not being a member of itself, so the
+        // stamp never lands on the cursor just written.
+        for (std::int32_t u = mSuperNext[pivot]; u != NIL; u = mSuperNext[u])
+            cursor[u] = -(pivot + 1);
     }
 
-    for (std::size_t v = 0; v < n; ++v) {                   // ascending, so the members are too
-        const std::int32_t s = slot[v];
-        if (s >= 0) continue;                               // a root, already placed
-        const std::int32_t root = -s - 1;
-        order[static_cast<std::size_t>(slot[root]++)] = static_cast<std::int32_t>(v);
+    // Ascending, so the members are too. `-(x + 1)` is its own inverse, so the decode below is
+    // the encode above, and its sign is the test: a non-negative cursor is a position, so u is a
+    // pivot and was placed already.
+    for (std::int32_t u = 0; u < static_cast<std::int32_t>(mSize); ++u) {
+        const std::int32_t pivot = -(cursor[u] + 1);
+        if (pivot < 0) continue;
+        order[cursor[pivot]++] = u;
     }
     return order;
 }
@@ -1207,7 +1215,7 @@ inline std::vector<std::int32_t> QuotientGraphCompacted::orderAscending(
 // build, where the partial is empty and both halves degenerate to the plain sweep.
 inline void QuotientGraphCompacted::compact(std::size_t& cliqueStart) {
     ++mCompactions;
-    const std::int32_t n = static_cast<std::int32_t>(mSegment.size());
+    const std::int32_t n = static_cast<std::int32_t>(mSize);
 
     for (std::int32_t e = 0; e < n; ++e) {
         const std::size_t len = static_cast<std::size_t>(mSegment[e].adjacencySize)

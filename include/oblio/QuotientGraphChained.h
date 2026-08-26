@@ -37,7 +37,7 @@ public:
     QuotientGraphChained(const std::vector<std::size_t>&  colPtr,
                   const std::vector<std::int32_t>& rowIdx);
 
-    std::size_t size() const { return (mSegment.size() - 1); }
+    std::size_t size() const { return mSize; }
     // GONE: one value reserved above every tag, so the stamp array answers "is v dead" on the load
     // it was making anyway and no array is spent on liveness at any walk site.
     //
@@ -254,6 +254,9 @@ private:
 
     const std::vector<std::int32_t>& finishElimination(std::int32_t pivot);
 
+    // Dimensions.
+    std::size_t mSize = 0;   // number of vertices
+
     // A[u] and I[u] share one run, and one array holds every run end to end. Their number is
     // CONSERVED: an elimination that reaches u replaces at least one source with the new clique
     // and never manufactures one, so
@@ -332,7 +335,7 @@ private:
     // default. See the setter, and massEliminate() for the half it hands over.
     bool mLateMassElimination = false;
 
-    // TWO STAMP SPACES IN ONE ARRAY: vertices at [v], cliques at [size() + c]. Clique ids ARE
+    // TWO STAMP SPACES IN ONE ARRAY: vertices at [v], cliques at [mSize + c]. Clique ids ARE
     // vertex ids, so one space cannot hold both once the vertex half carries GONE: stamping a
     // clique would write a live tag over the slot of the dead pivot that formed it, and a walk of
     // an older clique still holding that pivot as a member would take it for live. Neither genmmd
@@ -353,10 +356,11 @@ private:
 
 inline QuotientGraphChained::QuotientGraphChained(const std::vector<std::size_t>&  colPtr,
                              const std::vector<std::int32_t>& rowIdx)
-    : mSegment(colPtr.empty() ? 1 : colPtr.size()),
-      mCliqueLiveMembers(mSegment.size() - 1, 0),
-      mMark(2 * (mSegment.size() - 1), NIL) {
-    const std::int32_t size = static_cast<std::int32_t>((mSegment.size() - 1));
+    : mSize(colPtr.empty() ? 0 : colPtr.size() - 1),
+      mSegment(mSize + 1),
+      mCliqueLiveMembers(mSize, 0),
+      mMark(2 * mSize, NIL) {
+    const std::int32_t size = static_cast<std::int32_t>(mSize);
 
     // One pass to place each column's run, dropping the diagonal. The runs are laid out in column
     // order and never move afterwards, so the offsets are written once here and only the lengths
@@ -523,14 +527,14 @@ inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int3
 
     ++mTag;
     absorbed = mTag;
-    const std::size_t cliqueBase = mSegment.size() - 1;
+    const std::size_t cliqueBase = mSize;
     for (const std::int32_t c : mAbsorbed) mMark[cliqueBase + static_cast<std::size_t>(c)] = absorbed;
 }
 
 inline const std::vector<std::int32_t>& QuotientGraphChained::eliminateMmd(std::int32_t pivot) {
     std::int32_t absorbed = NIL;
     beginElimination(pivot, absorbed);
-    const std::size_t cliqueBase = mSegment.size() - 1;
+    const std::size_t cliqueBase = mSize;
     // C[pivot] IS the reach here: beginElimination wrote it there and nothing has trimmed it yet
     // (massEliminate does, and runs after). So the prune walks the arena block rather than a copy.
     const bool amdOrder = mVendoredListOrder;      // hoisted, as the other flags are
@@ -698,25 +702,27 @@ inline void QuotientGraphChained::merge(std::int32_t u, std::int32_t v) {
     // indistinguishable; only the permutation differs.
 inline std::vector<std::int32_t> QuotientGraphChained::orderAscending(
         const std::vector<std::int32_t>& pivots) const {
-    const std::size_t n = size();
-    std::vector<std::int32_t> order(n);
-    std::vector<std::int32_t> slot(n, 0);
+    std::vector<std::int32_t> order(mSize);
+    std::vector<std::int32_t> cursor(mSize, 0);
 
-    std::size_t pos = 0;
+    std::uint32_t k = 0;
     for (std::int32_t pivot : pivots) {
-        // The members first, so marking them cannot overwrite the root's own cursor: the chain
-        // starts AT the pivot, and the pivot is a root rather than a member of itself.
-        for (std::int32_t u = mSuperNext[pivot]; u != NIL; u = mSuperNext[u]) slot[u] = -(pivot + 1);
-        order[pos]  = pivot;
-        slot[pivot] = static_cast<std::int32_t>(pos) + 1;   // where its first member goes
-        pos += static_cast<std::uint32_t>(mWeight[pivot]);  // the whole supervariable's room
+        order[k]      = pivot;
+        cursor[pivot] = static_cast<std::int32_t>(k + 1);   // where its first member goes
+        k += static_cast<std::uint32_t>(mWeight[pivot]);    // the whole supervariable's room
+        // The chain starts at mSuperNext[pivot], the pivot not being a member of itself, so the
+        // stamp never lands on the cursor just written.
+        for (std::int32_t u = mSuperNext[pivot]; u != NIL; u = mSuperNext[u])
+            cursor[u] = -(pivot + 1);
     }
 
-    for (std::size_t v = 0; v < n; ++v) {                   // ascending, so the members are too
-        const std::int32_t s = slot[v];
-        if (s >= 0) continue;                               // a root, already placed
-        const std::int32_t root = -s - 1;
-        order[static_cast<std::size_t>(slot[root]++)] = static_cast<std::int32_t>(v);
+    // Ascending, so the members are too. `-(x + 1)` is its own inverse, so the decode below is
+    // the encode above, and its sign is the test: a non-negative cursor is a position, so u is a
+    // pivot and was placed already.
+    for (std::int32_t u = 0; u < static_cast<std::int32_t>(mSize); ++u) {
+        const std::int32_t pivot = -(cursor[u] + 1);
+        if (pivot < 0) continue;
+        order[cursor[pivot]++] = u;
     }
     return order;
 }

@@ -200,7 +200,7 @@ public:
     QuotientGraph(const std::vector<std::size_t>&  colPtr,
                   const std::vector<std::int32_t>& rowIdx);
 
-    std::size_t size() const { return mSegment.size(); }
+    std::size_t size() const { return mSize; }
 
     // EVERY MEMBER EVER PUT INTO A CLIQUE. Third of three member counters differing only in WHEN:
     // born is cumulative, live rises and falls, peak is live's running maximum.
@@ -489,6 +489,9 @@ private:
 
     const std::vector<std::int32_t>& finishElimination(std::int32_t pivot);
 
+    // Dimensions.
+    std::size_t mSize = 0;   // number of vertices
+
     // A[u] and I[u] share one run, and one array holds every run end to end. Their number is
     // CONSERVED: an elimination that reaches u replaces at least one source with the new clique
     // and never manufactures one, so
@@ -615,13 +618,13 @@ inline std::size_t gPeakCliqueMembers = 0;
 // stamp, since zero is a tag a walk can reach and this array's whole job is to answer "have I seen
 // v this step" against `mTag`, which starts there.
 inline void QuotientGraph::enableMarks() {
-    mMark.assign(mSegment.size(), NIL);
+    mMark.assign(mSize, NIL);
 }
 
 inline QuotientGraph::QuotientGraph(const std::vector<std::size_t>&  colPtr,
                              const std::vector<std::int32_t>& rowIdx)
-    : mSegment(colPtr.empty() ? 0 : colPtr.size() - 1) {
-    const std::int32_t size = static_cast<std::int32_t>(mSegment.size());
+    : mSize(colPtr.empty() ? 0 : colPtr.size() - 1), mSegment(mSize) {
+    const std::int32_t size = static_cast<std::int32_t>(mSize);
 
     // One pass to place each column's run, dropping the diagonal. The runs are laid out in column
     // order and never move afterwards, so the offsets are written once here and only the lengths
@@ -833,9 +836,9 @@ inline void QuotientGraph::beginEliminationMmd(std::int32_t pivot) {
     // THE ARENA MUST NOT MOVE WHILE THAT WALK RUNS, which is what the reserve below is for and is
     // not an optimization. The walk reads each clique's members through a pointer into the arena
     // while appending to that same arena, so a growth would leave every such pointer dangling. A
-    // reach is at most `size()` entries, so room for one is room for the whole walk.
-    if (mCliqueSrc.capacity() - mCliqueSrc.size() < size())
-        mCliqueSrc.reserve(std::max(2 * mCliqueSrc.capacity(), mCliqueSrc.size() + size()));
+    // reach is at most `mSize` entries, so room for one is room for the whole walk.
+    if (mCliqueSrc.capacity() - mCliqueSrc.size() < mSize)
+        mCliqueSrc.reserve(std::max(2 * mCliqueSrc.capacity(), mCliqueSrc.size() + mSize));
 
     // THE DESCRIPTOR IS HELD IN LOCALS UNTIL BOTH READERS OF THE PIVOT'S RUN ARE PAST, which is
     // the whole subtlety of storing a clique in the run of the vertex that formed it. The slots it
@@ -892,9 +895,9 @@ inline void QuotientGraph::beginEliminationAmd(std::int32_t pivot, TaggedScan& s
     // THE ARENA MUST NOT MOVE WHILE THAT WALK RUNS, which is what the reserve below is for and is
     // not an optimization. The walk reads each clique's members through a pointer into the arena
     // while appending to that same arena, so a growth would leave every such pointer dangling. A
-    // reach is at most `size()` entries, so room for one is room for the whole walk.
-    if (mCliqueSrc.capacity() - mCliqueSrc.size() < size())
-        mCliqueSrc.reserve(std::max(2 * mCliqueSrc.capacity(), mCliqueSrc.size() + size()));
+    // reach is at most `mSize` entries, so room for one is room for the whole walk.
+    if (mCliqueSrc.capacity() - mCliqueSrc.size() < mSize)
+        mCliqueSrc.reserve(std::max(2 * mCliqueSrc.capacity(), mCliqueSrc.size() + mSize));
 
     // THE DESCRIPTOR IS HELD IN LOCALS UNTIL BOTH READERS OF THE PIVOT'S RUN ARE PAST, which is
     // the whole subtlety of storing a clique in the run of the vertex that formed it. The slots it
@@ -1300,25 +1303,27 @@ inline void QuotientGraph::absorbAggressively(const std::vector<std::int32_t>& c
     // indistinguishable; only the permutation differs.
 inline std::vector<std::int32_t> QuotientGraph::orderAscending(
         const std::vector<std::int32_t>& pivots) const {
-    const std::size_t n = size();
-    std::vector<std::int32_t> order(n);
-    std::vector<std::int32_t> slot(n, 0);
+    std::vector<std::int32_t> order(mSize);
+    std::vector<std::int32_t> cursor(mSize, 0);
 
-    std::size_t pos = 0;
+    std::uint32_t k = 0;
     for (std::int32_t pivot : pivots) {
-        // The members first, so marking them cannot overwrite the root's own cursor: the chain
-        // starts AT the pivot, and the pivot is a root rather than a member of itself.
-        for (std::int32_t u = mSuperNext[pivot]; u != NIL; u = mSuperNext[u]) slot[u] = -(pivot + 1);
-        order[pos]  = pivot;
-        slot[pivot] = static_cast<std::int32_t>(pos) + 1;   // where its first member goes
-        pos += static_cast<std::uint32_t>(mWeight[pivot]);  // the whole supervariable's room
+        order[k]      = pivot;
+        cursor[pivot] = static_cast<std::int32_t>(k + 1);   // where its first member goes
+        k += static_cast<std::uint32_t>(mWeight[pivot]);    // the whole supervariable's room
+        // The chain starts at mSuperNext[pivot], the pivot not being a member of itself, so the
+        // stamp never lands on the cursor just written.
+        for (std::int32_t u = mSuperNext[pivot]; u != NIL; u = mSuperNext[u])
+            cursor[u] = -(pivot + 1);
     }
 
-    for (std::size_t v = 0; v < n; ++v) {                   // ascending, so the members are too
-        const std::int32_t s = slot[v];
-        if (s >= 0) continue;                               // a root, already placed
-        const std::int32_t root = -s - 1;
-        order[static_cast<std::size_t>(slot[root]++)] = static_cast<std::int32_t>(v);
+    // Ascending, so the members are too. `-(x + 1)` is its own inverse, so the decode below is
+    // the encode above, and its sign is the test: a non-negative cursor is a position, so u is a
+    // pivot and was placed already.
+    for (std::int32_t u = 0; u < static_cast<std::int32_t>(mSize); ++u) {
+        const std::int32_t pivot = -(cursor[u] + 1);
+        if (pivot < 0) continue;
+        order[cursor[pivot]++] = u;
     }
     return order;
 }
@@ -1326,7 +1331,7 @@ inline std::vector<std::int32_t> QuotientGraph::orderAscending(
 inline std::vector<std::int32_t>
 QuotientGraph::order(const std::vector<std::int32_t>& pivots) const {
     std::vector<std::int32_t> order;
-    order.reserve(size());
+    order.reserve(mSize);
     for (std::int32_t pivot : pivots)
         for (std::int32_t u = pivot; u != NIL; u = mSuperNext[u]) order.push_back(u);
     return order;

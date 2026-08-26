@@ -1,61 +1,46 @@
 #pragma once
 
-// QuotientGraphCompacted.h - the quotient graph on AMD_2'S CLIQUE LAYOUT: one pooled workspace
-// holding a vertex's two lists AND every live clique, with a free cursor and a compaction,
-// where QuotientGraph keeps C[c] in a separate append-only arena that only grows.
+// QuotientGraphCompacted.h - the quotient graph on a POOLED CLIQUE LAYOUT: one workspace holding a
+// vertex's two lists AND every live clique, with a free cursor and a compaction, where
+// `QuotientGraph` keeps C[c] in a separate store that only grows.
 //
 // SAME GRAPH, SAME ALGORITHMS, DIFFERENT STORAGE. Every idea in QuotientGraph.h holds here without
-// change: the reachable set, the two kinds of source, a clique id being the pivot that formed it,
-// a dead clique being an empty member list. Read that file first; this one comments only what the
-// storage makes different, which is where the cliques live and what has to happen when the pool
-// fills.
+// change. Read that file first; this one comments only what the storage makes different, which is
+// where the cliques live and what has to happen when the pool fills.
 //
-// WHAT THE POOL BUYS, and why the machinery is worth writing. The pool is sized ONCE from the
-// pattern, `nzaat + nzaat/5 + n`, and never grows: if A fits, the ordering completes. Our arena
-// cannot promise that, since nnz(L) depends on the ordering being computed and so cannot be
-// bounded before the run. That is the argument in docs/DESIGN_DECISIONS.md (2026-08-16) and it is
-// why both vendored routines carry reclamation machinery.
+// WHAT THE POOL BUYS. It is sized ONCE from the pattern and never grows: if A fits, the ordering
+// completes. A store that grows toward nnz(L) cannot promise that, nnz(L) depending on the
+// ordering being computed.
 //
-// WHAT IT COSTS is a compactor, and the compactor is what makes this class harder than the flat
-// one. Absorbed cliques and consumed list prefixes leave dead space, the cursor eventually reaches
-// the end, and everything live has to slide down. So every walk here is written in POSITIONS and
-// CURSORS rather than pointers and counters: a compaction moves blocks within a pool that never
-// reallocates, so a position survives it and a pointer does not, and a truncation shortens the
-// list being read, so a count of what is LEFT survives and a count of what has been done does not.
+// WHAT IT COSTS is a compactor, and that is what makes this class harder than the flat one.
+// Absorbed cliques and consumed list prefixes leave dead space, the cursor reaches the end, and
+// everything live slides down. **So every walk here is written in POSITIONS AND CURSORS rather
+// than pointers and counters**: a compaction moves blocks within a pool that never reallocates, so
+// a position survives it and a pointer does not, and a truncation shortens the list being read, so
+// a count of what is LEFT survives and a count of what has been done does not.
 //
-// ONE CLASS, TWO BRANCHES, AND THE SPLIT IS BY SUFFIX. `AmdCompacted` and `MmdCompacted` are the
-// two drivers. Where the vendored codes AGREE there is one method; where they disagree there are two, named
-// `...Amd` and `...Mmd`, so that each body can be read against `AMD_2` or `mmdelm` directly rather
-// than against a flag that means one thing on one branch and another on the other. The count of
-// splits is not a constraint: contorting shared code to avoid a suffix is worse than the suffix.
-// See docs/DESIGN_DECISIONS.md (2026-08-19).
+// ONE CLASS, TWO BRANCHES, SPLIT BY SUFFIX. Where the two branches agree there is one method;
+// where they disagree there are two, named `...Amd` and `...Mmd`. The count of splits is not a
+// constraint: contorting shared code to avoid a suffix is worse than the suffix.
 //
-// THE FOUR THINGS THAT GENUINELY DIFFER, and they are all order or lifetime rather than storage:
+// THE THREE THINGS THAT GENUINELY DIFFER, and they are order or lifetime rather than storage:
 //
-//   - WHERE THE NEW CLIQUE LANDS IN I[u]. `AMD_2` writes it first, genmmd appends it last. That
-//     decides the order members enter C[pivot], hence bucket order, hence which of several
-//     equal-degree vertices is picked, so neither is free to move: each driver reproduces its
-//     reference's permutation exactly or it is not a differential. `pruneAmd` and `pruneMmd`.
-//   - WHICH HALF OF THE RUN COMES FIRST, and which way the incidence list is walked. `AMD_2` lays
-//     the run out I[u] then A[u] and walks the cliques forward; genmmd lays it A[u] then I[u] and
-//     walks the cliques BACKWARD, `mmdelm` popping a stack. `adjacencyAmd`/`adjacencyMmd` with
-//     their incidence twins, and `reachableSetAmd`/`reachableSetMmd`.
-//
-//     The layout is these accessors and the walks and NOTHING ELSE. The pool, the cursor, the
-//     elbow room, the compactor's sweep, the descriptors and the counters are all blind to it.
-//   - HOW A DEAD VERTEX IS RECOGNIZED. Amd reads a zero weight, which is `AMD_2`'s `Nv [i] == 0`
-//     and costs no array at all. Mmd cannot: `number()` leaves a prepass vertex LIVE at weight one
-//     and in every list that names it, so only a tag can hide it. `eliminatedAmd` and
-//     `eliminatedMmd`, and `mMark` exists for the second alone.
-//   - WHEN THE NEGATED WEIGHTS ARE RESTORED. A walk marks membership by flipping a weight's sign,
-//     and amd calls the walk ONCE PER PIVOT and restores in a pass it already makes, while mmd
-//     calls `reachableWeight` PER VERTEX in its degree refresh and so needs each call to clean up
-//     after itself. `massEliminateAmd` and `massEliminateMmd`.
+//   - WHERE THE NEW CLIQUE LANDS IN I[u], first or last. That decides the order members enter
+//     C[pivot], hence bucket order, hence which of several equal-degree vertices is picked, so
+//     neither is free to move. `pruneAmd` and `pruneMmd`.
+//   - WHICH HALF OF THE RUN COMES FIRST, and which way the incidence list is walked. The layout is
+//     these accessors and the walks and NOTHING ELSE: the pool, the cursor, the elbow room, the
+//     compactor's sweep, the descriptors and the counters are all blind to it.
+//     `adjacencyAmd`/`adjacencyMmd` with their incidence twins, and the `reachableSet` pair.
+//   - HOW A DEAD VERTEX IS RECOGNIZED. Amd reads a zero weight and costs no array at all. Mmd
+//     cannot: `number()` leaves a prepass vertex LIVE at weight one and in every list that names
+//     it, so only a tag can hide it. `eliminatedAmd` and `eliminatedMmd`, and `mMark` exists for
+//     the second alone.
 //
 // THE MARK ARRAY IS ALLOCATED ON DEMAND, by `enableMarks`, so the amd driver pays a pointer rather
-// than n int32 and its footprint claim stays true. `mHasNumbered` IS THEREFORE LOAD BEARING and
-// not merely an optimization: it is the short circuit that keeps an empty array safe in the shared
-// bodies carrying the `mHasNumbered && mMark[v] == GONE` guard.
+// than n int32. **`mHasNumbered` IS THEREFORE LOAD BEARING** and not merely an optimization: it is
+// the short circuit that keeps an empty array safe in the shared bodies carrying the
+// `mHasNumbered && mMark[v] == GONE` guard.
 
 #include "oblio/QuotientGraph.h"   // Buckets and TaggedScan, which are shared verbatim
 #include "oblio/Types.h"
@@ -100,25 +85,15 @@ public:
 
     // ------------------------------------------------------------------ per-branch: liveness
 
-    // ZERO WEIGHT IS THE DEAD STATE on the amd branch, which is `Amd.cpp`'s `Nv [i] == 0`. The
-    // three ways a vertex leaves the graph there all end in a zero weight, so no array is spent.
-    bool eliminatedAmd(std::int32_t u) const { return mWeight[u] == 0; }
-
     // AND A TAG ON THE MMD BRANCH, because a zero weight is not available to it: `number()` leaves
     // a prepass vertex live at weight one so that its neighbors' degrees still count it.
     bool eliminatedMmd(std::int32_t u) const { return mMark[u] == GONE; }
 
-    // ------------------------------------------------------------------ per-branch: the layout
+    // ZERO WEIGHT IS THE DEAD STATE on the amd branch, which is `Amd.cpp`'s `Nv [i] == 0`. The
+    // three ways a vertex leaves the graph there all end in a zero weight, so no array is spent.
+    bool eliminatedAmd(std::int32_t u) const { return mWeight[u] == 0; }
 
-    // INCIDENCE FIRST, ADJACENCY BEHIND IT, which is `AMD_2`'s order. The flip is what lets the
-    // new clique go in by its three-move rotation and what makes the part a cliques-first walk has
-    // consumed a PREFIX, which is what the mid-walk compactor needs.
-    const std::int32_t* incidenceAmd(std::int32_t u) const {
-        return mSrc.data() + mSegment[u].srcPtr;
-    }
-    const std::int32_t* adjacencyAmd(std::int32_t u) const {
-        return mSrc.data() + mSegment[u].srcPtr + mSegment[u].incidenceSize;
-    }
+    // ------------------------------------------------------------------ per-branch: the layout
 
     // ADJACENCY FIRST, INCIDENCE BEHIND IT, which is genmmd's order and the flat class's. The
     // compactor needs no flip here: mmd walks A[u] forward and I[u] backward, so the consumed part
@@ -128,6 +103,16 @@ public:
     }
     const std::int32_t* incidenceMmd(std::int32_t u) const {
         return mSrc.data() + mSegment[u].srcPtr + mSegment[u].adjacencySize;
+    }
+
+    // INCIDENCE FIRST, ADJACENCY BEHIND IT, which is `AMD_2`'s order. The flip is what lets the
+    // new clique go in by its three-move rotation and what makes the part a cliques-first walk has
+    // consumed a PREFIX, which is what the mid-walk compactor needs.
+    const std::int32_t* incidenceAmd(std::int32_t u) const {
+        return mSrc.data() + mSegment[u].srcPtr;
+    }
+    const std::int32_t* adjacencyAmd(std::int32_t u) const {
+        return mSrc.data() + mSegment[u].srcPtr + mSegment[u].incidenceSize;
     }
 
     // THE LENGTHS ARE NOT SPLIT. A length is a count and says nothing about where the half sits.
@@ -143,7 +128,7 @@ public:
     }
     std::uint32_t cliqueSize(std::int32_t c) const { return mSegment[c].adjacencySize; }
 
-    // WRITABLE, for a restore pass that trims the clique as it walks it. See `trimClique`.
+    // WRITABLE, for the pass that trims the clique as it walks it. See `trimClique`.
     std::int32_t* clique(std::int32_t c) { return mSrc.data() + mSegment[c].srcPtr; }
     void trimClique(std::int32_t pivot, std::uint32_t kept);
 
@@ -162,15 +147,6 @@ public:
         const std::int32_t w = mWeight[u];
         return static_cast<std::uint32_t>(w < 0 ? -w : w);
     }
-
-    // RESTORING A MEMBER'S SIGN, amd only, called from the pass that pass already makes over
-    // C[pivot]. The mmd branch restores inside `massEliminateMmd` instead; see the header note.
-    std::uint32_t restoreWeight(std::int32_t u) {
-        const std::int32_t w = -mWeight[u];
-        mWeight[u] = w;
-        return static_cast<std::uint32_t>(w);
-    }
-    void restorePivotWeight(std::int32_t pivot) { mWeight[pivot] = -mWeight[pivot]; }
 
     // A ROW THE DENSE RULE SET ASIDE, amd only. `AMD_2` writes `Nv [i] = 0` and the row is then
     // absent from every reachable set and every prune, which a zero weight already achieves here.
@@ -192,6 +168,7 @@ public:
 
     // ------------------------------------------------------------------ elimination
 
+    void beginEliminationMmd(std::int32_t pivot);
     // THE THREE STEPS OF AN ELIMINATION, and the pair of wrappers over them. A driver calls one
     // wrapper; the steps stay public because the wrapper is a sequence rather than a replacement,
     // and its value is that the ORDER lives here where nothing in a driver could enforce it.
@@ -207,10 +184,9 @@ public:
     // capture are factored into private helpers and the six lines of the rule read twice, each
     // against its own reference, which is the trade docs/NEXT.md asked for.
     void beginEliminationAmd(std::int32_t pivot);
-    void beginEliminationMmd(std::int32_t pivot);
 
-    void pruneAmd(std::int32_t pivot, TaggedScan& scan);
     void pruneMmd(std::int32_t pivot);
+    void pruneAmd(std::int32_t pivot, TaggedScan& scan);
 
     // ONE METHOD FOR BOTH BRANCHES. `markGone` inside it does nothing when the mark array is
     // absent, which is the amd branch, so the two halves this was split into differed in a store
@@ -225,15 +201,14 @@ public:
     const std::vector<std::int32_t>& eliminateMmd(std::int32_t pivot);
     const std::vector<std::int32_t>& eliminateAmd(std::int32_t pivot, TaggedScan& scan);
 
-    // MASS ELIMINATION, one method for both branches. Whoever runs it restores the negated
-    // weights: this method when the eliminator runs it eagerly, the driver when it runs it late.
-    // See the body, and `restoreWeight`.
+    // MASS ELIMINATION, one method for both branches. It reads no sign: the merge test is
+    // structural, and the prune restored every weight before this runs.
     const std::vector<std::int32_t>& massEliminate(std::int32_t pivot);
 
     // AGGRESSIVE ABSORPTION, amd only: a clique whose external degree has reached zero is dead,
     // and its members drop it from their incidence lists.
-    void absorb(const std::vector<std::int32_t>& cliques,
-                const std::int32_t* vertices, std::uint32_t vertexCount);
+    void absorbAggressively(const std::vector<std::int32_t>& cliques,
+                            const std::int32_t* vertices, std::uint32_t vertexCount);
 
     // ONE SUPERVARIABLE ABSORBS ANOTHER. `v` is a live vertex that never formed a clique, so its
     // length is A[v]'s and NOT a clique's, which is why this does not call `killClique`.
@@ -249,17 +224,17 @@ public:
 
     // ------------------------------------------------------------------ the reachable set
 
+    std::uint32_t reachableSetMmd(std::int32_t u);
     // THE WALK THAT BUILDS THE NEW CLIQUE, one per branch, differing in the order of the two
     // halves and the direction of the incidence part. Both write at the free cursor, both may
     // COMPACT MID-WALK, and both return the number of members reached, the start having moved.
     std::uint32_t reachableSetAmd(std::int32_t u);
-    std::uint32_t reachableSetMmd(std::int32_t u);
 
+    std::uint32_t reachableSetInPlaceMmd(std::int32_t u);
     // AND THE IN-PLACE FORM, `AMD_2`'s `elenme == 0` branch: a pivot with no cliques has a reach
     // that is a SUBSET of A[pivot], so it is compacted where it stands and the pool is untouched.
     // The mmd form additionally rejects a prepass-numbered vertex, which a weight cannot exclude.
     std::uint32_t reachableSetInPlaceAmd(std::int32_t u);
-    std::uint32_t reachableSetInPlaceMmd(std::int32_t u);
 
     // THE DEGREE OF A REACHABLE SET WITHOUT BUILDING IT, mmd only, called per vertex in the
     // refresh. It stamps rather than negating, so it leaves the weights untouched.
@@ -280,7 +255,7 @@ public:
     // trim in `trimClique`, and the mid-walk truncation inside a walk. A funnel is a claim about
     // the CALL GRAPH and holds only while every writer goes through it, which twice it did not;
     // the way to make such a claim checkable is a recomputation from independent state, and this
-    // is it. See docs/DESIGN_DECISIONS.md (2026-08-19).
+    // is it.
     //
     // COMPILED OUT under NDEBUG, where the assertion that calls it is compiled out too.
 #ifndef NDEBUG
@@ -402,9 +377,7 @@ private:
 // routine, which differs from us in ways nobody has enumerated. Every out-of-class definition below
 // is `inline` so that several drivers may include this and the linker folds the copies.
 //
-// The measurement that decided it, and what it cost in compile time, is in
-// docs/DESIGN_DECISIONS.md, and `docs/CODING_RULES.md` carries the rule and the four mechanics it
-// needs.
+// `docs/CODING_RULES.md` carries the rule and the four mechanics it needs.
 // ------------------------------------------------------------------------------------------------
 
 
@@ -428,13 +401,8 @@ inline constexpr std::size_t kOrderingPad = 0;
 // WHY STAGGERED RATHER THAN A UNIFORM PAGE. The failure mode being tested for is same-sized arrays
 // landing in the same cache sets, and a large allocation is page aligned and rounded up to whole
 // pages, so adding the SAME amount to each leaves them the same size and therefore still
-// congruent. Different amounts is what actually perturbs the arrangement. The step is a whole page
-// on Apple Silicon, 16 KiB, because an intervention has to be large enough to intervene: the
-// 2026-08-17 investigation spent two rounds on other hypotheses after a sixteen-int pad moved
-// nothing, which was not evidence of anything, the allocator having returned the same addresses.
-//
-// See docs/DESIGN_DECISIONS.md (2026-08-17), where this mechanism cost `MmdCompacted` 28 per cent
-// at exactly 200 a side and nothing at 199 or 201.
+// congruent. Different amounts is what perturbs the arrangement, and the step must be a whole page
+// or the allocator returns the same addresses and the knob does nothing.
 template <class T>
 inline void padded(std::vector<T>& v, std::size_t size, std::size_t which) {
 #ifdef OBLIO_PAD_ORDERING
@@ -458,7 +426,7 @@ inline QuotientGraphCompacted::QuotientGraphCompacted(const std::vector<std::siz
     // the OFF-DIAGONAL entry count, `sum (Len [0..n-1])`. Ours holds the same lists, so the figure
     // transfers, and it has to be the same figure rather than the same shape: the headroom is what
     // decides how often the compactor runs, so a differential against `AMD_2` on compaction counts
-    // measures the headroom unless the two agree. Until 2026-08-18 ours was computed from `nnz`
+    // measures the headroom unless the two agree. It is computed from the OFF-DIAGONAL count
     // WITH the diagonal and so ran about 1.2n large.
     //
     // Reserved from an upper bound and then sized down, rather than counted in a pass of its own:
@@ -528,15 +496,35 @@ inline void QuotientGraphCompacted::number(std::int32_t u) {
     mMark[u]     = GONE;
 }
 
+// The same rule against genmmd. The walk order is the difference and the note is in the header.
+inline void QuotientGraphCompacted::beginEliminationMmd(std::int32_t pivot) {
+    captureAbsorbed(incidenceMmd(pivot), mSegment[pivot].incidenceSize);
+
+    mWeight[pivot] = -mWeight[pivot];
+
+    const bool inPlace = mSegment[pivot].incidenceSize == 0;
+    mBuiltInPlace = inPlace;
+
+    std::size_t   cliqueStart;
+    std::uint32_t cliqueLen;
+    if (inPlace) {
+        cliqueStart = mSegment[pivot].srcPtr;
+        cliqueLen   = reachableSetInPlaceMmd(pivot);
+    } else {
+        cliqueLen   = reachableSetMmd(pivot);
+        cliqueStart = mFree - cliqueLen;
+    }
+    bearClique(pivot, cliqueStart, cliqueLen);
+}
+
 // THE PLACEMENT RULE, WRITTEN TWICE. Everything about building a clique is common except the two
 // lines that NAME A WALK, and a walk cannot be selected without knowing the branch. So the capture
 // before it and the bookkeeping after it are shared helpers and only the rule itself reads twice.
 //
 // TWO WAYS TO BUILD, and which applies is `AMD_2`'s `elenme == 0`. With no cliques in I[pivot] the
 // reach is a SUBSET of A[pivot] and is compacted where it stands, so the pool is not touched at
-// all; otherwise it is assembled at the free cursor. Measured on grids, 62 to 68 per cent of
-// eliminations take the first path and the share rises with n, which is why the branch is worth
-// having and not merely faithful.
+// all; otherwise it is assembled at the free cursor. Most eliminations take the first path, which
+// is why the branch is worth having and not merely faithful.
 //
 // NO RESERVATION BEFORE THE WALK. The walks test per entry and compact from inside themselves,
 // which is `AMD_2`'s `if (pfree >= iwlen) garbage_collection`. Reserving room for a worst-case
@@ -570,25 +558,55 @@ inline void QuotientGraphCompacted::beginEliminationAmd(std::int32_t pivot) {
     mSegment[pivot].incidenceSize = 0;
 }
 
-// The same rule against genmmd. The walk order is the difference and the note is in the header.
-inline void QuotientGraphCompacted::beginEliminationMmd(std::int32_t pivot) {
-    captureAbsorbed(incidenceMmd(pivot), mSegment[pivot].incidenceSize);
+// THE PRUNE, `mmdelm`'s. One walk of each vertex of C[pivot] drops the dead from A[u], keeps the
+// live cliques of I[u], and APPENDS the new clique at the back, which is genmmd's convention and
+// the reverse of `AMD_2`'s. No degree bound and no hash key: this branch refreshes degrees in a
+// pass of its own.
+inline void QuotientGraphCompacted::pruneMmd(std::int32_t pivot) {
+    const std::int32_t* reached     = mSrc.data() + mSegment[pivot].srcPtr;
+    const std::uint32_t reachedSize = mSegment[pivot].adjacencySize;
 
-    mWeight[pivot] = -mWeight[pivot];
+    for (std::uint32_t uk = 0; uk < reachedSize; ++uk) {
+        const std::int32_t u = reached[uk];
+        const Segment&      segment       = mSegment[u];
+        std::int32_t*       source        = mSrc.data() + segment.srcPtr;
+        const std::uint32_t adjacencySize = segment.adjacencySize;
+        std::uint32_t       kept          = 0;
+        for (std::uint32_t vk = 0; vk < adjacencySize; ++vk) {
+            const std::int32_t v = source[vk];
+            if (mWeight[v] <= 0) continue;             // in the new clique, the pivot, or merged
+            if (mHasNumbered && mMark[v] == GONE) continue;   // numbered by a prepass; see above
+            source[kept++] = v;
+        }
+        mSegment[u].adjacencySize = kept;                      // A[u] - C[pivot] - {pivot}
 
-    const bool inPlace = mSegment[pivot].incidenceSize == 0;
-    mBuiltInPlace = inPlace;
-
-    std::size_t   cliqueStart;
-    std::uint32_t cliqueLen;
-    if (inPlace) {
-        cliqueStart = mSegment[pivot].srcPtr;
-        cliqueLen   = reachableSetInPlaceMmd(pivot);
-    } else {
-        cliqueLen   = reachableSetMmd(pivot);
-        cliqueStart = mFree - cliqueLen;
+        const std::int32_t* incidence     = source + adjacencySize;
+        const std::uint32_t incidenceSize = segment.incidenceSize;
+        std::uint32_t       write         = kept;      // follows `kept`; see the note above
+        for (std::uint32_t ck = 0; ck < incidenceSize; ++ck) {
+            const std::int32_t c = incidence[ck];
+            if (mSegment[c].adjacencySize != 0) source[write++] = c;  // dead is size zero; above
+        }
+        // THE NEW CLIQUE GOES AT THE BACK, which is genmmd's convention and the reverse of
+        // `AMD_2`'s. It is what the reversed incidence walk then reads first, and it decides the
+        // order members enter C[pivot], hence bucket order, hence which of several equal-degree
+        // vertices is picked. The held-vertex rotation that put it at the FRONT for `AMD_2` went
+        source[write++]   = pivot;                     // u joins the new clique, id = pivot
+        mSegment[u].incidenceSize = write - kept;
     }
-    bearClique(pivot, cliqueStart, cliqueLen);
+
+    // THE SIGNS COME BACK HERE, at the end of the prune, which is the LAST READER of them. The
+    // walk that built C[pivot] marked membership by negating a weight and the loop above is what
+    // consumed that mark. Nothing downstream asks: absorption never touches a weight, mass
+    // elimination's merge test is structural, and every other reader takes a magnitude through
+    // `weight()`.
+    mWeight[pivot] = -mWeight[pivot];
+    {
+        const std::size_t   base = mSegment[pivot].srcPtr;
+        const std::uint32_t len  = mSegment[pivot].adjacencySize;
+        for (std::uint32_t vk = 0; vk < len; ++vk)
+            mWeight[mSrc[base + vk]] = -mWeight[mSrc[base + vk]];
+    }
 }
 
 // THE PRUNE, `AMD_2`'s scan 2 with its scan 1 fused in. One walk of each vertex of C[pivot]
@@ -596,9 +614,7 @@ inline void QuotientGraphCompacted::beginEliminationMmd(std::int32_t pivot) {
 // adjacency half of the hash key, and leaves the incidence half in the tagged `w`.
 //
 // THE ABSORBED CLIQUES' `w` IS ZEROED HERE, from the copy `beginEliminationAmd` took, because the
-// compaction below reads `w == 0` as "absorbed and gone", which is `Amd.cpp`'s `W [e] == 0`. It
-// used to ride in the capture pass itself, which is the same store one call earlier and nothing
-// between the two reads `w`.
+// compaction below reads `w == 0` as "absorbed and gone".
 inline void QuotientGraphCompacted::pruneAmd(std::int32_t pivot, TaggedScan& scan) {
     for (std::int32_t c : mAbsorbed) scan.w[c] = 0;
 
@@ -606,16 +622,16 @@ inline void QuotientGraphCompacted::pruneAmd(std::int32_t pivot, TaggedScan& sca
     const std::uint32_t reachedSize = mSegment[pivot].adjacencySize;
 
     if (scan.buckets != nullptr)
-        for (std::uint32_t ri = 0; ri < reachedSize; ++ri) scan.buckets->unfile(reached[ri]);
+        for (std::uint32_t uk = 0; uk < reachedSize; ++uk) scan.buckets->unfile(reached[uk]);
 
     const std::int32_t  wflg        = scan.wflg;          // hoisted, as the flag is
 
-    for (std::uint32_t ri = 0; ri < reachedSize; ++ri) {
-        const std::int32_t u       = reached[ri];
+    for (std::uint32_t uk = 0; uk < reachedSize; ++uk) {
+        const std::int32_t u       = reached[uk];
         const std::int32_t nvi     = -mWeight[u];   // u is in C[pivot], so its weight is negative
         const std::int32_t wnvi    = wflg - nvi;          // Amd.cpp's wnvi, and signed for it
-        const Segment&  segment         = mSegment[u];
-        std::int32_t*     source        = mSrc.data() + segment.srcPtr;
+        const Segment&      segment       = mSegment[u];
+        std::int32_t*       source        = mSrc.data() + segment.srcPtr;
         const std::uint32_t incidenceSize = segment.incidenceSize;
         const std::uint32_t adjacencySize = segment.adjacencySize;
         const std::int32_t* adjacency     = source + incidenceSize;
@@ -623,8 +639,8 @@ inline void QuotientGraphCompacted::pruneAmd(std::int32_t pivot, TaggedScan& sca
         // THE INCIDENCE PART, AT THE FRONT OF THE RUN. Compacted where it lies: the write cursor
         // starts at the read cursor and advances only when an entry is kept, so it never passes it.
         std::uint32_t write = 0;
-        for (std::uint32_t i = 0; i < incidenceSize; ++i) {
-            const std::int32_t c = source[i];
+        for (std::uint32_t ck = 0; ck < incidenceSize; ++ck) {
+            const std::int32_t c = source[ck];
             std::int32_t we = scan.w[c];
             if (we == 0) continue;                        // absorbed and gone; Amd.cpp's W == 0
             source[write++] = c;
@@ -643,14 +659,14 @@ inline void QuotientGraphCompacted::pruneAmd(std::int32_t pivot, TaggedScan& sca
         // is still behind the read cursor, having entered this loop at most `incidenceSize`.
         std::uint32_t explicitPart = 0;                   // a weight sum, not a count of positions
         std::uint32_t key          = 0;                   // wraps, like Amd.cpp's UInt hval
-        for (std::uint32_t k = 0; k < adjacencySize; ++k) {
+        for (std::uint32_t vk = 0; vk < adjacencySize; ++vk) {
             // ONE LOAD, THREE QUESTIONS, which is Amd.cpp's `nvj = Nv [j] ; if (nvj > 0)`. A
             // negative weight is a member of the new clique, including the pivot itself, so the
             // explicit `v == pivot` test is gone with the rest; a zero is absorbed or merged away.
-            const std::int32_t v  = adjacency[k];
-            const std::int32_t nv = mWeight[v];
-            if (nv <= 0) continue;
-            explicitPart += static_cast<std::uint32_t>(nv);
+            const std::int32_t v  = adjacency[vk];
+            const std::int32_t vWeight = mWeight[v];
+            if (vWeight <= 0) continue;
+            explicitPart += static_cast<std::uint32_t>(vWeight);
             key += static_cast<std::uint32_t>(v);         // no + 1, no reduction; see above
             source[write++] = v;
         }
@@ -683,46 +699,18 @@ inline void QuotientGraphCompacted::pruneAmd(std::int32_t pivot, TaggedScan& sca
         mSegment[u].adjacencySize = write - incidenceKept;
     }
 
-}
-
-// THE PRUNE, `mmdelm`'s. One walk of each vertex of C[pivot] drops the dead from A[u], keeps the
-// live cliques of I[u], and APPENDS the new clique at the back, which is genmmd's convention and
-// the reverse of `AMD_2`'s. No degree bound and no hash key: this branch refreshes degrees in a
-// pass of its own.
-inline void QuotientGraphCompacted::pruneMmd(std::int32_t pivot) {
-    const std::int32_t* reached     = mSrc.data() + mSegment[pivot].srcPtr;
-    const std::uint32_t reachedSize = mSegment[pivot].adjacencySize;
-
-    for (std::uint32_t ri = 0; ri < reachedSize; ++ri) {
-        const std::int32_t u = reached[ri];
-        const Segment&  segment         = mSegment[u];
-        std::int32_t*     source        = mSrc.data() + segment.srcPtr;
-        const std::uint32_t adjacencySize = segment.adjacencySize;
-        std::uint32_t       kept          = 0;
-        for (std::uint32_t k = 0; k < adjacencySize; ++k) {
-            const std::int32_t v = source[k];
-            if (mWeight[v] <= 0) continue;             // in the new clique, the pivot, or merged
-            if (mHasNumbered && mMark[v] == GONE) continue;   // numbered by a prepass; see above
-            source[kept++] = v;
-        }
-        mSegment[u].adjacencySize = kept;                      // A[u] - C[pivot] - {pivot}
-
-        const std::int32_t* incidence     = source + adjacencySize;
-        const std::uint32_t incidenceSize = segment.incidenceSize;
-        std::uint32_t       write         = kept;      // follows `kept`; see the note above
-        for (std::uint32_t i = 0; i < incidenceSize; ++i) {
-            const std::int32_t c = incidence[i];
-            if (mSegment[c].adjacencySize != 0) source[write++] = c;  // dead is size zero; above
-        }
-        // THE NEW CLIQUE GOES AT THE BACK, which is genmmd's convention and the reverse of
-        // `AMD_2`'s. It is what the reversed incidence walk then reads first, and it decides the
-        // order members enter C[pivot], hence bucket order, hence which of several equal-degree
-        // vertices is picked. The held-vertex rotation that put it at the FRONT for `AMD_2` went
-        // with `mVendoredListOrder` on 2026-08-19; see that member's note.
-        source[write++]   = pivot;                     // u joins the new clique, id = pivot
-        mSegment[u].incidenceSize = write - kept;
+    // THE SIGNS COME BACK HERE, at the end of the prune, which is the LAST READER of them. The
+    // walk that built C[pivot] marked membership by negating a weight and the loop above is what
+    // consumed that mark. Nothing downstream asks: absorption never touches a weight, mass
+    // elimination's merge test is structural, and every other reader takes a magnitude through
+    // `weight()`.
+    mWeight[pivot] = -mWeight[pivot];
+    {
+        const std::size_t   base = mSegment[pivot].srcPtr;
+        const std::uint32_t len  = mSegment[pivot].adjacencySize;
+        for (std::uint32_t vk = 0; vk < len; ++vk)
+            mWeight[mSrc[base + vk]] = -mWeight[mSrc[base + vk]];
     }
-
 }
 
 // MASS ELIMINATION IS THE DRIVER'S ON THIS BRANCH, so this normally only clears the scratch: the
@@ -765,16 +753,8 @@ QuotientGraphCompacted::massEliminate(std::int32_t pivot) {
     merged.clear();
     const std::int32_t* reached     = mSrc.data() + mSegment[pivot].srcPtr;
     const std::uint32_t reachedSize = mSegment[pivot].adjacencySize;
-    // THE SIGNS COME BACK HERE UNLESS THE DRIVER IS DOING IT. Mass elimination is the last reader
-    // of the negated form, so whoever runs it restores: this method when the eliminator runs it
-    // eagerly, the driver when it runs it late and has a refile pass to ride the store on.
-    // `AMD_2` is the late case, mass-eliminating with the weights still negative, `nvi = -Nv [i]`,
-    // and restoring afterwards under RESTORE DEGREE LISTS. See restoreWeight.
-    const bool restore = !mLateMassElimination;
-    if (restore) mWeight[pivot] = -mWeight[pivot];
-    for (std::uint32_t ri = 0; ri < reachedSize; ++ri) {
-        const std::int32_t u = reached[ri];
-        if (restore) mWeight[u] = -mWeight[u];             // live again, and positive
+    for (std::uint32_t uk = 0; uk < reachedSize; ++uk) {
+        const std::int32_t u = reached[uk];
         if (mSegment[u].adjacencySize == 0 && mSegment[u].incidenceSize == 1 &&
             mSrc[mSegment[u].srcPtr] == pivot) {         // A[u] empty, so I[u] starts at the run
             mSegment[u].incidenceSize = 0;
@@ -786,7 +766,7 @@ QuotientGraphCompacted::massEliminate(std::int32_t pivot) {
         for (std::int32_t u : merged) {                // the pivot now stands for them too
             mSuperNext[mSuperLast[pivot]] = u;         // append u's chain, order preserved
             mSuperLast[pivot]             = mSuperLast[u];
-            mCliqueWeight -= weight(u);            // magnitude: the sign depends on `restore`
+            mCliqueWeight -= weight(u);
             mWeight[pivot] += mWeight[u];
             mWeight[u] = 0;
         }
@@ -794,8 +774,8 @@ QuotientGraphCompacted::massEliminate(std::int32_t pivot) {
         std::int32_t*     members     = mSrc.data() + mSegment[pivot].srcPtr;
         const std::uint32_t membersSize = mSegment[pivot].adjacencySize;
         std::uint32_t       kept        = 0;
-        for (std::uint32_t k = 0; k < membersSize; ++k)
-            if (mWeight[members[k]] != 0) members[kept++] = members[k];
+        for (std::uint32_t uk = 0; uk < membersSize; ++uk)
+            if (mWeight[members[uk]] != 0) members[kept++] = members[uk];
         mNumLiveCliqueMembers -= membersSize - kept;   // a shrink is a partial death
         mSegment[pivot].adjacencySize = kept;
 
@@ -813,8 +793,9 @@ QuotientGraphCompacted::massEliminate(std::int32_t pivot) {
     return merged;
 }
 
-inline void QuotientGraphCompacted::absorb(const std::vector<std::int32_t>& cliques,
-                           const std::int32_t* vertices, std::uint32_t vertexCount) {
+inline void QuotientGraphCompacted::absorbAggressively(
+    const std::vector<std::int32_t>& cliques,
+    const std::int32_t* vertices, std::uint32_t vertexCount) {
     if (cliques.empty()) return;
 
     // dead; the compaction reads the size
@@ -832,8 +813,8 @@ inline void QuotientGraphCompacted::absorb(const std::vector<std::int32_t>& cliq
     // rewrites the list, so an absorbed clique is simply not copied. We decide absorption after
     // the whole prune, because the prune has scan 1 fused into it, and so have to revisit the list.
     // What is removed here is the slide, not the visit.
-    for (std::uint32_t k = 0; k < vertexCount; ++k) {
-        const std::int32_t u         = vertices[k];
+    for (std::uint32_t uk = 0; uk < vertexCount; ++uk) {
+        const std::int32_t u         = vertices[uk];
         std::int32_t*      incidence = mSrc.data() + mSegment[u].srcPtr;
         const std::uint32_t size     = mSegment[u].incidenceSize;
 
@@ -870,6 +851,114 @@ inline void QuotientGraphCompacted::merge(std::int32_t u, std::int32_t v) {
     mSegment[v].adjacencySize = 0;
     mSegment[v].incidenceSize = 0;
     markGone(v);          // mmd only; the amd branch reads the zero weight above and has no array
+}
+
+// WRITES AT `mFree` RATHER THAN APPENDING, which is the storage change, and TESTS FOR ROOM PER
+// ENTRY, so a compaction can fire inside this walk and the walk then resumes; the positions and
+// cursors below are what make resuming possible. The reach lands exactly where the clique is to
+// live, so there is no copy from a scratch into place.
+inline std::uint32_t QuotientGraphCompacted::reachableSetMmd(std::int32_t u) {
+    ++mTag;
+    // THE PIVOT IS ALREADY NEGATED, by `beginEliminationMmd`, which is where the amd branch has
+    // always done it and where the merge moved this branch's. It was here and in the in-place walk
+    // before, and leaving it in both places negates twice, which reads as a positive weight and so
+    // as a vertex not yet taken. Caught on a 3 by 3 grid by `cliqueCountBalances`, in the first
+    // build of the merged class.
+    // THE TRUNCATION BELOW IS WRITTEN FOR THE REVERSED WALK, which is the only one this file runs.
+    // Reversed, the consumed part of I[u] is a suffix and the survivors are the prefix the run
+    // already points at, so a truncation is a length; forward it would be the other way round and
+    // `srcPtr` would have to move with it. The flag is the driver's, so the assumption is
+    // checked rather than assumed.
+    const bool reverse = mReverseIncidence;
+    assert(reverse && "reachableSetMmd's truncation assumes the reversed incidence walk");
+
+    // POSITIONS AND CURSORS, and this is what makes resuming possible at all. The compactor moves
+    // every live block, so a pointer taken before it runs points at whatever landed there
+    // afterwards; a POSITION survives, the pool being sized once at construction so that a
+    // compaction invalidates a block's OFFSET and never the array's base. And a cursor counting
+    // what is LEFT survives a truncation, where a counter into the original length would not.
+    // `AMD_2` walks the same way for the same reason, keeping `p` and `pj` as indices and
+    // restoring them from `Pe [me]` and `Pe [e]`.
+    std::int32_t* const pool = mSrc.data();             // stable: the pool never reallocates
+    std::uint32_t       reached     = 0;                // counted; the start moves under us
+    std::size_t         cliqueStart = mFree;            // AMD_2's pme1, and it moves too
+
+    // A[u] FORWARD, so the consumed part is a PREFIX and what remains is one contiguous block
+    // running to the end of the run. `p` is where the unconsumed part starts and `remaining` how
+    // much of it is left, which is the pair a truncation writes back.
+    std::size_t   p         = mSegment[u].srcPtr;
+    std::uint32_t remaining = mSegment[u].adjacencySize;
+    while (remaining-- > 0) {
+        const std::int32_t v  = pool[p++];
+        const std::int32_t vWeight = mWeight[v];
+        if (vWeight <= 0 || (mHasNumbered && mMark[v] == GONE)) continue;
+
+        if (mFree >= mSrc.size()) {
+            // TRUNCATE TO WHAT IS LEFT OF A[u], which is `AMD_2`'s `Pe [me] = p ; Len [me] -=
+            // knt1`. The consumed part is a prefix, so the survivors are still one block: A[u]'s
+            // tail followed by the whole of I[u], which is what `srcPtr` and the two lengths
+            // now describe. It is also what makes the space bound hold, the half-built clique
+            // being a subset of exactly the prefixes dropped here.
+            mSegment[u].srcPtr     = p;
+            mSegment[u].adjacencySize = remaining;
+            compact(cliqueStart);
+            p = mSegment[u].srcPtr;                         // AMD_2's `p = Pe [me]`
+        }
+
+        mWeight[v] = -vWeight;
+        pool[mFree++] = v;
+        ++reached;
+    }
+
+    // I[u] REVERSED, which is `mmdelm` pushing cliques onto a stack and popping them. The
+    // consumed part is therefore a SUFFIX, so what remains is the PREFIX the run already points at
+    // and a truncation is a length rather than a move. `left` is that length.
+    //
+    // THE BASE IS RE-READ RATHER THAN HOISTED, for the same reason the walk uses positions: a
+    // compaction moves the run. `srcPtr + adjacencySize` is where I[u] begins under every state
+    // this loop can be in, including after the first truncation below has set the length to zero.
+    std::size_t   incidenceBase = mSegment[u].srcPtr + mSegment[u].adjacencySize;
+    const std::uint32_t incidenceLen = mSegment[u].incidenceSize;
+    std::uint32_t left = incidenceLen;
+    while (left-- > 0) {
+        const std::int32_t c  = pool[incidenceBase + (reverse ? left : incidenceLen - 1 - left)];
+        std::size_t        pj = mSegment[c].srcPtr;
+        std::uint32_t      ln = mSegment[c].adjacencySize;
+        while (ln-- > 0) {
+            const std::int32_t v  = pool[pj++];
+            const std::int32_t vWeight = mWeight[v];
+            if (vWeight <= 0) continue;
+
+            if (mFree >= mSrc.size()) {
+                // A[u] IS SPENT BY NOW, so the run becomes I[u]'s surviving prefix alone and the
+                // consumed adjacency goes with the rest of the dead space. Dropping it is not
+                // tidiness: the space bound rests on the half-built clique being covered by what
+                // the walk has already released.
+                mSegment[u].srcPtr     = incidenceBase;
+                mSegment[u].adjacencySize = 0;
+                mSegment[u].incidenceSize = left;
+
+                // TRUNCATING A CLIQUE IS A CONTRACTION AND THE COUNTER HAS TO SEE IT. `c` is a
+                // live clique being consumed into the new one; dropping its consumed prefix
+                // shortens it, and the `killClique` in `beginElimination` would then subtract only
+                // what remained, leaving the difference live for the rest of the run. This is the
+                // second of the two defects `AmdCompacted` introduced with its own compactor.
+                mNumLiveCliqueMembers -= mSegment[c].adjacencySize - ln;
+                mSegment[c].srcPtr      = pj;
+                mSegment[c].adjacencySize  = ln;
+
+                compact(cliqueStart);
+                // AND RESUME FROM THE DESCRIPTORS, which is `AMD_2`'s `pj = Pe [e] ; p = Pe [me]`.
+                incidenceBase = mSegment[u].srcPtr + mSegment[u].adjacencySize;
+                pj            = mSegment[c].srcPtr;
+            }
+
+            mWeight[v] = -vWeight;
+            pool[mFree++] = v;
+            ++reached;
+        }
+    }
+    return reached;
 }
 
 // WRITES AT `mFree` RATHER THAN APPENDING, which is the storage change, and TESTS FOR ROOM PER
@@ -928,8 +1017,8 @@ inline std::uint32_t QuotientGraphCompacted::reachableSetAmd(std::int32_t u) {
         // slot. `> 0` is live-and-not-yet-taken, which is dedup and liveness together.
         while (ln-- > 0) {
             const std::int32_t v  = pool[pj++];
-            const std::int32_t nv = mWeight[v];
-            if (nv <= 0) continue;
+            const std::int32_t vWeight = mWeight[v];
+            if (vWeight <= 0) continue;
 
             if (mFree >= mSrc.size()) {
                 // TRUNCATE BOTH LISTS TO WHAT IS LEFT, which is `AMD_2`'s
@@ -968,7 +1057,7 @@ inline std::uint32_t QuotientGraphCompacted::reachableSetAmd(std::int32_t u) {
                 if (!onCliques) p = pj;
             }
 
-            mWeight[v] = -nv;
+            mWeight[v] = -vWeight;
             pool[mFree++] = v;
             ++reached;
         }
@@ -977,118 +1066,39 @@ inline std::uint32_t QuotientGraphCompacted::reachableSetAmd(std::int32_t u) {
     return reached;
 }
 
-// WRITES AT `mFree` RATHER THAN APPENDING, which is the storage change, and TESTS FOR ROOM PER
-// ENTRY, so a compaction can fire inside this walk and the walk then resumes; the positions and
-// cursors below are what make resuming possible. The reach lands exactly where the clique is to
-// live, so there is no copy from a scratch into place.
-inline std::uint32_t QuotientGraphCompacted::reachableSetMmd(std::int32_t u) {
-    ++mTag;
-    // THE PIVOT IS ALREADY NEGATED, by `beginEliminationMmd`, which is where the amd branch has
-    // always done it and where the merge moved this branch's. It was here and in the in-place walk
-    // before, and leaving it in both places negates twice, which reads as a positive weight and so
-    // as a vertex not yet taken. Caught on a 3 by 3 grid by `cliqueCountBalances`, in the first
-    // build of the merged class.
-    // THE TRUNCATION BELOW IS WRITTEN FOR THE REVERSED WALK, which is the only one this file runs.
-    // Reversed, the consumed part of I[u] is a suffix and the survivors are the prefix the run
-    // already points at, so a truncation is a length; forward it would be the other way round and
-    // `srcPtr` would have to move with it. The flag is the driver's, so the assumption is
-    // checked rather than assumed.
-    const bool reverse = mReverseIncidence;
-    assert(reverse && "reachableSetMmd's truncation assumes the reversed incidence walk");
-
-    // POSITIONS AND CURSORS, and this is what makes resuming possible at all. The compactor moves
-    // every live block, so a pointer taken before it runs points at whatever landed there
-    // afterwards; a POSITION survives, the pool being sized once at construction so that a
-    // compaction invalidates a block's OFFSET and never the array's base. And a cursor counting
-    // what is LEFT survives a truncation, where a counter into the original length would not.
-    // `AMD_2` walks the same way for the same reason, keeping `p` and `pj` as indices and
-    // restoring them from `Pe [me]` and `Pe [e]`.
-    std::int32_t* const pool = mSrc.data();             // stable: the pool never reallocates
-    std::uint32_t       reached     = 0;                // counted; the start moves under us
-    std::size_t         cliqueStart = mFree;            // AMD_2's pme1, and it moves too
-
-    // A[u] FORWARD, so the consumed part is a PREFIX and what remains is one contiguous block
-    // running to the end of the run. `p` is where the unconsumed part starts and `remaining` how
-    // much of it is left, which is the pair a truncation writes back.
-    std::size_t   p         = mSegment[u].srcPtr;
-    std::uint32_t remaining = mSegment[u].adjacencySize;
-    while (remaining-- > 0) {
-        const std::int32_t v  = pool[p++];
-        const std::int32_t nv = mWeight[v];
-        if (nv <= 0 || (mHasNumbered && mMark[v] == GONE)) continue;
-
-        if (mFree >= mSrc.size()) {
-            // TRUNCATE TO WHAT IS LEFT OF A[u], which is `AMD_2`'s `Pe [me] = p ; Len [me] -=
-            // knt1`. The consumed part is a prefix, so the survivors are still one block: A[u]'s
-            // tail followed by the whole of I[u], which is what `srcPtr` and the two lengths
-            // now describe. It is also what makes the space bound hold, the half-built clique
-            // being a subset of exactly the prefixes dropped here.
-            mSegment[u].srcPtr     = p;
-            mSegment[u].adjacencySize = remaining;
-            compact(cliqueStart);
-            p = mSegment[u].srcPtr;                         // AMD_2's `p = Pe [me]`
-        }
-
-        mWeight[v] = -nv;
-        pool[mFree++] = v;
-        ++reached;
-    }
-
-    // I[u] REVERSED, which is `mmdelm` pushing cliques onto a stack and popping them. The
-    // consumed part is therefore a SUFFIX, so what remains is the PREFIX the run already points at
-    // and a truncation is a length rather than a move. `left` is that length.
-    //
-    // THE BASE IS RE-READ RATHER THAN HOISTED, for the same reason the walk uses positions: a
-    // compaction moves the run. `srcPtr + adjacencySize` is where I[u] begins under every state
-    // this loop can be in, including after the first truncation below has set the length to zero.
-    std::size_t   incidenceBase = mSegment[u].srcPtr + mSegment[u].adjacencySize;
-    const std::uint32_t incidenceLen = mSegment[u].incidenceSize;
-    std::uint32_t left = incidenceLen;
-    while (left-- > 0) {
-        const std::int32_t c  = pool[incidenceBase + (reverse ? left : incidenceLen - 1 - left)];
-        std::size_t        pj = mSegment[c].srcPtr;
-        std::uint32_t      ln = mSegment[c].adjacencySize;
-        while (ln-- > 0) {
-            const std::int32_t v  = pool[pj++];
-            const std::int32_t nv = mWeight[v];
-            if (nv <= 0) continue;
-
-            if (mFree >= mSrc.size()) {
-                // A[u] IS SPENT BY NOW, so the run becomes I[u]'s surviving prefix alone and the
-                // consumed adjacency goes with the rest of the dead space. Dropping it is not
-                // tidiness: the space bound rests on the half-built clique being covered by what
-                // the walk has already released.
-                mSegment[u].srcPtr     = incidenceBase;
-                mSegment[u].adjacencySize = 0;
-                mSegment[u].incidenceSize = left;
-
-                // TRUNCATING A CLIQUE IS A CONTRACTION AND THE COUNTER HAS TO SEE IT. `c` is a
-                // live clique being consumed into the new one; dropping its consumed prefix
-                // shortens it, and the `killClique` in `beginElimination` would then subtract only
-                // what remained, leaving the difference live for the rest of the run. This is the
-                // second of the two defects `AmdCompacted` introduced with its own compactor.
-                mNumLiveCliqueMembers -= mSegment[c].adjacencySize - ln;
-                mSegment[c].srcPtr      = pj;
-                mSegment[c].adjacencySize  = ln;
-
-                compact(cliqueStart);
-                // AND RESUME FROM THE DESCRIPTORS, which is `AMD_2`'s `pj = Pe [e] ; p = Pe [me]`.
-                incidenceBase = mSegment[u].srcPtr + mSegment[u].adjacencySize;
-                pj            = mSegment[c].srcPtr;
-            }
-
-            mWeight[v] = -nv;
-            pool[mFree++] = v;
-            ++reached;
+// CONSTRUCTS THE CLIQUE IN THE PIVOT'S OWN RUN, which is `AMD_2`'s `if (elenme == 0)` branch and
+// the common case rather than a corner: a pivot with no cliques has a reach that is a SUBSET of
+// A[pivot], so it fits where A[pivot] already is and the pool is not touched.
+//
+// IT IS AN IN-PLACE COMPACTION and safe for the reason every such loop here is: the write cursor
+// starts at the read cursor and only ever falls behind it, a vertex being written only when it was
+// read. `AMD_2` spells it `Iw [++pme2] = i` with `pme2 = pme1 - 1`.
+//
+// THE GONE TEST SURVIVES HERE, unlike in AmdCompacted, and for the reason it survives everywhere on
+// this branch: `number()` leaves a prepass vertex at weight one and in every neighbour's adjacency, so
+// a positive weight does not mean live in an ADJACENCY list. This walk reads nothing else.
+inline std::uint32_t QuotientGraphCompacted::reachableSetInPlaceMmd(std::int32_t u) {
+    // THE PIVOT IS ALREADY NEGATED, by `beginEliminationMmd`. It has to be negated somewhere and
+    // not merely to keep u out of its own list, which has no self loop: the prune restores the
+    // sign of every member AND of the pivot, so a pivot left positive comes out of that restore
+    // negative and `orderAscending` then reads a supervariable of negative size. Negating twice,
+    // which is what hoisting it without removing it here would do, is the same bug reversed.
+    std::int32_t*       source = mSrc.data() + mSegment[u].srcPtr;
+    const std::uint32_t count = mSegment[u].adjacencySize;
+    std::uint32_t       kept  = 0;
+    for (std::uint32_t vk = 0; vk < count; ++vk) {
+        const std::int32_t v  = source[vk];
+        const std::int32_t vWeight = mWeight[v];
+        if (vWeight > 0 && !(mHasNumbered && mMark[v] == GONE)) {
+            mWeight[v] = -vWeight; source[kept++] = v;
         }
     }
-    return reached;
+    return kept;
 }
 
 // CONSTRUCTS THE CLIQUE IN THE PIVOT'S OWN RUN, which is `AMD_2`'s `if (elenme == 0)` branch and
 // the common case rather than a corner: a pivot with no cliques has a reach that is a SUBSET of
-// A[pivot], so it fits where A[pivot] already is and the pool is not touched at all. Measured on
-// grids, 62 to 68 percent of eliminations qualify, and the share rises with n.
+// A[pivot], so it fits where A[pivot] already is and the pool is not touched at all.
 //
 // IT IS AN IN-PLACE COMPACTION and safe for the reason every such loop here is: the write cursor
 // starts at the read cursor and only ever falls behind it, since a vertex is written only when it
@@ -1102,40 +1112,10 @@ inline std::uint32_t QuotientGraphCompacted::reachableSetInPlaceAmd(std::int32_t
     std::int32_t*       source = mSrc.data() + mSegment[u].srcPtr;
     const std::uint32_t count = mSegment[u].adjacencySize;
     std::uint32_t       kept  = 0;
-    for (std::uint32_t k = 0; k < count; ++k) {
-        const std::int32_t v  = source[k];
-        const std::int32_t nv = mWeight[v];
-        if (nv > 0) { mWeight[v] = -nv; source[kept++] = v; }
-    }
-    return kept;
-}
-
-// CONSTRUCTS THE CLIQUE IN THE PIVOT'S OWN RUN, which is `AMD_2`'s `if (elenme == 0)` branch and
-// the common case rather than a corner: a pivot with no cliques has a reach that is a SUBSET of
-// A[pivot], so it fits where A[pivot] already is and the pool is not touched. Measured on grids,
-// 62 to 68 percent of mmd's eliminations qualify, and the share rises with n.
-//
-// IT IS AN IN-PLACE COMPACTION and safe for the reason every such loop here is: the write cursor
-// starts at the read cursor and only ever falls behind it, a vertex being written only when it was
-// read. `AMD_2` spells it `Iw [++pme2] = i` with `pme2 = pme1 - 1`.
-//
-// THE GONE TEST SURVIVES HERE, unlike in AmdCompacted, and for the reason it survives everywhere on
-// this branch: `number()` leaves a prepass vertex at weight one and in every neighbour's adjacency, so
-// a positive weight does not mean live in an ADJACENCY list. This walk reads nothing else.
-inline std::uint32_t QuotientGraphCompacted::reachableSetInPlaceMmd(std::int32_t u) {
-    // THE PIVOT IS ALREADY NEGATED, by `beginEliminationMmd`. It has to be negated somewhere and
-    // not merely to keep u out of its own list, which has no self loop: `massEliminateMmd` restores
-    // the sign of every member AND of the pivot, so a pivot left positive comes out of that restore
-    // negative and `orderAscending` then reads a supervariable of negative size. That was found by
-    // ASan on a 3 by 3 grid when this walk was written; negating twice, which is what hoisting it
-    // without removing it here would do, is the same bug from the other side.
-    std::int32_t*       source = mSrc.data() + mSegment[u].srcPtr;
-    const std::uint32_t count = mSegment[u].adjacencySize;
-    std::uint32_t       kept  = 0;
-    for (std::uint32_t k = 0; k < count; ++k) {
-        const std::int32_t v  = source[k];
-        const std::int32_t nv = mWeight[v];
-        if (nv > 0 && !(mHasNumbered && mMark[v] == GONE)) { mWeight[v] = -nv; source[kept++] = v; }
+    for (std::uint32_t vk = 0; vk < count; ++vk) {
+        const std::int32_t v  = source[vk];
+        const std::int32_t vWeight = mWeight[v];
+        if (vWeight > 0) { mWeight[v] = -vWeight; source[kept++] = v; }
     }
     return kept;
 }
@@ -1144,21 +1124,21 @@ inline std::uint32_t QuotientGraphCompacted::reachableWeight(std::int32_t u) {
     ++mTag;
     std::uint32_t reached = 0;   // a sum over DISTINCT vertices, so bounded by n; see the header
     mMark[u] = mTag;
-    const Segment&    segment         = mSegment[u];          // one fetch; see the member
+    const Segment&      segment       = mSegment[u];          // one fetch; see the member
     const std::int32_t* source        = mSrc.data() + segment.srcPtr;
     const std::uint32_t adjacencySize = segment.adjacencySize;
     const std::uint32_t incidenceSize = segment.incidenceSize;
-    for (std::uint32_t k = 0; k < adjacencySize; ++k) {
-        const std::int32_t v = source[k];
+    for (std::uint32_t vk = 0; vk < adjacencySize; ++vk) {
+        const std::int32_t v = source[vk];
         if (mMark[v] != GONE) { mMark[v] = mTag; reached += static_cast<std::uint32_t>(mWeight[v]); }
     }
     const std::int32_t* incidence = source + adjacencySize;
-    for (std::uint32_t i = 0; i < incidenceSize; ++i) {
-        const std::int32_t  c           = incidence[i];
+    for (std::uint32_t ck = 0; ck < incidenceSize; ++ck) {
+        const std::int32_t  c           = incidence[ck];
         const std::int32_t* members     = mSrc.data() + mSegment[c].srcPtr;
         const std::uint32_t membersSize = mSegment[c].adjacencySize;
-        for (std::uint32_t k = 0; k < membersSize; ++k) {
-            const std::int32_t v = members[k];
+        for (std::uint32_t vk = 0; vk < membersSize; ++vk) {
+            const std::int32_t v = members[vk];
             if (mMark[v] < mTag) { mMark[v] = mTag; reached += static_cast<std::uint32_t>(mWeight[v]); }
         }
     }
@@ -1271,7 +1251,7 @@ inline void QuotientGraphCompacted::compact(std::size_t& cliqueStart) {
 inline void QuotientGraphCompacted::captureAbsorbed(const std::int32_t* incidence,
                                                     std::uint32_t count) {
     mAbsorbed.clear();
-    for (std::uint32_t i = 0; i < count; ++i) mAbsorbed.push_back(incidence[i]);
+    for (std::uint32_t ck = 0; ck < count; ++ck) mAbsorbed.push_back(incidence[ck]);
 }
 
 // THE ABSORBED CLIQUES DIE HERE: after the walk has read them and BEFORE the new clique is born.
@@ -1299,8 +1279,8 @@ inline void QuotientGraphCompacted::bearClique(std::int32_t pivot, std::size_t c
     // so this only sums.
     const std::int32_t* reached = mSrc.data() + cliqueStart;
     std::uint32_t cliqueWeight = 0;
-    for (std::uint32_t k = 0; k < cliqueLen; ++k)
-        cliqueWeight += static_cast<std::uint32_t>(-mWeight[reached[k]]);
+    for (std::uint32_t vk = 0; vk < cliqueLen; ++vk)
+        cliqueWeight += static_cast<std::uint32_t>(-mWeight[reached[vk]]);
     mCliqueWeight = cliqueWeight;
 }
 

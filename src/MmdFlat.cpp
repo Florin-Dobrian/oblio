@@ -120,8 +120,8 @@ std::vector<std::int32_t> orderMmdFlatImpl(const std::vector<std::size_t>&  colP
 
             const std::int32_t* newClique     = qg.clique(pivot);
             const std::uint32_t newCliqueSize = qg.cliqueSize(pivot);
-            for (std::uint32_t k = 0; k < newCliqueSize; ++k) {
-                const std::int32_t u = newClique[k];
+            for (std::uint32_t uk = 0; uk < newCliqueSize; ++uk) {
+                const std::int32_t u = newClique[uk];
                 buckets.unfile(u);                  // evict; mmdelm's bwd[rn] = 0 is both this
                 buckets.restore(u);                 //   and putting a withheld vertex back
             }
@@ -153,9 +153,9 @@ std::vector<std::int32_t> orderMmdFlatImpl(const std::vector<std::size_t>&  colP
             const std::uint32_t refreshedCliqueSize = qg.cliqueSize(clique);
 
             cliqueMembers.clear();
-            for (std::uint32_t k = 0; k < refreshedCliqueSize; ++k)
-                if (!qg.eliminatedMmd(refreshedClique[k]))
-                    cliqueMembers.push_back(refreshedClique[k]);
+            for (std::uint32_t uk = 0; uk < refreshedCliqueSize; ++uk)
+                if (!qg.eliminatedMmd(refreshedClique[uk]))
+                    cliqueMembers.push_back(refreshedClique[uk]);
 
             const std::int32_t cliqueTag = qg.advanceTag();   // marked once for the clique
             for (std::int32_t u : cliqueMembers) qg.setMark(u, cliqueTag);
@@ -196,8 +196,8 @@ std::vector<std::int32_t> orderMmdFlatImpl(const std::vector<std::size_t>&  colP
                 // saving. Hoist where a loop is long; leave it where the loop is short or exits
                 // early. Measured both ways.
                 const std::int32_t* adjacency = qg.adjacencyMmd(u);
-                for (std::uint32_t uak = 0; uak < qg.adjacencySize(u); ++uak) {
-                    const std::int32_t v = adjacency[uak];
+                for (std::uint32_t vk = 0; vk < qg.adjacencySize(u); ++vk) {
+                    const std::int32_t v = adjacency[vk];
                     // ONE LOAD FOR BOTH QUESTIONS. `vertexTag` is the newest tag drawn, so
                     // anything at or above it is either this pass's own stamp or GONE, and both
                     // mean skip. This was `qg.eliminatedMmd(v) || mark[v] == vertexTag`, two
@@ -209,13 +209,13 @@ std::vector<std::int32_t> orderMmdFlatImpl(const std::vector<std::size_t>&  colP
                     degree += qg.weight(v);
                 }
                 const std::int32_t* incidence = qg.incidenceMmd(u);
-                for (std::uint32_t uik = 0; uik < qg.incidenceSize(u); ++uik) {
-                    const std::int32_t c = incidence[uik];
+                for (std::uint32_t ck = 0; ck < qg.incidenceSize(u); ++ck) {
+                    const std::int32_t c = incidence[ck];
                     if (c == clique) continue;
                     const std::int32_t* otherClique     = qg.clique(c);
                     const std::uint32_t otherCliqueSize = qg.cliqueSize(c);
-                    for (std::uint32_t k = 0; k < otherCliqueSize; ++k) {
-                        const std::int32_t v = otherClique[k];
+                    for (std::uint32_t vk = 0; vk < otherCliqueSize; ++vk) {
+                        const std::int32_t v = otherClique[vk];
                         const std::int32_t vMark = qg.mark(v);
                         if (v == u || vMark >= vertexTag) continue;    // seen this pass, or dead
                         if (vMark == cliqueTag) {
@@ -244,7 +244,7 @@ std::vector<std::int32_t> orderMmdFlatImpl(const std::vector<std::size_t>&  colP
             for (auto uit = manySourceQueue.rbegin(); uit != manySourceQueue.rend(); ++uit) {
                 const std::int32_t u = *uit;                 // the full union, as md5 computes it
                 if (qg.eliminatedMmd(u) || buckets.outmatched(u)) continue;
-                const std::uint32_t degree = qg.reachableWeight(u); // reach excludes u already
+                const std::uint32_t degree = qg.reachableSetWeight(u); // reach excludes u already
                 const std::uint32_t filed = degree;
                 buckets.file(filed, u);
                 minDegree = std::min(minDegree, filed);

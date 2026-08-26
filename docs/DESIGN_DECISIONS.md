@@ -134,6 +134,48 @@ who did not go looking, and none of them is a thing a build or a test can catch.
 that a change to an encoding obliges a reading of everything that describes the encoding, which is a
 habit rather than a mechanism.
 
+### 4. The negated weights are restored at the end of the prune, on both branches
+
+**Added later the same day, and this one departs from `AMD_2` rather than aligning with it.** The
+sign that marks membership of `C[pivot]` used to be restored in two unrelated places: inside
+`massEliminate` on the mmd side, and in the amd driver's fourth pass, where `restoreWeight` returned
+the magnitude that pass needed anyway. Both rode on a walk that was happening regardless.
+
+**THE PRUNE IS THE LAST READER ON BOTH BRANCHES**, which is what makes one place possible. Its
+`mWeight[v] <= 0` is what consumes the mark; downstream, absorption never touches a weight, mass
+elimination's merge test is structural on `adjacencySize == 0 && incidenceSize == 1`, and every
+other reader takes a magnitude through `weight()`.
+
+What it removed: `restoreWeight` and `restorePivotWeight` from both class surfaces with their four
+call sites, and `mLateMassElimination`'s SECOND job. That flag had been deciding both "do not merge
+here" and "do not restore here" while being named for the first alone. It also fixed a line that was
+correct only by coincidence: `mWeight[pivot] += mWeight[u]` worked because both operands happened to
+carry the same sign under either setting of the flag, and both are positive now.
+
+**IT IS NOT A SAVING AND THE DIRECTION IS THE UNFAVOURABLE ONE.** A free rider on an existing walk
+became a pass of its own over C[pivot]. Over five grid sizes in both families every driver of ours
+landed inside the run-to-run spread of the two vendored controls, which nothing touched between the
+runs. What it buys is one lifetime instead of two: the answer to "where do the signs come back" is
+one line rather than a trace through two call chains and a flag that secretly meant two things.
+
+### 5. A noun-named function is its return value
+
+**The rule was already in the tree and had not been written down.** It divides cleanly:
+`weight`, `cliqueWeight`, `adjacencySize` and `numLiveCliqueMembers` are nouns and return that noun;
+`formStaticUpper`, `computeParent` and `getFrontalIndices` are verb-plus-noun and do work.
+
+So `reachableSetMmd` and `reachableSetAmd` were misnamed: they negate weights, append into the
+caller's store, and leave the graph half-eliminated with `C[pivot]` built. They are operations and
+now say so, `formReachableSetMmd` and `formReachableSetAmd`. `reachableSetWeight` keeps its noun,
+being a query that leaves the graph as it found it.
+
+**`form` RATHER THAN `compute` OR `get`**, because `formStaticUpper` and `formDynamicUpper` are the
+tree's existing word for building a structure where `compute*` is used for scalars, and because the
+class header already says the reach is "formed on demand and never stored".
+
+Applied to the flat class only. The compacted and chained ones still carry the old names, so three
+classes disagree until that is followed through.
+
 ### How it was checked
 
 Recorded from the tree BEFORE the edits and compared after, which is the order that matters:

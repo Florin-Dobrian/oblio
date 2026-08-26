@@ -96,8 +96,9 @@
 //
 // TWO THINGS WENT WITH THEM, both flags this layout cannot serve two values of and neither ever
 // set here: the list order and the reverse incidence walk. See the notes where each setter was.
-// One thing was added: a slide in `absorb`, the adjacency having to follow the incidence part down
-// when that part shrinks. That is a pass `AMD_2` does not make at all, and the flip priced it
+// One thing was added: a slide in `absorbAggressively`, the adjacency having to follow the
+// incidence part down when that part shrinks. That is a pass `AMD_2` does not make at all, and
+// the flip priced it
 // rather than caused it. See the note there.
 //
 // VERIFIED BY VARYING THE HEADROOM, which is a better check than the digest alone. At the shipped
@@ -263,7 +264,7 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
         deadCliques.clear();
         for (std::int32_t c : touchedCliques)
             if (w[c] == wflg) { deadCliques.push_back(c); w[c] = 0; }   // |C[c] - C[p]| == 0
-        qg.absorb(deadCliques, pivotClique, pivotCliqueSize);
+        qg.absorbAggressively(deadCliques, pivotClique, pivotCliqueSize);
 
         const std::vector<std::int32_t>& merged = qg.massEliminate(pivot);
         numEliminated += 1 + static_cast<std::uint32_t>(merged.size());
@@ -275,22 +276,22 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
         pivotClique     = qg.clique(pivot);
         pivotCliqueSize = qg.cliqueSize(pivot);
         pivotCliqueWeight = 0;
-        for (std::uint32_t k = 0; k < pivotCliqueSize; ++k)
-            pivotCliqueWeight += qg.weight(pivotClique[k]);
+        for (std::uint32_t uk = 0; uk < pivotCliqueSize; ++uk)
+            pivotCliqueWeight += qg.weight(pivotClique[uk]);
 
         degrees[pivot] = pivotCliqueWeight;
 
         const std::uint32_t numLeft = numLive;
 
-        for (std::uint32_t k = 0; k < pivotCliqueSize; ++k) {
-            const std::int32_t u = pivotClique[k];
+        for (std::uint32_t uk = 0; uk < pivotCliqueSize; ++uk) {
+            const std::int32_t u = pivotClique[uk];
             const std::int32_t* incidence     = qg.incidenceAmd(u);
             const std::uint32_t incidenceSize = qg.incidenceSize(u);
 
             std::size_t deg = static_cast<std::size_t>(w[u]);   // the adjacency half
             std::uint32_t key = static_cast<std::uint32_t>(buckets.key(u));
-            for (std::uint32_t i = 0; i < incidenceSize; ++i) {
-                const std::int32_t c = incidence[i];
+            for (std::uint32_t ck = 0; ck < incidenceSize; ++ck) {
+                const std::int32_t c = incidence[ck];
                 if (c != pivot) key += static_cast<std::uint32_t>(c);   // me is not in the key
                 if (c != pivot) deg += static_cast<std::size_t>(w[c] - wflg);
             }
@@ -326,8 +327,8 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
         // in 246.
         stamp = std::max(stamp, wflg + lemax);
 
-        for (std::uint32_t kk = 0; kk < pivotCliqueSize; ++kk) {
-            const std::int32_t seed = pivotClique[kk];
+        for (std::uint32_t uk = 0; uk < pivotCliqueSize; ++uk) {
+            const std::int32_t seed = pivotClique[uk];
             if (qg.eliminatedAmd(seed)) continue;
             const std::int32_t hash = buckets.key(seed);
             const std::int32_t headOfBucket = hashHead[hash];
@@ -406,17 +407,16 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
         //
         // A vertex the hash absorbed is skipped and never restored, which is right: `merge` zeroed
         // its weight, and zero is the absorbed state whatever sign it arrived with.
-        qg.restorePivotWeight(pivot);
 
         // AND THE CLIQUE IS TRIMMED AS THIS PASS WALKS IT, which is Amd.cpp's `Iw [p++] = i` under
         // RESTORE DEGREE LISTS: the survivors are written back over the front of the clique and
         // what detection absorbed falls off the end. One store on a walk this pass makes anyway.
         std::int32_t* cliqueOut = qg.clique(pivot);
         std::uint32_t kept      = 0;
-        for (std::uint32_t k = 0; k < pivotCliqueSize; ++k) {
-            const std::int32_t u = pivotClique[k];
+        for (std::uint32_t uk = 0; uk < pivotCliqueSize; ++uk) {
+            const std::int32_t u = pivotClique[uk];
             if (qg.eliminatedAmd(u)) continue;         // absorbed by the hash a moment ago
-            const std::uint32_t weightU = qg.restoreWeight(u);   // POST-merge, and un-negated here
+            const std::uint32_t weightU = qg.weight(u);          // POST-merge
             std::size_t bound = static_cast<std::size_t>(w[u]) + pivotCliqueWeight - weightU;
             w[u] = 1;
             bound = std::min<std::size_t>(bound, numLeft - weightU);

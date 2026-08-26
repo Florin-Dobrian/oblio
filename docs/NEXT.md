@@ -11,7 +11,6 @@ an accident of how the two files were written.
 
 **THREE ITEMS CLOSED, none of which moves a permutation.** `docs/DESIGN_DECISIONS.md` (2026-08-24)
 has the account.
-
 - **The minimum-degree seed.** `AmdFlat` and `AmdCompacted` computed it with a `min_element` pass of
   their own, which is neither `AMD_2`'s `mindeg = 0` nor the mmd branch's minimum-at-filing, and
   which answers for buckets that do not exist: the degree-zero and dense rows are numbered or set
@@ -87,6 +86,93 @@ has the account.
   `experiments/ordering/README.md`, "The interface each branch actually uses", which is every
   `Buckets` entry point against the two branches and is where both items above were found.
 
+**THE LIST-ORDER CONVENTION IS ONE FACT WEARING FOUR FACES, and this is the item most likely to
+cost someone a day.** Each of these looks like an independent branch difference and they are not:
+they are the same tie-break convention, inherited from genmmd and `AMD_2` respectively, expressed
+four times.
+
+```
+(a) where the new clique lands in I[u]     mmd appends at the BACK and leaves it
+                                           amd appends then SWAPS it to the front
+(b) which end of I[u] is walked            mmd BACKWARD, mReverseIncidence, amd forward
+(c) which half of the run comes first      mmd adjacency then cliques, amd the reverse
+(d) how the run is laid out, compacted     mmd A then I, amd I then A
+```
+
+**NONE OF THE FOUR IS FREE.** Each decides the order vertices enter `C[pivot]`, hence the order they
+are filed into the degree buckets, hence which of several equal-degree vertices is picked. Each
+branch reproduces its reference's permutation exactly or the comparison stops being one, so touching
+any of these alone moves a permutation and `make mmdorder` or `make amdorder` fails.
+
+**IT IS ALSO HALF A FLAG AND HALF A SUFFIX, which is the inconsistency.** (b) is a member,
+`mReverseIncidence`; (c) is the `reachableSetMmd` / `reachableSetAmd` suffix. They are always
+wanted together, and the compacted class's own comment says so, "two conventions under one switch
+because they are one fact", while the flat class splits them across a flag and a name. Neither
+arrangement is wrong; having both is.
+
+**(d) IS WHY THE COMPACTED PRUNES ARE STRUCTURALLY DIFFERENT** rather than one loop moved, which the
+flat pair is. Amd's layout lets ONE cursor sweep both halves, so its walk is one loop with an
+`onCliques` flag; mmd's needs two cursors moving in opposite directions and so two loops. Only mmd's
+order lets the walk set `adjacencySize = 0` mid-compaction, having finished the adjacency before it
+starts the cliques, where amd is still holding an unread one.
+
+**AND ONE THING HERE IS UNVERIFIED, flagged because reading has lost to instrumenting repeatedly in
+this tree.** (a) and (b) appear to COMPOSE, so that both branches meet the new clique FIRST: mmd
+puts it last and reads backward, amd puts it first and reads forward. If that is right, the two
+conventions are one semantic rule reached by two routes, which changes what an alignment here would
+even mean. It follows from reading `pruneMmd` and `pruneAmd` against `reachableSetMmd` and
+`reachableSetAmd`, and nothing has instrumented it.
+
+**THE MARK ARRAY, AND THE FOUR-LINK CHAIN THAT MAKES ITS WORST TEST LOOK ARBITRARY.** Traced
+2026-08-24 by reading, not measured. The condition in question is
+`formReachableSetMmd`'s adjacency test, `vWeight > 0 && !(mHasNumbered && mMark[v] == GONE)`, which
+is three terms where the amd twin has one.
+
+```
+orderAscending reads mWeight[pivot] to reserve a supervariable's room
+   -> a prepass-numbered vertex must keep weight 1 or it loses its slot
+      -> the weight cannot record that it is dead
+         -> mMark must carry GONE, and the walks must ask
+            -> mHasNumbered exists to skip that load when nothing was numbered
+```
+
+Every link is reasonable and the top is nowhere near the bottom, which is why the condition reads as
+an accident. **CUTTING THE TOP LINK DROPS THE BOTTOM THREE**, and the cut is small:
+`orderAscending`'s first loop ALREADY walks the chain, `for (u = mSuperNext[pivot]; u != NIL; ...)`,
+so it can count the members instead of reading the weight, and the count equals `mWeight[pivot]` by
+construction. Then a numbered vertex can be weight zero, `vWeight > 0` catches it like any other
+death, and `number()`, `mHasNumbered` and the three-term test all go. The gate is the digest.
+
+**WHAT REMAINS AFTER THAT, and it is structural rather than contingent.** `mMark` and `mTag` stay,
+doing DISTINCTNESS in `reachableSetWeight`: an exact degree counts each reached vertex once and u
+reaches the same v through two cliques. That is what mmd IS, and amd escapes it by not
+deduplicating at all, which is exactly what makes its number a bound rather than a degree. The
+drivers' q2h stamps stay too, seven sites per mmd driver through `advanceTag`, `setMark` and `mark`.
+
+**AND THE ELIMINATION WALKS NEED NO STAMP EITHER WAY**, on both branches, which is the part that
+makes the above worth doing rather than merely tidy. `formReachableSet*` negates as it goes, so a
+vertex already in the reach is negative and `vWeight > 0` rejects it. The negation is not the walk
+being clever: the PRUNE requires it, reading `mWeight[v] <= 0` as "v is in C[pivot]" to get the
+subtrahend of `A[u] = A[u] - C[p] - {p}`. The walk reads back a sign that is written anyway. So the
+array is the price of the DEGREE REFRESH alone, the one call that forms a reach without eliminating
+anything, and that call is also where the mmd branch's factor of 21 lives.
+
+**A SMALLER ALTERNATIVE, independent of all of it.** `formReachableSetMmd`'s adjacency test can be
+written `mMark[v] != GONE` today. It is equivalent THERE and nowhere else: mmd walks adjacency
+FIRST, so nothing is negated yet, `vWeight > 0` is doing liveness alone, and every mmd death carries
+GONE. It would not be equivalent in `formReachableSetAmd`, which walks cliques first, nor in either
+clique loop, where the sign is doing distinctness. It costs one extra scattered load per adjacency
+entry in a walk that runs once per elimination, and it buys one flag in place of three terms, drops
+`mHasNumbered` to a single reader, and makes the test identical to `reachableSetWeight`'s adjacency
+test. Not taken; the argument against is that it narrows defence in depth, the weight no longer
+catching a death that stopped being marked.
+
+**AND TWO COMMENTS ARE NOW STALE ON THIS SUBJECT.** Both class headers still call `mHasNumbered`
+"load bearing and not merely an optimization", the short circuit that keeps an empty `mMark` safe in
+shared bodies. That was true until 2026-08-24, when the two amd sites carrying the guard were
+removed; every reader is now mmd-only and `mMark` is always allocated there, so the safety job is
+finished and only the load-skipping remains.
+
 **AND THE DOCUMENTATION WAS CORRECTED BEFORE ANY OF IT**, six files, all uncommitted with the three
 above. Two were stale, four were wrong.
 
@@ -113,6 +199,61 @@ about the ordering is unchecked; what is unchecked is the default as a default. 
 list entry and one constant, and the comment there says an added enumerator is meant to make the
 assertion fail until someone has ruled on it, which `MmdCorrected` did not trip because both are
 hardcoded.
+
+**AND A SECOND BATCH LANDED AFTER COMMIT `937fb30`, all of it uncommitted with this note.** Every
+item below was gated on `make test` 265/265 and 237/237, `make digest` all identical over 365
+against `937fb30`, and both alignment checks at 38 of 38; the ones that move a store also had ASan
+and UBSan.
+
+- **THE COMMENT TRIM.** 1307 comment lines removed across the three quotient graph headers, and NO
+  CODE CHANGED, checked by comparing every non-comment line. What went is the four kinds
+  `docs/WRITING_RULES.md` names: measurements, dated history, alternatives tried, and justification
+  for the arrangement. What stayed is the invariants a reader can break. 224 of those lines were
+  literal duplication between the amd and mmd twins.
+
+```
+                        lines            comment          >10 blocks   longest
+QuotientGraph.h    1922 -> 1370   1239 ->  687  (50%)      38 -> 11     52 -> 27
+QuotientGraphChained  980 -> 734   615 ->  369  (50%)      20 ->  5     48 -> 17
+QuotientGraphCompacted 1308 -> 1280 533 ->  505  (39%)     13 -> 12     56 -> 41
+```
+
+- **THE SIGN RESTORE MOVED INTO THE PRUNE**, both branches, the prune being the last reader of the
+  negated form. `restoreWeight` and `restorePivotWeight` are deleted from both classes with their
+  four call sites, and `mLateMassElimination` loses its SECOND job, having decided both "do not
+  merge here" and "do not restore here" while being named for the first alone. Measured at nothing,
+  and in the unfavourable direction: the restore was a free rider on an existing walk and is now a
+  pass of its own. `experiments/ordering/AMD3.md` iteration 28 has it.
+- **FIVE UNCALLED MEMBERS DELETED.** `reachableSet` and `reachableSize` on the flat class, called
+  from nowhere; and THREE ON THE CHAINED CLASS THAT WERE DECLARED AND NEVER DEFINED, which nothing
+  could have caught, an uncalled declaration never having to link.
+- **Mmd BEFORE Amd at every suffixed pair**, 8 pairs in the flat class and 10 in the compacted one,
+  declarations, definitions and the calls inside the wrappers.
+- **`absorb` is `absorbAggressively`**, since the only list ever passed to it is the driver's
+  `deadCliques`. Elimination-time absorption owns no function: the kill is in `beginElimination*`
+  and the removal rides the prune's compaction.
+- **`nv` is `vWeight`**, 31 sites; `reachableWeight` is `reachableSetWeight` with a local
+  `totalWeight`; the flat walks are `formReachableSetMmd` and `formReachableSetAmd` taking a
+  `reachableSet` parameter. **The naming rule this settles**: a noun-named function IS its return
+  value, so a query keeps the noun and an operation takes a verb. `form` rather than `compute`,
+  matching `formStaticUpper` and the header's own "formed on demand and never stored".
+- **THE LOOP COUNTER SCHEME**, 73 loops across seven files. The counter is the letter of what the
+  body assigns, plus `k`: `vk` over an adjacency or a clique's members, `ck` over an incidence,
+  `uk` over `C[pivot]`. It replaces `k`, `i`, `ii`, `ri`, `a`, `kk`, `uak` and `uik`. The rule is
+  script-checkable and the only five loops that disagree are correct.
+- **TWO DEAD `++mTag` BUMPS REMOVED** from the two `formReachableSet` walks, which read `mMark`
+  only against the CONSTANT `GONE` and never write it. The tag is a consumable, `GONE` being
+  `INT32_MAX`, so this is slightly more than tidiness.
+- **AND THE TWO amd SITES THAT MENTIONED `mMark` ARE GONE**, in `formReachableSetAmd` and
+  `pruneAmd`. Both were provably dead, `mHasNumbered` being written only by `number()` and called
+  only by the mmd drivers. **The justification is that `QuotientGraphCompacted` ALREADY DID THIS**:
+  its three amd functions mention neither array, so the flat class was the outlier and this is an
+  alignment defect rather than a design question.
+
+**THE EXPERIMENT README GAINED FOUR SECTIONS**, all reference material rather than narrative: the
+`Buckets` interface against the two branches, the class surface of flat against compacted,
+indistinguishability with the three mechanisms that find it, and what `mWeight` and `mMark` encode
+between them as a state table per branch.
 
 ## DONE 2026-08-23: the mmd branch files at the true degree, and the oracle changed
 

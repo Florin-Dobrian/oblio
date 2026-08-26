@@ -6770,6 +6770,21 @@ all. That is the mmd analogue of amd's bound pass, and it is why the fold was af
 elimination path. It does NOT extend to `reachableWeight`, which is called per refreshed vertex and
 whose result nothing walks again; that one is left on the mark.
 
+**SUPERSEDED 2026-08-24 ON WHERE THE RESTORE LIVES, and the two paragraphs above stand as the
+account of the day.** Both branches now restore AT THE END OF THE PRUNE, which is the last reader of
+the negated form in either: the prune's `mWeight[v] <= 0` is what consumed the mark, absorption
+never touches a weight, mass elimination's merge test is structural, and everything downstream takes
+a magnitude through `weight()`. So the restore no longer rides in `massEliminate` on one branch and
+in the driver's bound pass on the other; it is one place, unconditional, in both classes.
+
+What that removed: `restoreWeight` and `restorePivotWeight` from both class surfaces and their four
+call sites in the amd drivers, and `mLateMassElimination`'s SECOND job. That flag had been deciding
+both "do not merge here" and "do not restore here", and only the first is what it is named for.
+
+It is still not a saving. The restore rode on an existing walk before and is its own short loop over
+C[pivot] now, so this trades a free rider for a pass in exchange for one lifetime instead of two.
+The gate was that nothing moves: all 365 digests identical, both alignment checks 38 of 38.
+
 The cheapest form for `reachableWeight`, if it is ever wanted, is a member scratch holding the
 emitted vertices, cleared per call so its capacity survives, walked afterwards to restore. Per member that gives up one scattered mark load and one
 scattered mark store, and takes on one contiguous scratch store and one scattered weight store in
@@ -7634,6 +7649,387 @@ has no caller anywhere. It is a comment at `src/AmdFlat.cpp` naming the method t
 driver does NOT use it. Comments have to be stripped before the match, which is the identical trap
 `docs/QUOTIENT_GRAPH_USAGE.md` records against itself: it published call-difference counts of three
 and nine that were really zero and two, from prose naming a method.
+
+### The surface each class actually has, 2026-08-24
+
+The table above is one class against two branches. This one is one branch's machinery against two
+CLASSES: every member `QuotientGraph` and `QuotientGraphCompacted` declare, side by side. It exists
+to be re-read after a change, since the whole claim of the pair is that they differ in STORAGE and
+nothing else, and that claim is checkable only by looking.
+
+```
+                                     flat   compacted
+
+  size / setup
+    size                              x         x
+    enableMarks                       x         x
+
+  layout accessors
+    adjacencyAmd / adjacencyMmd       x         x
+    incidenceAmd / incidenceMmd       x         x
+    adjacencySize                     x         x
+    incidenceSize                     x         x
+
+  cliques
+    clique                            x         x
+    cliqueSize                        x         x
+    cliqueWeight                      x         x
+    trimClique                        x         x
+    killClique                        x         x
+    bearClique                        .         x
+    captureAbsorbed                   .         x
+
+  weights
+    weight                            x         x
+    setAside                          x         x
+
+  marks
+    mark / setMark                    x         x
+    advanceTag                        x         x
+    markGone                          x         x
+    number                            x         x
+    eliminatedAmd / eliminatedMmd     x         x
+
+  elimination
+    eliminateMmd / eliminateAmd       x         x
+    beginEliminationMmd / ...Amd      x         x
+    pruneMmd / pruneAmd               x         x
+    finishElimination                 x         x
+    massEliminate                     x         x
+
+  merging and absorption
+    merge                             x         x
+    absorb                            x         x
+
+  reachable set
+    reachableSetMmd / ...Amd          x         x
+    reachableWeight                   x         x
+    reachableSetInPlaceMmd / ...Amd   .         x
+
+  output
+    order                             x         x
+    orderAscending                    x         x
+
+  configuration
+    setReverseIncidence               x         x
+    setLateMassElimination            x         x
+
+  counters
+    numLiveCliqueMembers              x         x
+    numPeakCliqueMembers              x         x
+    cliqueCountBalances               x         x
+    numBornCliqueMembers              x         .
+    numCompactions                    .         x
+    compact                           .         x
+```
+
+**Thirty-five shared, no flat-only, six compacted-only, as of 2026-08-24.** It was thirty-eight,
+four and six when this table was first taken the same day; what closed the flat-only column is
+below.
+
+**EVERY REMAINING DIFFERENCE IS THE LAYOUT.** `bearClique`, `captureAbsorbed`,
+`compact` and `numCompactions` are pool machinery: a store that fills has to be compacted, and a
+walk that destroys `I[pivot]` while it runs has to copy the ids out first. `numBornCliqueMembers`
+against `numCompactions` is the same fact from the two sides, one store paying for what it holds
+and the other for what it reclaims. `reachableSetInPlaceMmd` and `reachableSetInPlaceAmd` are the
+pool's special case: with `I[pivot]` empty the reach is a SUBSET of `A[pivot]` and is compacted
+where it stands, so the pool is not touched at all. The flat class has nothing to spare and no use
+for the case.
+
+**AND THE FLAT-ONLY COLUMN CLOSED THE SAME DAY, by deletion.** `reachableSet` and `reachableSize`
+were on the flat class and called from NOWHERE: not `src/`, not `tests/`, not `examples/`, not
+`benchmarks/`. `reachableSize`'s last caller was `retired/Mmd1.cpp`, which left the build on
+2026-08-21, so it had been dead for three days.
+
+**THE CHAINED CLASS WAS WORSE AND NOTHING COULD HAVE CAUGHT IT.** It declared three of them,
+`reachableSet` in both forms and `reachableSize`, and DEFINED NONE. An uncalled declaration never
+has to link, so a header can carry a promise with no body indefinitely. Five members gone in all.
+
+What they were is worth keeping, because it is not what the first reading said. They are not the
+shape `Buckets::refile` had, a member that outlived its caller. They never had one: they are the
+readable form of a computation the production path only ever runs fused, which is the next section.
+The argument for deleting them is simply that nothing calls them.
+
+### What the reachable set is, and why it is five members and not one
+
+The prototypes have ONE function. `mmd3_neighbors(A, I, C, eliminated, mark, tag, u)` returns the
+list, and the file uses it twice: `sum(len(super_members[v]) for v in neighbors)` in the degree, and
+as the new clique in `mmd3_eliminate`. Production split that one function five ways, and only two
+of the five materialize anything:
+
+```
+prototype                       production                   called by
+mmd3_neighbors, in the degree   reachableWeight(u)           MmdFlat, MmdCompacted, MmdChained
+mmd3_neighbors, in eliminate    reachableSetMmd / ...Amd     beginEliminationMmd / ...Amd,
+                                                             appending into the clique's own block
+mmd3_neighbors, literally       reachableSet(u)              nobody, DELETED 2026-08-24
+                                reachableSize(u)             nobody, DELETED 2026-08-24
+```
+
+**NEITHER LIVE FORM BUILDS THE SET.** `reachableWeight` sums as it walks and returns a number. The
+appending pair writes straight into `mCliqueSrc` at the block the clique will occupy, because the
+reach IS the clique. So the prototype's return value has no counterpart in either hot path, and
+`reachableSet` is the readable form kept beside the fused ones. Its own comment says as much: a
+convenience with no caller inside the elimination, which undoes the sign negation the appending form
+deliberately leaves for `massEliminate`, so that a reader reaching for it gets a query rather than a
+half-finished elimination.
+
+The open question this raised was why the flat class had the query form and the compacted class did
+not, which is not the layout either. It was settled by deleting rather than by matching: adding the
+pair to the compacted class would have added a pass that exists nowhere in either branch's real
+path, purely so two surfaces agree.
+
+### And the branch split on the reachable set is the whole 21x
+
+```
+                        during elimination                for the degree
+mmd    reachableSetMmd, into the clique           reachableWeight, per vertex, per refresh
+amd    reachableSetAmd, into the clique           never
+```
+
+**BOTH BRANCHES FORM THE REACH ONCE PER PIVOT**, to build the clique. They are identical there.
+
+**ONLY MMD FORMS IT AGAIN.** An exact degree IS `|reach(u)|` weighted, so there is no way to get it
+except by walking u's whole neighborhood, once for every vertex whose degree the elimination
+changed. An approximate degree decomposes the same quantity into
+
+    |A[u] - C[p]|  +  |C[p] - {u}|  +  sum over c of |C[c] - C[p]|
+
+every term of which the prune has already walked, so the amd branch never forms the set outside
+`beginElimination` and calls NOTHING between one elimination and the next.
+
+So the amd branch reads counts off a pass it was making anyway where the mmd branch makes a fresh
+pass per reached vertex. That is why `reachableWeight` has exactly three callers and all three are
+mmd drivers, and it is where the branch's factor of 21 on the benchmark set comes from: not a
+better data structure, the same reach formed a different number of times.
+
+`reachableSet` returned the neighborhood of a live vertex BY VALUE, which is what an external user
+of `QuotientGraph` would reach for, and that was the one argument for keeping it. It lost to the
+plainer one: an uncalled member is read by everyone who opens the file and used by nobody. If a
+caller ever wants the query, it is five lines over `reachableSetMmd` and the restore the prune now
+does anyway.
+
+**HOW THE TABLE WAS BUILT, and the first two attempts were both wrong.** A regex over the whole
+file collects definitions and call sites along with declarations, and reports 62 members against
+52. Restricting it to the class body still misses every member returning a pointer, `adjacencyAmd`
+and its three siblings among them. The version above walks the class body and then checks the
+known-awkward returns by hand. Anyone regenerating it should assume the naive extraction is wrong
+and diff against this list rather than trust it.
+
+## Indistinguishable vertices, and the three ways they are found, 2026-08-24
+
+Two live vertices are INDISTINGUISHABLE when their reachable sets agree, each counting the other:
+
+    reach(u) | {u}  ==  reach(v) | {v}
+
+If that holds it holds forever. Every elimination from here treats them identically, they keep the
+same degree, they are eliminated at the same moment, and they produce the same fill. So one is kept
+as the PRINCIPAL and the other stops existing as a separate entity: its lists are emptied, its
+weight goes to zero, and it is threaded onto the principal's chain through `mSuperNext` and
+`mSuperLast`.
+
+**`mWeight[u]` IS HOW MANY ORIGINAL VERTICES u STANDS FOR**, which is what makes it the thing a
+degree sums:
+
+    degree(u) = sum of weight(v) over v in reach(u)
+
+A neighbour standing for three originals contributes three, because eliminating u will fill against
+all three. Counting entries instead of weights under-counts the fill by exactly the merging. At
+output, `order` walks the chain and emits the principal followed by its members, so a supervariable
+of weight three occupies three consecutive slots of the permutation.
+
+**THE PAYOFF IS COMPOUND, which is why both branches spend effort finding them.** A merge removes a
+vertex from the graph, so every later reach is shorter, every later degree cheaper, and one pivot
+selection eliminates a whole group at once.
+
+### Three mechanisms, and they are not alternatives
+
+```
+mass elimination     reach(u) == C[pivot] - {u}      structural, free       both branches
+q2h merge            two sources, same tag           free, partial          mmd only
+hash detection       any two in C[pivot]             a hash per vertex      amd only
+```
+
+They are increasing cost for increasing coverage. Mass elimination is the case the elimination
+hands you and neither branch would decline it. Beyond that, mmd takes what the tag has already
+proved and stops, catching a subset; amd pays a hash and catches the general case. **Neither branch
+does both.**
+
+**MASS ELIMINATION IS A MERGE, and the weight arithmetic is the same one.** `massEliminate` appends
+u's chain to the pivot's, adds the weights and zeroes u's, which is `merge`'s body written out:
+
+```
+massEliminate    mSuperNext[mSuperLast[pivot]] = u;  mSuperLast[pivot] = mSuperLast[u];
+                 mWeight[pivot] += mWeight[u];       mWeight[u] = 0;
+
+merge(u, v)      mSuperNext[mSuperLast[u]] = v;      mSuperLast[u] = mSuperLast[v];
+                 mWeight[u] += mWeight[v];           mWeight[v] = 0;
+```
+
+What differs is only WHERE the merged vertex lands: into the pivot, which is on its way out, rather
+than into a live vertex that stays. So the question "does the weight apply during mass elimination"
+answers yes, and it has to: without it the pivot would occupy fewer slots in the permutation than
+the originals it stands for.
+
+**AND `massEliminate` DOES NOT CALL `merge`, it repeats it.** The two other things it does around
+those four lines, `markGone(u)` and zeroing the incidence size, are also `merge`'s. So the body
+could be `merge(pivot, u)` plus the one line `mCliqueWeight -= weight(u)`, with the first loop
+reduced to detection alone; the detection test reads only u's own segment, so deferring the zeroing
+to the second loop cannot change what the first loop decides. Not done, and it wants the digest
+rather than an argument.
+
+### What genmmd's q2h branch actually does, and why only two sources
+
+The two-source queue is not merely a cheaper degree update. Inside its walk, when it meets a vertex
+`nd` already stamped with this step's tag:
+
+```
+if (fwd[nd] == 2)  qsize[en] += qsize[nd]; qsize[nd] = 0; fwd[nd] = -en;   merge
+else               bwd[nd] = -maxint;                                      outmatch
+```
+
+**A two-source vertex sharing the tag with another two-source vertex is indistinguishable and is
+merged.** One that shares the tag but has more sources is only OUTMATCHED: its reach is contained
+in the other's, so it can never be the unique minimum and is withheld from selection, but it is not
+absorbed and it is not gone.
+
+**Why the two-source restriction is exact rather than cautious.** With exactly two sources, the new
+clique plus one other, sharing a tag is enough to conclude the reaches are EQUAL, since there is
+nothing else either vertex could reach through. With more sources the tag proves only CONTAINMENT,
+which is why the `qxh` path does neither: it recomputes the degree and nothing else.
+
+**Outmatching is not a merge**, and the difference is why it needs state of its own. A merge removes
+a vertex from the graph, so zeroing its weight is enough to make every walk skip it. An outmatched
+vertex is still live, still in every list that names it, still contributing to its neighbours'
+degrees; only its candidacy is withheld. That is `OUTMATCHED` in `mPrev`, and it is mmd's alone.
+
+## What `mWeight` and `mMark` encode between them, 2026-08-24
+
+Every question either branch asks about a vertex is answered from these two arrays. Below is what
+each combination means, over the flat class; the compacted and chained ones agree.
+
+**One table per branch, because neither branch has all the states.** mmd never sets a row aside,
+having no dense-row rule; amd never numbers, its prepass taking degree 0 alone. And `mMark` is
+EMPTY on the amd branch, `enableMarks` being called by the three mmd drivers alone, so it has no
+column there at all.
+
+```
+MMD                         mWeight[u]        mMark[u]        eliminatedMmd
+                                                              (mMark[u] == GONE)
+
+live, principal             > 0, its size     NIL or old tag  false
+live, in the reach          < 0, negated      unchanged       false
+numbered by the prepass     1, unchanged      GONE            true
+merged into another         0                 GONE            true
+pivot, eliminated           > 0, unchanged    GONE            true
+```
+
+```
+AMD                         mWeight[u]                        eliminatedAmd
+                                                              (mWeight[u] == 0)
+
+live, principal             > 0, its size                     false
+live, in the reach          < 0, negated                      false
+set aside, dense row        0                                 true
+merged into another         0                                 true
+pivot, eliminated           > 0, unchanged                    false, AND IT IS DEAD
+```
+
+**ON MMD THE TEST IS EXACT.** All three ways out of the graph write `GONE`, so one comparison
+answers for a numbered vertex, a merged one and a pivot alike, with no exceptions to remember.
+
+**ON AMD IT IS EXACT ONLY FOR THE DEATHS AMD CAN PRODUCE.** The last row is the one to hold onto:
+a pivot is eliminated and its weight is still POSITIVE, so `eliminatedAmd` returns false about a
+dead vertex. The accessor says as much, and it is safe rather than lucky: the amd driver unfiles a
+pivot when it chooses it and never revisits it. So the predicate is not "is u eliminated" but "is u
+eliminated, given you would never ask about a pivot".
+
+That makes the amd test cheaper AND narrower at once. It is not a weaker way of asking the same
+question; it is a different question whose answer happens to agree everywhere amd asks it.
+
+**AND THE REASON THE WEIGHT CANNOT SIMPLY BE ZEROED IN THOSE TWO CASES IS THE PERMUTATION.**
+`orderAscending` reads `mWeight[pivot]` to reserve a supervariable's room, and `order` walks the
+chain the weight counts. A numbered vertex and a pivot both still need a place in the output, so
+their weight has to keep saying how many originals they stand for. That is the whole of it: the
+weight is two facts, how many originals and whether alive, and where the two disagree the first
+wins.
+
+**`markGone` IS CALLED ON EVERY DEATH ON BOTH BRANCHES**, from `setAside`, `finishElimination` for
+the pivot, `massEliminate` and `merge`, with `number` writing `GONE` directly. On amd every one of
+those calls is a no-op against an empty vector. So **the mark is a complete death record and the
+weight is not**, and mmd is simply the branch that kept the record.
+
+### Where each array is asked, and why the tests differ
+
+**THE NEGATION IS A PHASE AND NOT A STATE**, which is why it appears in both tables as a row and in
+neither as a death. A negative weight is a live vertex currently in the reach being built. It exists
+between the walk and the end of the prune, which restores it, and nothing outside that window ever
+sees one. That is what lets `vWeight > 0` answer two questions in one load: v is live, AND v is not
+already in this reach.
+
+```
+formReachableSetMmd   adjacency   vWeight > 0 && !(mHasNumbered && mMark[v] == GONE)
+                      cliques     vWeight > 0
+formReachableSetAmd   adjacency   vWeight > 0
+                      cliques     vWeight > 0
+reachableSetWeight    adjacency   mMark[v] != GONE
+                      cliques     mMark[v] < mTag
+```
+
+**ALL FOUR ASK THE SAME TWO QUESTIONS. What differs is the currency each has to pay with.**
+
+```
+                        liveness              distinctness
+form*, adjacency        vWeight > 0           vWeight > 0     one load, both answers
+        plus GONE, because a numbered vertex is live AND positive
+form*, cliques          vWeight > 0           vWeight > 0     one load, both answers
+
+reachableSetWeight
+        adjacency       mMark[v] != GONE      not needed      A[u] has no duplicates,
+                                                              and it runs first
+        cliques         mMark[v] < mTag       mMark[v] < mTag one load, both answers
+```
+
+**THE NEGATION IS THE DISTINCTNESS MARK IN THE `form*` WALKS.** A vertex already in this reach is
+negative, so `vWeight > 0` rejects it, and the SAME comparison rejects merged and set-aside
+vertices at zero. Two questions, one load, no tag and no stamp anywhere.
+
+**`reachableSetWeight` CANNOT SPEND THAT CURRENCY, because it is a query and must leave the graph as
+it found it.** It emits nothing, so there is no reach to negate and nothing to restore against. It
+falls back to the tag, and the tag then absorbs the liveness question too, `GONE` sorting above it.
+
+**AND IT COULD NOT CHOOSE OTHERWISE.** The `form*` walks get their restore for free: the prune walks
+C[pivot] at the end anyway and that is where the signs come back. `reachableSetWeight` runs per
+REFRESHED VERTEX and nothing walks its result afterwards, so negating would buy it a second pass
+over the reach purely to undo itself. The cheapest negating form would need a member scratch holding
+the emitted vertices, cleared per call so its capacity survives, walked afterwards to restore, which
+is more than the mark costs.
+
+So the tests are not four conventions. They are one pair of questions answered from whichever array
+is already being touched, and the single residual asymmetry is `GONE` in the mmd adjacency test,
+covering the one state where the weight says live and the vertex is not.
+
+**GONE IS ASKED IN ADJACENCY LISTS AND NEVER IN CLIQUES, and the asymmetry is exact.** A numbered
+vertex LINGERS in `A[v]`, since `number()` marks and returns and nobody rewrites its neighbours'
+lists. It can NEVER appear in a `C[c]`: the prepass completes before the first elimination, so no
+clique exists yet, and every clique since is built from a reach whose adjacency loop already
+skipped it. A guard in the clique loops would be dead code.
+
+**`reachableSetWeight` IS THE ODD ONE AND HAS A REASON.** It leads with the mark rather than the
+weight because it must touch `mMark[v]` anyway, writing `mMark[v] = mTag` on the next line for
+DISTINCTNESS: an exact degree counts each reached vertex once, and u can reach the same v through
+two cliques. The load is happening regardless, so `!= GONE` rides on it free, and guarding it with
+`mHasNumbered` would add a test to save nothing.
+
+Its clique loop's `mMark[v] < mTag` then answers THREE questions from one load, `GONE` sorting above
+every tag: distinct this call, not numbered, not merged. That fold is why `GONE` cannot simply be
+retired in favour of a zero weight. Merged vertices linger in other cliques' member lists, so
+dropping `GONE` would cost that loop a second test, in the hottest loop in the ordering.
+
+**AND AMD NEEDS NO DISTINCTNESS STAMP AT ALL**, which is the real reason it has no mark array. Its
+bound is `|A[u] - C[p]| + |C[p] - {u}| + sum |C[c] - C[p]|`, summed term by term over passes the
+prune already made. A vertex in two cliques is counted twice and that is not a defect: it is what
+makes the result a bound rather than a degree.
 
 ## What each file is, and what it adds
 

@@ -1658,3 +1658,57 @@ scan viable in both B layers. `AMD1B` went from 7 to 9 percent slower than `AMD1
 better, and `AMD2B` from 3 to 9 percent slower to even, with the cubic advantage roughly doubling
 in both. The fused schedule was never the problem; `ApproximateScan` crossing three arrays from the
 prune was.
+
+---
+
+## Iteration 28: the restore leaves `AMD_2`'s schedule, 2026-08-24
+
+**The change.** Both branches now restore the negated weights AT THE END OF THE PRUNE. Every earlier
+entry here describes the other arrangement, and iteration 5 in particular turns on it, so this is a
+departure from the reference and not a correction of our reading of it.
+
+**Where the sign lived before, and it was two places for one fact.**
+
+```
+AMD_2    negate in the construct loop, restore under RESTORE DEGREE LISTS at line 2083,
+         `nvi = -Nv [i]` then `Nv [i] = nvi`, folded into the pass computing the final degree
+AmdFlat  the same, ported: restoreWeight rode the driver's fourth pass and returned the
+         magnitude that pass needed one line later
+MmdFlat  restore rode massEliminate's walk of C[pivot], the pass that finds what merged
+```
+
+**genmmd never negates anything.** Not one negative assignment in the file: it marks membership
+with `marker[]` and a monotone tag and reads liveness off `qsize[nb] != 0`. So the sign trick is
+`AMD_2`'s alone, and the mmd branch did not inherit it, it was GIVEN it on 2026-08-17 to fold away
+an `inClique` stamp array. That is why the restore sat in two unrelated places: one reference's
+technique retrofitted onto a branch with no opinion about it, each half then solving the placement
+locally against whatever walk it already had.
+
+**What made the move legal is that the prune is the LAST READER on both branches.** Its
+`mWeight[v] <= 0` is what consumes the mark. Downstream, absorption never touches a weight, mass
+elimination's merge test is structural on `adjacencySize == 0 && incidenceSize == 1`, and every
+other reader takes a magnitude through `weight()`.
+
+**What it removed.** `restoreWeight` and `restorePivotWeight` from both class surfaces and their
+four call sites; and `mLateMassElimination`'s SECOND job, that flag having decided both "do not
+merge here" and "do not restore here" while being named for the first alone.
+
+**MEASURED AT NOTHING, and the direction is worth stating because it is the unfavourable one.** The
+restore was a free rider on a walk that was happening anyway and is now a pass of its own over
+C[pivot]. That should cost something. Over five grid sizes in both families, every driver of ours
+lands inside the run-to-run spread of the two vendored controls, which nothing touched between the
+runs: ours 0.963 to 1.034, `MmdCorrected` 0.979 to 1.035, `AmdVendored` 0.981 to 1.029. Fill
+identical everywhere, all 365 digests identical.
+
+**AND THE LADDER'S SHAPE HOLDS AGAIN, now from the other side.** Every entry above that moved a
+clock moved it by REMOVING AN ARRAY: the eleven-to-five fold, the tagged `W`, the `inClique` stamp
+this very sign trick bought. Every entry that only rescheduled work measured zero, and the list is
+long enough now to be a rule rather than an observation: the dead-clique test, the tagged `W` on
+its own, the fused scans, `eliminateAmd`'s fused walk earlier the same day, and this restore, which
+is a FUSION UNDONE and measured zero in that direction too. Fusing and un-fusing are both free
+here; folding an array is not.
+
+The reason is not mysterious and it is worth writing once. A fold removes a cache line from every
+touch of a vertex, forever. A schedule change moves the same loads and stores between passes over
+data that is already warm, so it changes the instruction count by a few per cent and the miss count
+by nothing, and a few per cent is under this machine's floor.

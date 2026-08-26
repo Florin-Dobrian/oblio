@@ -372,7 +372,7 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         deadCliques.clear();
         for (std::int32_t c : touchedCliques)
             if (w[c] == wflg) { deadCliques.push_back(c); w[c] = 0; }   // |C[c] - C[p]| == 0
-        qg.absorb(deadCliques, pivotClique, pivotCliqueSize);
+        qg.absorbAggressively(deadCliques, pivotClique, pivotCliqueSize);
 
         // MASS ELIMINATION, and it runs HERE rather than inside the eliminator. Absorption is what
         // makes the cheap structural test agree with the true one: a clique whose members all lie
@@ -398,8 +398,8 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         pivotClique     = qg.clique(pivot);
         pivotCliqueSize = qg.cliqueSize(pivot);
         pivotCliqueWeight = 0;
-        for (std::uint32_t k = 0; k < pivotCliqueSize; ++k)
-            pivotCliqueWeight += qg.weight(pivotClique[k]);
+        for (std::uint32_t uk = 0; uk < pivotCliqueSize; ++uk)
+            pivotCliqueWeight += qg.weight(pivotClique[uk]);
 
         // AND THE STORED CLIQUE DEGREE IS WRITTEN AGAIN, which is not a tidy-up. `Amd.cpp` writes
         // `Degree [me] = degme` TWICE, at its lines 1676 and 1940, and the second write is the
@@ -434,8 +434,8 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         // Subtracting it in this pass would use the weight u had before absorbing v, which files a
         // supervariable one bucket too high per vertex taken. Amd2 and Amd2B carried exactly that
         // and it was costing 3 to 9 percent of fill on grids.
-        for (std::uint32_t k = 0; k < pivotCliqueSize; ++k) {
-            const std::int32_t u = pivotClique[k];
+        for (std::uint32_t uk = 0; uk < pivotCliqueSize; ++uk) {
+            const std::int32_t u = pivotClique[uk];
             // bound(u) = |A[u] - C[p]| + |C[p] - {u}| + sum |C[c] - C[p]| over I[u] - {p},
             // against the exact |( A[u] | C[c] for c in I[u] ) - {u}|. The first term needs no
             // subtraction: when a clique is formed every member has its explicit adjacency
@@ -492,8 +492,8 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
             // clique list it is compacting, which by then holds the new clique, while the degree
             // term for the new clique is added in a later pass. Fusing the walks does not fuse
             // the rules.
-            for (std::uint32_t i = 0; i < incidenceSize; ++i) {
-                const std::int32_t c = incidence[i];
+            for (std::uint32_t ck = 0; ck < incidenceSize; ++ck) {
+                const std::int32_t c = incidence[ck];
                 if (c != pivot) key += static_cast<std::uint32_t>(c);   // me is not in the key
                 if (c != pivot) deg += static_cast<std::size_t>(w[c] - wflg);
             }
@@ -608,8 +608,8 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         // in 246.
         stamp = std::max(stamp, wflg + lemax);
 
-        for (std::uint32_t kk = 0; kk < pivotCliqueSize; ++kk) {
-            const std::int32_t seed = pivotClique[kk];
+        for (std::uint32_t uk = 0; uk < pivotCliqueSize; ++uk) {
+            const std::int32_t seed = pivotClique[uk];
             if (qg.eliminatedAmd(seed)) continue;
             const std::int32_t hash = buckets.key(seed);
             const std::int32_t headOfBucket = hashHead[hash];
@@ -683,7 +683,7 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
                 const std::uint32_t adjacencyU = qg.adjacencySize(u);
                 const std::uint32_t incidenceU = qg.incidenceSize(u);
                 const std::int32_t* runU       = qg.adjacencyAmd(u);
-                for (std::uint32_t a = 0; a < adjacencyU; ++a) w[runU[a]] = other;
+                for (std::uint32_t vk = 0; vk < adjacencyU; ++vk) w[runU[vk]] = other;
                 // Index 1: the new clique is at the front of every I[u] and is shared by every
                 // member of C[pivot], so it can never discriminate. Ledger entry 6.
                 const std::int32_t* incidenceRunU = qg.incidenceAmd(u);
@@ -702,8 +702,8 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
 
                     bool                same       = true;
                     const std::int32_t* adjacencyV = qg.adjacencyAmd(v);
-                    for (std::uint32_t a = 0; a < adjacencyU && same; ++a)
-                        if (w[adjacencyV[a]] != other) same = false;
+                    for (std::uint32_t vk = 0; vk < adjacencyU && same; ++vk)
+                        if (w[adjacencyV[vk]] != other) same = false;
                     if (same) {
                         const std::int32_t* incidenceV = qg.incidenceAmd(v);
                         for (std::uint32_t i = 1; i < incidenceU && same; ++i)
@@ -773,14 +773,13 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         // DEGREE LISTS, and the store rides on the load this pass makes anyway. A vertex the hash
         // absorbed is skipped and never restored, which is right: `merge` zeroed its weight, and
         // zero is the absorbed state whatever sign it arrived with.
-        qg.restorePivotWeight(pivot);
 
         std::int32_t* cliqueOut = qg.clique(pivot);
         std::uint32_t kept      = 0;
-        for (std::uint32_t k = 0; k < pivotCliqueSize; ++k) {
-            const std::int32_t u = pivotClique[k];
+        for (std::uint32_t uk = 0; uk < pivotCliqueSize; ++uk) {
+            const std::int32_t u = pivotClique[uk];
             if (qg.eliminatedAmd(u)) continue;         // absorbed by the hash a moment ago
-            const std::uint32_t weightU = qg.restoreWeight(u);   // POST-merge, and un-negated here
+            const std::uint32_t weightU = qg.weight(u);          // POST-merge
             // ONE OPERAND WIDENED, so the sum is formed in `std::size_t`; see the note in Amd1
             // on why widening cannot be done after the addition the way narrowing is done after
             // the subtraction. `partial[u]` and `degme` each reach n, so the sum reaches 2n, and

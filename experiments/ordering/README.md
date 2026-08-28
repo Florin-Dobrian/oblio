@@ -6716,7 +6716,7 @@ a non-canonical state for the length of an elimination and something has to rest
 - **Amd negates in `reachableSet`, called ONCE PER PIVOT, and restores in the bound pass it already
   makes.** `Amd.cpp` does the same, `Nv[i] = -nvi` under CONSTRUCT NEW ELEMENT and `Nv[i] = nvi`
   under RESTORE DEGREE LISTS. Neither is a pass of its own.
-- **Mmd calls `reachableSize` and `reachableWeight` PER VERTEX in the refresh**, and has no bound
+- **Mmd calls `reachableSize` and `reachableSetWeight` PER VERTEX in the refresh**, and has no bound
   pass to hide a restore in. Each call must therefore leave the array as it found it, which is a
   per-call lifetime rather than a per-pivot one, and it is the design problem `Mmd3C` exists to
   work out.
@@ -6732,8 +6732,8 @@ mark. The exclusion is structural rather than probabilistic. `A[u]` is the oppos
 `number` leaves the lists alone: a numbered vertex sits in the adjacency of every neighbor for the
 rest of the run.
 
-So the split follows the SOURCE KIND, and `reachableSet` and `reachableWeight` already write the two
-loops separately:
+So the split follows the SOURCE KIND, and `reachableSet` and `reachableSetWeight` already write the
+two loops separately:
 
 ```
 clique walk, C[c] for c in I[u]    sign carries liveness, dedup and value      one array
@@ -6749,26 +6749,27 @@ while each clique in `I[u]` opens a `C[c]` that grows with fill.
 
 **IMPLEMENTED IN `Mmd3C` ON 2026-08-17, and the split above is exactly what landed.** The clique
 loops of `reachableSet` read one array, the adjacency loops read two, `beginElimination` loses its
-stamping pass, and the prune answers three of its four questions from the sign. `reachableWeight`
+stamping pass, and the prune answers three of its four questions from the sign. `reachableSetWeight`
 was DECLINED rather than blocked, for the reason in the next paragraph. Permutations identical to
 `Mmd3` on 24 cases and across all nine drivers under `make digest`.
 
 **The bad half: the tag scheme invalidates in O(1) and the sign scheme cannot.** `++mTag` retires
-every mark in the array at once, which is exactly why `reachableWeight` can count a reach without
+every mark in the array at once, which is exactly why `reachableSetWeight` can count a reach without
 materializing it and without cleaning up after itself. A negation has no such trick. Every one must
 be undone individually, and these two functions keep no record of what they negated, having been
 written deliberately not to build a list.
 
 Amd never meets this. `reachableSet` runs once per pivot and writes its result into the arena, and
 the bound pass walks exactly that result and restores as it goes, so the restore rides in a
-traversal that already exists. Mmd's refresh calls `reachableSize` and `reachableWeight` PER VERTEX
-and walks the result again nowhere, so there a restore is a new traversal rather than a free rider.
+traversal that already exists. Mmd's refresh calls `reachableSize` and `reachableSetWeight` PER
+VERTEX and walks the result again nowhere, so there a restore is a new traversal rather than a free
+rider.
 
 **What landed instead, and it is cheaper than either.** `massEliminate` already walks C[pivot],
 which is exactly the set `reachableSet` negated, so the restore rides there and costs no pass at
 all. That is the mmd analogue of amd's bound pass, and it is why the fold was affordable on the
-elimination path. It does NOT extend to `reachableWeight`, which is called per refreshed vertex and
-whose result nothing walks again; that one is left on the mark.
+elimination path. It does NOT extend to `reachableSetWeight`, which is called per refreshed vertex
+and whose result nothing walks again; that one is left on the mark.
 
 **SUPERSEDED 2026-08-24 ON WHERE THE RESTORE LIVES, and the two paragraphs above stand as the
 account of the day.** Both branches now restore AT THE END OF THE PRUNE, which is the last reader of
@@ -6785,7 +6786,7 @@ It is still not a saving. The restore rode on an existing walk before and is its
 C[pivot] now, so this trades a free rider for a pass in exchange for one lifetime instead of two.
 The gate was that nothing moves: all 365 digests identical, both alignment checks 38 of 38.
 
-The cheapest form for `reachableWeight`, if it is ever wanted, is a member scratch holding the
+The cheapest form for `reachableSetWeight`, if it is ever wanted, is a member scratch holding the
 emitted vertices, cleared per call so its capacity survives, walked afterwards to restore. Per member that gives up one scattered mark load and one
 scattered mark store, and takes on one contiguous scratch store and one scattered weight store in
 the restore, against a gain of one fewer array touched in the clique walk. The scattered count comes
@@ -7384,10 +7385,11 @@ permutation once the ordering is done. So each of those two arrays is named for 
 used for its first.
 
 We do not do this and the cost is visible: `Buckets` owns 3n of its own, the drivers carry a
-`pivots` list, and the permutation is built from it by `order` or `orderAscending`. The vendored
-codes get the links inside storage the caller supplied anyway. It is an aliasing trade rather than
-an encoding one, so it sits outside the rest of this section, and it is recorded because "why is the
-predecessor called `Last`" has no answer inside the degree lists and an obvious one outside them.
+`pivots` list, and the permutation is built from it by `orderAsMerged` or `orderAscending`. The
+vendored codes get the links inside storage the caller supplied anyway. It is an aliasing trade
+rather than an encoding one, so it sits outside the rest of this section, and it is recorded because
+"why is the predecessor called `Last`" has no answer inside the degree lists and an obvious one
+outside them.
 
 ### Reading genmmd's names
 
@@ -7702,9 +7704,9 @@ nothing else, and that claim is checkable only by looking.
     absorb                            x         x
 
   reachable set
-    reachableSetMmd / ...Amd          x         x
-    reachableWeight                   x         x
-    reachableSetInPlaceMmd / ...Amd   .         x
+    formReachableSetMmd / ...Amd          x         x
+    reachableSetWeight                   x         x
+    formReachableSetInPlaceMmd / ...Amd   .         x
 
   output
     order                             x         x
@@ -7730,9 +7732,9 @@ below.
 **EVERY REMAINING DIFFERENCE IS THE LAYOUT.** `bearClique`, `captureAbsorbed`,
 `compact` and `numCompactions` are pool machinery: a store that fills has to be compacted, and a
 walk that destroys `I[pivot]` while it runs has to copy the ids out first. `numBornCliqueMembers`
-against `numCompactions` is the same fact from the two sides, one store paying for what it holds
-and the other for what it reclaims. `reachableSetInPlaceMmd` and `reachableSetInPlaceAmd` are the
-pool's special case: with `I[pivot]` empty the reach is a SUBSET of `A[pivot]` and is compacted
+against `numCompactions` is the same fact from the two sides, one store paying for what it holds and
+the other for what it reclaims. `formReachableSetInPlaceMmd` and `formReachableSetInPlaceAmd` are
+the pool's special case: with `I[pivot]` empty the reach is a SUBSET of `A[pivot]` and is compacted
 where it stands, so the pool is not touched at all. The flat class has nothing to spare and no use
 for the case.
 
@@ -7759,16 +7761,16 @@ of the five materialize anything:
 
 ```
 prototype                       production                   called by
-mmd3_neighbors, in the degree   reachableWeight(u)           MmdFlat, MmdCompacted, MmdChained
-mmd3_neighbors, in eliminate    reachableSetMmd / ...Amd     beginEliminationMmd / ...Amd,
+mmd3_neighbors, in the degree   reachableSetWeight(u)           MmdFlat, MmdCompacted, MmdChained
+mmd3_neighbors, in eliminate    formReachableSetMmd / ...Amd     beginEliminationMmd / ...Amd,
                                                              appending into the clique's own block
 mmd3_neighbors, literally       reachableSet(u)              nobody, DELETED 2026-08-24
                                 reachableSize(u)             nobody, DELETED 2026-08-24
 ```
 
-**NEITHER LIVE FORM BUILDS THE SET.** `reachableWeight` sums as it walks and returns a number. The
-appending pair writes straight into `mCliqueSrc` at the block the clique will occupy, because the
-reach IS the clique. So the prototype's return value has no counterpart in either hot path, and
+**NEITHER LIVE FORM BUILDS THE SET.** `reachableSetWeight` sums as it walks and returns a number.
+The appending pair writes straight into `mCliqueSrc` at the block the clique will occupy, because
+the reach IS the clique. So the prototype's return value has no counterpart in either hot path, and
 `reachableSet` is the readable form kept beside the fused ones. Its own comment says as much: a
 convenience with no caller inside the elimination, which undoes the sign negation the appending form
 deliberately leaves for `massEliminate`, so that a reader reaching for it gets a query rather than a
@@ -7783,8 +7785,8 @@ path, purely so two surfaces agree.
 
 ```
                         during elimination                for the degree
-mmd    reachableSetMmd, into the clique           reachableWeight, per vertex, per refresh
-amd    reachableSetAmd, into the clique           never
+mmd    formReachableSetMmd, into the clique           reachableSetWeight, per vertex, per refresh
+amd    formReachableSetAmd, into the clique           never
 ```
 
 **BOTH BRANCHES FORM THE REACH ONCE PER PIVOT**, to build the clique. They are identical there.
@@ -7799,15 +7801,15 @@ every term of which the prune has already walked, so the amd branch never forms 
 `beginElimination` and calls NOTHING between one elimination and the next.
 
 So the amd branch reads counts off a pass it was making anyway where the mmd branch makes a fresh
-pass per reached vertex. That is why `reachableWeight` has exactly three callers and all three are
-mmd drivers, and it is where the branch's factor of 21 on the benchmark set comes from: not a
+pass per reached vertex. That is why `reachableSetWeight` has exactly three callers and all three
+are mmd drivers, and it is where the branch's factor of 21 on the benchmark set comes from: not a
 better data structure, the same reach formed a different number of times.
 
 `reachableSet` returned the neighborhood of a live vertex BY VALUE, which is what an external user
 of `QuotientGraph` would reach for, and that was the one argument for keeping it. It lost to the
 plainer one: an uncalled member is read by everyone who opens the file and used by nobody. If a
-caller ever wants the query, it is five lines over `reachableSetMmd` and the restore the prune now
-does anyway.
+caller ever wants the query, it is five lines over `formReachableSetMmd` and the restore the prune
+now does anyway.
 
 **HOW THE TABLE WAS BUILT, and the first two attempts were both wrong.** A regex over the whole
 file collects definitions and call sites along with declarations, and reports 62 members against
@@ -7835,8 +7837,8 @@ degree sums:
 
 A neighbour standing for three originals contributes three, because eliminating u will fill against
 all three. Counting entries instead of weights under-counts the fill by exactly the merging. At
-output, `order` walks the chain and emits the principal followed by its members, so a supervariable
-of weight three occupies three consecutive slots of the permutation.
+output, `orderAsMerged` walks the chain and emits the principal followed by its members, so a
+supervariable of weight three occupies three consecutive slots of the permutation.
 
 **THE PAYOFF IS COMPOUND, which is why both branches spend effort finding them.** A merge removes a
 vertex from the graph, so every later reach is shorter, every later degree cheaper, and one pivot
@@ -7948,8 +7950,8 @@ That makes the amd test cheaper AND narrower at once. It is not a weaker way of 
 question; it is a different question whose answer happens to agree everywhere amd asks it.
 
 **AND THE REASON THE WEIGHT CANNOT SIMPLY BE ZEROED IN THOSE TWO CASES IS THE PERMUTATION.**
-`orderAscending` reads `mWeight[pivot]` to reserve a supervariable's room, and `order` walks the
-chain the weight counts. A numbered vertex and a pivot both still need a place in the output, so
+`orderAscending` reads `mWeight[pivot]` to reserve a supervariable's room, and `orderAsMerged` walks
+the chain the weight counts. A numbered vertex and a pivot both still need a place in the output, so
 their weight has to keep saying how many originals they stand for. That is the whole of it: the
 weight is two facts, how many originals and whether alive, and where the two disagree the first
 wins.
@@ -8114,10 +8116,10 @@ permutation, so the pieces can be read against each other rather than in turn.
 
 **One example, not one per branch.** The elimination below is `MmdFlat`'s on this grid. Both output
 functions are then applied to that same state, including the one the mmd drivers do not call, so
-that `order` and `orderAscending` differ in the emission and in nothing else. Running the amd
-drivers on this grid would give a different pivot sequence and a different chain, since the branches
-select differently, and comparing two states would put a real difference in selection next to the
-one point at issue here. The hypothetical is only that a state mmd produced is handed to the
+that `orderAsMerged` and `orderAscending` differ in the emission and in nothing else. Running the
+amd drivers on this grid would give a different pivot sequence and a different chain, since the
+branches select differently, and comparing two states would put a real difference in selection next
+to the one point at issue here. The hypothetical is only that a state mmd produced is handed to the
 function amd calls. Nothing in either function knows or cares which branch built the arrays.
 
 The graph is a five-point square grid at 3 a side, which `gridGraph` builds and every layer here
@@ -8167,16 +8169,17 @@ mSuperNext[5] = 4          head                          tail
 mSuperNext[4] = 3            5 -----> 4 -----> 3 -----> NIL
 mSuperNext[3] = NIL          ^                 ^
 mSuperLast[5] = 3            |                 |
-                             the root          mSuperLast[5]
+                             the pivot         mSuperLast[5]
 ```
 
 No element of the list is stored as an element. Each is stored as the successor of the one before
 it, at the index of the one before it, so 4 lives at `mSuperNext[5]` and 3 lives at `mSuperNext[4]`.
 
 **The head lives nowhere in the three arrays, and that is what `pivots` is for.** Nothing marks a
-root and no member points back to one, so `mSuperNext` on its own is a set of links with no entry
-points. Read in index order it gives `3` at slot 4 and `4` at slot 5, which is neither the list nor
-its reverse. The pivot vector supplies the heads, and only then does the row resolve into chains.
+pivot and no member points back to one, so `mSuperNext` on its own is a set of links with no entry
+points. Read in index order it gives `3` at entry 4 and `4` at entry 5, which is neither the list
+nor its reverse. The pivot vector supplies the heads, and only then does the row resolve into
+chains.
 
 Note what `pivots` is NOT indexed by. It is dense and positional, one entry per elimination in
 elimination order, where the three arrays are indexed by vertex. Its fifth entry being 7 says the
@@ -8197,11 +8200,12 @@ pivots                      pivots, the driver's own vector, identical
 
 Three things the arrays say that the lists do not have to.
 
-- **The root is an index, not a value.** `super_members[5]` is a lookup by root in the prototype and
-  the three arrays are the same lookup: 5 being the root means slot 5 is where the chain begins and
-  where the tail and the weight live. There is no root flag and no back-pointer from a member, which
-  is why `orderAscending` has to build one for the length of one call and `mmd3.py` builds `root_of`
-  in the same shape. Both construct, temporarily, an inverse the data structure does not keep.
+- **The pivot is an index, not a value.** `super_members[5]` is a lookup by root in the prototype
+  and the three arrays are the same lookup: 5 being the pivot means entry 5 is where the chain
+  begins and where the tail and the weight live. There is no flag saying so and no back-pointer from
+  a member, which is why `orderAscending` has to build one for the length of one call and `mmd3.py`
+  builds `root_of` in the same shape. Both construct, temporarily, an inverse the data structure
+  does not keep. The code says pivot throughout, `root` being the prototypes' word.
 - **`mWeight` is `len()` made affordable.** A list knows its own length and a chain does not, and
   the degree computation asks for it once per reached vertex. `mmd3.py` says this where it declines
   to keep a weight array of its own: MMD keeps `qsize` because its members are a chain, not a list.
@@ -8221,9 +8225,9 @@ Three things the arrays say that the lists do not have to.
 Both functions do conceptually the same thing: walk `pivots` in order and splice in each pivot's
 members after it. They differ in the member order, and in how each avoids an actual insertion.
 
-**`order`, which the two amd drivers call.** One pass, appending. For each pivot, walk its chain
-from the pivot to NIL and push. The chain is already root-then-members, so the members arrive in
-merge order because that is the order the chain holds:
+**`orderAsMerged`, which the two amd drivers call.** One pass, appending. For each pivot, walk its
+chain from the pivot to NIL and push. The chain is already pivot-then-members, so the members arrive
+in merge order because that is the order the chain holds:
 
 ```
 8 | 6 | 2 | 0 | 7 | 1 | 5 4 3
@@ -8233,10 +8237,10 @@ merge order because that is the order the chain holds:
 8 6 2 0 7 1 5 4 3
 ```
 
-**`orderAscending`, which the three mmd drivers call.** Two passes, and it never walks a chain to
-emit. The first reserves: place each pivot, advance the cursor by `mWeight[pivot]` to leave a gap of
-exactly the right size behind it, and stamp each member of that chain with the pivot it belongs to,
-as `slot[u] = -(pivot + 1)`.
+**`orderAscending`, which the three mmd drivers call.** Two passes over one array, `cursor`, which
+carries a position at a pivot and an encoded pivot at a member. The first reserves: place each
+pivot, advance by `mWeight[pivot]` to leave a gap of exactly the right size behind it, and stamp
+each member of that chain with the pivot it belongs to, as `cursor[u] = -(pivot + 1)`.
 
 ```
 pivot   placed at   room reserved   members stamped
@@ -8246,11 +8250,14 @@ pivot   placed at   room reserved   members stamped
 0       3           1
 7       4           1
 1       5           1
-5       6           3               slot[4] = slot[3] = -6
+5       6           3               cursor[4] = cursor[3] = -6
 ```
 
-The second fills: sweep `v = 0 .. n - 1` and drop each stamped vertex into its root's advancing
-cursor. Vertex 3 is reached before vertex 4, so 3 takes position 7 and 4 takes position 8:
+The second fills: sweep `u = 0 .. n - 1`, decode with `-(cursor[u] + 1)`, and drop each member into
+its pivot's advancing cursor. The decode is the encode written again, `-(x + 1)` being its own
+inverse, and its sign is the test: a pivot's entry is a position, so the decode comes out negative
+and the sweep skips it. Vertex 3 is reached before vertex 4, so 3 takes position 7 and 4 takes
+position 8:
 
 ```
 8 | 6 | 2 | 0 | 7 | 1 | 5 3 4
@@ -8304,6 +8311,196 @@ right one takes pivot 3. Same fill, different permutation, and nothing in the ou
 convention produced it. See the note above `gridGraph` on ascending order, which is the 3D builder's
 version of the same trap.
 
+
+## Every state a vertex can be in, and the two questions they answer differently, 2026-08-26
+
+A vertex is in one of six states, and reading the code as though there were one live state and one
+dead one gets four of them wrong. They differ along two independent questions, "is it still in the
+graph" and "does it have a position in the permutation":
+
+```
+                           in graph   has a position       weight     mark (mmd)   mark (amd)
+
+live                       yes        not yet              1 .. n     < mTag       none
+live, in the current reach yes        not yet              -(1 .. n)  < mTag       none
+pivot, eliminated          no         yes, at that step    KEPT       GONE         none
+merged                     no         no, rides later      0          GONE         none
+prepass-numbered           no         yes, at that step    1          GONE         none
+set aside                  no         no, appended last    0          n/a          none
+```
+
+**THE SECOND ROW IS A WINDOW, NOT A STATE THE GRAPH RESTS IN.** A weight is negated by the form walk
+that puts the vertex into C[pivot] and restored by that elimination's prune, so it is live only
+between those two points and no reader outside them ever meets it. The sign is the reach's
+membership mark, which is why the prune's test is `mWeight[v] <= 0` and why the restore cannot move
+ahead of the loop that consumes it.
+
+**AND THE amd COLUMN IS EMPTY ALL THE WAY DOWN, WHICH IS NOT AN OVERSIGHT.** That branch never
+calls `enableMarks`, so `mMark` is empty, and `markGone` is `if (!mMark.empty()) mMark[u] = GONE;`,
+a no-op there. Every `markGone` call in the class is therefore mmd's alone at run time even though
+the code is shared. What amd has instead is the zero weight, in every case but one: a pivot keeps
+its weight, so `eliminatedAmd` must never be asked about a pivot, and the driver never does.
+
+**A WEIGHT'S RANGE IS WHAT MAKES THAT WORK, AND IT DIFFERS FROM AN INDEX'S.** A weight counts
+original vertices, so it runs 1 to n and n is capped at `MAX_IDX`, which is `INT32_MAX`. Zero is
+outside the live range and is therefore free to mean dead. An index has no such spare value, which
+is why the two encodings are not the same map even though they share an image:
+
+```
+index    live range  0 .. 2^31-2      encode -(x + 1)   ->  -(2^31-1) .. -1
+weight   live range  1 .. 2^31-1      encode -x         ->  -(2^31-1) .. -1
+```
+
+The `+ 1` an index needs is exactly the offset a weight already has. `-2^31` is unreachable in both,
+and for weights that is load-bearing rather than tidy: negating `INT32_MIN` is undefined, and it
+cannot arise because a weight never reaches `2^31`.
+
+**MERGED IS THE ONLY STATE WITH NO POSITION OF ITS OWN, AND IT NEVER GETS ONE.** It is threaded onto
+its principal's chain through `mSuperNext`, and its slot is issued at output time when
+`orderAsMerged` or `orderAscending` expands that chain. So it is waiting on the OUTPUT rather than
+on an elimination, and the pivot it rides behind may be selected many steps after the merge that
+folded it away. It is also the only exit that leaves a vertex named by lists it is no longer in:
+nothing purges an absorbed vertex from the adjacency of everyone who knew it, and the zero weight is
+what keeps it out of every later reachable set.
+
+**THE TWO ODDITIES IN THE WEIGHT COLUMN ARE WHY THE BRANCHES NEED DIFFERENT PREDICATES.** A pivot
+keeps its weight, that weight being the supervariable's size and `orderAscending` needing it to
+reserve room. A prepass-numbered vertex keeps weight one deliberately so its neighbors' degrees
+still count it. On the amd branch neither case is reachable through the predicate: a pivot is
+unfiled when chosen and never revisited, and a degree-zero vertex is in nobody's adjacency, so no
+walk can meet either. That is the whole reason `eliminatedAmd` can be `mWeight[u] == 0` while mmd
+needs a mark array.
+
+### Where the branches could converge, and it is the same axis as the detector
+
+**SET ASIDE IS THE DENSE-ROW RULE AND IT IS amd's ALONE.** A row whose degree exceeds
+`max(16, 10 * sqrt(n))` is not eliminated, not available, kept out of every reachable set by a zero
+weight, and appended to the permutation at the end. Nothing about it needs an approximate degree.
+mmd has no rule at all, and on a matrix with a hub of degree in the thousands that costs mmd exactly
+what it cost amd before the rule went in: the hub sits in every reachable set it touches, which was
+20.4 ms against 0.43 on `GHS_indef/bloweybq` and 41.0 against 1.24 on `bloweybl`. Adding it to mmd
+is a variation, and one with a measured prize rather than a guess.
+
+**AND THE TWO PREPASSES ARE NOT THE SAME PASS.** Read from the code rather than the comments:
+
+```
+mmd    buckets 0 AND 1, drained together, and it calls qg.number on each
+amd    degree 0 only, pushed straight onto pivots, no number call, plus the dense-row fork
+```
+
+genmmd's `if (dg == 0) dg = 1` lumps degree zero and degree one into one bucket, which is why mmd
+takes both; `AMD_2`'s initialization pass tests `deg == 0` alone. The difference is not cosmetic. A
+degree-ZERO vertex is in nobody's adjacency, so no walk can reach it and nothing has to be marked;
+a degree-ONE vertex is still named by its neighbor, so numbering it requires a mark and that is what
+`number` writes. Everything mmd pays for `mMark` on this path follows from taking bucket 1.
+
+**WHICH IS THE TOP OF THE CHAIN RECORDED IN `docs/NEXT.md`**, seen from the other end. That chain
+runs `orderAscending` reads `mWeight[pivot]` -> a numbered vertex must keep weight one -> the weight
+cannot say dead -> `mMark` must carry GONE -> `mHasNumbered` guards the load. The prepass is where
+the numbered vertex comes from, so a variation taking only bucket 0 would remove the case the chain
+exists to serve. It would also change the order, bucket 1 being genmmd's, so it belongs with the
+other variations rather than with the alignment work.
+
+## Absorb, reclaim and prune, and where each half lives, 2026-08-26
+
+The elimination is three tasks. Prune is one place; absorb and reclaim each have a C side and an I
+side, and the two sides are in different functions:
+
+```
+absorb    C side   C[p] = reach(p)          formReachableSet*, in beginElimination
+          I side   | {p}                    the append after the incidence loop, in prune
+
+reclaim   C side   C = C - I[p]             killClique over I[pivot], in beginElimination
+          I side   I[u] - I[p]              the drop in the incidence loop, in prune
+
+prune     one side A[u] = A[u] - C[p] - {p} the adjacency loop, in prune
+```
+
+So the incidence loop is the I half of both tasks and decides neither. Both decisions were taken in
+`beginElimination`, and the loop records them in u's list. The adjacency loop is the only one of the
+three that both decides and performs its task.
+
+Two things this split does not say, and both matter.
+
+**The incidence loop tests DEAD, not IN I[p].** Its condition is `adjacencySize != 0`, so it drops
+any clique that has been retired, whoever retired it. Whether that is the same set as `I[p]` is a
+separate question from where the work lives.
+
+**AND ON THE amd BRANCH RECLAIM HAS A THIRD SITE.** `absorbAggressively` kills cliques of its own
+and compacts `I[u]` itself, outside both functions above. So the two-sided picture is mmd's exactly
+and amd's plus one.
+
+## A clique that survives the prune, worked on five vertices, 2026-08-26
+
+The incidence loop keeps some of `I[u]` and drops the rest, and the test is narrower than "is it
+still useful". A clique `c` survives in `I[u]` exactly when the PIVOT IS NOT ONE OF ITS MEMBERS,
+which is the same as `c` not being in `I[p]`. `reach(p)` unions the cliques `p` belongs to, so those
+are the ones subsumed; a clique holding `u` and not `p` was never in that union and nothing covers
+it.
+
+Five vertices are enough to see it happen:
+
+```
+1 --- 0 --- 2 --- 3            edges: 0-1, 0-2, 2-3, 2-4, 3-4
+            |    /|
+            +-- 4-+            1 - 0 - 2 is a path, {2,3,4} is a triangle
+```
+
+Eliminating in the order 0, 3, 1, 2, 4:
+
+```
+eliminate 0:   C[0] = [1, 2]      cliques absorbed: []
+    I[1]: []       -> [0]
+    I[2]: []       -> [0]
+eliminate 3:   C[3] = [2, 4]      cliques absorbed: []
+    I[2]: [0]      -> [0, 3]
+    I[4]: []       -> [3]
+eliminate 1:   C[1] = [2]         cliques absorbed: [0]
+    I[2]: [0, 3]   -> [1, 3]
+eliminate 2:   C[2] = [4]         cliques absorbed: [1, 3]
+    I[4]: [3]      -> [2]
+eliminate 4:   C[4] = []          cliques absorbed: [2]
+```
+
+Each `eliminate p` line is `beginElimination`: it forms `C[p]` and kills the cliques of `I[p]`, so
+"cliques absorbed" is `I[p]`, empty for the first two because neither pivot belonged to a clique
+yet. The indented lines under it are the prune, one per `u` in `C[p]`, rewriting `I[u]` as
+`( I[u] - I[p] ) | {p}`.
+
+**PIVOT 1 IS THE CASE.** Vertex 2 names two cliques there and they part ways:
+
+- `C[0] = {1, 2}` is ABSORBED, because 1 is a member. `reach(1)` unions it, so it becomes a subset
+  of `C[1]` and is killed.
+- `C[3] = {2, 4}` SURVIVES, because 1 is not a member. Nothing unioned it, and it still carries 4,
+  which `C[1] = {2}` does not cover.
+
+The survivor is carrying real information rather than being left behind by an incomplete test:
+`C[3] - C[1] = {4}` is the only way vertex 2 still reaches 4 after this step. That difference is
+literally the term the amd bound sums over the survivors.
+
+The matrix, permuted to the elimination order, with F for fill:
+
+```
+A                          L + L^T
+      0  3  1  2  4              0  3  1  2  4
+  0   X  .  X  X  .          0   X  .  X  X  .
+  3   .  X  .  X  X          3   .  X  .  X  X
+  1   X  .  X  .  .          1   X  .  X  F  .
+  2   X  X  .  X  X          2   X  X  F  X  X
+  4   .  X  .  X  X          4   .  X  .  X  X
+```
+
+One fill entry, from eliminating 0 with its two non-adjacent neighbors 1 and 2.
+
+**WHERE THE TEST STOPS SHORT, and it is the gap between the branches.** Survival is decided by
+`p not in C[c]`, not by `C[c]` failing to be contained in `C[p]`. Those differ: a clique can have
+every member inside `C[p]` while not containing `p` itself, and it is then redundant but not
+absorbed. mmd keeps it. That is exactly what aggressive absorption catches on the amd branch,
+testing `outside[c] == 0`, which the bound has already computed.
+
+**PROVENANCE.** The trace above is a direct simulation of the four set-operation lines, not a run of
+a production driver: the drivers choose their own pivots and would not pick this order. The
+arithmetic is the algorithm's; it has not been through `MmdFlat`.
 
 ## Related
 

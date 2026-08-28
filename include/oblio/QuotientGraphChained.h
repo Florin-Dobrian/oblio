@@ -154,7 +154,7 @@ public:
     // The same set, weighted: the number of ORIGINAL vertices reach(u) stands for. Once a branch
     // merges into live vertices, a reached vertex can stand for several, and a degree that counts
     // vertices has to count those rather than entries.
-    std::uint32_t reachableWeight(std::int32_t u);
+    std::uint32_t reachableSetWeight(std::int32_t u);
 
     // Eliminate the pivot: turn it into a clique, absorb the cliques it belonged to, prune the
     // edges the new clique implies, and merge in whatever it makes indistinguishable. Returns the
@@ -235,14 +235,14 @@ public:
     void absorbAggressively(const std::vector<std::int32_t>& cliques,
                             const std::int32_t* vertices, std::uint32_t vertexCount);
 
-    // Expand a pivot sequence into an elimination order over the original vertices. A pivot
-    // stands for its whole supervariable, whose members are eliminated consecutively, so this is
-    // where a supervariable of size w becomes w columns.
-    std::vector<std::int32_t> order(const std::vector<std::int32_t>& pivots) const;
-
-    // The same permutation with each supervariable's members in ASCENDING VERTEX INDEX rather
-    // than merge order. Indistinguishable members, so the fill and the forest are unchanged;
-    // only the permutation is, and it is genmmd's. Used by MmdFlat alone. See the .cpp.
+    // Expand a pivot sequence into an elimination order over the original vertices. A pivot stands
+    // for its whole supervariable, whose members are eliminated consecutively, so this is where a
+    // supervariable of size w becomes w columns, with the members in ASCENDING VERTEX INDEX rather
+    // than merge order. Indistinguishable members, so only the permutation turns on that; the fill
+    // and the forest do not. It is genmmd's order.
+    //
+    // NO `orderAsMerged` HERE, where the other two classes carry the pair. That one emits merge
+    // order and the amd drivers are its only callers, and no amd driver uses this store.
     std::vector<std::int32_t> orderAscending(const std::vector<std::int32_t>& pivots) const;
 
 private:
@@ -255,7 +255,7 @@ private:
     const std::vector<std::int32_t>& finishElimination(std::int32_t pivot);
 
     // Dimensions.
-    std::size_t mSize = 0;   // number of vertices
+    std::size_t mSize;   // number of vertices; the constructor's init list is the only writer
 
     // A[u] and I[u] share one run, and one array holds every run end to end. Their number is
     // CONSERVED: an elimination that reaches u replaces at least one source with the new clique
@@ -360,7 +360,6 @@ inline QuotientGraphChained::QuotientGraphChained(const std::vector<std::size_t>
       mSegment(mSize + 1),
       mCliqueLiveMembers(mSize, 0),
       mMark(2 * mSize, NIL) {
-    const std::int32_t size = static_cast<std::int32_t>(mSize);
 
     // One pass to place each column's run, dropping the diagonal. The runs are laid out in column
     // order and never move afterwards, so the offsets are written once here and only the lengths
@@ -368,7 +367,7 @@ inline QuotientGraphChained::QuotientGraphChained(const std::vector<std::size_t>
     // gives up, never past mSegment[u + 1].srcPtr.
     mSrc.reserve(colPtr.empty() ? 0 : colPtr.back());
     mSegment[0].srcPtr = 0;
-    for (std::int32_t aj = 0; aj < size; ++aj) {
+    for (std::int32_t aj = 0; aj < static_cast<std::int32_t>(mSize); ++aj) {
         for (std::size_t cp = colPtr[aj]; cp < colPtr[aj + 1]; ++cp)
             if (rowIdx[cp] != aj) mSrc.push_back(rowIdx[cp]);
         mSegment[aj + 1].srcPtr = mSrc.size();
@@ -386,34 +385,43 @@ inline QuotientGraphChained::QuotientGraphChained(const std::vector<std::size_t>
 
     // Every vertex begins as a supervariable of one: a chain holding itself, so next is NIL and
     // last is the vertex. Mass elimination splices these together and order() walks them.
-    mSuperNext.assign(size, NIL);
-    mSuperLast.resize(size);
-    mWeight.assign(size, 1);
-    for (std::int32_t u = 0; u < size; ++u) mSuperLast[u] = u;
+    mSuperNext.assign(mSize, NIL);
+    mSuperLast.resize(mSize);
+    mWeight.assign(mSize, 1);
+    for (std::int32_t u = 0; u < static_cast<std::int32_t>(mSize); ++u) mSuperLast[u] = u;
 }
 
-inline std::uint32_t QuotientGraphChained::reachableWeight(std::int32_t u) {
+inline std::uint32_t QuotientGraphChained::reachableSetWeight(std::int32_t u) {
+    // A sum over DISTINCT vertices, so bounded by n; see the header.
+    std::uint32_t totalWeight = 0;
     ++mTag;
-    std::uint32_t reached = 0;   // a sum over DISTINCT vertices, so bounded by n; see the header
     mMark[u] = mTag;
     // The bounds are hoisted, all of them. Each is a load from a member vector, and the bodies
     // below store through mMark, which the compiler cannot prove does not alias the sizes, so a
     // bound left in the condition is re-loaded once per clique.
-    const std::int32_t* source        = mSrc.data() + mSegment[u].srcPtr;
-    const std::uint32_t adjacencySize = mSegment[u].adjacencySize;
-    const std::uint32_t incidenceSize = mSegment[u].incidenceSize;
-    for (std::uint32_t vk = 0; vk < adjacencySize; ++vk) {
-        const std::int32_t v = source[vk];
-        if (mMark[v] != GONE) { mMark[v] = mTag; reached += static_cast<std::uint32_t>(mWeight[v]); }
+    const Segment&      uSegment       = mSegment[u];          // one fetch; see the member
+    const std::int32_t* uAdjacency     = mSrc.data() + uSegment.srcPtr;
+    const std::uint32_t uAdjacencySize = uSegment.adjacencySize;
+    const std::uint32_t uIncidenceSize = uSegment.incidenceSize;
+    for (std::uint32_t vk = 0; vk < uAdjacencySize; ++vk) {
+        const std::int32_t v = uAdjacency[vk];
+        if (mMark[v] != GONE) {
+            mMark[v] = mTag; totalWeight += static_cast<std::uint32_t>(mWeight[v]);
+        }
     }
-    const std::int32_t* incidence = source + adjacencySize;
-    for (std::uint32_t ck = 0; ck < incidenceSize; ++ck) {
-        const std::int32_t c = incidence[ck];
+    const std::int32_t* uIncidence = uAdjacency + uAdjacencySize;
+    // NO `cClique` POINTER HERE, where the other two classes take one. A clique's members are a
+    // chain of segments joined by links, so there is no contiguous block to point at and no
+    // member count to hoist; `forEachMember` is what walks it.
+    for (std::uint32_t ck = 0; ck < uIncidenceSize; ++ck) {
+        const std::int32_t c = uIncidence[ck];
         forEachMember(c, [&](std::int32_t v) {
-            if (mMark[v] < mTag) { mMark[v] = mTag; reached += static_cast<std::uint32_t>(mWeight[v]); }
+            if (mMark[v] < mTag) {   // includes mMark[v] != GONE, GONE sorting above every tag
+                mMark[v] = mTag; totalWeight += static_cast<std::uint32_t>(mWeight[v]);
+            }
         });
     }
-    return reached;
+    return totalWeight;
 }
 
 inline void QuotientGraphChained::number(std::int32_t u) {
@@ -630,8 +638,7 @@ QuotientGraphChained::finishElimination(std::int32_t pivot) {
 // the body is the same either way: what moves is when the question is asked, since aggressive
 // absorption is what makes this cheap test agree with the true one. experiments/ordering/AMD3.md, entry 3.
 inline const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std::int32_t pivot) {
-    std::vector<std::int32_t>& merged = mMerged;   // scratch, kept for its capacity
-    merged.clear();
+    mMerged.clear();   // a member scratch, kept for its capacity
     // THE SIGNS COME BACK HERE, IN A PASS THAT ALREADY EXISTS, mirroring QuotientGraph. The walk
     // below is the only other traversal of C[pivot], so the restore rides in it and costs no pass.
     // The pivot goes first, since the merge at the end adds into it and both operands must be
@@ -650,32 +657,32 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std:
             mSrc[mSegment[u].srcPtr] == pivot) {         // A[u] empty, so I[u] starts at the run
             mSegment[u].incidenceSize = 0;
             mMark[u]          = GONE;
-            merged.push_back(u);
+            mMerged.push_back(u);
         }
     });
     // NO COMPACTION OF C[pivot]. A clique is placed once and never shortened: mass elimination
-    // zeroes the merged vertex's weight and leaves it in the list, and every later reader skips it
+    // zeroes the mMerged vertex's weight and leaves it in the list, and every later reader skips it
     // on that.
     //
     // EVERY READER ALREADY SKIPS THE DEAD, which is what makes this safe: `reachableSet` tests
     // `nv > 0`, the reach count tests the mark with GONE outranking any tag, the driver's clique
     // walk tests `eliminated`, and its pair test rejects on the tag. The one loop with no test is
-    // the eviction over C[pivot], and the unfile-and-restore pair is idempotent, so a merged
+    // the eviction over C[pivot], and the unfile-and-restore pair is idempotent, so a mMerged
     // vertex is evicted harmlessly.
     //
     // THE COST IS SPACE. A clique keeps its dead members for as long as it lives, so live clique
     // storage here is strictly above what the compacting classes report for the same ordering.
-    mCliqueLiveMembers[pivot] -= static_cast<std::uint32_t>(merged.size());
-    mNumLiveCliqueMembers     -= merged.size();
+    mCliqueLiveMembers[pivot] -= static_cast<std::uint32_t>(mMerged.size());
+    mNumLiveCliqueMembers     -= mMerged.size();
 
-    if (!merged.empty()) {
-        for (std::int32_t u : merged) {                // the pivot now stands for them too
+    if (!mMerged.empty()) {
+        for (std::int32_t u : mMerged) {                // the pivot now stands for them too
             mSuperNext[mSuperLast[pivot]] = u;         // append u's chain, order preserved
             mSuperLast[pivot]             = mSuperLast[u];
     // The weighted clique size follows the clique, so `cliqueWeight()` stays true across the
     // merge. Magnitudes only: the sign of a weight is membership of the clique being built.
     //
-    // THE MERGED LEAVE THE LIVE COUNT even though they do NOT leave this file's storage, a merged
+    // THE MERGED LEAVE THE LIVE COUNT even though they do NOT leave this file's storage, a mMerged
     // vertex keeping its place and being skipped on a zero weight. Tracking the notional size is
     // what makes the figure comparable with `MmdFlat`, which does drop them.
             mCliqueWeight -= static_cast<std::uint32_t>(mWeight[u]);
@@ -683,23 +690,20 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std:
             mWeight[u] = 0;
         }
     }
-    return merged;
+    return mMerged;
 }
 
 inline void QuotientGraphChained::merge(std::int32_t u, std::int32_t v) {
     mSuperNext[mSuperLast[u]] = v;                 // append v's chain, order preserved
     mSuperLast[u]             = mSuperLast[v];
-    mWeight[u] += mWeight[v];
-    mWeight[v] = 0;
+    mWeight[u]                += mWeight[v];
+    mWeight[v]                = 0;
 
     mSegment[v].adjacencySize = 0;
     mSegment[v].incidenceSize = 0;
-    mMark[v]          = GONE;
+    mMark[v]                  = GONE;
 }
 
-    // Each pivot first, then the members of its supervariable in ASCENDING VERTEX INDEX rather
-    // than merge order. Same fill and same forest as `order`, the members being
-    // indistinguishable; only the permutation differs.
 inline std::vector<std::int32_t> QuotientGraphChained::orderAscending(
         const std::vector<std::int32_t>& pivots) const {
     std::vector<std::int32_t> order(mSize);

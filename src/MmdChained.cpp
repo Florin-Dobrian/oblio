@@ -227,13 +227,13 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
 
             const std::int32_t cliqueTag = qg.advanceTag();   // marked once for the clique
             for (std::int32_t u : cliqueMembers) qg.setMark(u, cliqueTag);
-            std::uint32_t cliqueWeight = 0;
-            for (std::int32_t u : cliqueMembers) cliqueWeight += qg.weight(u);
+            std::uint32_t refreshedCliqueWeight = 0;
+            for (std::int32_t u : cliqueMembers) refreshedCliqueWeight += qg.weight(u);
 
             // reach(u) has |A[u]| + |I[u]| sources once the new clique is counted, so one other
-            // source means everything u reaches is in this clique plus that one place. cliqueWeight
-            // already counts the clique, and the other source is walked directly, so no union is
-            // formed at all.
+            // source means everything u reaches is in this clique plus that one place.
+            // refreshedCliqueWeight already counts the clique, and the other source is walked
+            // directly, so no union is formed at all.
             twoSourceQueue.clear();
             manySourceQueue.clear();
             for (std::int32_t u : cliqueMembers) {
@@ -248,14 +248,14 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
                 // merged or withheld by an earlier two-source vertex
                 if (qg.eliminated(u) || buckets.outmatched(u)) continue;
                 const std::int32_t vertexTag = qg.advanceTag();
-                // cliqueWeight is kept WHOLE and u's own weight subtracted at the end, which is
-                // genmmd's `dg - qsize[en] + 1` and not the same as subtracting it now. The
-                // walk below can MERGE a vertex into u, and genmmd's merge does
-                // `qsize[en] += qsize[nd]` in that same walk, so the weight it subtracts is the
-                // one AFTER the merge. Subtracting first files a supervariable one bucket too
-                // high per merged vertex, so it is not picked as early as its size has earned.
-                // See experiments/ordering/mmd3.py, ledger entry 5.
-                std::uint32_t degree = cliqueWeight;
+                // refreshedCliqueWeight is kept WHOLE and u's own weight subtracted at the end,
+                // which is genmmd's `dg - qsize[en] + 1` and not the same as subtracting it now.
+                // The walk below can MERGE a vertex into u, and genmmd's merge does `qsize[en] +=
+                // qsize[nd]` in that same walk, so the weight it subtracts is the one AFTER the
+                // merge. Subtracting first files a supervariable one bucket too high per merged
+                // vertex, so it is not picked as early as its size has earned. See
+                // experiments/ordering/mmd3.py, ledger entry 5.
+                std::uint32_t degree = refreshedCliqueWeight;
 
                 // NO LOOPS. A two-source vertex has exactly TWO sources and one of them is the new
                 // clique, by the test that put it on this list, so the other one is unique and
@@ -288,8 +288,9 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
                         degree += qg.weight(v);
                     }
                 } else {                                           // two cliques; take the other
-                    const std::int32_t* incidence = qg.incidenceMmd(u);
-                    const std::int32_t  c = (incidence[0] == clique) ? incidence[1] : incidence[0];
+                    const std::int32_t* uIncidence = qg.incidenceMmd(u);
+                    const std::int32_t  c =
+                        (uIncidence[0] == clique) ? uIncidence[1] : uIncidence[0];
                     qg.forEachMember(c, [&](std::int32_t v) {
                         const std::int32_t vMark = qg.mark(v);
                         if (v == u || vMark >= vertexTag) return;  // seen this pass, or dead
@@ -319,7 +320,7 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
             for (auto uit = manySourceQueue.rbegin(); uit != manySourceQueue.rend(); ++uit) {
                 const std::int32_t u = *uit;                 // the full union, as md5 computes it
                 if (qg.eliminated(u) || buckets.outmatched(u)) continue;
-                const std::uint32_t degree = qg.reachableWeight(u); // reach excludes u already
+                const std::uint32_t degree = qg.reachableSetWeight(u); // reach excludes u already
                 const std::uint32_t filed = degree;
                 buckets.file(filed, u);
                 minDegree = std::min(minDegree, filed);

@@ -66,9 +66,9 @@ as long as both classes agree about it, which is the usual case and the expected
 | `merge` | x | x | aligned |  |
 | `absorb` |  | x | aligned |  |
 | **degree** | | | | |
-| `reachableWeight` | x |  | aligned |  |
+| `reachableSetWeight` | x |  | aligned |  |
 | **output** | | | | |
-| `order` |  | x | aligned |  |
+| `orderAsMerged` |  | x | aligned |  |
 | `orderAscending` | x |  | aligned |  |
 | **configuration** | | | | |
 | `setReverseIncidence` | x |  | aligned |  |
@@ -114,9 +114,9 @@ where the vendored routines disagree.
 | `merge` | x | x | aligned |  |
 | `absorb` |  | x | aligned |  |
 | **degree** | | | | |
-| `reachableWeight` | x |  | aligned |  |
+| `reachableSetWeight` | x |  | aligned |  |
 | **output** | | | | |
-| `order` |  | x | aligned |  |
+| `orderAsMerged` |  | x | aligned |  |
 | `orderAscending` | x |  | aligned |  |
 | **configuration** | | | | |
 | `setReverseIncidence` | x |  | aligned |  |
@@ -165,7 +165,7 @@ Both shapes are kept deliberately, to see which is the more useful to work from.
 | merge | x | x | x | x | aligned |  |  |
 | absorb |  | x |  | x | aligned |  |  |
 | **degree** | | | | | | | |
-| reachableWeight | x |  | x |  | aligned |  |  |
+| reachableSetWeight | x |  | x |  | aligned |  |  |
 | **output** | | | | | | | |
 | order |  | x |  | x | aligned |  |  |
 | orderAscending | x |  | x |  | aligned |  |  |
@@ -198,8 +198,9 @@ The concept rows above hide the spellings. In full, where they differ between th
 of what an ordering driver over a quotient graph needs whatever branch and whatever layout.
 
 **The branch split is the same in both classes**, which is the reassuring part: marks, `number`,
-`reachableWeight`, `orderAscending` and `setReverseIncidence` are mmd's on both sides, and `absorb`,
-`trimClique`, `setAside`, `cliqueWeight`, `order` and `setLateMassElimination` are amd's on both.
+`reachableSetWeight`, `orderAscending` and `setReverseIncidence` are mmd's on both sides, and
+`absorb`, `trimClique`, `setAside`, `cliqueWeight`, `orderAsMerged` and `setLateMassElimination` are
+amd's on both.
 Moving between layouts changed the storage, not who wants what.
 
 **And the class split WAS one idea**: the flat pair called `eliminate` where the compacted pair
@@ -358,10 +359,10 @@ with the array allocated by `enableMarks`. `AmdFlat` drops n int32 it never read
 
 **The two predicates are NOT equivalent, which is why this needed checking rather than renaming.**
 They differ on a vertex `number` retired, which is mmd's alone, and on a PIVOT, which is retired
-with its weight intact because that weight is the supervariable's and `order` needs it. So the amd
-predicate is correct only if the amd driver never asks about a pivot. It does not, a pivot being
-unfiled when chosen and never revisited, and that was established by asserting the two agree on
-every call `AmdFlat` makes and running it: the digest's 73 grids at `-O0`, cubes to 33 a side,
+with its weight intact because that weight is the supervariable's and `orderAsMerged` needs it. So
+the amd predicate is correct only if the amd driver never asks about a pivot. It does not, a pivot
+being unfiled when chosen and never revisited, and that was established by asserting the two agree
+on every call `AmdFlat` makes and running it: the digest's 73 grids at `-O0`, cubes to 33 a side,
 random patterns at degree 6, 12 and 40, a star, a diagonal, a dense block that fires the dense-row
 rule, and `test_order`. No disagreement anywhere.
 

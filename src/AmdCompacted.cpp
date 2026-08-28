@@ -250,21 +250,21 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
 
         buckets.unfile(pivot);
 
-        const std::int32_t* pivotClique     = qg.clique(pivot);
-        std::uint32_t       pivotCliqueSize = qg.cliqueSize(pivot);
+        const std::int32_t* newClique     = qg.clique(pivot);
+        std::uint32_t       newCliqueSize = qg.cliqueSize(pivot);
 
         // |C[p]| weighted, which is AMD_2's `degme`, "degree of me". The WEIGHTED size of
-        // C[pivot] against `pivotCliqueSize`'s entry count: a degree counts original vertices and
+        // C[pivot] against `newCliqueSize`'s entry count: a degree counts original vertices and
         // a clique holds supervariables. Taken twice per pivot; see src/AmdFlat.cpp.
-        std::uint32_t pivotCliqueWeight = qg.cliqueWeight();
-        degrees[pivot] = pivotCliqueWeight;       // what the scan below subtracts from
+        std::uint32_t newCliqueWeight = qg.cliqueWeight();
+        degrees[pivot] = newCliqueWeight;       // what the scan below subtracts from
 
-        lemax = std::max(lemax, static_cast<std::int32_t>(pivotCliqueWeight));
+        lemax = std::max(lemax, static_cast<std::int32_t>(newCliqueWeight));
 
         deadCliques.clear();
         for (std::int32_t c : touchedCliques)
             if (w[c] == wflg) { deadCliques.push_back(c); w[c] = 0; }   // |C[c] - C[p]| == 0
-        qg.absorbAggressively(deadCliques, pivotClique, pivotCliqueSize);
+        qg.absorbAggressively(deadCliques, newClique, newCliqueSize);
 
         const std::vector<std::int32_t>& merged = qg.massEliminate(pivot);
         numEliminated += 1 + static_cast<std::uint32_t>(merged.size());
@@ -273,25 +273,25 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
             degrees[u] = 0;                         // already out of the lists; see eliminateAmd()
         }
 
-        pivotClique     = qg.clique(pivot);
-        pivotCliqueSize = qg.cliqueSize(pivot);
-        pivotCliqueWeight = 0;
-        for (std::uint32_t uk = 0; uk < pivotCliqueSize; ++uk)
-            pivotCliqueWeight += qg.weight(pivotClique[uk]);
+        newClique       = qg.clique(pivot);
+        newCliqueSize   = qg.cliqueSize(pivot);
+        newCliqueWeight = 0;
+        for (std::uint32_t uk = 0; uk < newCliqueSize; ++uk)
+            newCliqueWeight += qg.weight(newClique[uk]);
 
-        degrees[pivot] = pivotCliqueWeight;
+        degrees[pivot] = newCliqueWeight;
 
         const std::uint32_t numLeft = numLive;
 
-        for (std::uint32_t uk = 0; uk < pivotCliqueSize; ++uk) {
-            const std::int32_t u = pivotClique[uk];
-            const std::int32_t* incidence     = qg.incidenceAmd(u);
-            const std::uint32_t incidenceSize = qg.incidenceSize(u);
+        for (std::uint32_t uk = 0; uk < newCliqueSize; ++uk) {
+            const std::int32_t u = newClique[uk];
+            const std::int32_t* uIncidence     = qg.incidenceAmd(u);
+            const std::uint32_t uIncidenceSize = qg.incidenceSize(u);
 
             std::size_t deg = static_cast<std::size_t>(w[u]);   // the adjacency half
             std::uint32_t key = static_cast<std::uint32_t>(buckets.key(u));
-            for (std::uint32_t ck = 0; ck < incidenceSize; ++ck) {
-                const std::int32_t c = incidence[ck];
+            for (std::uint32_t ck = 0; ck < uIncidenceSize; ++ck) {
+                const std::int32_t c = uIncidence[ck];
                 if (c != pivot) key += static_cast<std::uint32_t>(c);   // me is not in the key
                 if (c != pivot) deg += static_cast<std::size_t>(w[c] - wflg);
             }
@@ -327,8 +327,8 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
         // in 246.
         stamp = std::max(stamp, wflg + lemax);
 
-        for (std::uint32_t uk = 0; uk < pivotCliqueSize; ++uk) {
-            const std::int32_t seed = pivotClique[uk];
+        for (std::uint32_t uk = 0; uk < newCliqueSize; ++uk) {
+            const std::int32_t seed = newClique[uk];
             if (qg.eliminatedAmd(seed)) continue;
             const std::int32_t hash = buckets.key(seed);
             const std::int32_t headOfBucket = hashHead[hash];
@@ -343,11 +343,11 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
                 // `W [Iw [p]] = wflg` over the whole of i's list, variables and cliques alike,
                 // because both live in one id space and one array can hold a mark for either.
                 //
-                // ONE LOOP OVER THE RUN, FROM THE SECOND ENTRY, AND NO LIVENESS TEST, which is
-                // Amd.cpp's `for (p = Pe[i]+1 ; p <= Pe[i]+ln-1 ; p++)` exactly. Two things make
-                // it one loop rather than two: the run is contiguous, so the incidence and
-                // adjacency parts are one span, and the pivot sits at the front from the prune's
-                // rotation, so skipping it is skipping index 0. Amd.cpp needs no liveness test
+                // ONE LOOP OVER THE SEGMENT, FROM THE SECOND ENTRY, AND NO LIVENESS TEST, which
+                // is Amd.cpp's `for (p = Pe[i]+1 ; p <= Pe[i]+ln-1 ; p++)` exactly. Two things
+                // make it one loop rather than two: the segment is contiguous, so the incidence
+                // and adjacency parts are one span, and the pivot sits at the front from the
+                // prune's rotation, so skipping it is skipping index 0. Amd.cpp needs no liveness
                 // because its lists never hold dead entries and neither do ours after the prune,
                 // with ONE exception: a vertex the hash absorbed EARLIER IN THIS SAME LOOP is
                 // still listed by its neighbors. Amd.cpp stamps it like any other member and
@@ -364,12 +364,12 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
                 //
                 // The zeros survive: only entries of a live vertex's list are stamped, and a dead
                 // clique is not in one.
-                const std::int32_t  other      = ++stamp;
-                const std::int32_t* runU       = qg.incidenceAmd(u);        // the run's first entry
-                const std::uint32_t incidenceU = qg.incidenceSize(u);
-                const std::uint32_t adjacencyU = qg.adjacencySize(u);
-                const std::uint32_t runSizeU   = incidenceU + adjacencyU;
-                for (std::uint32_t a = 1; a < runSizeU; ++a) w[runU[a]] = other;
+                const std::int32_t  other          = ++stamp;
+                const std::int32_t* uSegment       = qg.incidenceAmd(u);   // the segment's start
+                const std::uint32_t uIncidenceSize = qg.incidenceSize(u);
+                const std::uint32_t uAdjacencySize = qg.adjacencySize(u);
+                const std::uint32_t uSegmentSize   = uIncidenceSize + uAdjacencySize;
+                for (std::uint32_t a = 1; a < uSegmentSize; ++a) w[uSegment[a]] = other;
 
                 for (std::int32_t v = buckets.chain(u); v != NIL; v = buckets.chain(v)) {
                     if (qg.eliminatedAmd(v)) continue;
@@ -378,13 +378,13 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
                     // `ok = (Len [j] == ln) && (Elen [j] == eln)`. Two compares throw out most
                     // candidates for nothing, where counting live entries as we walk cannot decide
                     // until the walk is over.
-                    if (qg.incidenceSize(v) != incidenceU) continue;
-                    if (qg.adjacencySize(v) != adjacencyU) continue;
+                    if (qg.incidenceSize(v) != uIncidenceSize) continue;
+                    if (qg.adjacencySize(v) != uAdjacencySize) continue;
 
                     bool                same = true;
-                    const std::int32_t* runV = qg.incidenceAmd(v);
-                    for (std::uint32_t a = 1; a < runSizeU && same; ++a)
-                        if (w[runV[a]] != other) same = false;
+                    const std::int32_t* vSegment = qg.incidenceAmd(v);
+                    for (std::uint32_t a = 1; a < uSegmentSize && same; ++a)
+                        if (w[vSegment[a]] != other) same = false;
                     if (!same) continue;
 
                     const std::uint32_t weightV = qg.weight(v);
@@ -396,28 +396,16 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
             }
         }
 
-        // THE SIGNS COME BACK HERE, which is Amd.cpp's `Nv [i] = nvi` under RESTORE DEGREE LISTS
-        // and is the same pass. Every member of C[pivot] has read negative since the clique was
-        // built, which is what let the prune answer three questions from one load; from this point
-        // on they are ordinary live vertices again.
-        // THE SIGNS COME BACK INSIDE THIS PASS, not before it. Every member of C[pivot] has read
-        // negative since the clique was built, which is what let the prune answer three questions
-        // from one load; the store that ends that rides on the load this pass makes anyway.
-        // Amd.cpp does the same, `nvi = -Nv [i]` then `Nv [i] = nvi`, under RESTORE DEGREE LISTS.
-        //
-        // A vertex the hash absorbed is skipped and never restored, which is right: `merge` zeroed
-        // its weight, and zero is the absorbed state whatever sign it arrived with.
-
-        // AND THE CLIQUE IS TRIMMED AS THIS PASS WALKS IT, which is Amd.cpp's `Iw [p++] = i` under
+        // THE CLIQUE IS TRIMMED AS THIS PASS WALKS IT, which is Amd.cpp's `Iw [p++] = i` under
         // RESTORE DEGREE LISTS: the survivors are written back over the front of the clique and
         // what detection absorbed falls off the end. One store on a walk this pass makes anyway.
         std::int32_t* cliqueOut = qg.clique(pivot);
         std::uint32_t kept      = 0;
-        for (std::uint32_t uk = 0; uk < pivotCliqueSize; ++uk) {
-            const std::int32_t u = pivotClique[uk];
+        for (std::uint32_t uk = 0; uk < newCliqueSize; ++uk) {
+            const std::int32_t u = newClique[uk];
             if (qg.eliminatedAmd(u)) continue;         // absorbed by the hash a moment ago
             const std::uint32_t weightU = qg.weight(u);          // POST-merge
-            std::size_t bound = static_cast<std::size_t>(w[u]) + pivotCliqueWeight - weightU;
+            std::size_t bound = static_cast<std::size_t>(w[u]) + newCliqueWeight - weightU;
             w[u] = 1;
             bound = std::min<std::size_t>(bound, numLeft - weightU);
             const std::uint32_t filed = static_cast<std::uint32_t>(bound);
@@ -448,9 +436,9 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
     // THE ROWS THE DENSE RULE SET ASIDE GO LAST, in index order, which is where `AMD_2`'s output
     // assembly puts them. They were compacted in an ascending pass, so appending the vector is
     // that order; each stands only for itself, having been set aside before it could absorb
-    // anything, so `order` expands a chain of one.
+    // anything, so `orderAsMerged` expands a chain of one.
     pivots.insert(pivots.end(), denseRows.begin(), denseRows.end());
-    return qg.order(pivots);
+    return qg.orderAsMerged(pivots);
 }
 
 } // namespace Oblio

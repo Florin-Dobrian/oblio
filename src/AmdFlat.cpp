@@ -321,8 +321,8 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         // Read at the moment of use: the arena holding it grows as cliques are formed, so a
         // pointer taken before the next elimination is the only one that is safe, and this is
         // that window.
-        const std::int32_t* pivotClique     = qg.clique(pivot);
-        std::uint32_t       pivotCliqueSize = qg.cliqueSize(pivot);
+        const std::int32_t* newClique     = qg.clique(pivot);
+        std::uint32_t       newCliqueSize = qg.cliqueSize(pivot);
 
         // No membership stamp for C[p] is needed any more: the subtraction below asks which
         // cliques the new clique's members belong to, never which vertices a clique's members
@@ -341,10 +341,10 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         //
         // `degme` IS AMD_2'S NAME FOR THIS, "degree of me", `me` being its name for the pivot, and
         // the comments below quote it. It is the WEIGHTED size of C[pivot] against
-        // `pivotCliqueSize`'s entry count, which is what a degree needs: a degree counts original
+        // `newCliqueSize`'s entry count, which is what a degree needs: a degree counts original
         // vertices and a clique holds supervariables.
-        std::uint32_t pivotCliqueWeight = qg.cliqueWeight();
-        degrees[pivot] = pivotCliqueWeight;       // what the scan below subtracts from
+        std::uint32_t newCliqueWeight = qg.cliqueWeight();
+        degrees[pivot] = newCliqueWeight;       // what the scan below subtracts from
 
         // |C[c] - C[p]| once per clique. This is the whole reason the bound is cheap: the
         // quantity depends on c alone, so every vertex whose incidence list holds c reads it
@@ -362,7 +362,7 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         // 272646, which is most of the reason this branch used to run three times slower than the
         // vendored routine. `Amd.cpp` does the same thing at `we = Degree[e] + wnvi`, then
         // `we -= nvi`, and it is the amd2 layer's pass 3.
-        lemax = std::max(lemax, static_cast<std::int32_t>(pivotCliqueWeight));
+        lemax = std::max(lemax, static_cast<std::int32_t>(newCliqueWeight));
 
         // AGGRESSIVE ABSORPTION. w[c] - wflg == 0 says C[c] lies wholly inside the new clique, so
         // it can never contribute anything again and its entries in the incidence lists are pure
@@ -372,7 +372,7 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         deadCliques.clear();
         for (std::int32_t c : touchedCliques)
             if (w[c] == wflg) { deadCliques.push_back(c); w[c] = 0; }   // |C[c] - C[p]| == 0
-        qg.absorbAggressively(deadCliques, pivotClique, pivotCliqueSize);
+        qg.absorbAggressively(deadCliques, newClique, newCliqueSize);
 
         // MASS ELIMINATION, and it runs HERE rather than inside the eliminator. Absorption is what
         // makes the cheap structural test agree with the true one: a clique whose members all lie
@@ -395,11 +395,11 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         // enters a survivor's degree only in the pass that restores the degree lists,
         // `deg = Degree[i] + degme - nvi`, by which point degme is final. So every survivor sees
         // the same number, which is what re-taking it here gives.
-        pivotClique     = qg.clique(pivot);
-        pivotCliqueSize = qg.cliqueSize(pivot);
-        pivotCliqueWeight = 0;
-        for (std::uint32_t uk = 0; uk < pivotCliqueSize; ++uk)
-            pivotCliqueWeight += qg.weight(pivotClique[uk]);
+        newClique       = qg.clique(pivot);
+        newCliqueSize   = qg.cliqueSize(pivot);
+        newCliqueWeight = 0;
+        for (std::uint32_t uk = 0; uk < newCliqueSize; ++uk)
+            newCliqueWeight += qg.weight(newClique[uk]);
 
         // AND THE STORED CLIQUE DEGREE IS WRITTEN AGAIN, which is not a tidy-up. `Amd.cpp` writes
         // `Degree [me] = degme` TWICE, at its lines 1676 and 1940, and the second write is the
@@ -420,7 +420,7 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         // defect arrived with ledger entry 3, which moved mass elimination out and did not carry
         // the second write that placement is the whole reason for. Half a mechanism, as entry 6
         // was. See experiments/ordering/AMD3.md.
-        degrees[pivot] = pivotCliqueWeight;
+        degrees[pivot] = newCliqueWeight;
 
         const std::uint32_t numLeft = numLive;
 
@@ -434,8 +434,8 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         // Subtracting it in this pass would use the weight u had before absorbing v, which files a
         // supervariable one bucket too high per vertex taken. Amd2 and Amd2B carried exactly that
         // and it was costing 3 to 9 percent of fill on grids.
-        for (std::uint32_t uk = 0; uk < pivotCliqueSize; ++uk) {
-            const std::int32_t u = pivotClique[uk];
+        for (std::uint32_t uk = 0; uk < newCliqueSize; ++uk) {
+            const std::int32_t u = newClique[uk];
             // bound(u) = |A[u] - C[p]| + |C[p] - {u}| + sum |C[c] - C[p]| over I[u] - {p},
             // against the exact |( A[u] | C[c] for c in I[u] ) - {u}|. The first term needs no
             // subtraction: when a clique is formed every member has its explicit adjacency
@@ -443,8 +443,8 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
             // disjoint. All the overcounting is therefore clique against clique, outside C[p],
             // which is the smallest place it could have been put.
             // Every length hoisted out of its condition; see the note in Amd1.
-            const std::int32_t* incidence     = qg.incidenceAmd(u);
-            const std::uint32_t incidenceSize = qg.incidenceSize(u);
+            const std::int32_t* uIncidence     = qg.incidenceAmd(u);
+            const std::uint32_t uIncidenceSize = qg.incidenceSize(u);
 
             // THE ADJACENCY TERM AND THE WHOLE KEY ARE ALREADY IN HAND, accumulated by the
             // prune over exactly the sets it produced. AmdFlat walks A[u] here for the bound's
@@ -492,8 +492,8 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
             // clique list it is compacting, which by then holds the new clique, while the degree
             // term for the new clique is added in a later pass. Fusing the walks does not fuse
             // the rules.
-            for (std::uint32_t ck = 0; ck < incidenceSize; ++ck) {
-                const std::int32_t c = incidence[ck];
+            for (std::uint32_t ck = 0; ck < uIncidenceSize; ++ck) {
+                const std::int32_t c = uIncidence[ck];
                 if (c != pivot) key += static_cast<std::uint32_t>(c);   // me is not in the key
                 if (c != pivot) deg += static_cast<std::size_t>(w[c] - wflg);
             }
@@ -608,8 +608,8 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         // in 246.
         stamp = std::max(stamp, wflg + lemax);
 
-        for (std::uint32_t uk = 0; uk < pivotCliqueSize; ++uk) {
-            const std::int32_t seed = pivotClique[uk];
+        for (std::uint32_t uk = 0; uk < newCliqueSize; ++uk) {
+            const std::int32_t seed = newClique[uk];
             if (qg.eliminatedAmd(seed)) continue;
             const std::int32_t hash = buckets.key(seed);
             const std::int32_t headOfBucket = hashHead[hash];
@@ -680,14 +680,14 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
                 // new clique at the front of I[u], so the entry to skip is in the middle.
                 // `AmdCompacted`, which carries `AMD_2`'s order, does get the single loop.
                 const std::int32_t  other      = ++stamp;
-                const std::uint32_t adjacencyU = qg.adjacencySize(u);
-                const std::uint32_t incidenceU = qg.incidenceSize(u);
-                const std::int32_t* runU       = qg.adjacencyAmd(u);
-                for (std::uint32_t vk = 0; vk < adjacencyU; ++vk) w[runU[vk]] = other;
+                const std::uint32_t uAdjacencySize = qg.adjacencySize(u);
+                const std::uint32_t uIncidenceSize = qg.incidenceSize(u);
+                const std::int32_t* uAdjacency       = qg.adjacencyAmd(u);
+                for (std::uint32_t vk = 0; vk < uAdjacencySize; ++vk) w[uAdjacency[vk]] = other;
                 // Index 1: the new clique is at the front of every I[u] and is shared by every
                 // member of C[pivot], so it can never discriminate. Ledger entry 6.
-                const std::int32_t* incidenceRunU = qg.incidenceAmd(u);
-                for (std::uint32_t i = 1; i < incidenceU; ++i) w[incidenceRunU[i]] = other;
+                const std::int32_t* uIncidence = qg.incidenceAmd(u);
+                for (std::uint32_t i = 1; i < uIncidenceSize; ++i) w[uIncidence[i]] = other;
 
                 for (std::int32_t v = buckets.chain(u); v != NIL; v = buckets.chain(v)) {
                     if (qg.eliminatedAmd(v)) continue;
@@ -697,17 +697,17 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
                     // against the stamp of u laid down once above. Both walks short-circuit on the
                     // first mismatch, which is what made the comparison cheap and the stamping the
                     // thing that had to move: see experiments/ordering/AMD3.md, iteration 15.
-                    if (qg.adjacencySize(v) != adjacencyU) continue;
-                    if (qg.incidenceSize(v) != incidenceU) continue;
+                    if (qg.adjacencySize(v) != uAdjacencySize) continue;
+                    if (qg.incidenceSize(v) != uIncidenceSize) continue;
 
                     bool                same       = true;
-                    const std::int32_t* adjacencyV = qg.adjacencyAmd(v);
-                    for (std::uint32_t vk = 0; vk < adjacencyU && same; ++vk)
-                        if (w[adjacencyV[vk]] != other) same = false;
+                    const std::int32_t* vAdjacency = qg.adjacencyAmd(v);
+                    for (std::uint32_t vk = 0; vk < uAdjacencySize && same; ++vk)
+                        if (w[vAdjacency[vk]] != other) same = false;
                     if (same) {
-                        const std::int32_t* incidenceV = qg.incidenceAmd(v);
-                        for (std::uint32_t i = 1; i < incidenceU && same; ++i)
-                            if (w[incidenceV[i]] != other) same = false;
+                        const std::int32_t* vIncidence = qg.incidenceAmd(v);
+                        for (std::uint32_t i = 1; i < uIncidenceSize && same; ++i)
+                            if (w[vIncidence[i]] != other) same = false;
                     }
                     if (!same) continue;
 
@@ -768,23 +768,18 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
         // RESTORE DEGREE LISTS: the survivors are written back over the front of the clique and
         // what detection absorbed falls off the end. One store on a walk this pass makes anyway,
         // and without it those vertices are visited by every later walk of this clique.
-        // THE SIGNS COME BACK INSIDE THIS PASS, not in mass elimination, which ran late and left
-        // them negative. `AMD_2` does the same, `nvi = -Nv [i]` then `Nv [i] = nvi` under RESTORE
-        // DEGREE LISTS, and the store rides on the load this pass makes anyway. A vertex the hash
-        // absorbed is skipped and never restored, which is right: `merge` zeroed its weight, and
-        // zero is the absorbed state whatever sign it arrived with.
 
         std::int32_t* cliqueOut = qg.clique(pivot);
         std::uint32_t kept      = 0;
-        for (std::uint32_t uk = 0; uk < pivotCliqueSize; ++uk) {
-            const std::int32_t u = pivotClique[uk];
+        for (std::uint32_t uk = 0; uk < newCliqueSize; ++uk) {
+            const std::int32_t u = newClique[uk];
             if (qg.eliminatedAmd(u)) continue;         // absorbed by the hash a moment ago
             const std::uint32_t weightU = qg.weight(u);          // POST-merge
             // ONE OPERAND WIDENED, so the sum is formed in `std::size_t`; see the note in Amd1
             // on why widening cannot be done after the addition the way narrowing is done after
             // the subtraction. `partial[u]` and `degme` each reach n, so the sum reaches 2n, and
             // in 32 bits that would fit only because n is capped at 2^31 - 1.
-            std::size_t bound = static_cast<std::size_t>(w[u]) + pivotCliqueWeight - weightU;
+            std::size_t bound = static_cast<std::size_t>(w[u]) + newCliqueWeight - weightU;
             // THE SLOT GOES BACK TO ALIVE-AND-UNSEEN, the last read having just happened. Without
             // it a survivor later chosen as pivot would form a clique whose w already held a
             // bound, which the next step's prune would read as a running value above the tag or as
@@ -841,9 +836,9 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
     // THE ROWS THE DENSE RULE SET ASIDE GO LAST, in index order, which is where `AMD_2`'s output
     // assembly puts them. They were collected in an ascending pass, so appending the vector is
     // that order; each stands only for itself, having been set aside before it could absorb
-    // anything, so `order` expands a chain of one.
+    // anything, so `orderAsMerged` expands a chain of one.
     pivots.insert(pivots.end(), denseRows.begin(), denseRows.end());
-    return qg.order(pivots);
+    return qg.orderAsMerged(pivots);
 }
 
 

@@ -200,8 +200,8 @@ std::vector<std::int32_t> orderMmdCompacted(const std::vector<std::size_t>&  col
 
             const std::int32_t cliqueTag = qg.advanceTag();   // marked once for the clique
             for (std::int32_t u : cliqueMembers) qg.setMark(u, cliqueTag);
-            std::uint32_t cliqueWeight = 0;
-            for (std::int32_t u : cliqueMembers) cliqueWeight += qg.weight(u);
+            std::uint32_t refreshedCliqueWeight = 0;
+            for (std::int32_t u : cliqueMembers) refreshedCliqueWeight += qg.weight(u);
 
             twoSourceQueue.clear();
             manySourceQueue.clear();
@@ -216,20 +216,20 @@ std::vector<std::int32_t> orderMmdCompacted(const std::vector<std::size_t>&  col
                 // merged or withheld by an earlier two-source vertex
                 if (qg.eliminatedMmd(u) || buckets.outmatched(u)) continue;
                 const std::int32_t vertexTag = qg.advanceTag();
-                std::uint32_t degree = cliqueWeight;
+                std::uint32_t degree = refreshedCliqueWeight;
 
-                const std::int32_t* adjacency = qg.adjacencyMmd(u);
+                const std::int32_t* uAdjacency = qg.adjacencyMmd(u);
                 for (std::uint32_t vk = 0; vk < qg.adjacencySize(u); ++vk) {
-                    const std::int32_t v = adjacency[vk];
+                    const std::int32_t v = uAdjacency[vk];
                     const std::int32_t vMark = qg.mark(v);
                     if (vMark >= vertexTag) continue;              // seen this pass, or dead
-                    if (vMark == cliqueTag) continue;             // already counted in cliqueWeight
+                    if (vMark == cliqueTag) continue;   // already in refreshedCliqueWeight
                     qg.setMark(v, vertexTag);
                     degree += qg.weight(v);
                 }
-                const std::int32_t* incidence = qg.incidenceMmd(u);
+                const std::int32_t* uIncidence = qg.incidenceMmd(u);
                 for (std::uint32_t ck = 0; ck < qg.incidenceSize(u); ++ck) {
-                    const std::int32_t c = incidence[ck];
+                    const std::int32_t c = uIncidence[ck];
                     if (c == clique) continue;
                     const std::int32_t* otherClique     = qg.clique(c);
                     const std::uint32_t otherCliqueSize = qg.cliqueSize(c);
@@ -260,7 +260,7 @@ std::vector<std::int32_t> orderMmdCompacted(const std::vector<std::size_t>&  col
             for (auto uit = manySourceQueue.rbegin(); uit != manySourceQueue.rend(); ++uit) {
                 const std::int32_t u = *uit;                 // the full union, as md5 computes it
                 if (qg.eliminatedMmd(u) || buckets.outmatched(u)) continue;
-                const std::uint32_t degree = qg.reachableWeight(u); // reach excludes u already
+                const std::uint32_t degree = qg.reachableSetWeight(u); // reach excludes u already
                 const std::uint32_t filed = degree;
                 buckets.file(filed, u);
                 minDegree = std::min(minDegree, filed);

@@ -1,5 +1,59 @@
 # NEXT: the mmd and amd branches are being aligned against each other; one regression is open
 
+## OPEN, 2026-08-26: the merge detector is orthogonal to the degree rule, and the swaps are open
+
+**THE TWO CHOICES ARE INDEPENDENT AND WE HAVE THEM WELDED TOGETHER.** A branch makes two decisions,
+how it computes a degree and how it finds indistinguishable vertices, and today each branch takes
+one pairing only:
+
+```
+                  degree rule        merge detector beyond mass elimination
+mmd               exact              q2h, free and partial
+amd               bound              hash, a hash per vertex and the general case
+```
+
+Nothing in either algorithm requires that pairing. Mass elimination is already shared, its test
+reading a descriptor both prunes write, so the detector is the only part that differs, and it is a
+separate axis from the degree.
+
+**WHAT WE STAY ALIGNED TO IS A PHASE, NOT A CONSTRAINT.** `MmdCorrected` and `AMD_2` are how we
+prove the implementations are right while we are still finding defects in them by the week. Once we
+are comfortable, the oracles stop being the target and become the baseline a variation is measured
+against. Nothing below is blocked; it is queued behind that confidence.
+
+### Variations worth trying, roughly by increasing distance from what we have
+
+```
+1  mmd + hash          exact degree, general detection      the most merges any pair here can find
+2  amd + q2h           bound, cheap partial detection       the cheapest pair
+3  amd + both          bound, q2h first then hash on what it missed
+4  mmd + neither       exact degree, mass elimination only  the floor, for attribution
+```
+
+(1) and (4) are the two that matter first, because together they say how much of mmd's cost and
+quality is the exact degree and how much is the detector. Today those are confounded: every mmd
+number we have is exact-degree-plus-q2h and every amd number is bound-plus-hash, so no measurement
+we own separates them. (4) is nearly free to build, being a switch that skips a call.
+
+(3) is the one with a real question inside it rather than a measurement: q2h's tag proves a subset
+for free, so running it first should leave the hash less to do, but whether the hash then costs
+meaningfully less is not obvious and neither is whether the bookkeeping of two detectors in one pass
+costs more than it saves.
+
+**AND (2) IS THE ONE NOT TO ASSUME.** q2h is described as free because it reuses a tag genmmd's
+two-source walk has already assigned; that tag is a product of that walk's structure. Whether amd's
+cliques-first update produces anything equivalent is unknown and is a question for an instrument,
+not for reading. Every equivalence claim of this shape that we settled by reading this month was
+settled wrong at least once.
+
+### What the axis is really for
+
+More merging means shorter reaches, cheaper degrees and more columns per pivot selection, which is
+why both branches spend something on it. It also costs: a hash per vertex is added work, and the
+ladder's own timing rule is that folding an array moves the clock while rescheduling work does not.
+A detector is neither, so it has to earn its place on the 246 rather than by argument. The gate is
+the same one every ladder rung has used: quality on the real set, and not slower.
+
 ## DONE 2026-08-24: the branch alignment starts, and the documentation was corrected first
 
 **THE FRONT IS NOW mmd AGAINST amd**, which is a different axis from the flat-against-compacted work
@@ -105,10 +159,10 @@ branch reproduces its reference's permutation exactly or the comparison stops be
 any of these alone moves a permutation and `make mmdorder` or `make amdorder` fails.
 
 **IT IS ALSO HALF A FLAG AND HALF A SUFFIX, which is the inconsistency.** (b) is a member,
-`mReverseIncidence`; (c) is the `reachableSetMmd` / `reachableSetAmd` suffix. They are always
-wanted together, and the compacted class's own comment says so, "two conventions under one switch
-because they are one fact", while the flat class splits them across a flag and a name. Neither
-arrangement is wrong; having both is.
+`mReverseIncidence`; (c) is the `formReachableSetMmd` / `formReachableSetAmd` suffix. They are
+always wanted together, and the compacted class's own comment says so, "two conventions under one
+switch because they are one fact", while the flat class splits them across a flag and a name.
+Neither arrangement is wrong; having both is.
 
 **(d) IS WHY THE COMPACTED PRUNES ARE STRUCTURALLY DIFFERENT** rather than one loop moved, which the
 flat pair is. Amd's layout lets ONE cursor sweep both halves, so its walk is one loop with an
@@ -120,8 +174,8 @@ starts the cliques, where amd is still holding an unread one.
 this tree.** (a) and (b) appear to COMPOSE, so that both branches meet the new clique FIRST: mmd
 puts it last and reads backward, amd puts it first and reads forward. If that is right, the two
 conventions are one semantic rule reached by two routes, which changes what an alignment here would
-even mean. It follows from reading `pruneMmd` and `pruneAmd` against `reachableSetMmd` and
-`reachableSetAmd`, and nothing has instrumented it.
+even mean. It follows from reading `pruneMmd` and `pruneAmd` against `formReachableSetMmd` and
+`formReachableSetAmd`, and nothing has instrumented it.
 
 **THE MARK ARRAY, AND THE FOUR-LINK CHAIN THAT MAKES ITS WORST TEST LOOK ARBITRARY.** Traced
 2026-08-24 by reading, not measured. The condition in question is
@@ -1794,8 +1848,8 @@ bounded by n: `mAdjacencySize`, `mIncidenceSize`, `mCliqueSize`, `mWeight`, and 
 correctly rather than an exception to it: the unsigned case rests on having nothing to stand in for,
 and that field now has. See `docs/DESIGN_DECISIONS.md` (2026-08-17) and the four conditions in
 `docs/CODING_RULES.md`. The other four are unaffected. The accessors over them move too, `adjacencySize`, `incidenceSize`, `cliqueSize`,
-`weight`, `cliqueWeight`, `reachableSize` and `reachableWeight`, which is what takes the casts out
-of the hot loops.
+`weight`, `cliqueWeight`, `reachableSize` and `reachableSetWeight`, which is what takes the casts
+out of the hot loops.
 
 In the drivers, **twenty-three declarations across the eight files**:
 

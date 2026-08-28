@@ -22,14 +22,14 @@
 // way. A verdict on storage therefore does NOT retire it, storage never having been the only thing
 // it was for.
 //
-// SECOND, IT IS THE PREDICTABLE-SPACE VERSION OF MmdFlat, and that is worth having on its own. From
-// a conversation with Alex Pothen: given a machine you know whether A fits, but you cannot know
-// whether L fits, nnz(L) depending on the ordering being computed. So a method that stays within
-// `O(n + m)` carries a guarantee no amount of speed substitutes for: IF THE INPUT FITS, THE ANSWER
-// IS REACHABLE. genmmd's chaining and AMD_2's compaction are that guarantee bought
-// deliberately, not frugality for its own sake. Our arena is the right default for a known shape on
-// a known machine solved repeatedly; this is the right one when whether an answer exists is the
-// open question. See docs/DESIGN_DECISIONS.md (2026-08-16).
+// SECOND, IT IS THE PREDICTABLE-SPACE VERSION OF MmdFlat, and that is worth having on its own.
+// Given a machine you know whether A fits, but you cannot know whether L fits, nnz(L) depending on
+// the ordering being computed. So a method that stays within `O(n + m)` carries a guarantee no
+// amount of speed substitutes for: IF THE INPUT FITS, THE ANSWER IS REACHABLE. genmmd's chaining
+// and AMD_2's compaction are that guarantee bought deliberately, not frugality for its own sake.
+// Our arena is the right default for a known shape on a known machine solved repeatedly; this is
+// the right one when whether an answer exists is the open question. See docs/DESIGN_DECISIONS.md
+// (2026-08-16).
 //
 // THE PRICE, measured: 4 to 10 percent slower than MmdFlat at every size on the square ladder, and
 // 1.15 to 1.38x genmmd where MmdFlat reads 1.02 to 1.19x. On 16.61M instructions against 14.22M and
@@ -144,7 +144,7 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
     // emptying it; the prepass now reads each successor before unfiling and needs no list at all.
     // A `touched` list with a `touchedRound` stamp beside it went the same way on 2026-08-15,
     // having been filled once per clique member per pivot and never read on this layer.
-    std::vector<std::int32_t> batch, cliqueMembers, twoSourceQueue, manySourceQueue;
+    std::vector<std::int32_t> batchPivots, refreshedCliqueMembers, twoSourceQueue, manySourceQueue;
 
     // NO DRIVER MARK ARRAY. The two levels this refresh needs, one surviving a whole clique and
     // one fresh per vertex, are two tags rather than two arrays, and they go into the graph's own
@@ -190,7 +190,7 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
             batchLimit = std::min(minDegree + static_cast<std::uint32_t>(delta),
                                   static_cast<std::uint32_t>(size) - 1);
 
-        batch.clear();
+        batchPivots.clear();
         while (true) {
             if (buckets.empty(minDegree)) {
                 if (minDegree >= batchLimit) break;
@@ -201,7 +201,7 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
             buckets.unfile(pivot);
 
             const std::vector<std::int32_t>& merged = qg.eliminateMmd(pivot);
-            batch.push_back(pivot);
+            batchPivots.push_back(pivot);
             pivots.push_back(pivot);
             numEliminated += 1 + static_cast<std::uint32_t>(merged.size());
             for (std::int32_t u : merged) buckets.unfile(u);
@@ -218,17 +218,20 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
         // ---- one refresh, walked clique by clique -----------------------------
         // The driver's clique list, genmmd's `list[mn] = ehead; ehead = mn`, so the LAST pivot of
         // a batch is the FIRST clique refreshed.
-        for (auto cliqueIt = batch.rbegin(); cliqueIt != batch.rend(); ++cliqueIt) {
-            const std::int32_t clique = *cliqueIt;
-            cliqueMembers.clear();
-            qg.forEachMember(clique, [&](std::int32_t v) {
-                if (!qg.eliminated(v)) cliqueMembers.push_back(v);
+        for (auto rcit = batchPivots.rbegin(); rcit != batchPivots.rend(); ++rcit) {
+            const std::int32_t rc = *rcit;
+            // The dead are dropped HERE, before anything stamps: `mMark` carries GONE as well as
+            // the tag, so stamping a dead member would overwrite GONE and bring it back to life.
+            // This store never compacts a clique, so the mass eliminated are in the list too.
+            refreshedCliqueMembers.clear();
+            qg.forEachMember(rc, [&](std::int32_t v) {
+                if (!qg.eliminated(v)) refreshedCliqueMembers.push_back(v);
             });
 
             const std::int32_t cliqueTag = qg.advanceTag();   // marked once for the clique
-            for (std::int32_t u : cliqueMembers) qg.setMark(u, cliqueTag);
+            for (std::int32_t u : refreshedCliqueMembers) qg.setMark(u, cliqueTag);
             std::uint32_t refreshedCliqueWeight = 0;
-            for (std::int32_t u : cliqueMembers) refreshedCliqueWeight += qg.weight(u);
+            for (std::int32_t u : refreshedCliqueMembers) refreshedCliqueWeight += qg.weight(u);
 
             // reach(u) has |A[u]| + |I[u]| sources once the new clique is counted, so one other
             // source means everything u reaches is in this clique plus that one place.
@@ -236,7 +239,7 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
             // directly, so no union is formed at all.
             twoSourceQueue.clear();
             manySourceQueue.clear();
-            for (std::int32_t u : cliqueMembers) {
+            for (std::int32_t u : refreshedCliqueMembers) {
                 if (buckets.filed(u) || buckets.outmatched(u)) continue;   // done, or withheld
                 const std::uint32_t otherSources = qg.adjacencySize(u) + qg.incidenceSize(u) - 1;
                 (otherSources == 1 ? twoSourceQueue : manySourceQueue).push_back(u);
@@ -255,7 +258,9 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
                 // merge. Subtracting first files a supervariable one bucket too high per merged
                 // vertex, so it is not picked as early as its size has earned. See
                 // experiments/ordering/mmd3.py, ledger entry 5.
-                std::uint32_t degree = refreshedCliqueWeight;
+                // Bounded by n: a sum of weights over DISJOINT sets, which is what the guards
+                // below make them. It reads as a fixed value here and accumulates further down.
+                std::uint32_t closedReachableSetWeight = refreshedCliqueWeight;
 
                 // NO LOOPS. A two-source vertex has exactly TWO sources and one of them is the new
                 // clique, by the test that put it on this list, so the other one is unique and
@@ -267,7 +272,7 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
                 //     if(fwd[nb]>=0){ dg+=qsize[nb]; goto n2100; }
                 //
                 // What stood here was two loops, each re-reading its bound through an accessor on
-                // every iteration and one of them testing `c == clique` per entry, to find a
+                // every iteration and one of them testing `oc == rc` per entry, to find a
                 // single entry already known to be there. The comment defending that said the
                 // loops were short enough not to be worth hoisting, which was true and beside the
                 // point: the loops themselves are what genmmd does not have. This pass measured
@@ -285,13 +290,13 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
                     const std::int32_t vMark = qg.mark(v);
                     if (vMark < vertexTag && vMark != cliqueTag) {   // not seen, dead, or counted
                         qg.setMark(v, vertexTag);
-                        degree += qg.weight(v);
+                        closedReachableSetWeight += qg.weight(v);
                     }
                 } else {                                           // two cliques; take the other
                     const std::int32_t* uIncidence = qg.incidenceMmd(u);
-                    const std::int32_t  c =
-                        (uIncidence[0] == clique) ? uIncidence[1] : uIncidence[0];
-                    qg.forEachMember(c, [&](std::int32_t v) {
+                    const std::int32_t  oc =
+                        (uIncidence[0] == rc) ? uIncidence[1] : uIncidence[0];
+                    qg.forEachMember(oc, [&](std::int32_t v) {
                         const std::int32_t vMark = qg.mark(v);
                         if (v == u || vMark >= vertexTag) return;  // seen this pass, or dead
                         if (vMark == cliqueTag) {
@@ -307,13 +312,13 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
                             return;
                         }
                         qg.setMark(v, vertexTag);
-                        degree += qg.weight(v);
+                        closedReachableSetWeight += qg.weight(v);
                     });
                 }
 
-                const std::uint32_t filed = degree - qg.weight(u);
-                buckets.file(filed, u);
-                minDegree = std::min(minDegree, filed);
+                const std::uint32_t degree = closedReachableSetWeight - qg.weight(u);
+                buckets.file(degree, u);
+                minDegree = std::min(minDegree, degree);
             }
 
             // mmdupd's qxh list, the same stack.
@@ -321,9 +326,8 @@ std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPt
                 const std::int32_t u = *uit;                 // the full union, as md5 computes it
                 if (qg.eliminated(u) || buckets.outmatched(u)) continue;
                 const std::uint32_t degree = qg.reachableSetWeight(u); // reach excludes u already
-                const std::uint32_t filed = degree;
-                buckets.file(filed, u);
-                minDegree = std::min(minDegree, filed);
+                buckets.file(degree, u);
+                minDegree = std::min(minDegree, degree);
             }
         }
 

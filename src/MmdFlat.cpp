@@ -57,7 +57,7 @@ std::vector<std::int32_t> orderMmdFlatImpl(const std::vector<std::size_t>&  colP
     // emptying it; the prepass now reads each successor before unfiling and needs no list at all.
     // A `touched` list with a `touchedRound` stamp beside it went the same way on 2026-08-15,
     // having been filled once per clique member per pivot and never read on this layer.
-    std::vector<std::int32_t> batch, cliqueMembers, twoSourceQueue, manySourceQueue;
+    std::vector<std::int32_t> batchPivots, refreshedCliqueMembers, twoSourceQueue, manySourceQueue;
 
     // NO DRIVER MARK ARRAY. The two levels this refresh needs, one surviving a whole clique and
     // one fresh per vertex, are two tags rather than two arrays, and they go into the graph's own
@@ -102,7 +102,7 @@ std::vector<std::int32_t> orderMmdFlatImpl(const std::vector<std::size_t>&  colP
             batchLimit = std::min(minDegree + static_cast<std::uint32_t>(delta),
                                   static_cast<std::uint32_t>(size) - 1);
 
-        batch.clear();
+        batchPivots.clear();
         while (true) {
             if (buckets.empty(minDegree)) {
                 if (minDegree >= batchLimit) break;
@@ -113,7 +113,7 @@ std::vector<std::int32_t> orderMmdFlatImpl(const std::vector<std::size_t>&  colP
             buckets.unfile(pivot);
 
             const std::vector<std::int32_t>& merged = qg.eliminateMmd(pivot);
-            batch.push_back(pivot);
+            batchPivots.push_back(pivot);
             pivots.push_back(pivot);
             numEliminated += 1 + static_cast<std::uint32_t>(merged.size());
             for (std::int32_t u : merged) buckets.unfile(u);
@@ -147,20 +147,22 @@ std::vector<std::int32_t> orderMmdFlatImpl(const std::vector<std::size_t>&  colP
         // that day, the stamping fold and the arena cursor, and neither was ever timed.
         // The driver's clique list, genmmd's `list[mn] = ehead; ehead = mn`, so the LAST pivot of
         // a batch is the FIRST clique refreshed.
-        for (auto cliqueIt = batch.rbegin(); cliqueIt != batch.rend(); ++cliqueIt) {
-            const std::int32_t clique = *cliqueIt;
-            const std::int32_t* refreshedClique     = qg.clique(clique);
-            const std::uint32_t refreshedCliqueSize = qg.cliqueSize(clique);
+        for (auto rcit = batchPivots.rbegin(); rcit != batchPivots.rend(); ++rcit) {
+            const std::int32_t rc = *rcit;
+            const std::int32_t* refreshedClique     = qg.clique(rc);
+            const std::uint32_t refreshedCliqueSize = qg.cliqueSize(rc);
 
-            cliqueMembers.clear();
+            // The dead are dropped HERE, before anything stamps: `mMark` carries GONE as well as
+            // the tag, so stamping a dead member would overwrite GONE and bring it back to life.
+            refreshedCliqueMembers.clear();
             for (std::uint32_t uk = 0; uk < refreshedCliqueSize; ++uk)
                 if (!qg.eliminatedMmd(refreshedClique[uk]))
-                    cliqueMembers.push_back(refreshedClique[uk]);
+                    refreshedCliqueMembers.push_back(refreshedClique[uk]);
 
             const std::int32_t cliqueTag = qg.advanceTag();   // marked once for the clique
-            for (std::int32_t u : cliqueMembers) qg.setMark(u, cliqueTag);
+            for (std::int32_t u : refreshedCliqueMembers) qg.setMark(u, cliqueTag);
             std::uint32_t refreshedCliqueWeight = 0;
-            for (std::int32_t u : cliqueMembers) refreshedCliqueWeight += qg.weight(u);
+            for (std::int32_t u : refreshedCliqueMembers) refreshedCliqueWeight += qg.weight(u);
 
             // reach(u) has |A[u]| + |I[u]| sources once the new clique is counted, so one other
             // source means everything u reaches is in this clique plus that one place.
@@ -168,7 +170,7 @@ std::vector<std::int32_t> orderMmdFlatImpl(const std::vector<std::size_t>&  colP
             // directly, so no union is formed at all.
             twoSourceQueue.clear();
             manySourceQueue.clear();
-            for (std::int32_t u : cliqueMembers) {
+            for (std::int32_t u : refreshedCliqueMembers) {
                 if (buckets.filed(u) || buckets.outmatched(u)) continue;   // done, or withheld
                 const std::uint32_t otherSources = qg.adjacencySize(u) + qg.incidenceSize(u) - 1;
                 (otherSources == 1 ? twoSourceQueue : manySourceQueue).push_back(u);
@@ -187,7 +189,9 @@ std::vector<std::int32_t> orderMmdFlatImpl(const std::vector<std::size_t>&  colP
                 // merge. Subtracting first files a supervariable one bucket too high per merged
                 // vertex, so it is not picked as early as its size has earned. See
                 // experiments/ordering/mmd3.py, ledger entry 5.
-                std::uint32_t degree = refreshedCliqueWeight;
+                // Bounded by n: a sum of weights over DISJOINT sets, which is what the guards
+                // below make them. It reads as a fixed value here and accumulates further down.
+                std::uint32_t closedReachableSetWeight = refreshedCliqueWeight;
 
                 // Not hoisted, deliberately. A two-source vertex has adjacencySize +
                 // incidenceSize == 2 by the test that put it on this list, so these two loops run
@@ -206,14 +210,14 @@ std::vector<std::int32_t> orderMmdFlatImpl(const std::vector<std::size_t>&  colP
                     if (vMark >= vertexTag) continue;              // seen this pass, or dead
                     if (vMark == cliqueTag) continue;   // already in refreshedCliqueWeight
                     qg.setMark(v, vertexTag);
-                    degree += qg.weight(v);
+                    closedReachableSetWeight += qg.weight(v);
                 }
                 const std::int32_t* uIncidence = qg.incidenceMmd(u);
-                for (std::uint32_t ck = 0; ck < qg.incidenceSize(u); ++ck) {
-                    const std::int32_t c = uIncidence[ck];
-                    if (c == clique) continue;
-                    const std::int32_t* otherClique     = qg.clique(c);
-                    const std::uint32_t otherCliqueSize = qg.cliqueSize(c);
+                for (std::uint32_t ock = 0; ock < qg.incidenceSize(u); ++ock) {
+                    const std::int32_t oc = uIncidence[ock];
+                    if (oc == rc) continue;
+                    const std::int32_t* otherClique     = qg.clique(oc);
+                    const std::uint32_t otherCliqueSize = qg.cliqueSize(oc);
                     for (std::uint32_t vk = 0; vk < otherCliqueSize; ++vk) {
                         const std::int32_t v = otherClique[vk];
                         const std::int32_t vMark = qg.mark(v);
@@ -231,13 +235,13 @@ std::vector<std::int32_t> orderMmdFlatImpl(const std::vector<std::size_t>&  colP
                             continue;
                         }
                         qg.setMark(v, vertexTag);
-                        degree += qg.weight(v);
+                        closedReachableSetWeight += qg.weight(v);
                     }
                 }
 
-                const std::uint32_t filed = degree - qg.weight(u);
-                buckets.file(filed, u);
-                minDegree = std::min(minDegree, filed);
+                const std::uint32_t degree = closedReachableSetWeight - qg.weight(u);
+                buckets.file(degree, u);
+                minDegree = std::min(minDegree, degree);
             }
 
             // mmdupd's qxh list, the same stack.
@@ -245,9 +249,8 @@ std::vector<std::int32_t> orderMmdFlatImpl(const std::vector<std::size_t>&  colP
                 const std::int32_t u = *uit;                 // the full union, as md5 computes it
                 if (qg.eliminatedMmd(u) || buckets.outmatched(u)) continue;
                 const std::uint32_t degree = qg.reachableSetWeight(u); // reach excludes u already
-                const std::uint32_t filed = degree;
-                buckets.file(filed, u);
-                minDegree = std::min(minDegree, filed);
+                buckets.file(degree, u);
+                minDegree = std::min(minDegree, degree);
             }
         }
 

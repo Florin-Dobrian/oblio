@@ -8502,6 +8502,364 @@ testing `outside[c] == 0`, which the bound has already computed.
 a production driver: the drivers choose their own pivots and would not pick this order. The
 arithmetic is the algorithm's; it has not been through `MmdFlat`.
 
+## The mass elimination test is one fact at two moments, 2026-08-28
+
+Two equations sit in the mass elimination comment and they read as the same statement written
+twice:
+
+```
+reach(u) | {u} == reach(p) | {p}
+reach(u) == C[p] - {u}
+```
+
+They are not one equation restated. They are one fact read in two different graphs, before and
+after p is eliminated, and they differ by exactly `{p}`. Anyone who takes them for a restatement
+tries the algebra, finds it does not close, and concludes that one of the two is wrong.
+
+**Moment 1, before the elimination.** p is still a live vertex, so `reach(p)` is defined and the
+ordinary indistinguishability condition applies with the counterpart FIXED TO THE PIVOT:
+
+```
+reach(u) | {u} == reach(p) | {p}
+```
+
+`reach(p)` is the set the elimination is about to store, so the right side is `C[p] | {p}`. What
+each `| {v}` is doing is visible here rather than conventional: p is in `reach(u)`, u is in
+`C[p] = reach(p)`, and neither set holds its own vertex, so the two sides are comparable only once
+each has its own vertex added back.
+
+**Moment 2, after the elimination.** p is numbered and out of the graph. It is in nobody's reach
+and it is not a member of its own clique. Take moment 1 and remove the two vertices whose status
+has changed:
+
+```
+reach'(u) = ( reach(u) | {u} ) - {u} - {p}       u's reach in the new graph
+          = ( C[p] | {p} )    - {u} - {p}        by moment 1
+          = C[p] - {u}                           p is not in C[p]
+```
+
+which is the second form. The `{u}` survives on the right because u is still a member of the clique
+it helped form. Only `{p}` drops out, and it drops out of both sides at once.
+
+**Which moment the code is in.** `massEliminate` runs after the prune, so it is moment 2
+throughout, and its three conjuncts are that form read against the definition of the reachable set:
+
+```
+reach(u) = ( A[u] | C[c] for c in I[u] ) - {u}
+
+adjacencySize == 0            A[u] empty, so the first term is gone
+incidenceSize == 1            the union is over exactly one clique
+mAdjIncSrc[srcPtr] == pivot   and that clique is C[p]
+```
+
+giving `reach(u) = C[p] - {u}` directly. Moment 1 is what the test MEANS and moment 2 is what it
+CHECKS, which is why both belong in the comment and why the comment has to say which is which.
+
+## q2h in closed form, and the three mechanisms as one ladder, 2026-08-28
+
+q2h runs in the refresh, after the prune, so it reads the same moment-2 graph the section above
+describes: p is gone, and the refreshed clique `C` holds live vertices only. In the drivers that
+clique is `rc`, the batch entry being a pivot and a clique under one id. For a live `u` in `C` the
+prune has just left `C` in `I[u]`, so
+
+```
+otherSources(u) = |A[u]| + |I[u]| - 1
+```
+
+counts u's sources other than `C`, and is what the driver splits the queue on.
+
+**A SOURCE IS A TERM OF THE UNION, and the count follows from reading the definition that way.**
+
+```
+reach(u) = ( {w} for w in A[u]  |  C[c] for c in I[u] ) - {u}
+```
+
+Each explicit neighbor is a term of its own and each clique is one term whatever its size, so the
+number of terms is `|A[u]| + |I[u]|` and the `- 1` above removes `C`, which the prune has just
+appended to `I[u]`.
+
+**The two-source form, which is the whole mechanism.** `u` is two-source when
+`otherSources(u) == 1`, so exactly one term stands beside `C`. **In the drivers' names: two sources
+means `rc` and one other, and the other is either some `w` or some `oc`.** Call that other term
+`S_u`. It takes one of two shapes, and they are the only two:
+
+```
+|A[u]| == 1, |I[u]| == 1     S_u = {w}       w the single adjacency entry
+|A[u]| == 0, |I[u]| == 2     S_u = C[oc]     oc the other clique
+```
+
+`MmdChained` branches on exactly this, `adjacencySize(u) == 1` against the else; `MmdFlat` and
+`MmdCompacted` cover both shapes by walking the two lists rather than by branching. Either way the
+reach has one closed form:
+
+```
+reach(u) = ( C | S_u ) - {u}
+```
+
+**`S_u` IS A SET OF VERTICES, NOT A SOURCE ID.** Where `oc` names the other clique, `S_u` is its
+member set. The distinction is load-bearing below: `v in S_u` is a membership test on the set, while
+concluding `S_v == S_u` reasons about `oc` being in `I[v]`. Naming the term is what lets the merge
+argument be stated once instead of once per shape.
+
+`u` is itself a member of `C`, so the closed reach loses the subtraction:
+
+```
+reach(u) | {u} == C | S_u
+```
+
+A two-source vertex therefore has a two-term closed form with nothing else in it, and two such
+vertices are indistinguishable exactly when their two terms agree. One of the two terms is `C`,
+which agrees by construction.
+
+**The test.** Walking `S_u` for the degree, `u` meets a `v` carrying the clique tag, which says `v`
+is in `C`. So `v` lies in `C & S_u`, and the branch turns on v's own source count:
+
+```
+v two-source     S_v must be S_u, v being in S_u with one source besides C
+                 so  reach(v) | {v} == C | S_u == reach(u) | {u}      MERGE
+
+v many-source    C | S_u is only part of what v reaches
+                 so  reach(u) | {u}  is a subset of  reach(v) | {v}   OUTMATCH
+```
+
+The second is containment rather than equality, which is why its outcome differs in kind. `v` is
+not removed, it is withheld: its reach strictly covers u's, so it cannot be the unique minimum
+before `u` is taken, but it stays live, stays in every list that names it, and keeps contributing to
+its neighbors' degrees.
+
+**THE TEST IN THE CODE IS THE SAME EXPRESSION THE SPLIT LOOP USES**, applied to `v` at the site
+rather than to `u` up front:
+
+```
+split loop    const std::uint32_t otherSources = adjacencySize(u) + incidenceSize(u) - 1;
+merge test    if (adjacencySize(v) + incidenceSize(v) - 1 == 1)
+```
+
+The `- 1` is legitimate on `v` for the same reason it is on `u`: `v` carried the clique tag, so `v`
+is a member of `C`, and the prune appended the pivot to `I[v]` as it did to every member. So
+`incidenceSize(v) >= 1` and the entry being discounted is the right one, which also rules out
+unsigned underflow. Same computation, named in one place and written out in the other, in all three
+drivers.
+
+**AND THE TEST PROVES MORE THAN "v HAS ONE OTHER SOURCE". It proves that source is `C[oc]`.** `v`
+was found inside `C[oc]`, so `oc` is in `I[v]`, giving `I[v] >= {rc, oc}` before the count is even
+read. The count equalling 1 then forces the shape exactly:
+
+```
+|A[v]| == 0,  |I[v]| == 2,  I[v] == {rc, oc}
+```
+
+leaving no room for v's other source to be anything else. Hence
+`reach(v) | {v} == C[rc] | C[oc] == reach(u) | {u}` immediately, with no set compared and no hash
+taken.
+
+**WHICH IS WHY THE BRANCH LIVES IN THE INCIDENCE LOOP ALONE.** In the adjacency shape `S_u` is a
+single vertex `w`, and `w` cannot carry the clique tag, the prune leaving `A[u]` and `C` disjoint.
+There is no candidate there to test.
+
+**AND THE GUARD ABOVE IT IS LOAD-BEARING RATHER THAN DEFENSIVE.**
+`if (filed(v) || outmatched(v)) continue;` is genmmd's `bwd[nd] == 0`. A `v` already refreshed and
+filed by an earlier clique of this round would, if merged, leave a dead vertex sitting in a degree
+bucket and selectable as a pivot; a `v` already outmatched is withheld and there is nothing to do.
+So the merge fires only on a `v` that is live, unhandled this refresh, and provably identical.
+
+**Why exactly two.** With two sources, agreeing on `C` and on the other source exhausts both
+reaches, so agreement on the constituents gives agreement on the union. With three or more, two
+shared sources leave the rest unconstrained and only containment follows. That is why the `qxh` path
+makes no identity claim at all and recomputes the degree alone.
+
+**The direction is fixed and is not a symmetry.** `u` is known two-source because it is on the
+queue; `v` is tested at the site. So `u` absorbs `v` and never the reverse, and `v` is the one
+outmatched, because `v` is the one that reaches more.
+
+**Why it is free.** The tag was drawn to count the refreshed clique's weight, and the walk over
+`S_u` is the degree walk. Detection reads a mark the degree computation was going to read anyway and
+adds a source-count test on whatever comes back marked. No pass, no hash, no array.
+
+### The degree falls out of the closed form in three terms
+
+**TWO QUANTITIES PER SUPERVARIABLE, AND THEY ARE NOT PARTS OF EACH OTHER.** Every vertex in the
+quotient graph is a supervariable, an ordinary vertex being the weight-1 case, and it carries two
+numbers:
+
+```
+weight(u)     the pivot block: how many ORIGINAL vertices u stands for, so how many
+              columns are eliminated together when u is chosen
+degree(u)     the border: the weight of everything u REACHES, so how many rows sit
+              below that block
+```
+
+Those are `frontSize` and `updateSize` on a supernode one phase later, front indices being the
+supernode's own columns and update indices the rest of its index set. Not an analogy: a
+supervariable is the ordering-phase supernode, which is why merging supervariables is what makes
+supernodes large.
+
+**`degree(u)` therefore EXCLUDES `weight(u)`**, `u` not being in its own reach, and that is what the
+walk's closing subtraction is for rather than any correction.
+
+The closed form is not only what proves the merge; it is what the degree walk computes. A degree is
+
+```
+degree(u) = sum of weight(v) over v in reach(u)
+```
+
+and taking weights of `reach(u) | {u} == C | S_u`, with `u` a member of `C`, splits it into three:
+
+```
+weight(reach(u)) = weight(C) + weight(S_u \ C) - weight(u)
+```
+
+Each term is one line of the two-source walk, and the running value has a name of its own in the
+code, `closedReachableSetWeight`, deliberately parallel to the `reachableSetWeight` accessor the
+qxh path calls. The two differ by one word and the word is the whole difference: the accessor
+returns the OPEN reach, excluding `u`, and this variable holds the CLOSED one, including it.
+
+```
+closedReachableSetWeight = weight(u) + degree(u)        front + border
+degree                   = closedReachableSetWeight - weight(u)
+```
+
+So the intermediate is not an accumulator carrying a surplus. It is the order of the dense front
+that eliminating `u` would produce, and the closing line drops the front to leave the border.
+genmmd calls the same number `dg` and files `dg - qsize[en]`.
+
+**AND IT IS BOUNDED BY n, WHICH IS WHY THE TYPE IS NARROW.** It sums weights over distinct
+supervariables, and weights partition the original vertices, so the sets being summed are disjoint
+and the total cannot exceed n however many terms it has. That is the exception in
+`docs/CODING_RULES.md`: a sum of weights over disjoint sets stays one dimensional, where the amd
+branch's `bound += outside[c]` sums over sets that can overlap and goes wide. So
+`std::uint32_t` throughout, with no cast in the accumulation.
+
+**The disjointness is not free, it is what the guards produce.** `vMark >= vertexTag` and
+`vMark == cliqueTag` are what stop a vertex being added twice and `v == u` stops `u` being added on
+top of the seed, so those three tests carry the premise the narrow type rests on as well as the
+correctness of the degree. The variable is also the shape that rule warns about: it reads as a fixed
+assignment at its declaration and is an accumulator nine lines later.
+
+**THE SEQUENCE IS NOT TOP DOWN**, which is the tempting way to read it. The seed is not the whole
+quantity with pieces removed; it is the largest piece taken in one go:
+
+```
+seed    weight(C)               the front, plus the part of the border C supplies
+walk    += S_u \ C              the rest of the border
+close   -= weight(u)            drop the front
+```
+
+**The seed, `closedReachableSetWeight = refreshedCliqueWeight`, is `weight(C)`.** Not a starting
+guess but the clique's whole contribution, precomputed once because every two-source vertex of that
+clique shares it. That shared term is what the case exists for. The many-source path has no term to
+hoist and calls `reachableSetWeight`, which forms the union properly, and that difference is where
+the mmd branch's factor of 21 lives.
+
+**AND A CLIQUE-WIDE CONSTANT IS LEGITIMATELY u's OWN NUMBER**, which is the step that looks like
+sleight of hand. `C` is a clique, so every member is adjacent to every other, giving
+`reach(u) & C == C - {u}` for every member. Hence `weight(C) == weight(C - {u}) + weight(u)`, and
+both halves are u's: the first is the part of u's reach that `C` supplies, the second is the `{u}`
+of the closed form. `C - {u}` differs per member while `weight(C)` does not, and the discrepancy is
+exactly the `weight(u)` the last line removes, which is why one hoisted number can serve every
+member.
+
+**The walk adds `weight(S_u \ C)`, and in the two shapes that is one line each:**
+
+```
+S_u in A[u]     one vertex w        add weight(w)
+S_u in I[u]     one clique C[oc]    add weight(v) over its members
+```
+
+**OVERLAP IS THE ONLY COMPLICATION AND IT ARISES IN THE SECOND SHAPE ALONE.** `C[oc]` and `C` can
+share members, and the seed has already counted every member of `C`, so a shared `v` would be
+counted twice. In the first shape there is nothing to handle: the prune leaves `A[u]` and `C`
+disjoint, so `w` is never in the seed. Every skip in the walk exists for this:
+
+```
+vMark >= vertexTag   dead, or already counted this pass
+vMark == cliqueTag   in C, so already inside refreshedCliqueWeight
+v == u               u is in C and would otherwise fall into the merge branch
+```
+
+so what reaches the addition is precisely the members of `S_u` that `C` did not supply.
+
+**AND THE OVERLAP IS THE PRICE OF THE HOIST, NOT AN OBSTACLE TO AVOIDING IT.** Counting from the
+ground up handles overlap perfectly well, by tagging as it goes, and that is exactly what
+`reachableSetWeight` does and what the qxh path uses; it would give the same number here. What the
+hoist buys is cost, and what it costs is two lines that ground-up would not need:
+
+```
+the seed contains u             ->  subtract weight(u) at the end
+the seed contains the overlap   ->  skip C's members during the walk
+```
+
+Both disappear the moment the seed does. The reason to keep them is that ground-up walks `C` once
+per member, so a clique of `m` members pays `m * |C|` where the hoist pays `|C|` once plus the `S_u`
+walks. That is the whole reason the two-source case is a separate path.
+
+**`degree = closedReachableSetWeight - weight(u)` is the `- {u}`.** The seed deliberately counted
+`u`, `u` being a member of its own clique, so this is the reach definition's own subtraction rather
+than a correction. What comes out is the external degree, and it is called `degree` in all three mmd
+drivers because that is what it is; the qxh path's `reachableSetWeight` result carries the same name
+for the same quantity. The `+ 1` genmmd carries at this site is the degree-scale defect
+`MmdCorrected` repairs.
+
+**WHY THE SUBTRACTION IS AT THE END AND NOT FOLDED INTO THE SEED**, which looks like style and is
+not. The walk can merge a vertex into `u`, and `merge` does `mWeight[u] += mWeight[v]`, so
+`weight(u)` at the bottom of the loop is not `weight(u)` at the top, and the bottom value is the
+correct one. `v` has ceased to exist and must not contribute to u's degree, and since `weight(v)`
+was inside `refreshedCliqueWeight` and is now inside `weight(u)`, one subtraction of the post-merge
+weight removes `u` and everything merged into it at once. Seeding with
+`refreshedCliqueWeight - weight(u)` leaves each merged vertex's weight in the total and files the
+supervariable one bucket too high per merge, so it is not selected as early as its size has earned.
+See `mmd3.py`, ledger entry 5.
+
+**AND THE HOIST STAYS LEGAL ACROSS THOSE MERGES.** `refreshedCliqueWeight` is summed before the
+queue walk, so a merge during the walk makes it stale in its parts and not in its total: merging two
+members of `C` moves originals from one member to another, both inside `C`, so the sum over `C` is
+conserved. A later vertex of the same queue therefore still gets the right first term, and it
+should, since it reaches the absorbing vertex, which now stands for the absorbed one.
+
+**NO TERM OF A DIFFERENT KIND APPEARS ANYWHERE.** From end to end the computation is a sum of
+neighbor weights, each added at most once:
+
+```
+seed                weight(v) for all v in C, which is C - {u} and u itself
+the two loops       weight(v) for v in S_u \ C
+final subtraction   removes the u the seed added
+```
+
+The three guards exist to enforce the "at most once" and the "in the reach", and nothing else is
+ever added. The reason it does not read that way is only that the longest run of those weights is
+paid once per clique instead of once per member.
+
+### The three mechanisms are one ladder over the same quantity
+
+Mass elimination is the `otherSources == 0` case of exactly this count: `A[u]` empty and
+`I[u] == {p}` is `0 + 1 - 1`, and the closed form collapses to `reach(u) | {u} == C` with no other
+term to compare against.
+
+```
+otherSources(u) == 0        mass elimination   closed form is C alone, nothing to compare
+otherSources(u) == 1        q2h                closed form is C | S_u, one term to match
+otherSources(u) unbounded   hash               no closed form, compare the sets themselves
+```
+
+This is a sharper statement than "increasing cost for increasing coverage". What increases is the
+number of unknown terms in the closed reach, and each mechanism is the cheapest instrument that can
+settle that many. It also says why the first two are free and the third is not: a closed form with
+at most one unknown is decided by a tag the degree walk already carries, and beyond that there is
+nothing left to compare but the sets.
+
+**AND IT SAYS WHERE THE BRANCHES REALLY PART.** Both branches take rung 0. mmd takes rung 1 and
+stops; amd skips rung 1 and takes rung 2, which subsumes it. Neither takes all three, and nothing in
+either algorithm forbids it; see the detector axis in `docs/NEXT.md`.
+
+**ONE CANDIDATE, UNVERIFIED, and it is recorded here as a question rather than a finding.** A merge
+partner `v` has to lie in `C & S_u`. In the first shape above `S_u = {w}` with `w` in `A[u]`, and
+the prune's `A[u] = A[u] - C[p] - {p}` appears to leave `A[u]` and `C` disjoint, which would make
+that intersection empty and the first shape incapable of producing a merge at all. Two things follow
+if it holds: the merge branch belongs in the incidence walk alone, which is where it already is, and
+the `vMark == cliqueTag` guard in the adjacency walk is unreachable. That is a reading, and reading
+has lost to instrumenting repeatedly in this tree. The instrument is a counter on that guard across
+the digest set.
+
 ## Related
 
 - `archive/sparse_factorization.md` section 5, the prose, pseudocode and worked examples.

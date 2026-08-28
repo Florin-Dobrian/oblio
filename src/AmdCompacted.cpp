@@ -55,13 +55,13 @@
 // `mMark[u]` for `mWeight[u]`, both scattered, and the array stays for mmd either way. Checked and
 // declined 2026-08-17.
 //
-// SECOND, IT IS THE PREDICTABLE-SPACE VERSION OF AmdFlat. From a conversation with Alex Pothen:
-// given a machine you know whether A fits, but you cannot know whether L fits, nnz(L) depending on the
-// ordering being computed. So a method that stays within `O(n + m)` carries a guarantee no amount
-// of speed substitutes for: IF THE INPUT FITS, THE ANSWER IS REACHABLE. The compaction
-// below is that guarantee bought deliberately, not frugality. Our arena is the right default for a
-// known shape on a known machine solved repeatedly; this is the right one when whether an answer
-// exists is the open question. See docs/DESIGN_DECISIONS.md (2026-08-16).
+// SECOND, IT IS THE PREDICTABLE-SPACE VERSION OF AmdFlat. Given a machine you know whether A fits,
+// but you cannot know whether L fits, nnz(L) depending on the ordering being computed. So a method
+// that stays within `O(n + m)` carries a guarantee no amount of speed substitutes for: IF THE INPUT
+// FITS, THE ANSWER IS REACHABLE. The compaction below is that guarantee bought deliberately, not
+// frugality. Our arena is the right default for a known shape on a known machine solved repeatedly;
+// this is the right one when whether an answer exists is the open question. See
+// docs/DESIGN_DECISIONS.md (2026-08-16).
 //
 // THE STORAGE PRICE, measured on its own before the folds went in: 2.6 percent fewer data reads,
 // 6 to 8 percent more D1 read misses, both constant across the ladder. A wash. Two compactions at

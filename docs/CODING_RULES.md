@@ -65,6 +65,28 @@ softer layer: conventions for consistency, not correctness.
   `sortIdx`. Loop-local variables go the other way and abbreviate freely (`sfp`, `sp`, `lk`),
   because there they are read a hundred times and written once.
 
+- **A local that names an entity's list takes the entity as a PREFIX.** `uAdjacency`,
+  `uAdjacencySize`, `uIncidence`, `cClique`, `cCliqueSize`, `vSegment`, matching the loop counters
+  `vk` and `ck` that already carry the letter. Two reasons beyond symmetry. The accessors are nouns,
+  `clique(c)`, `cliqueSize(u)`, `adjacencySize(u)`, so a bare local of the same name SHADOWS a
+  member function, and `-Wshadow` does not warn for that: gcc warns for members and locals, not for
+  member functions. The prefix removes the collision without renaming the accessors, which read
+  correctly as they are. And it says whose list it is, which a walk over two vertices needs to say
+  anyway.
+
+  `run` is not the word for a per-vertex block; that is a **segment**, matching `Segment` and
+  `mSegment`.
+
+- **A clique local takes its ROLE: `new`, `refreshed`, or `other`.** `newClique`, `newCliqueSize`,
+  `newCliqueWeight` for `C[pivot]` as it is being built; `refreshedClique*` in the mmd drivers for
+  the clique a refresh is walking. Not the pivot's name, `pivotClique`, since the fact worth
+  carrying is which of the three it is.
+
+- **A cursor that compacts a list in place is `cursor`.** It trails the read index, survivors are
+  written over entries already consumed, and its final value is the new length. `kept` and `write`
+  are the same thing under two names; one cursor per compaction, and the boundary between two
+  compactions comes from the descriptor the first one wrote.
+
 - **A store of per-entity blocks is named for its PAYLOAD where there is one kind of it, and for
   the BLOCK where there are several.** `colPtr` locates a column and the column's contents are
   named directly, `rowIdx` and `val`; `snodePtr` and `nodeIdx` do the same one level up, `node`

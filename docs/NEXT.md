@@ -1,5 +1,72 @@
 # NEXT: the mmd and amd branches are being aligned against each other; one regression is open
 
+## DONE 2026-08-28: the ordering code took the naming conventions, and three defects fell out
+
+Two commits, `98af0bf` and `64020aa`, both named "Ordering code alignments". Most of it is naming
+and comments; the code changes are small and every one of them was checked against a digest of all
+five drivers over grids 1 to 40 plus six edge cases.
+
+### What changed in the code
+
+- `order` is `orderAsMerged`, and `QuotientGraphChained::order` is gone, declared and never defined.
+  See `docs/DESIGN_DECISIONS.md` for why not `orderAmd`.
+- `mSize` is a stored field in all three classes, and the clique arena's guard is a plain doubling
+  on the invariant `capacity() >= mSize`. Same file.
+- `orderAscending` lost its temporary: the decode is `-(cursor[u] + 1)`, which is the encode written
+  again, `-(x + 1)` being its own inverse. `slot` is `cursor`, `pos` is `k`.
+- Both prunes and both `massEliminate`s lost duplicate locals. `pruneMmd` runs on ONE cursor across
+  both compactions, taking the boundary from the descriptor it just wrote. The compacted
+  `massEliminate` calls `trimClique` where it had an eleven-line copy of that method's body.
+- `formReachableSet*` and `reachableSetWeight` are the names in all three classes now, and the
+  compacted class's five definitions moved to follow its constructor.
+- Locals take the entity prefix and cliques take their role. See `docs/CODING_RULES.md`.
+
+### Three stale comments, and none of them was findable by reading
+
+**A comment claimed an ordering was load-bearing when it was not.** `orderAscending`'s first pass
+said the members had to be stamped before the pivot was placed, or the stamp would overwrite the
+cursor. It would not: the chain walk starts at `mSuperNext[pivot]`, so the pivot is never stamped,
+and the two writes are disjoint. Settled by swapping the two halves and diffing 40 grids, which took
+one build. The comment now states the invariant instead, and the pivot goes first because that reads
+in the order the reader thinks.
+
+**A comment described a swap that was in the other function.** `pruneMmd` carried the explanation of
+the `[c1..ck, pivot] -> [pivot, c2..ck, c1]` rotation; the rotation is `pruneAmd`'s and mmd has
+none. Moved to the swap, with a closing line saying mmd does not rotate, since the absence is what a
+reader arriving from the other prune will ask about.
+
+**And two comments in the amd drivers claimed the sign restore happened there.** It moved into the
+prune in `5dcc57c` and those two were not swept with it; `AmdCompacted.cpp` had two copies, one a
+leftover of the other, which is presumably how it survived. Found by checking whether
+`massEliminate` sees negative weights, which it does not, on either branch. Deleted.
+
+### Two process notes, both earned the hard way
+
+**`-Wshadow` DOES NOT CATCH A LOCAL SHADOWING A MEMBER FUNCTION.** gcc warns for data members and
+for locals, and says nothing when a local named `clique` or `cliqueSize` hides an accessor of that
+name. `reachableSetWeight` had four such locals and two of them predate this session. The check
+that works is a parse: pull every local out of the function body, pull every member name out of the
+class, and intersect. That is how the five aligned functions were cleared.
+
+**A WORD-BOUNDARY REGEX IS NOT A SCOPE, THREE TIMES IN ONE SESSION.** `\badjacencySize\b` renamed
+the struct FIELD as well as the local, at nine sites, which did not compile and so surfaced at once.
+`\bincidence\b` twice rewrote the English word inside comment prose, eleven lines across two driver
+files, which compiles fine and is invisible to every gate. The repair that works is to re-run over
+comment text only and then assert that no pure comment line differs from the committed version.
+Rename inside a function's own text, not the file's.
+
+### Where this leaves the front
+
+The alignment work is close to done on `reachableSetWeight`, the two form functions, `merge`,
+`massEliminate` and the prunes: the flat and compacted bodies of `reachableSetWeight` and
+`massEliminate` are now identical modulo the arena name, checked by substitution rather than by eye.
+What remains is comments rather than code. The compacted `massEliminate` is missing four comment
+blocks flat has, and the chained `merge` has none of the two the others carry and writes
+`mMark[v] = GONE` directly where they call `markGone`.
+
+`pruneAmd` still holds `key`, which shadows `Buckets::key`, and it is the last shadowing local in
+the file.
+
 ## OPEN, 2026-08-26: the merge detector is orthogonal to the degree rule, and the swaps are open
 
 **THE TWO CHOICES ARE INDEPENDENT AND WE HAVE THEM WELDED TOGETHER.** A branch makes two decisions,

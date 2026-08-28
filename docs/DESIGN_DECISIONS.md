@@ -65,6 +65,77 @@ be real, which requires Hermitian. Once that is on the table, the design collaps
 **Cholesky is `CC^H`, always, and in real that *is* `CC^T`.** No option, no flag, no forbidden
 combination to reject. The answer was not hard. Asking the right question was.
 
+## 2026-08-28: `order` is `orderAsMerged`, and the branch mapping is where the oracle is cut
+
+`QuotientGraph::order` and `QuotientGraphCompacted::order` are `orderAsMerged`. The pair is now
+`orderAscending` and `orderAsMerged`, named for the MEMBER ORDER each emits inside a supervariable
+rather than for the driver that calls it.
+
+**THE OBVIOUS NAMES WOULD HAVE BEEN `orderMmd` AND `orderAmd`, AND THEY WOULD HAVE BEEN WRONG.**
+The tree suffixes by branch wherever two branches need different code, `eliminateMmd`, `pruneAmd`,
+`formReachableSetMmd`. These two are not that: either function runs correctly on either branch's
+state, both read the same three arrays, and neither can tell which branch built them. Feeding mmd's
+chains to `orderAsMerged` produces a valid permutation, which is what the worked example in
+`experiments/ordering/README.md` does.
+
+**AND THE MAPPING THE SUFFIX WOULD HAVE RECORDED IS AN ARTIFACT.** The mmd drivers call
+`orderAscending` because `mmdnum` numbers a supervariable's members in a `1 .. neqns` sweep, so
+genmmd's own answer is ascending. The amd drivers call `orderAsMerged` because their oracle is not
+`amd_order`'s output but the raw order the hook reconstructs upstream of `AMD_postorder`, and the
+hook emits each pivot's membership in the order it accumulated it. `AMD_2`'s own output assembly,
+`Next[i] = Next[e]; Next[e]++` walked over `i` ascending, numbers non-principal variables ASCENDING.
+So on this one point the two vendored routines agree with each other and our amd drivers are the odd
+ones out, because the amd oracle is taken at the finalize marker and the hook had to invent a member
+order there. `orderAmd` would have named merge order after a branch whose vendored routine does not
+use it, and would have become wrong the day that oracle moves.
+
+The declarations carry `// mmd today` and `// amd today` for that reason: current usage, not a
+property.
+
+**THE CHAINED CLASS LOSES THE FUNCTION ENTIRELY.** It declared `order` and never defined it, which
+nothing caught because an uncalled declaration never has to link. The two callers of the plain form
+are the amd drivers and no amd driver uses that store, so the declaration went and the surviving
+`orderAscending` comment says why the class carries one where the other two carry both. Same shape
+as `absorbAggressively` in that class on 2026-08-24: the class-surface table is what finds these,
+and reading is not.
+
+## 2026-08-28: `mSize` is a field, and `capacity() >= mSize` replaces a per-call `max`
+
+All three quotient graph classes store `std::size_t mSize`, set in the constructor's member-init
+list and returned by `size()`, matching `ElmForest` and `DirectSolver`. It is not initialized at the
+declaration: each class has exactly one constructor and it always writes the field, so an
+initializer there would be dead. The other two classes keep theirs because `ElmForest() = default`
+and because `DirectSolver`'s constructor never touches its `mSize`.
+
+The chained class gained most: `mSegment.size() - 1` appeared five times and the `+ 1` sentinel is
+now stated once, at `mSegment(mSize + 1)`.
+
+**AND THE ARENA GUARD GOT SIMPLER FOR A REASON THAT IS PROVABLE.** `QuotientGraph`'s clique store
+must not reallocate under a reach walk, since the walk reads absorbed cliques through pointers into
+the same arena it is appending to. The guard was
+
+    if (capacity() - size() < mSize)
+        reserve(max(2 * capacity(), size() + mSize));
+
+and is now `reserve(2 * capacity())`, with the constructor reserving `max(nnz, mSize)` instead of
+`nnz`. That establishes `capacity() >= mSize`, which holds forever since `reserve` never shrinks,
+and one doubling is then always enough:
+
+    2 * capacity() - size()  >=  2 * capacity() - capacity()  =  capacity()  >=  mSize
+
+**THE `max` WAS DOING THE CONSTRUCTOR'S JOB ON EVERY FIRE.** Its second arm can win only when
+`capacity() < mSize`, which given the old constructor means `nnz < n` -- fewer stored entries than
+columns, so some column carries no diagonal. `SparseMatrix` guarantees one per column, so on every
+real input the arm was dead and `max(nnz, mSize)` is `nnz`, allocating exactly what it did before.
+The arm was not a performance choice but a correctness floor for an input the class accepts and does
+not check: measured on a triangle with `nnz = 6` against `n = 40`, doubling alone gives 12 where a
+reach may need 40.
+
+**THE `2 * 0` CASE IS UNREACHABLE**, which was worth checking rather than guarding. Capacity zero
+needs `nnz == 0`, so the graph has no edges, so every vertex is isolated and the prepass numbers all
+of them without `beginElimination` ever being called. Reaching the guard at all needs a vertex of
+degree two or more, the prepass having drained buckets 0 and 1.
+
 ## 2026-08-24: the amd branch takes the mmd branch's minimum-degree seed
 
 **THE DECISION.** Three small changes on one axis, the alignment of the mmd and amd branches against
@@ -904,8 +975,8 @@ beginEliminationAmd / beginEliminationMmd         the two lines that name a walk
 pruneAmd / pruneMmd                               where the new clique lands in I[u]
 finishEliminationAmd / finishEliminationMmd       which mass elimination it calls
 massEliminateAmd / massEliminateMmd               when the negated weights are restored
-reachableSetAmd / reachableSetMmd                 walk order and direction
-reachableSetInPlaceAmd / reachableSetInPlaceMmd   the prepass reject
+formReachableSetAmd / formReachableSetMmd                 walk order and direction
+formReachableSetInPlaceAmd / formReachableSetInPlaceMmd   the prepass reject
 ```
 
 **WHAT STAYED SHARED AND WHY IT COULD.** `merge`, `killClique`, `trimClique`, `absorb`,
@@ -1342,10 +1413,10 @@ genmmd's layout behaves the same under a second algorithm.
 
 **`Mmd3C` carries a real design problem** and it is the blocker for the mmd port rather than a
 coverage exercise. Amd calls `reachableSet` ONCE PER PIVOT and restores the negated weights in a
-pass it already makes. Mmd calls `reachableSize` and `reachableWeight` PER VERTEX in the refresh, so
-the negation needs a per-call lifetime: each call must clean up after itself. The cheap form is to
-un-negate while walking the result, those callers already traversing it to count, but it has to be
-right at every call site or the state leaks into the next call.
+pass it already makes. Mmd calls `reachableSize` and `reachableSetWeight` PER VERTEX in the refresh,
+so the negation needs a per-call lifetime: each call must clean up after itself. The cheap form is
+to un-negate while walking the result, those callers already traversing it to count, but it has to
+be right at every call site or the state leaks into the next call.
 
 **So the order is a real choice.** `Amd3C` first confirms a layout under a second algorithm before
 the hard question is opened; `Mmd3C` first puts the mmd port's blocker on the table before anything
@@ -1613,8 +1684,8 @@ the interesting ones for mmd, because `Mmd3`'s degree refresh is the same walk i
 loop, and mmd's constant against genmmd is 1.04 to 1.20.
 
 **The lifetime is what makes it harder there, not the encoding.** Amd calls `reachableSet` once per
-pivot and restores in a pass it already makes; mmd calls `reachableSize` and `reachableWeight` PER
-VERTEX in the refresh, so each call must clean up after itself. Two quotient graphs would be the
+pivot and restores in a pass it already makes; mmd calls `reachableSize` and `reachableSetWeight`
+PER VERTEX in the refresh, so each call must clean up after itself. Two quotient graphs would be the
 failure rather than the fallback: the amd folds were cheap precisely because the shared class had
 already paid for the encodings.
 
@@ -2388,7 +2459,7 @@ in the narrowing set is written from a cursor, from another length, or from zero
 
 The test as written says an accumulation over an unbounded number of one dimensional terms can
 always exceed the type. Read literally it fires on nine sites in the ordering and is wrong at every
-one of them: `reachableWeight`'s `reached`, the clique weight, both `explicitPart` sums in the
+one of them: `reachableSetWeight`'s `reached`, the clique weight, both `explicitPart` sums in the
 prune, the two in the amd drivers, `dg0`, and both `degree` accumulations in the mmd refresh. Each
 sums weights over a set of DISTINCT vertices, and the weights partition the original vertices, so
 the sum is at most n whatever the term count.

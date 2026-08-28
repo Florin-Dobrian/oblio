@@ -7701,16 +7701,16 @@ nothing else, and that claim is checkable only by looking.
 
   merging and absorption
     merge                             x         x
-    absorb                            x         x
+    absorbAggressively                x         x
 
   reachable set
-    formReachableSetMmd / ...Amd          x         x
-    reachableSetWeight                   x         x
-    formReachableSetInPlaceMmd / ...Amd   .         x
+    formReachableSetMmd / ...Amd      x         x
+    formReachableSetInPlaceMmd / ..   .         x
+    reachableSetWeight                x         x
 
   output
-    order                             x         x
     orderAscending                    x         x
+    orderAsMerged                     x         x
 
   configuration
     setReverseIncidence               x         x

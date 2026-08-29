@@ -88,7 +88,7 @@ where the vendored routines disagree.
 | API | `MmdCompacted` | `AmdCompacted` | align | since |
 |---|:---:|:---:|:---:|:---:|
 | **layout accessors** | | | | |
-| `adjacencyMmd` / `adjacencyAmd` | x |  | done | 2026-08-21 |
+| `adjacencyMmd` / `adjacencyAmd` | x |  | done | 2026-08-28 |
 | `incidenceMmd` / `incidenceAmd` | x | x | done | 2026-08-21 |
 | `adjacencySize` | x | x | aligned |  |
 | `incidenceSize` | x | x | aligned |  |
@@ -215,18 +215,17 @@ when the classes merged, because amd's prune takes a `TaggedScan` and mmd's take
 
 Each of these was checked rather than assumed.
 
-**`AmdCompacted` does not call `adjacencyAmd`.** SUPERVARIABLE DETECTION IS THE WHOLE OF IT, and
-this entry said something else until 2026-08-21: it blamed the prune moving into the class, which is
-not the reason and was probably true of an earlier arrangement. Both drivers reach the prune through
-one `eliminate` call today and neither walks an adjacency in it. `AmdFlat`'s only two
-`adjacencyAmd` calls in the file are in the hash block.
+**CLOSED 2026-08-28. `AmdCompacted` does not call `adjacencyAmd`, AND NOW NEITHER DOES `AmdFlat`.**
+Supervariable detection was the whole of it. The layout decided where the entry to skip sat: under
+the amd run order the new clique is rotated to index 0, so the run minus its first entry is ONE SPAN
+and the walk is a single loop off the run's base, which under that order is the incidence accessor.
+The flat class used to store `[A, I]` for BOTH branches, which put the new clique in the MIDDLE of
+the run and forced `AmdFlat` to stamp in two loops and name both accessors.
 
-What the layout decides there is where the entry to skip sits. Under `AMD_2`'s order the new clique
-is rotated to index 0, so the run minus its first entry is ONE SPAN and the walk is a single loop
-off the run's base, which under that order is the incidence accessor. The flat class puts the new
-clique at the front of `I[u]`, which is the MIDDLE of the run, so `AmdFlat` stamps in two loops and
-names both accessors. The same asymmetry gives `AmdFlat` a second `adjacencyAmd` on the candidate
-side.
+THE FLAT CLASS NOW CARRIES THE RUN ORDER PER BRANCH, as the compacted one always did: `[A, I]` for
+mmd and `[I, A]` for amd. `AmdFlat`'s detection is a single loop over one span and the two drivers'
+detection regions are BYTE-IDENTICAL. There was no reason for the flat class to serve amd's
+front-of-`I` convention on mmd's run order; it was inherited rather than chosen.
 
 **Detection is the only operation in either driver that is blind to the kind of an entry**, which is
 why it is the only one the run order reaches. Everywhere else a clique id is looked up in the store
@@ -391,8 +390,9 @@ are the gate at each one, and the baseline below is the second gate.
 
 **FOUR OF THE FIVE ARE CLOSED AS OF 2026-08-21, AND THE FIFTH WAS REVERSED ON 2026-08-23**, item 1
 having been a difference the layout causes rather than an accident; see its entry. What remains
-between the two classes is `numBornCliqueMembers` against `numCompactions`, which is layout, and two
-`adjacencyAmd` calls in `AmdFlat`'s hash-detection block that `AmdCompacted` does not make.
+between the two classes is `numBornCliqueMembers` against `numCompactions`, which is layout. The two
+`adjacencyAmd` calls in `AmdFlat`'s hash-detection block are GONE as of 2026-08-28: the flat class
+took the amd run order and the two detection regions are now byte-identical.
 
 **THE COUNTS THIS PARAGRAPH CARRIED WERE TOO HIGH, corrected 2026-08-21.** It said the mmd pair
 differs in three calls of about forty and the amd pair in nine of about thirty-eight. Both figures
@@ -408,9 +408,10 @@ AmdFlat vs AmdCompacted        9 calls        2 calls
 The three mmd differences are `qg.mark(v)`, `qg.weight(v)` and `qg.eliminatedMmd(v)` written into
 comments in `MmdFlat.cpp` that `MmdCompacted` does not carry, and one of the nine is
 `qg.cliqueBase()` named in the comment that records its removal. **Stripped of comments the mmd
-pair's call sequences are IDENTICAL apart from `numCompactions`, and the amd pair's differ only in
+pair's call sequences are IDENTICAL apart from `numCompactions`, and the amd pair's differed only in
 the two `adjacencyAmd` calls named above and the order of two adjacent rejects.** So the sentence
-above the table was right and the arithmetic beside it was not.
+above the table was right and the arithmetic beside it was not. Both of those amd differences are
+closed as of 2026-08-28, the rejects having been reordered and the run order flipped.
 
 **One residual the tables do not show, and it is the tail.** Three of the four drivers publish
 their counters in the same order and `MmdCompacted` does not:

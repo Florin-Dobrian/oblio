@@ -13,8 +13,8 @@
 //
 // WHAT IT IS FOR, AND IT IS TWO THINGS.
 //
-// FIRST, IT IS THE ALIGNMENT VEHICLE FOR A DIFFERENTIAL. Comparing our ordering against a vendored
-// one is only clean when the two hold their cliques the same way, or every difference is confounded
+// FIRST, IT IS THE ALIGNMENT VEHICLE FOR A DIFFERENTIAL. Comparing our ordering against an oracle
+// is only clean when the two hold their cliques the same way, or every difference is confounded
 // with layout. What then remains is either LAYOUT or an IMPROVEMENT to carry back into our own
 // ladder.
 //

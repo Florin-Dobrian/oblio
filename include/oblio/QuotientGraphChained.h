@@ -206,7 +206,7 @@ public:
     //   reachableSet   walks the CLIQUES before the explicit adjacency
     //   the prune      puts the new clique at the FRONT of I[u] rather than appending, with the
     //                  displaced entries ROTATED rather than shifted
-    void setVendoredListOrder(bool on) { mVendoredListOrder = on; }
+    void setAmdListOrder(bool on) { mAmdListOrder = on; }
 
     // Stop the eliminator at the prune, leaving mass elimination to the caller. With this on the
     // eliminator returns an EMPTY merged list and C[pivot] is reach(pivot) exactly, and the caller
@@ -312,12 +312,10 @@ private:
 
     std::vector<std::int32_t> mMerged;   // scratch for the vertices an elimination merges away
 
-    // Which end of I[u] the reachable-set walk starts from. The mmd branch threads its clique list
-    // through an
-    // integer array and pushes at the head, `list[nb] = el; el = nb`, then reads from the head, so
-    // the clique seen LAST is expanded FIRST; we hold a vector and append. Same set either way and
-    // the same cost, but the order decides C[pivot]'s order, hence which of two equal-degree
-    // candidates a later iteration finds first, and minimum degree is settled by exactly that.
+    // Which end of I[u] the reachable-set walk starts from. The mmd branch expands the clique seen
+    // LAST first, so with a list held in order the walk runs BACKWARD. Same set either way and the
+    // same cost, but the order decides C[pivot]'s order, hence which of two equal-degree candidates
+    // a later iteration finds first, and minimum degree is settled by exactly that.
     // Off by default, so every existing driver is unaffected; MmdFlat turns it on. See
     // experiments/ordering/mmd3.py, where the same four walks are reversed together.
     bool mReverseIncidence = false;
@@ -327,7 +325,7 @@ private:
     // mReverseIncidence
     // is: a member load the compiler cannot prove is unaliased by the stores in the loop. See the
     // setter for what each half does and why they are one flag.
-    bool mVendoredListOrder = false;
+    bool mAmdListOrder = false;
 
     // Whether the eliminator stops at the prune and leaves mass elimination to the caller. Off by
     // default. See the setter, and massEliminate() for the half it hands over.
@@ -336,9 +334,9 @@ private:
     // TWO STAMP SPACES IN ONE ARRAY: vertices at [v], cliques at [mSize + c]. Clique ids ARE
     // vertex ids, so one space cannot hold both once the vertex half carries GONE: stamping a
     // clique would write a live tag over the slot of the dead pivot that formed it, and a walk of
-    // an older clique still holding that pivot as a member would take it for live. Neither
-    // reference shares one array between the two kinds, and this is the cheap way to stop doing
-    // so. It is what lets the dead-clique test be a stamp again rather than a size, which is what
+    // an older clique still holding that pivot as a member would take it for live. Cliques and
+    // vertices therefore need marks that cannot be confused, and this is the cheap way to get
+    // them. It is what lets the dead-clique test be a stamp again rather than a size, which is what
     // retires mCliqueSize.
     // PEAK LIVE CLIQUE MEMBERS, and this array is the price of having it here. See
     // `numPeakCliqueMembers`.
@@ -543,7 +541,7 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::eliminateMmd(std::
     const std::size_t cliqueBase = mSize;
     // C[pivot] IS the reach here: beginElimination wrote it there and nothing has trimmed it yet
     // (massEliminate does, and runs after). So the prune walks the arena block rather than a copy.
-    const bool amdOrder = mVendoredListOrder;      // hoisted, as the other flags are
+    const bool amdOrder = mAmdListOrder;      // hoisted, as the other flags are
 
     // Both lists are compacted in place rather than rebuilt into a scratch: every pass here only
     // ever removes, so survivors are written over entries already read and nothing is allocated.
@@ -647,7 +645,7 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std:
     // nothing here shortens it.
     forEachMember(pivot, [&](std::int32_t u) {
         mWeight[u] = -mWeight[u];                          // live again, and positive
-        // Under mVendoredListOrder the new clique sits at the FRONT of I[u] rather than the back,
+        // Under mAmdListOrder the new clique sits at the FRONT of I[u] rather than the back,
         // so the single remaining entry is at the head of the incidence run either way: with A[u]
         // empty the run starts with I[u], and with one clique there is only one position. The
         // test therefore needs no branch on the flag.

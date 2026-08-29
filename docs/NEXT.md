@@ -67,6 +67,167 @@ blocks flat has, and the chained `merge` has none of the two the others carry an
 `pruneAmd` still holds `key`, which shadows `Buckets::key`, and it is the last shadowing local in
 the file.
 
+## PARTLY DONE 2026-08-28: the flat and compacted drivers could be ONE TEMPLATED BODY per branch
+
+Compaction happens inside `QuotientGraphCompacted`, so a driver never sees it. Diffing the driver
+bodies with comments stripped shows how little is left once that is true:
+
+```
+                     lines            substantive hunks in the shared body
+MmdFlat  / MmdCompacted   149 / 136        NONE
+AmdFlat  / AmdCompacted   169 / 162        NONE, since the run order was flipped
+```
+
+**THE FOURTH OPTION BELOW WAS DONE ON 2026-08-28 AND STEP 1 IS GONE.** `QuotientGraph` now carries
+the run order per branch, `[A, I]` for mmd and `[I, A]` for amd, so `AmdFlat`'s detection is a
+single loop and the two amd detection regions are BYTE-IDENTICAL. What is left of this entry is the
+templating itself, in two steps rather than three.
+
+The precedent is in this tree already: `NumFactorEngine`'s traversals are
+`template<class Val, class Factor>`, and `NumFactorStatic.cpp` and `NumFactorDynamic.cpp` are 12 and
+9 lines, explicit instantiations and nothing else.
+
+### The mmd pair needs no design work
+
+Three differences, all at the ends: the signature, `QuotientGraph qg` against
+`QuotientGraphCompacted qg`, and the reporting tail, `gMmdCompactions = qg.numCompactions()` against
+`*numBornCliqueMembers = qg.numBornCliqueMembers()`. Everything between, including the batch loop,
+the refresh, and both the q2h and qxh walks, is BYTE-IDENTICAL. Template on the graph, instantiate
+twice.
+
+### The amd pair had two hunks; both are closed
+
+Both were in detection, the stamp walk and the compare walk, two spans in the flat driver against
+one in the compacted. Neither was algorithmic: the compacted run was contiguous with the pivot at
+index 0 while flat's `[A, I]` put the entry to skip in the middle. Flipping the flat class's amd run
+order closed both without moving a walk into a class or inventing an accessor.
+
+### Why this is worth doing, and it is not tidiness
+
+These pairs exist to price layouts against each other. A shared body makes STORAGE THE ONLY
+DIFFERENCE MEASURED, where today it is storage plus whatever has drifted, and the compiler enforces
+it instead of a periodic reading of the alignment table.
+
+### Three costs to weigh first
+
+The header-only requirement carries over: each driver compiles in its own translation unit with its
+graph, so the template has to live in a header or the reason those timings are comparable goes away.
+
+`-Wall` on a template reports only what is instantiated, so a mistake in a branch neither
+instantiation reaches goes quiet. Minor with exactly two instantiations, both gated.
+
+And the CHAINED driver does not follow. `QuotientGraphChained` carries runtime flags for list order
+where `QuotientGraphCompacted` bakes them in, so a three-way template is a harder problem than
+either two-way one. Do the pairs first and leave `MmdChained` on its own body.
+
+### THE ORDER MATTERS, AND "ALIGN FULLY FIRST, TEMPLATE LATER" IS THE WRONG ONE
+
+The natural reading of the above is to make the four drivers identical except for the graph type and
+template afterwards. That step has almost no content, and where it has content it needs the
+template's design decision anyway.
+
+For the mmd pair the body is ALREADY identical; what is left is the signature and the tail. Aligning
+those without the template means adding a counter to a class that has no use for it:
+
+```
+QuotientGraph            has numBornCliqueMembers, no numCompactions
+QuotientGraphCompacted   has numCompactions, no numBornCliqueMembers
+```
+
+`numCompactions()` on the flat class is honest and free, a `constexpr 0`, an arena never compacting.
+`numBornCliqueMembers()` on the compacted class is not: it does not track that, so it would mean
+adding an accumulator to the elimination path for a probe that class does not want, or returning 0
+and lying. `QUOTIENT_GRAPH_USAGE.md` item 5 already records this pair as layout-driven and left
+alone. The template absorbs it in one place instead, three lines of `if constexpr` on a trait.
+
+For the amd pair there is no cheap alignment step at all: its two hunks ARE the walk decision.
+
+### THE FOURTH OPTION, FOUND AND DONE 2026-08-28
+
+The two amd hunks are not a flat-against-compacted difference. They are ONE CLASS MISSING A KNOB THE
+OTHER HAS.
+
+`QuotientGraphCompacted` carries the run order PER BRANCH, two accessor pairs over one segment:
+`adjacencyMmd`/`incidenceMmd` give `[A, I]` and `incidenceAmd`/`adjacencyAmd` give `[I, A]`.
+`QuotientGraph` has one pair serving both branches, always `[A, I]`. The four cells:
+
+```
+                run       pivot in I    pivot in the RUN     detection
+flat  + mmd    [A, I]     back          back                 (unused)
+flat  + amd    [I, A]     front         FRONT                one loop      <- flipped
+comp  + mmd    [A, I]     back          back                 (unused)
+comp  + amd    [I, A]     front         FRONT                one loop
+```
+
+**AND `[I, A]` IS THE ACCEPTABLE CELL, NOT THE BEST ONE.** `[A, I]` WITH THE PIVOT APPENDED AT THE
+BACK also gives a contiguous span, positions `0 .. runSize - 2`, so detection is one loop that stops
+one short instead of one that starts at 1. The length tests are unaffected, both sides counting the
+pivot in `incidenceSize` so it cancels. That cell has the single detection span AND NO ROTATION AT
+ALL:
+
+```
+[A, I], pivot appended     1 store per member per elimination     one detection span
+[I, A], pivot rotated in   3 stores                               one detection span
+```
+
+So the amd convention costs TWO EXTRA STORES per member of C[p] per elimination, bought with
+nothing but the reference's list order; mmd pays none. Small and non-zero, and it is the first case
+found where following the oracle costs something measurable rather than merely being arbitrary.
+
+IT IS NOT AVAILABLE WHILE THE ORACLE STANDS, changing the raw order and so failing `make amdorder`
+entry for entry. It belongs with the other convention questions, a candidate for a layer with no
+oracle behind it, beside the detector cells and the four faces of the list-order convention.
+
+Detection has to stamp `A[u] | ( I[u] - {p} )`, which is the whole run minus one element, and that
+is CONTIGUOUS EXACTLY WHEN THE PIVOT SITS AT AN END OF THE RUN. Two of the four cells give one span
+and one gives the pivot in the middle. `AmdFlat` is the only bad one, and it is bad because the flat
+class serves amd's front-of-I convention on mmd's run order.
+
+**AND THE RUN ORDER APPEARS NOT TO BE PERMUTATION-VISIBLE.** `AmdCompacted` walks `[I, A]` and
+`AmdFlat` walks `[A, I]`, and they return the SAME permutation, verified on 38 cases and on 246
+matrices with `nnz(L)` agreeing throughout. What is permutation-visible is the pivot's position
+within `I[u]` and the direction of the walk, and those are identical in the two.
+
+It held. Five methods changed, all amd-side: the two accessors, `beginEliminationAmd`,
+`formReachableSetAmd`, `pruneAmd` and `absorbAggressively`. `massEliminate` needed nothing, its
+`mAdjIncSrc[srcPtr] == pivot` test being true under both layouts. `make amdorder` stayed at 38 / 0,
+so the flip is permutation-neutral in fact and not only by inference.
+
+TWO THINGS WORTH KNOWING FOR THE NEXT PERSON. `pruneAmd` now builds the run with ONE cursor from the
+run's start, incidence then adjacency, and inserts the pivot by THREE MOVES rather than an append;
+the spare slot that needs is guaranteed because u is in C[pivot], so either A[u] drops the pivot or
+I[u] drops an absorbed clique. And `absorbAggressively` compacts I RIGHTWARD, letting the dropped
+entries fall off the front and advancing `srcPtr`, so A[u] never has to slide.
+
+### THE GOAL IS ONE PLACE TO READ HASHING, and the walk move gets there on its own
+
+The reason to do any of this is not tidiness: it is that reasoning about hash detection today means
+reading both `AmdFlat` and `AmdCompacted` and holding the difference in your head.
+
+Option 1 above delivers exactly that WITHOUT the template. Move the two walks into the classes and
+the driver's detection loop becomes one identical text in both files, with the layout detail in
+`stampGenerators` inside each storage class, where it belongs and where nobody thinking about the
+algorithm has to look. That is a smaller change than templating and it is the one that pays.
+
+So the sequence is:
+
+```
+1  MOVE THE AMD DETECTION WALKS INTO THE CLASSES     DONE DIFFERENTLY, by the run-order flip
+2  TEMPLATE THE MMD PAIR                             the rehearsal, no unknowns
+3  TEMPLATE THE AMD PAIR                             mechanical once 2 is done
+```
+
+Step 1 is closed and was not needed in the form written above: flipping the flat class's amd run
+order gave the single detection loop without moving any walk into a class. Two steps remain, and
+both are now pure bookkeeping, each pair differing only in the signature, the graph type and the
+reporting tail.
+
+### The gate
+
+`make amdorder` and `make mmdorder` at 38 / 0, `make digest` unmoved over 365 digests, and for
+steps 2 and 3 both `.cpp` files reduced to explicit instantiations. Nothing here changes an
+ordering, so a failure is a mistake rather than a trade.
+
 ## OPEN, 2026-08-26: the merge detector is orthogonal to the degree rule, and the swaps are open
 
 **THE TWO CHOICES ARE INDEPENDENT AND WE HAVE THEM WELDED TOGETHER.** A branch makes two decisions,
@@ -106,6 +267,16 @@ we own separates them. (4) is nearly free to build, being a switch that skips a 
 for free, so running it first should leave the hash less to do, but whether the hash then costs
 meaningfully less is not obvious and neither is whether the bookkeeping of two detectors in one pass
 costs more than it saves.
+
+**AND (1) IS CHEAPER TO BUILD THAN THIS ENTRY IMPLIED, corrected 2026-08-28.** The standing reason
+for not attempting mmd-with-hashing was that amd can afford a key only because it rides the bound's
+walks, and that mmd would pay a pass of its own. That is wrong. `pruneMmd` already walks `A[u]` and
+then `I[u]` per member of `C[p]`, so a key is one add per surviving entry on a walk that exists. The
+fusion is in fact SIMPLER there: amd splits its key across the prune and the bound pass because
+aggressive absorption sits between them and compacts `I[u]`, and mmd has no aggressive absorption at
+all. What still stands in the way is the two link slots, `mPrev` and `mNext` not being free when the
+overlay would want them, which means moving mmd's filing after detection and so moving the
+permutation.
 
 **AND (2) IS THE ONE NOT TO ASSUME.** q2h is described as free because it reuses a tag genmmd's
 two-source walk has already assigned; that tag is a product of that walk's structure. Whether amd's

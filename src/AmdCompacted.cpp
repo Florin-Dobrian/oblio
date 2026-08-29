@@ -18,8 +18,8 @@
 //
 // WHAT IT IS FOR, AND IT IS TWO THINGS.
 //
-// FIRST, IT IS THE ALIGNMENT VEHICLE FOR A DIFFERENTIAL. Comparing our ordering against a vendored
-// one is only clean when the two hold their cliques the same way, or every difference is confounded
+// FIRST, IT IS THE ALIGNMENT VEHICLE FOR A DIFFERENTIAL. Comparing our ordering against an oracle
+// is only clean when the two hold their cliques the same way, or every difference is confounded
 // with layout. What then remains is either LAYOUT or an IMPROVEMENT to carry back into our own
 // ladder.
 //
@@ -183,15 +183,16 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
             const std::int32_t* uIncidence     = qg.incidenceAmd(u);
             const std::uint32_t uIncidenceSize = qg.incidenceSize(u);
 
-            std::size_t partialBound = static_cast<std::size_t>(work[u]);   // the adjacency half
+            std::size_t otherCliqueBound = 0;   // sum |C[c] - C[p]| over c in I[u] - {p}
             std::uint32_t uHashKey = buckets.hashKey(u);
             for (std::uint32_t ck = 0; ck < uIncidenceSize; ++ck) {
                 const std::int32_t c = uIncidence[ck];
+                if (c != pivot) otherCliqueBound += static_cast<std::size_t>(work[c] - workTag);
                 if (c != pivot) uHashKey += static_cast<std::uint32_t>(c);   // not the pivot
-                if (c != pivot) partialBound += static_cast<std::size_t>(work[c] - workTag);
             }
 
-            work[u] = static_cast<std::int32_t>(std::min<std::size_t>(partialBound, degrees[u]));
+            const std::size_t twoTerms = static_cast<std::size_t>(work[u]) + otherCliqueBound;
+            work[u] = static_cast<std::int32_t>(std::min<std::size_t>(twoTerms, degrees[u]));
 
             if (!qg.eliminatedAmd(u)) {
                 const std::int32_t uHashBucket = static_cast<std::int32_t>(

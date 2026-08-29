@@ -274,11 +274,9 @@ public:
     // WHICH ONE A DRIVER CALLS IS THE CALLER'S CHOICE and not a property of either function: both
     // read the same three arrays and neither can tell which branch built them. The mmd drivers
     // take `orderAscending`, which is their oracle's numbering. The amd drivers take
-    // `orderAsMerged` because theirs is the hook's raw order, reconstructed upstream of
-    // `AMD_postorder`, and the hook emits each pivot's membership in the order it accumulated it.
-    // The amd oracle numbers non-principal variables ascending, so that mapping
-    // records where the amd oracle is cut rather than anything about the branches.
-    // mmd today
+    // `orderAsMerged`, theirs being a raw order taken before the postorder, emitted in the order
+    // each pivot accumulated its membership. So the choice records where each oracle is read
+    // rather than anything about the branches.
     std::vector<std::int32_t> orderAscending(const std::vector<std::int32_t>& pivots) const;
     // amd today
     std::vector<std::int32_t> orderAsMerged(const std::vector<std::int32_t>& pivots) const;
@@ -391,8 +389,8 @@ private:
 // translation unit is an opaque call from a driver's pivot loop: the pool's and the run array's
 // bases are reloaded around every call and the loop's registers are spilled. In the driver's own
 // unit the compiler inlines it and keeps them. Every ordering driver is arranged this way, so that
-// they can be compared with EACH OTHER; it says nothing about a comparison against a vendored
-// routine, which differs from us in ways nobody has enumerated. Every out-of-class definition below
+// they can be compared with EACH OTHER; it says nothing about a comparison against an oracle,
+// which differs from us in ways nobody has enumerated. Every out-of-class definition below
 // is `inline` so that several drivers may include this and the linker folds the copies.
 //
 // No anonymous namespace, which would give each unit its own copy.
@@ -439,19 +437,17 @@ inline QuotientGraphCompacted::QuotientGraphCompacted(const std::vector<std::siz
     : mSize(colPtr.empty() ? 0 : colPtr.size() - 1) {
     detail::padded(mSegment, mSize, 0);
 
-    // ELBOW ROOM. The pool is sized
-    // `iwlen = slen - 6n` to the main loop, so the pool is `nzaat + nzaat/5 + n` where `nzaat` is
-    // the OFF-DIAGONAL entry count, `sum (Len [0..n-1])`. Ours holds the same lists, so the figure
-    // transfers, and it has to be the same figure rather than the same shape: the headroom is what
-    // decides how often the compactor runs, so a differential on compaction counts
-    // measures the headroom unless the two agree. It is computed from the OFF-DIAGONAL count
-    // WITH the diagonal and so ran about 1.2n large.
+    // ELBOW ROOM. The pool holds `offDiagonalCount + offDiagonalCount/5 + n` entries. The figure
+    // has to match the amd oracle's exactly rather than merely be of the same shape: the headroom
+    // decides how often the compactor runs, so a differential on compaction counts measures the
+    // headroom unless the two agree. It is computed from the OFF-DIAGONAL count, an earlier version
+    // having counted WITH the diagonal and so run about 1.2n large.
     //
     // Reserved from an upper bound and then sized down, rather than counted in a pass of its own:
-    // `nnz >= nzaat`, so the reserve cannot reallocate, and `nzaat` is known once the runs are
-    // laid out. The vector is SIZED rather than left at capacity because the space past the runs
-    // is written by cliques and read by nothing until it is, and a cursor into a vector's unused
-    // capacity would be undefined.
+    // `nnz` is at least the off-diagonal count, so the reserve cannot reallocate, and the exact
+    // figure is known once the runs are laid out. The vector is SIZED rather than left at capacity
+    // because the space past the runs is written by cliques and read by nothing until it is, and a
+    // cursor into a vector's unused capacity would be undefined.
     const std::size_t nnz = colPtr.empty() ? 0 : colPtr.back();
     mSrc.reserve(nnz + nnz / 5 + mSize + detail::kOrderingPad);
     for (std::int32_t aj = 0; aj < static_cast<std::int32_t>(mSize); ++aj) {
@@ -462,9 +458,9 @@ inline QuotientGraphCompacted::QuotientGraphCompacted(const std::vector<std::siz
     }
 
     // The runs are laid out; everything past them is free space the cliques will use.
-    const std::size_t nzaat = mSrc.size();
-    mFree = nzaat;
-    mSrc.resize(nzaat + nzaat / 5 + mSize);
+    const std::size_t offDiagonalCount = mSrc.size();
+    mFree = offDiagonalCount;
+    mSrc.resize(offDiagonalCount + offDiagonalCount / 5 + mSize);
 
     detail::padded(mSuperNext, mSize, 1);
     detail::padded(mSuperLast, mSize, 2);
@@ -498,8 +494,8 @@ inline std::uint32_t QuotientGraphCompacted::formReachableSetMmd(std::int32_t u)
     // afterwards; a POSITION survives, the pool being sized once at construction so that a
     // compaction invalidates a block's OFFSET and never the array's base. And a cursor counting
     // what is LEFT survives a truncation, where a counter into the original length would not.
-    // A pointer would not survive one, which is the whole reason, keeping positions and
-    // restoring them from `Pe [me]` and `Pe [e]`.
+    // A pointer would not survive one, which is the whole reason for keeping positions and
+    // restoring them from the descriptors the compaction has just rewritten.
     std::int32_t* const pool = mSrc.data();             // stable: the pool never reallocates
     std::uint32_t       reached     = 0;                // counted; the start moves under us
     std::size_t         cliqueStart = mFree;            // the clique's start, and it moves too
@@ -596,7 +592,7 @@ inline std::uint32_t QuotientGraphCompacted::formReachableSetMmd(std::int32_t u)
 // once at construction and the compactor only slides data within it, so what a compaction
 // invalidates is a block's OFFSET and never the array's base. Hoisting that base costs the same as
 // holding a pointer, which is the whole reason for keeping positions rather than pointers as
-// indices and restoring them from `Pe [me]` and `Pe [e]`.
+// indices and restoring them from the descriptors the compaction has just rewritten.
 //
 // CURSORS RATHER THAN COUNTERS, for the same reason again. A compaction TRUNCATES the two lists
 // being read, dropping the part already consumed, so after it a list starts at a new base with a
@@ -642,9 +638,9 @@ inline std::uint32_t QuotientGraphCompacted::formReachableSetAmd(std::int32_t u)
             if (vWeight <= 0) continue;
 
             if (mFree >= mSrc.size()) {
-                // TRUNCATE BOTH LISTS TO WHAT IS LEFT, which is
-                // `Pe [me] = p ; Len [me] -= knt1` and `Pe [e] = pj ; Len [e] = ln - knt2`. This
-                // is the step the flipped run exists for: the consumed part is a PREFIX, so what
+                // TRUNCATE BOTH LISTS TO WHAT IS LEFT, moving each descriptor forward and
+                // dropping its length by what was consumed. This is the step the flipped run
+                // exists for: the consumed part is a PREFIX, so what
                 // remains is still one contiguous block and the descriptor can simply be moved
                 // forward. It is also what makes the space bound hold, the half-built clique
                 // being a subset of exactly the prefixes dropped here.
@@ -776,10 +772,9 @@ inline std::uint32_t QuotientGraphCompacted::reachableSetWeight(std::int32_t u) 
 
 // THE SAME RECLAIM, ONE PASS LATER AND FOR THE OTHER REASON. `massEliminate` above drops the
 // members it merged into the pivot; this drops the members supervariable detection absorbed into
-// each other, which happens after it. A reference doing both in one place has its detection
-// inside the scan, so its RESTORE DEGREE LISTS pass sees every casualty at once and writes the
-// survivors back with `Iw [p++] = i`, then `Len [me] = p - pme1` and `if (elenme != 0) pfree = p`.
-// Ours needs two because detection is a pass of its own.
+// each other, which happens after it. Doing both in one place needs detection inside the scan, so
+// that a single restoring pass sees every casualty at once and writes the survivors back. Ours
+// needs two passes because detection is a pass of its own.
 //
 // WITHOUT THIS THE ABSORBED STAY IN THE CLIQUE FOR THE REST OF THE RUN. No permutation moves, every
 // later walk skipping them on the `nv > 0` test, but they are visited, and the space behind them
@@ -881,36 +876,40 @@ inline void QuotientGraphCompacted::beginEliminationAmd(std::int32_t pivot) {
 // the reverse of amd's. No degree bound and no hash key: this branch refreshes degrees in a
 // pass of its own.
 inline void QuotientGraphCompacted::pruneMmd(std::int32_t pivot) {
-    const std::int32_t* reached     = mSrc.data() + mSegment[pivot].srcPtr;
-    const std::uint32_t reachedSize = mSegment[pivot].adjacencySize;
+    const std::int32_t* newClique     = mSrc.data() + mSegment[pivot].srcPtr;
+    const std::uint32_t newCliqueSize = mSegment[pivot].adjacencySize;
 
-    for (std::uint32_t uk = 0; uk < reachedSize; ++uk) {
-        const std::int32_t u = reached[uk];
-        const Segment&      segment       = mSegment[u];
-        std::int32_t*       source        = mSrc.data() + segment.srcPtr;
-        const std::uint32_t adjacencySize = segment.adjacencySize;
-        std::uint32_t       kept          = 0;
-        for (std::uint32_t vk = 0; vk < adjacencySize; ++vk) {
-            const std::int32_t v = source[vk];
+    for (std::uint32_t uk = 0; uk < newCliqueSize; ++uk) {
+        const std::int32_t  u              = newClique[uk];
+        const Segment&      uSegment       = mSegment[u];
+        std::int32_t*       uAdjacency     = mSrc.data() + uSegment.srcPtr;
+        const std::uint32_t uAdjacencySize = uSegment.adjacencySize;
+        const std::int32_t* uIncidence     = uAdjacency + uAdjacencySize;
+        const std::uint32_t uIncidenceSize = uSegment.incidenceSize;
+        std::uint32_t       cursor         = 0;
+        // A[u] = A[u] - C[p] - {p} (prune)
+        for (std::uint32_t vk = 0; vk < uAdjacencySize; ++vk) {
+            const std::int32_t v = uAdjacency[vk];
             if (mWeight[v] <= 0) continue;             // in the new clique, the pivot, or merged
-            if (mHasNumbered && mMark[v] == GONE) continue;   // numbered by a prepass; see above
-            source[kept++] = v;
+            if (mHasNumbered && mMark[v] == GONE) continue;   // numbered by a prepass
+            uAdjacency[cursor++] = v;
         }
-        mSegment[u].adjacencySize = kept;                      // A[u] - C[pivot] - {pivot}
+        const std::uint32_t keptAdjacencySize = cursor;   // the boundary; it does not move again
+        mSegment[u].adjacencySize = keptAdjacencySize;
 
-        const std::int32_t* incidence     = source + adjacencySize;
-        const std::uint32_t incidenceSize = segment.incidenceSize;
-        std::uint32_t       write         = kept;      // follows `kept`; see the note above
-        for (std::uint32_t ck = 0; ck < incidenceSize; ++ck) {
-            const std::int32_t c = incidence[ck];
-            if (mSegment[c].adjacencySize != 0) source[write++] = c;  // dead is size zero; above
+        // I[u] = ( I[u] - I[p] ) | {p}
+        // I[u] - I[p] (reclaim I[p])
+        for (std::uint32_t ck = 0; ck < uIncidenceSize; ++ck) {
+            const std::int32_t c = uIncidence[ck];
+            if (mSegment[c].adjacencySize != 0) uAdjacency[cursor++] = c;  // dead is size zero
         }
         // THE NEW CLIQUE GOES AT THE BACK, which is the mmd convention and the reverse of
         // amd's. It is what the reversed incidence walk then reads first, and it decides the
         // order members enter C[pivot], hence bucket order, hence which of several equal-degree
         // vertices is picked. The held-vertex rotation that put it at the FRONT for amd went
-        source[write++]   = pivot;                     // u joins the new clique, id = pivot
-        mSegment[u].incidenceSize = write - kept;
+        // | {p} (absorb into C[p])
+        uAdjacency[cursor++] = pivot;                  // u joins the new clique, id = pivot
+        mSegment[u].incidenceSize = cursor - keptAdjacencySize;
     }
 
     // THE SIGNS COME BACK HERE, at the end of the prune, which is the LAST READER of them. The
@@ -936,85 +935,85 @@ inline void QuotientGraphCompacted::pruneMmd(std::int32_t pivot) {
 inline void QuotientGraphCompacted::pruneAmd(std::int32_t pivot, TaggedScan& scan) {
     for (std::int32_t c : mAbsorbed) scan.work[c] = 0;
 
-    const std::int32_t* reached     = mSrc.data() + mSegment[pivot].srcPtr;
-    const std::uint32_t reachedSize = mSegment[pivot].adjacencySize;
+    const std::int32_t* newClique     = mSrc.data() + mSegment[pivot].srcPtr;
+    const std::uint32_t newCliqueSize = mSegment[pivot].adjacencySize;
 
     if (scan.buckets != nullptr)
-        for (std::uint32_t uk = 0; uk < reachedSize; ++uk) scan.buckets->unfile(reached[uk]);
+        for (std::uint32_t uk = 0; uk < newCliqueSize; ++uk) scan.buckets->unfile(newClique[uk]);
 
     const std::int32_t  workTag        = scan.workTag;          // hoisted, as the flag is
 
-    for (std::uint32_t uk = 0; uk < reachedSize; ++uk) {
-        const std::int32_t u       = reached[uk];
-        const std::int32_t nvi     = -mWeight[u];   // u is in C[pivot], so its weight is negative
-        const std::int32_t wnvi    = workTag - nvi;          // signed, deliberately
-        const Segment&      segment       = mSegment[u];
-        std::int32_t*       source        = mSrc.data() + segment.srcPtr;
-        const std::uint32_t incidenceSize = segment.incidenceSize;
-        const std::uint32_t adjacencySize = segment.adjacencySize;
-        const std::int32_t* adjacency     = source + incidenceSize;
+    for (std::uint32_t uk = 0; uk < newCliqueSize; ++uk) {
+        const std::int32_t  u                = newClique[uk];
+        const std::int32_t  uWeight          = -mWeight[u];
+        const std::int32_t  firstSeenBase    = workTag - uWeight;   // signed, deliberately
+        const Segment&      uSegment         = mSegment[u];
+        std::int32_t*       source           = mSrc.data() + uSegment.srcPtr;
+        const std::uint32_t uIncidenceSize   = uSegment.incidenceSize;
+        const std::uint32_t uAdjacencySize   = uSegment.adjacencySize;
+        const std::int32_t* uAdjacency       = source + uIncidenceSize;
+        std::uint32_t       cursor           = 0;
+        std::uint32_t       uAdjacencyWeight = 0;    // |A[u] - C[p]|, weighted
+        std::uint32_t       uHashKey         = 0;    // wraps, deliberately
 
-        // THE INCIDENCE PART, AT THE FRONT OF THE RUN. Compacted where it lies: the write cursor
+        // THE INCIDENCE PART, AT THE FRONT OF THE RUN. Compacted where it lies: the cursor cursor
         // starts at the read cursor and advances only when an entry is kept, so it never passes it.
-        std::uint32_t write = 0;
-        for (std::uint32_t ck = 0; ck < incidenceSize; ++ck) {
+        for (std::uint32_t ck = 0; ck < uIncidenceSize; ++ck) {
             const std::int32_t c = source[ck];
-            std::int32_t we = scan.work[c];
-            if (we == 0) continue;                        // absorbed and gone
-            source[write++] = c;
+            std::int32_t cWork = scan.work[c];
+            if (cWork == 0) continue;                        // absorbed and gone
+            source[cursor++] = c;
             if (c == pivot) continue;                     // the new clique subtracts from nothing
-            if (we >= workTag) {
-                we -= nvi;
+            if (cWork >= workTag) {
+                cWork -= uWeight;
             } else {
-                we = static_cast<std::int32_t>(scan.degree[c]) + wnvi;
+                cWork = static_cast<std::int32_t>(scan.degree[c]) + firstSeenBase;
                 scan.touchedCliques.push_back(c);
             }
-            scan.work[c] = we;
+            scan.work[c] = cWork;
         }
-        const std::uint32_t incidenceKept = write;        // the boundary
+        const std::uint32_t keptIncidenceSize = cursor;        // the boundary
 
-        // THE ADJACENCY PART, BEHIND IT, and the write cursor carries on through the boundary. It
-        // is still behind the read cursor, having entered this loop at most `incidenceSize`.
-        std::uint32_t explicitPart = 0;                   // a weight sum, not a count of positions
-        std::uint32_t uHashKey      = 0;                   // wraps, deliberately
-        for (std::uint32_t vk = 0; vk < adjacencySize; ++vk) {
+        // THE ADJACENCY PART, BEHIND IT, and the cursor cursor carries on through the boundary. It
+        // is still behind the read cursor, having entered this loop at most `uIncidenceSize`.
+        for (std::uint32_t vk = 0; vk < uAdjacencySize; ++vk) {
             // ONE LOAD, THREE QUESTIONS, the weight answering all of them. A
             // negative weight is a member of the new clique, including the pivot itself, so the
             // explicit `v == pivot` test is gone with the rest; a zero is absorbed or merged away.
-            const std::int32_t v  = adjacency[vk];
+            const std::int32_t v       = uAdjacency[vk];
             const std::int32_t vWeight = mWeight[v];
-            if (vWeight <= 0) continue;
-            explicitPart += static_cast<std::uint32_t>(vWeight);
+            if (vWeight <= 0) continue;                // see the plain prune above
+            uAdjacencyWeight += static_cast<std::uint32_t>(vWeight);
             uHashKey += static_cast<std::uint32_t>(v);     // no + 1, no reduction; see above
-            source[write++] = v;
+            source[cursor++] = v;
         }
-        scan.work[u] = static_cast<std::int32_t>(explicitPart);
+        scan.work[u] = static_cast<std::int32_t>(uAdjacencyWeight);
         if (scan.buckets != nullptr)
             scan.buckets->setHashKey(u, uHashKey);                             // the ADJACENCY half
 
         // THE NEW CLIQUE GOES IN BY ROTATION, WHICH IS THREE MOVES:
         //
-        //     Iw [pn] = Iw [p3] ;   the first adjacency entry moves to the end
-        //     Iw [p3] = Iw [p1] ;   the first incidence entry moves to the boundary
-        //     Iw [p1] = me ;        and the pivot takes the front
+        //     the first adjacency entry moves to the spare slot at the end
+        //     the first incidence entry moves into the slot that vacated, the boundary
+        //     the pivot takes position 0
         //
         // There is no free slot to insert into, so a rotation is what puts the pivot at the front
         // without a shift, and it is why each part reads with its first entry last. The old code
-        // reproduced the same two orders under the reversed layout by holding the first adjacency
+        // reproduced the same two orders under the reversed layout by holding the first uAdjacency
         // survivor back and swapping the pivot into place afterwards; with the parts in this
-        // order the rotation says it directly and takes a test out of the adjacency loop.
+        // order the rotation says it directly and takes a test out of the uAdjacency loop.
         //
         // ROOM IS GUARANTEED BY ONE DROPPED ENTRY, and there is always at least one: u is in
         // C[pivot], so either the pivot was in A[u] and the walk above dropped it, or a clique of
-        // I[u] was absorbed into the new one and was dropped as `we == 0`. Both self-assign
+        // I[u] was absorbed into the new one and was dropped as `cWork == 0`. Both self-assign
         // harmlessly when a part comes out empty.
-        assert(write < incidenceSize + adjacencySize &&
+        assert(cursor < uIncidenceSize + uAdjacencySize &&
                "the rotation has no slot: nothing was dropped from u's run");
-        source[write]         = source[incidenceKept];
-        source[incidenceKept] = source[0];
-        source[0]             = pivot;
-        mSegment[u].incidenceSize = incidenceKept + 1;
-        mSegment[u].adjacencySize = write - incidenceKept;
+        source[cursor]            = source[keptIncidenceSize];
+        source[keptIncidenceSize] = source[0];
+        source[0]                 = pivot;
+        mSegment[u].incidenceSize = keptIncidenceSize + 1;
+        mSegment[u].adjacencySize = cursor - keptIncidenceSize;
     }
 
     // THE SIGNS COME BACK HERE, at the end of the prune, which is the LAST READER of them. The

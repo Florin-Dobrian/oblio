@@ -2276,16 +2276,24 @@ should expect fill to move in both directions across a set.
 
 ### If an mmd layer with hashing is ever built
 
-Three constraints, so that it is not attempted inside an existing driver.
+Two constraints and one correction, so that it is not attempted inside an existing driver and not
+declined for the wrong reason.
 
 **It cannot be `Mmd3`.** That driver reproduces genmmd's permutation exactly and the differential
 depends on it; coarser supervariables change pivot choice. It would be a new layer with its own
 twin.
 
-**And the port is not the interesting part.** amd's hash key is accumulated inside the bound's
-walks, `hval += e` and `hval += j` in scan 2, which is what makes it affordable there. mmd has no
-bound walk to fuse it into, so a naive version pays the whole key accumulation as a pass of its
-own, and a measurement of that would be measuring the pass rather than the idea.
+**THE KEY IS NOT THE OBSTACLE, and this section said it was until 2026-08-28.** The claim here was
+that amd can afford a key only because it is accumulated inside the bound's walks, and that mmd,
+having no bound walk, would pay a pass of its own. That is wrong. `pruneMmd` already walks `A[u]`
+entry by entry and then `I[u]` entry by entry, per member of `C[p]`, so both halves of a key are one
+add per surviving entry on a walk that exists.
+
+The fusion would in fact be SIMPLER on mmd than on amd. amd has to split its key across the prune
+and the bound pass because AGGRESSIVE ABSORPTION sits between them and compacts `I[u]`, so at prune
+time the incidence list to sum over does not exist yet. mmd has no aggressive absorption at all,
+`absorbAggressively` being called by the two amd drivers alone, so `I[u]` is final when the prune
+finishes and both halves can be summed in one place.
 
 **AND THE TWO LINK SLOTS THE AMD HASH BORROWS ARE NOT FREE ON THIS BRANCH**, which is the concrete
 one. The amd overlay parks the key in `mPrev` and the chain in `mNext`, both free because
@@ -9068,6 +9076,220 @@ The wrap at `2^32` is PART OF the hash, so reducing before it changes which vert
 moves the permutation. The out-of-range store is load-bearing, and the only clean guarantee
 available is `-std=c++20`.
 
+## Why the encodings are tight, and what the tightness costs, 2026-08-28
+
+The thesis under all the encoding notes, rather than another one of them.
+
+### It is not the COUNT of arrays, it is the streams touched per neighbour visit
+
+The 2026-08-15 differential is the evidence. Our code ran 1.13x the vendored instruction count and
+1.36x the clock, and what explained the gap was 1.89x the D1 read misses. An array touched once per
+elimination costs nothing measurable; one touched once per entry of every list is another stream
+competing for the same cache. That is why every fold that paid was on an ENTITY-INDEXED array read
+INSIDE A WALK, and why the standing rule came out as: folding an array moves the clock, rescheduling
+work does not.
+
+### The tax is not readability, it is that correctness stops being locally checkable
+
+A multiplexed slot is safe only because of a claim about WHEN two uses can coexist, and that claim
+spans functions and sometimes files:
+
+```
+work[u]    free because NO CLIQUE IS NAMED AFTER A LIVE VERTEX
+mPrev[u]   free because THE PRUNE UNFILED EVERY MEMBER of C[pivot]
+mMark      GONE sits above every tag only because NOTHING STAMPS A DEAD VERTEX
+```
+
+None of those can be checked by reading the line, or the function, or in one case even the file. The
+two defects this encoding has actually produced were both of that kind: the detection stamp base
+sitting below the scan's values, and ledger entry 8's stride annihilated by a modulus written in a
+different file. Neither was a hard idea; both were invisible locally.
+
+### Which is why the checks that work here are INTERVENTIONS, not readings
+
+Documentation is necessary and it is not sufficient: a comment records the claim without testing it.
+The dead store at the hash merge was settled by POISONING the slot, not by tracing readers. Earlier
+equivalence claims were settled by logging rather than by argument. The honest pairing for every
+multiplexed slot is two things together: a comment stating the non-local invariant, and something in
+the gate set that FAILS IF IT BREAKS.
+
+### Coupling is a separate axis, and worth keeping separate
+
+`TaggedScan` exists because the DRIVER OWNS STATE THE CLASS MUST WRITE, which is an ownership
+question rather than an encoding one. The two are linked, folding driver state into entity-indexed
+arrays being what creates the shared write, but they are not the same axis, and treating them as one
+means paying for a fold in coupling that the fold did not require. The open question about whether
+`work` should become a member is exactly that shape: the fold already happened, and where the array
+lives is still undecided.
+
+## The bound in three terms, and where each is computed, 2026-08-28
+
+```
+bound(u) = |A[u] - C[p]|  +  |C[p] - {u}|  +  sum |C[c] - C[p]| over c in I[u] - {p}
+```
+
+against the exact `|( A[u] | C[c] for c in I[u] ) - {u}|`. All three are WEIGHTED, counting original
+vertices rather than list entries, since a neighbour standing for three originals will fill against
+all three.
+
+**THE THREE TERMS ARE COMPUTED IN THREE DIFFERENT PLACES**, which is why reading any one pass leaves
+the formula looking incomplete:
+
+```
+|A[u] - C[p]|            the PRUNE, as explicitPart, parked in work[u]
+sum |C[c] - C[p]|        the BOUND PASS, work[c] - workTag summed over I[u] - {p}
+|C[p] - {u}|             the FOURTH PASS, as newCliqueWeight - weight(u)
+```
+
+The first two make `partialBound`; the third is added after detection. That split is load-bearing
+rather than an arrangement: `weight(u)` can GROW during detection, and the fourth pass reads it
+post-merge. Subtracting it earlier would use the pre-merge value and file a supervariable one bucket
+too high per vertex absorbed.
+
+**THE FIRST TERM NEEDS NO SUBTRACTION.** When a clique is formed, every member has its adjacency
+pruned against it, and neither set grows afterwards, so `A[u]` and `C[p]` are already disjoint. The
+prune's sum IS the term.
+
+**AND ALL THE OVERCOUNTING IS IN THE THIRD.** The cliques `C[c]` can overlap each other outside
+`C[p]`, and a vertex lying in two of them is counted twice. Everything else is exact. That single
+fact is the entire gap between the bound and the true degree, and it is why the bound is an UPPER
+bound and never a lower one.
+
+**TWO CAPS, NOT ONE**, applied at the two ends of the split:
+
+```
+min(partialBound, degrees[u])          in the bound pass, against the previous step's degree
+min(bound, numLeft - weight(u))        in the fourth pass, against what is left in the graph
+```
+
+The first is what makes the wide accumulator REPRESENTABLE: `partialBound` is the one accumulator in
+the ordering that no disjointness argument bounds, its terms overlapping freely and reaching O(n^2)
+in the intermediate, and the minimum brings it back to at most `degrees[u]` and so at most n. The
+second is the trivial ceiling, `u` being unable to reach more than the live originals other than
+itself.
+
+## `TaggedScan`, and whether `work` should become a member, 2026-08-28
+
+`TaggedScan` is a PARAMETER BUNDLE and nothing more: six fields, no methods, passed by reference to
+the three `...Amd` entry points. `QuotientGraphCompacted` includes `QuotientGraph.h` specifically
+for `Buckets` and `TaggedScan`, which it uses verbatim.
+
+**THE mmd AND amd FORK IS VISIBLE IN ONE FIELD**, `Buckets* buckets` being a POINTER and nullable.
+The mmd prune needs no buckets, mmd parking nothing there and leaving its candidates filed to ask
+`filed()` about them. That is not incidental to the bundle, it is why the bundle exists: the AMD
+PRUNE PRODUCES TWO BY-PRODUCTS AND THE MMD PRUNE PRODUCES NONE. `explicitPart` into `work[u]` and
+the adjacency half of the key into `mPrev[u]`, both borrowed slots belonging to structures the
+vertex is temporarily outside of. mmd's prune computes nothing anyone else wants.
+
+### Could `work` and `workTag` become members, like `mMark` and `mTag`?
+
+They could, opt-in the same way through an `enableWork()` beside `enableMarks()`, so no mmd driver
+pays for an array it never touches. Two things make it less clean than that parallel, and both are
+worth weighing rather than assuming.
+
+**THE LIVE-VERTEX HALF IS DRIVER STATE.** The array has four uses, and if the detection walks move
+into the classes they split like this:
+
+```
+work[c]  tag + count        the class writes it in the prune, the driver reads it       SHARED
+work[x]  detection stamp    moves into the class with the walk                          CLASS
+work[u]  partial bound      parked between the bound pass and the fourth pass           DRIVER
+work[c]  zero, absorbed     written by the class                                        CLASS
+```
+
+Three of four become the class's and one stays the driver's. Survivable, `mMark` being class-owned
+while the mmd driver stamps into it through `setMark`, but it means the class would own an array
+whose live-vertex slots are none of its business.
+
+**AND `workTag` ADVANCES BY A DRIVER QUANTITY.** `workTag = stamp + 1` with `stamp` raised to
+`workTag + maxCliqueWeight`, and `maxCliqueWeight` is maintained by the driver. As a member it would
+need a setter the driver drives, which is weaker ownership than `mTag`, which the graph advances
+inside its own walks.
+
+**SO DO NOT DECIDE IT YET: THE WALK MOVE DECIDES IT.** If the detection walks go into the classes,
+the class touches `work` in three of four uses and membership is the natural shape. If they do not,
+`TaggedScan` is already the right answer and moving the array in would be ownership without a
+reason.
+
+One thing to know before anyone edits scan structures: `TaggedScan` is shared VERBATIM across two
+classes, so a change to its shape is a change to both at once. And `TaggedScanCompacted` in
+`MmdCompacted` is still declared and never used, which is the loose end to clear first.
+
+## The key pass in pseudocode, and the two halves, 2026-08-28
+
+The key is accumulated in TWO PLACES, so a single block of pseudocode would misrepresent where each
+half comes from. Either driver reads the same now, the flat class having taken the amd run order on
+2026-08-28; the two detection regions are byte-identical.
+
+```
+# ---- part A: in pruneAmd, one walk per member u of C[p] -------------------
+# The prune is rewriting A[u] anyway, so it sums the survivors on the way past.
+
+for u in C[p]:
+    uHashKey     = 0
+    explicitPart = 0                       # |A[u] - C[p]| weighted, the bound's first term
+    for v in A[u]:
+        if v is dead or v in C[p]: drop it            # the prune's own job
+        explicitPart += weight(v)
+        uHashKey     += v                  # NO +1, NO reduction
+        keep v
+    work[u]          = explicitPart        # borrowed slot: u is live, so work[u] is free
+    setHashKey(u, uHashKey)                # borrowed slot: mPrev, u having been unfiled
+
+# ---- part B: the bound pass, one walk per member u of C[p] ----------------
+# The key's other half rides on the walk the bound was making anyway.
+
+for u in C[p]:
+    partialBound = work[u]                 # the adjacency half, from part A       BOUND
+    uHashKey     = hashKey(u)              # the adjacency half, from part A       KEY
+
+    for c in I[u]:
+        if c != p: uHashKey     += c                                            # KEY
+        if c != p: partialBound += work[c] - workTag                            # BOUND
+
+    work[u] = min(partialBound, degrees[u])        # narrow again, and park it    BOUND
+
+    if u is not dead:                              # the ONLY skip that survives
+        b = uHashKey mod n                         # ONE reduction, over a wrapped sum
+        setChain(u, hashHead[b]); hashHead[b] = u  # push at the head
+        setHashBucket(u, b)                        # the reduced form, over the sum
+```
+
+**THE TWO HALVES CANNOT BE MOVED INTO EACH OTHER.** The adjacency half has to be part A because
+`A[u]` is only in hand while the prune is rewriting it. The incidence half has to be part B because
+AGGRESSIVE ABSORPTION RUNS BETWEEN THE TWO and compacts `I[u]`, so at prune time the list to sum
+over does not exist yet. That is the whole reason the key is split rather than computed in one
+place, and it is also why the two halves travel in different slots, `work[u]` and `mPrev[u]`, both
+borrowed for exactly the span that needs them.
+
+**TWO ACCUMULATORS IN ONE LOOP, AND ONE RULE.** The bound and the key ride the same walk of `I[u]`
+and both skip the pivot, so the two `c != pivot` tests are one rule written twice. Excluding the
+pivot is free either way: every member of `C[p]` carries it, so taking it would shift every key in
+this clique by the same constant and leave the PARTITION into buckets identical, changing only which
+index each bucket has.
+
+That last point is worth its provenance. The comment at this site used to say the opposite, that
+every entry of `I[u]` is taken with the pivot included where the bound skips it, and the code has
+said `c != pivot` on both lines throughout. `AMD_2` settles which is right: its `hval` loop runs
+`p1..p2` with `p2 = p1 + Elen[i] - 1`, and the note immediately after is "count the number of
+elements in i (including me)", the pivot being appended AFTER the loop. So it never sees the pivot
+either. Corrected 2026-08-28, and it survived unnoticed because it cannot move a permutation.
+
+**NO STRIDE, and that is an invariant spanning two files.** Multiplying the incidence half by
+`size + 1` would be annihilated by the modulus at the filing site, which is the same number, leaving
+the hash a function of the ADJACENCY ALONE. The rule the two lines have to hold jointly is that the
+modulus must not divide the stride, and having no stride at all is the cheapest way to hold it. This
+is ledger entry 8, and it cost AMD3 a factor of two on cubes before it was found.
+
+**ONE REDUCTION, AT THE END.** The sum wraps in `uint32` deliberately and is reduced once rather
+than per term. Reducing per term is a different hash function, not a tightening of this one; see the
+round-trip section.
+
+**AND THE DEAD SKIP MOVED ONTO THE FILING ALONE.** A bound computed for an eliminated vertex is
+written and never read, so the loop guards the push rather than the arithmetic. The loop walks
+`C[p]` FORWARD and pushes at the head, which is what decides which of two indistinguishable vertices
+absorbs the other, so reversing either half moves the permutation.
+
 ## The detection loop in pseudocode, 2026-08-28
 
 Both amd drivers, which differ in one line of it and are otherwise identical.
@@ -9112,10 +9334,11 @@ for seed in C[p]:                                    # driven by the clique, not
 has nobody after it to compare against, so the stamp loop is never paid for it, and most buckets are
 singletons.
 
-**`A[u] + (I[u] - {p})` is the ONE line the two drivers spell differently**, and it is the only one.
-`AmdFlat` walks it as two spans, `A[u]` then `I[u]` from index 1; `AmdCompacted` walks it as one
-span from index 1, its run being contiguous with `p` at the front. Same set either way, and the
-difference is the layout rather than a choice.
+**`A[u] + (I[u] - {p})` IS ONE SPAN IN BOTH DRIVERS**, walked from index 1. It became so on
+2026-08-28, when the flat class took the amd run order `[I, A]` that the compacted one always had;
+before that `AmdFlat` stored `[A, I]` for both branches, which put the pivot in the MIDDLE of the
+run and cost it two loops. The set was the same either way, so nothing about the algorithm changed
+and no permutation moved.
 
 **The last `continue` is the exact test, and it is a CONTAINMENT.** Every entry of v's generators
 carries u's stamp. Equality follows from the two length checks together with the live/dead split of
@@ -9269,6 +9492,60 @@ reach finding orderings of about the same quality, and on our grids `amd2` fires
 and fills 7 per cent worse than `amd1`, which has no detector beyond mass elimination. Any
 experiment in the empty cells should be posed as a TIMING question with pivot count beside it, and
 should expect fill to move in both directions.
+
+## What the hash actually buys: a partition of the comparison space, 2026-08-28
+
+Stated without the ordering vocabulary, the problem is: given `e` entities, find the pairs that are
+equal, where equality is expensive to test. The naive cost is quadratic in `e`. A hash partitions
+the comparison space and the cost becomes quadratic in the BUCKET sizes instead:
+
+```
+without hashing    e(e-1)/2 pairs
+with hashing       sum over buckets of  k_i(k_i - 1)/2
+```
+
+Here `e` is `|C[pivot]|` and the entities are its live members.
+
+**THE WORST CASE IS UNCHANGED.** One bucket of `e` gives back the full quadratic. What makes it pay
+is that the sizes are small in practice, and the tree measures exactly that: `hash pairs tested`
+beside `hash merges` reads 94 against 88 on a 20x20 grid, so buckets are essentially pairs and
+almost every comparison made is a real twin.
+
+### The partition is legal because the key is a function of the thing compared
+
+Partitioning a comparison space is sound only if the partition never separates two things that would
+have matched. That is what the key gives, and it gives it in ONE DIRECTION ONLY:
+
+```
+equal lists  =>  equal keys  =>  same bucket      guaranteed, never luck
+same bucket  =>  equal lists                      NOT implied
+```
+
+So the buckets are a FILTER and the exact test still decides. A collision, meaning two vertices with
+different lists in one bucket, costs one run of that test and can never cause a wrong merge. Which
+is also why the key may be a plain sum reduced modulo n rather than anything stronger.
+
+### What the partition costs
+
+```
+per member    one key accumulated, one reduction, one head insertion    O(1) each
+per bucket    one head read, one clear                                  O(1)
+```
+
+Linear in `e`, and the key accumulation in particular RIDES WALKS THAT ALREADY EXIST, the adjacency
+half in the prune and the incidence half in the bound pass. The split is forced by aggressive
+absorption sitting between the two and compacting `I[u]`, not by any shortage of walks.
+
+THAT FUSION IS NOT AN amd PRIVILEGE. `pruneMmd` walks both lists per member of `C[p]` as well, and
+having no aggressive absorption it could sum both halves in ONE place. So the cost of the key is not
+what stands between the mmd branch and hashing; see the constraints section above for what does.
+
+### And the other half of the trade is quality, not time
+
+Hashing reduces the cost of the comparisons you decided to make. It does not widen the set you
+compare. Detection over `C[pivot]` alone cannot find indistinguishable vertices elsewhere in the
+graph, hashed or not, and that limit comes from the schedule rather than from the filter. Widening
+it is pre-compression's job, not the hash's.
 
 ## Related
 

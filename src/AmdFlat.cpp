@@ -230,13 +230,20 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
             const std::int32_t* uIncidence     = qg.incidenceAmd(u);
             const std::uint32_t uIncidenceSize = qg.incidenceSize(u);
 
-            // The adjacency term and the adjacency half of the key are already in hand, accumulated
-            // by the prune over exactly the sets it produced. WIDE: `partialBound` accumulates
-            // `work[c] - workTag` over I[u], each term up to n and O(n) of them, so the
-            // intermediate reaches O(n^2). It is the one accumulator in the ordering that no
-            // disjointness argument bounds, and the minimum below is what brings it back into
-            // range.
-            std::size_t partialBound = static_cast<std::size_t>(work[u]);   // the adjacency half
+            // THE THIRD TERM OF THE BOUND, and the only inexact one. Each addend is the exact
+            // weight |C[c] - C[p]|, but the C[c] can overlap EACH OTHER outside C[p], so a vertex
+            // in two of them is counted twice. That over-count is the whole gap between the bound
+            // and the true degree, which is why this is a `Bound` where the other two terms are
+            // `Weight`s.
+            //
+            // WIDE, and it is the one accumulator in the ordering that no disjointness argument
+            // bounds: each addend reaches n and there are O(n) of them, so the intermediate reaches
+            // O(n^2). The minimum below is what brings it back into range.
+            //
+            // The first term is already in `work[u]`, put there by the prune as `uAdjacencyWeight`
+            // over exactly the sets it produced, and it is added once at the end rather than used
+            // as a seed, so this accumulator means ONE thing for its whole life.
+            std::size_t otherCliqueBound = 0;   // sum |C[c] - C[p]| over c in I[u] - {p}
             // The ADJACENCY HALF of the key, already reduced. The other half is accumulated below,
             // in the walk this pass makes anyway, and cannot move into the prune: absorption runs
             // between the two and compacts I[u], so the list to sum over does not exist there yet.
@@ -247,20 +254,27 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
             // The invariant the two lines have to hold together is that the modulus must not divide
             // the stride, and having no stride is the cheapest way to hold it.
             //
-            // EVERY ENTRY OF I[u] IS TAKEN, the pivot included, where the bound skips it. The two
-            // rules differ, and fusing the walks does not fuse them.
+            // THE PIVOT IS EXCLUDED FROM BOTH, and the two `c != pivot` tests are one rule rather
+            // than two. Excluding it is free either way: every member of C[p] carries the pivot, so
+            // taking it would shift every key in this clique by the same constant and leave the
+            // partition into buckets identical.
             for (std::uint32_t ck = 0; ck < uIncidenceSize; ++ck) {
                 const std::int32_t c = uIncidence[ck];
+                if (c != pivot) otherCliqueBound += static_cast<std::size_t>(work[c] - workTag);
                 if (c != pivot) uHashKey += static_cast<std::uint32_t>(c);   // not the pivot
-                if (c != pivot) partialBound += static_cast<std::size_t>(work[c] - workTag);
             }
 
-            // THE ONE PLACE THE WIDE ACCUMULATOR MEETS A NARROW DEGREE. The stored degree is a full
-            // one from an earlier step and this is a partial, so the two are comparable only once
-            // the pass below adds the clique weight and subtracts u's. The minimum is taken WIDE
-            // and is what makes the result representable, being at most `degrees[u]` and so at most
-            // n.
-            work[u] = static_cast<std::int32_t>(std::min<std::size_t>(partialBound, degrees[u]));
+            // TERMS ONE AND THREE MEET HERE, `work[u]` carrying the adjacency weight in and the
+            // sum of both back out. What the slot holds therefore changes at this line, from one
+            // term to two.
+            //
+            // AND IT IS THE ONE PLACE THE WIDE ACCUMULATOR MEETS A NARROW DEGREE. The stored degree
+            // is a full one from an earlier step and this is two terms of three, so the two are
+            // comparable only once the pass below adds the clique weight and subtracts u's. The
+            // minimum is taken WIDE and is what makes the result representable, being at most
+            // `degrees[u]` and so at most n.
+            const std::size_t twoTerms = static_cast<std::size_t>(work[u]) + otherCliqueBound;
+            work[u] = static_cast<std::int32_t>(std::min<std::size_t>(twoTerms, degrees[u]));
 
             // AND THE VERTEX IS FILED HERE, in the pass that completes its key. The skip for an
             // eliminated vertex moves onto the FILING alone: a bound computed for one is written
@@ -318,16 +332,16 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
                 // vertex the hash absorbed earlier in this loop is still listed by its neighbors
                 // and both sides count it, so the answer is consistent.
                 //
-                // TWO LOOPS, forced by the layout: A[u] then I[u], with the new clique heading
-                // I[u], puts the entry to skip in the MIDDLE. That entry is shared by every member
-                // of C[pivot], so it can never discriminate and is skipped at index 1.
+                // ONE LOOP, forced by the layout: the run is contiguous, so I[u] and A[u] are one
+                // span, and the prune's rotation puts the new clique at index 0. That entry is
+                // shared by every member of C[pivot], so it can never discriminate and is skipped
+                // by starting at 1.
                 const std::int32_t  other          = ++stamp;
                 const std::uint32_t uAdjacencySize = qg.adjacencySize(u);
                 const std::uint32_t uIncidenceSize = qg.incidenceSize(u);
-                const std::int32_t* uAdjacency     = qg.adjacencyAmd(u);
-                for (std::uint32_t vk = 0; vk < uAdjacencySize; ++vk) work[uAdjacency[vk]] = other;
-                const std::int32_t* uIncidence     = qg.incidenceAmd(u);
-                for (std::uint32_t i = 1; i < uIncidenceSize; ++i) work[uIncidence[i]] = other;
+                const std::int32_t* uSegment       = qg.incidenceAmd(u);   // the segment's start
+                const std::uint32_t uSegmentSize   = uAdjacencySize + uIncidenceSize;
+                for (std::uint32_t a = 1; a < uSegmentSize; ++a) work[uSegment[a]] = other;
 
                 for (std::int32_t v = buckets.chain(u); v != NIL; v = buckets.chain(v)) {
                     if (qg.eliminatedAmd(v)) continue;
@@ -338,15 +352,10 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
 
                     // The exact test the hash only filters for, A[u] == A[v] and I[u] == I[v],
                     // read against u's stamp and short-circuiting on the first mismatch.
-                    bool                same       = true;
-                    const std::int32_t* vAdjacency = qg.adjacencyAmd(v);
-                    for (std::uint32_t vk = 0; vk < uAdjacencySize && same; ++vk)
-                        if (work[vAdjacency[vk]] != other) same = false;
-                    if (same) {
-                        const std::int32_t* vIncidence = qg.incidenceAmd(v);
-                        for (std::uint32_t i = 1; i < uIncidenceSize && same; ++i)
-                            if (work[vIncidence[i]] != other) same = false;
-                    }
+                    bool                same     = true;
+                    const std::int32_t* vSegment = qg.incidenceAmd(v);
+                    for (std::uint32_t a = 1; a < uSegmentSize && same; ++a)
+                        if (work[vSegment[a]] != other) same = false;
                     if (!same) continue;
 
                     // The TARGET IS LIVE and never the pivot, which is the whole difference from

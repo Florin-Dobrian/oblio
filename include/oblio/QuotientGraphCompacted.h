@@ -183,7 +183,7 @@ public:
     // NAME A WALK, and a walk cannot be selected without knowing the branch. So the tail and the
     // capture are factored into private helpers and the six lines of the rule read twice, each
     // against its own reference.
-    void beginEliminationAmd(std::int32_t pivot);
+    void beginEliminationAmd(std::int32_t pivot, TaggedScan& scan);
 
     void pruneMmd(std::int32_t pivot);
     void pruneAmd(std::int32_t pivot, TaggedScan& scan);
@@ -843,7 +843,7 @@ inline void QuotientGraphCompacted::beginEliminationMmd(std::int32_t pivot) {
 // the free cursor being tested against the pool's end. Reserving room for a worst-case
 // reach of n beforehand, which is what a walk holding pointers had to do, compacted where the
 // would not.
-inline void QuotientGraphCompacted::beginEliminationAmd(std::int32_t pivot) {
+inline void QuotientGraphCompacted::beginEliminationAmd(std::int32_t pivot, TaggedScan& scan) {
     captureAbsorbed(incidenceAmd(pivot), mSegment[pivot].incidenceSize);
 
     // The pivot's own weight is negated, and it is what keeps it out of its own clique: the
@@ -865,6 +865,11 @@ inline void QuotientGraphCompacted::beginEliminationAmd(std::int32_t pivot) {
         cliqueStart = mFree - cliqueLen;
     }
     bearClique(pivot, cliqueStart, cliqueLen);
+
+    // AND DEAD TO THE SCAN, from the copy `captureAbsorbed` took. A second loop rather than one,
+    // `bearClique` being shared with the mmd branch, which has no scan to write into. The moment is
+    // the same one the plain class kills at: after the walk that read their member lists.
+    for (std::int32_t c : mAbsorbed) scan.work[c] = 0;
 
     // A CLIQUE HAS NO INCIDENCE LIST. The mmd branch clears this in `finishEliminationMmd`
     // instead, its mass elimination reading the pivot's run in between.
@@ -929,12 +934,7 @@ inline void QuotientGraphCompacted::pruneMmd(std::int32_t pivot) {
 // THE PRUNE, amd's, with the first scan fused in. One walk of each vertex of C[pivot]
 // rewrites both halves of its run, accumulates the degree bound's explicit part, builds the
 // adjacency half of the hash key, and leaves the incidence half in the tagged `work`.
-//
-// THE ABSORBED CLIQUES' `work` IS ZEROED HERE, from the copy `beginEliminationAmd` took, because
-// the compaction below reads `work == 0` as "absorbed and gone".
 inline void QuotientGraphCompacted::pruneAmd(std::int32_t pivot, TaggedScan& scan) {
-    for (std::int32_t c : mAbsorbed) scan.work[c] = 0;
-
     const std::int32_t* newClique     = mSrc.data() + mSegment[pivot].srcPtr;
     const std::uint32_t newCliqueSize = mSegment[pivot].adjacencySize;
 
@@ -1054,7 +1054,7 @@ inline const std::vector<std::int32_t>& QuotientGraphCompacted::eliminateMmd(std
 
 inline const std::vector<std::int32_t>& QuotientGraphCompacted::eliminateAmd(std::int32_t pivot,
                                                                           TaggedScan& scan) {
-    beginEliminationAmd(pivot);
+    beginEliminationAmd(pivot, scan);
     pruneAmd(pivot, scan);
     return finishElimination(pivot);
 }

@@ -36,25 +36,6 @@ namespace Oblio {
 // about once per ordering, so the mid-walk path is nearly untested by any ordinary run.
 std::size_t gMmdCompactions = 0;
 
-namespace {
-
-
-
-struct TaggedScanCompacted {
-    Buckets*                          buckets;
-    std::vector<std::int32_t>&        w;             // per clique, the tagged workspace
-    const std::vector<std::uint32_t>& degree;
-    std::vector<std::int32_t>&        touchedCliques;// the cliques this step reached, once each
-    std::int32_t                      wflg;          // the tag for this elimination
-    std::int32_t                      modulus;       // the driver's bucket count, n + 1
-};
-
-
-
-
-
-} // namespace
-
 std::vector<std::int32_t> orderMmdCompacted(const std::vector<std::size_t>&  colPtr,
                                             const std::vector<std::int32_t>& rowIdx,
                                             std::int32_t delta) {

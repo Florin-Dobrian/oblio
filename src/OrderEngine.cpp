@@ -7,7 +7,7 @@
 
 #include <vector>
 
-// Entry points of the vendored ordering codes (raw int CSC arrays), declared only when those
+// Entry points of the oracle ordering codes (raw int CSC arrays), declared only when those
 // sources are being compiled. They live in private/, which is not part of the published tree, so
 // the two orderings they implement are optional; see the Makefile and CMakeLists.txt for the
 // detection, and docs/DESIGN_DECISIONS.md for why.
@@ -17,7 +17,7 @@ extern void mmd_order(int n, const int colPtr[], const int rowIdx[],
 extern void mmd_order_corrected(int n, const int colPtr[], const int rowIdx[],
                       int perm[], int invp[]);            // private/MmdCorrected.cpp
 extern "C" int amd_order(int n, const int Ap[], const int Ai[],
-                         int P[], double Control[], double Info[]);    // private/Amd.cpp
+                         int P[], double Control[], double Info[]);    // private/AmdVendored.cpp
 #endif
 
 namespace Oblio {
@@ -47,8 +47,8 @@ bool OrderEngine::compute(const std::vector<std::size_t>&  colPtr,
         case Ordering::MmdVendored:     return orderMmdVendored(size, colPtr, rowIdx, P);
         case Ordering::MmdCorrected:    return orderMmdCorrected(size, colPtr, rowIdx, P);
 #else
-        case Ordering::MmdVendored:     return false;   // vendored, and private/ is not present
-        case Ordering::MmdCorrected:    return false;
+        case Ordering::MmdVendored:     return false;   // vendored oracle, private/ not present
+        case Ordering::MmdCorrected:    return false;   // corrected oracle, private/ not present
 #endif
         case Ordering::MmdFlat:      return orderMmdFlat(size, colPtr, rowIdx, P);
         case Ordering::MmdChained:   return orderMmdChained(size, colPtr, rowIdx, P);
@@ -56,7 +56,7 @@ bool OrderEngine::compute(const std::vector<std::size_t>&  colPtr,
 #ifdef OBLIO_VENDORED_ORDERINGS
         case Ordering::AmdVendored:     return orderAmdVendored(size, colPtr, rowIdx, P);
 #else
-        case Ordering::AmdVendored:     return false;   // vendored, and private/ is not present
+        case Ordering::AmdVendored:     return false;   // vendored oracle, private/ not present
 #endif
         case Ordering::AmdFlat:      return orderAmdFlat(size, colPtr, rowIdx, P);
         case Ordering::AmdCompacted: return orderAmdCompacted(size, colPtr, rowIdx, P);
@@ -74,8 +74,8 @@ bool OrderEngine::orderNatural(std::size_t size, Permutation& P) const {
 #ifdef OBLIO_VENDORED_ORDERINGS
 namespace {
 
-// ONE BODY FOR BOTH VENDORED MMDs. `MmdVendored` and `MmdCorrected` are the same routine under two
-// entry points, one frozen and one with genmmd's degree scale repaired, so the adapter that strips
+// ONE BODY FOR BOTH MMD ORACLES. `MmdVendored` and `MmdCorrected` are the same routine under two
+// entry points, one frozen and one with the degree scale repaired, so the adapter that strips
 // the diagonal and crosses into the int-based C interface is shared and only the call differs.
 using MmdEntry = void (*)(int, const int[], const int[], int[], int[]);
 
@@ -89,7 +89,7 @@ bool orderMmdRaw(MmdEntry entry,
     newToOld.assign(size, 0);
     if (size == 0) return true;
 
-    // A is stored full-symmetric; the vendored MMD wants the off-diagonal structure only, so
+    // A is stored full-symmetric; the mmd oracle wants the off-diagonal structure only, so
     // strip the diagonal (no expansion needed, A already holds both triangles). This is MMD's
     // requirement alone: AMD symmetrizes and drops the diagonal itself, and MmdFlat builds its own
     // adjacency lists skipping i == j. Columns are indices, so aj is an int32_t and the
@@ -106,7 +106,7 @@ bool orderMmdRaw(MmdEntry entry,
         for (std::size_t cp = colPtr[aj]; cp < colPtr[aj + 1]; ++cp)
             if (rowIdx[cp] != aj) rowIdxOff[cur[aj]++] = rowIdx[cp];
 
-    // Crossing into the vendored C API, which is int-based throughout. These casts are not the
+    // Crossing into the oracle's C API, which is int-based throughout. These casts are not the
     // index/position crossings of our own type rules; they are the boundary of a foreign
     // interface, and the arrays below exist only to feed it.
     const int N   = static_cast<int>(size);
@@ -135,10 +135,11 @@ bool OrderEngine::orderMmdVendored(std::size_t size,
     return orderMmdRaw(mmd_order, size, colPtr, rowIdx, P.mOldToNew, P.mNewToOld);
 }
 
-// THE ORACLE FOR THE MMD BRANCH. genmmd files at the degree in `mmdint` and at the degree PLUS ONE
-// in `mmdupd`, so a refreshed vertex is penalised by one against one no pivot has reached and the
-// minimum is not always the minimum. `MmdVendored` keeps that and stays frozen for reference; this
-// one repairs it, and our three mmd drivers match THIS. See private/MmdCorrected.cpp.
+// THE ORACLE FOR THE MMD BRANCH. The vendored oracle files a vertex at its degree when the graph
+// is built and at the degree PLUS ONE when a degree is refreshed, so a refreshed vertex is
+// penalised by one against one no pivot has reached and the minimum is not always the minimum.
+// `MmdVendored` keeps that and stays frozen; this one repairs it, and our three mmd drivers match
+// THIS.
 bool OrderEngine::orderMmdCorrected(std::size_t size,
                            const std::vector<std::size_t>&  colPtr,
                            const std::vector<std::int32_t>& rowIdx,
@@ -147,7 +148,7 @@ bool OrderEngine::orderMmdCorrected(std::size_t size,
 }
 #endif
 
-// The completed MMD with genmmd's list order, which changes the permutation and nothing else.
+// The completed MMD with the oracle's list order, which changes the permutation and nothing else.
 bool OrderEngine::orderMmdFlat(std::size_t size,
                             const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,
@@ -195,8 +196,8 @@ bool OrderEngine::orderAmdVendored(std::size_t size,
 }
 #endif
 
-// Ours, the bound with aggressive absorption, hash detection and the vendored routine's list
-// order, which together reproduce AMD's permutation. Written into the maps the same way.
+// Ours, the bound with aggressive absorption, hash detection and the oracle's list order, which
+// together reproduce the amd oracle's permutation. Written into the maps the same way.
 bool OrderEngine::orderAmdFlat(std::size_t size,
                             const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,

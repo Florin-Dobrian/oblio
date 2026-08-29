@@ -188,7 +188,7 @@ The concept rows above hide the spellings. In full, where they differ between th
 | eliminated | `eliminated` | `eliminatedMmd`, `eliminatedAmd` |
 | performing an elimination | `eliminateMmd`, `eliminateAmd` | the same pair, over |
 | | | `beginElimination*`, `prune*`, `finishElimination` |
-| which half of the run comes first | `setVendoredListOrder` | the suffixed accessors and walks |
+| which half of the run comes first | `setAmdListOrder` | the suffixed accessors and walks |
 | mark array on demand | always allocated | `enableMarks` |
 
 ## What the tables say

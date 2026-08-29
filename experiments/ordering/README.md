@@ -9212,8 +9212,9 @@ the class touches `work` in three of four uses and membership is the natural sha
 reason.
 
 One thing to know before anyone edits scan structures: `TaggedScan` is shared VERBATIM across two
-classes, so a change to its shape is a change to both at once. And `TaggedScanCompacted` in
-`MmdCompacted` is still declared and never used, which is the loose end to clear first.
+classes, so a change to its shape is a change to both at once. `MmdCompacted` also carried a
+`TaggedScanCompacted`, a copy of that struct under an old name that nothing ever instantiated;
+it was deleted on 2026-08-29 along with the anonymous namespace that held nothing else.
 
 ## The key pass in pseudocode, and the two halves, 2026-08-28
 

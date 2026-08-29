@@ -60,12 +60,16 @@ Rename inside a function's own text, not the file's.
 The alignment work is close to done on `reachableSetWeight`, the two form functions, `merge`,
 `massEliminate` and the prunes: the flat and compacted bodies of `reachableSetWeight` and
 `massEliminate` are now identical modulo the arena name, checked by substitution rather than by eye.
-What remains is comments rather than code. The compacted `massEliminate` is missing four comment
-blocks flat has, and the chained `merge` has none of the two the others carry and writes
-`mMark[v] = GONE` directly where they call `markGone`.
+BOTH PRUNES JOINED THEM ON 2026-08-29, 33 and 59 code lines each side and three hunks each, every
+one of them the array member. What remains is comments rather than code: the compacted
+`massEliminate` is missing four comment blocks flat has, and the chained `merge` writes
+`mMark[v] = GONE` directly where the other two call `markGone`, that class having no `markGone` to
+call, so closing it means adding one.
 
 `pruneAmd` still holds `key`, which shadows `Buckets::key`, and it is the last shadowing local in
-the file.
+the file. CLOSED 2026-08-28: the accessor pair became `hashKey`/`setHashKey` with a second pair
+`hashBucket`/`setHashBucket` for the reduced form, and the locals became `uHashKey` and
+`uHashBucket`, so nothing shadows in either direction.
 
 ## PARTLY DONE 2026-08-28: the flat and compacted drivers could be ONE TEMPLATED BODY per branch
 

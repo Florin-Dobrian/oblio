@@ -1978,9 +1978,22 @@ computed for that round at all; if it stays outmatched across several rounds it 
 those either. genmmd writes `bwd[nd] = -maxint` and our `Buckets` spells it `outmatch`, with
 `restore`, `mmdelm`'s `bwd[rn] = 0`, putting it back.
 
-**And that is what the qxh list is for.** The reached vertices divide in two: `q2h`, cheap enough
-to decide exactly and where pairwise merging happens, and `qxh`, where outmatching happens instead.
-Both lists exist because of this split, not because of the batch.
+**And that is what the split is for, though NOT in the way this section used to say.** The claim
+here was that merging happens on `q2h` and outmatching on `qxh`. It is wrong: BOTH happen in the
+q2h walk, and the qxh walk does neither. In `MmdCorrected` the pair merge, `qsize[en] += qsize[nd]`,
+and the withholding, `bwd[nd] = -maxint`, are two arms of one `else if` inside the q2h loop, and the
+qxh loop at `n1600` only recomputes a degree. Ours agrees, `buckets.outmatch` appearing once in
+`MmdFlat`, inside the two-source walk.
+
+So the split is not merge-here-outmatch-there. It is DECIDABLE CHEAPLY against not, and everything
+mmd does beyond computing a degree happens on the cheap side:
+
+```
+q2h vertex   a cheap degree from the closed form,  then MERGE or OUTMATCH per candidate
+qxh vertex   the full union, and nothing else
+```
+
+Both lists exist because of that split, not because of the batch. Corrected 2026-08-28.
 
 ### Amd has no incomplete update, and hashing is not the reason
 
@@ -2263,7 +2276,7 @@ should expect fill to move in both directions across a set.
 
 ### If an mmd layer with hashing is ever built
 
-Two constraints, so that it is not attempted inside an existing driver.
+Three constraints, so that it is not attempted inside an existing driver.
 
 **It cannot be `Mmd3`.** That driver reproduces genmmd's permutation exactly and the differential
 depends on it; coarser supervariables change pivot choice. It would be a new layer with its own
@@ -2273,6 +2286,31 @@ twin.
 walks, `hval += e` and `hval += j` in scan 2, which is what makes it affordable there. mmd has no
 bound walk to fuse it into, so a naive version pays the whole key accumulation as a pass of its
 own, and a measurement of that would be measuring the pass rather than the idea.
+
+**AND THE TWO LINK SLOTS THE AMD HASH BORROWS ARE NOT FREE ON THIS BRANCH**, which is the concrete
+one. The amd overlay parks the key in `mPrev` and the chain in `mNext`, both free because
+`eliminateAmd` unfiled every member of `C[pivot]` and nothing refiles until a pass after detection.
+For a member of the clique an mmd refresh is walking, `mPrev[u]` is in one of three states and only
+the first is free:
+
+```
+UNFILED        free                    the ordinary case, after the batch's unfile + restore
+a link         NOT FREE, and live      filed by an EARLIER clique of this same refresh
+OUTMATCHED     NOT FREE, a sentinel    withheld, possibly rounds ago
+```
+
+The middle one is the awkward one, and no re-encoding reaches it: it is not a reserved value
+competing for range but a real predecessor link, with another vertex's `mNext` pointing back at it.
+Only `OUTMATCHED` is the kind of collision a different encoding could move.
+
+**The guard that already exists sidesteps all three, and the price is a tie-break.** The split loop
+skips exactly `filed(u) || outmatched(u)`, so the vertices it queues are precisely the ones whose
+slot reads `UNFILED`; `mNext` is free for them too, `unfile` setting it to `NIL` explicitly. What
+makes the slot stop being free partway through is that mmd FILES INSIDE the q2h and qxh walks, at
+the end of each vertex's own walk, where amd defers every filing to a pass after detection. So the
+change is to move mmd's filing after detection as well, and filing order decides which of several
+equal-degree vertices sits at a bucket head. The permutation moves. That is the same shape as
+`Amd2` filing during its bound pass where `Amd3` refiles afterwards and comes out canonical.
 
 ## The two prepasses: which drivers have one, and why they are not the same idea
 
@@ -7427,7 +7465,7 @@ IN A LIST
 OUT OF EVERY LIST
   mNext[u]   NIL, left by unfile               NIL, or the HASH CHAIN link
   mPrev[u]   -1               UNFILED          -1  UNFILED
-             INT32_MAX        OUTMATCHED       a raw HASH KEY
+             INT32_MAX        OUTMATCHED       a HASH KEY, in one of two forms
 
 EITHER WAY
   mHead[d]   a vertex id, or NIL               same
@@ -7486,10 +7524,32 @@ returns to `UNFILED` when an elimination reaches it, which `restore` does. No am
 `outmatch`.
 
 **amd adds the hash overlay**, `AMD_2`'s supervariable detection reusing `Last` and `Next`:
-`setKey`/`key` on `mPrev` and `setChain`/`chain` on `mNext`. No mmd driver touches them.
+`setHashKey`/`hashKey` and `setHashBucket`/`hashBucket` on `mPrev`, one pair per form, and
+`setChain`/`chain` on `mNext`. No mmd driver touches any of them.
 
 **ONLY AMD OVERLOADS `mNext`.** On the mmd side it is a pure link with one meaning; on the amd side
 it is a link while filed and a chain link while not.
+
+**AND THE AMD SLOT HOLDS TWO VALUES IN SEQUENCE, NOT ONE.** "A hash key" names a slot that changes
+meaning once more inside a single elimination step, and reading it as one state hides the reason
+detection can walk `C[pivot]` at all:
+
+```
+after pruneAmd         the UNREDUCED adjacency-half sum      read by the bound pass
+after the bound pass   the REDUCED key, u's bucket index     read by detection
+```
+
+The prune sums the surviving entries of `A[u]` and parks that; the bound pass adds the incidence
+half, reduces once modulo the bucket count, and writes the result back over it. So detection finds
+a vertex's bucket FROM THE VERTEX, `buckets.hashBucket(seed)`, rather than keeping a list of the
+keys it used, which is what lets the pass be driven by `C[pivot]`.
+
+**AND THERE IS A NAMED PAIR PER FORM**, `setHashKey`/`hashKey` and
+`setHashBucket`/`hashBucket`, over the one slot, so a call site says which form it means. The
+SIGNATURES carry it rather than the names alone: the key pair is `std::uint32_t` at the boundary
+and does the conversion itself, the bucket pair is `std::int32_t` throughout. Which is the
+distinction that matters, since a key is any bit pattern and cannot index anything while a bucket
+is in `[0, n)` and indexes `hashHead` directly.
 
 **AND THE AMD OVERLAY IS NOT SENTINEL-ENCODED, IT IS STATE-SCOPED**, which is the sharpest
 difference in this section. A hash key is an arbitrary `int32` with no reserved range, so it can
@@ -7546,7 +7606,7 @@ that work by another route entirely.
 The idea is `AMD_2`'s and ours is copied from it. During supervariable detection a vertex is out of
 every degree list, so both slots are free, and both codes park the hash there: the KEY in the
 `Last`/`mPrev` slot and the CHAIN LINK in the `Next`/`mNext` slot. `Last [i] = hval` is line 1936;
-ours is `setKey(u, hash)` beside `setChain(u, hashHead[hash])`.
+ours is `setHashBucket(u, uHashBucket)` beside `setChain(u, hashHead[uHashBucket])`.
 
 **WHERE THE BUCKET HEADS GO IS THE DIFFERENCE.** `AMD_2` refuses to spend an array on them and
 overlays `Head` itself, which is already the degree-list head array, telling the two apart by sign:
@@ -7610,7 +7670,8 @@ same division seen from the other side and is the shorter statement of it.
     unfile(u)            x         x       both        out, bucket read from mPrev
     outmatch(u)          x         .       mPrev       withheld, still live
     restore(u)           x         .       mPrev       withheld -> unfiled
-    setKey(u, k)         .         x       mPrev       hash key, while out of list
+    setHashKey(u, k)     .         x       mPrev       the UNREDUCED sum, out of list
+    setHashBucket(u, b)  .         x       mPrev       the REDUCED key, over the sum
     setChain(u, v)       .         x       mNext       hash chain, while out of list
 
   QUERIES
@@ -7619,7 +7680,8 @@ same division seen from the other side and is the shorter statement of it.
     next(u)              x         .       mNext       successor, for the prepass walk
     filed(u)             x         .       mPrev       is u in any list
     outmatched(u)        x         .       mPrev       is u withheld
-    key(u)               .         x       mPrev       the stored hash key
+    hashKey(u)           .         x       mPrev       the sum back, as uint32
+    hashBucket(u)        .         x       mPrev       u's bucket, an index in [0, n)
     chain(u)             .         x       mNext       the next vertex in the hash bucket
 ```
 
@@ -8859,6 +8921,354 @@ if it holds: the merge branch belongs in the incidence walk alone, which is wher
 the `vMark == cliqueTag` guard in the adjacency walk is unreachable. That is a reading, and reading
 has lost to instrumenting repeatedly in this tree. The instrument is a counter on that guard across
 the digest set.
+
+## Hash detection, the third rung, and the one that compares two live vertices, 2026-08-28
+
+**FIRST, WHERE IT RUNS, BECAUSE THERE IS NO REFRESH PHASE ON THIS BRANCH.** `AmdFlat` has a single
+`while (numEliminated < size)` loop with no batch and no separate refresh: select a pivot,
+eliminate, compute the bounds, detect, restore the degree lists, all in one step. Multiple
+elimination is genmmd's and not `AMD_2`'s. So hash detection runs inside the elimination step, after
+the bound pass and before the degree lists are restored, over the members of `C[pivot]`.
+
+### What is being proved
+
+The relation is the same one the other two rungs test:
+
+```
+reach(u) | {u} == reach(v) | {v}
+```
+
+with `v` a LIVE VERTEX rather than the pivot, which is what neither of the others can reach. Mass
+elimination only ever compares a member against the pivot, and two members can become
+interchangeable with each other without either being interchangeable with it.
+
+**THE REDUCTION THAT MAKES IT TESTABLE.** After the prune, u's reach is generated by its own two
+lists, so the definition read backward gives a condition on the GENERATORS rather than on the reach:
+
+```
+reach(u) = ( A[u] | C[c] for c in I[u] ) - {u}
+
+tested:    A[u] == A[v]   and   I[u] == I[v]
+```
+
+That is stronger than reach equality. Two vertices with equal reaches through different generators
+exist in principle and are missed, so the test is sound rather than complete, which is the price of
+comparing lists instead of computing sets.
+
+**WHY THE CLOSED FORM COMES OUT RIGHT.** Both `u` and `v` are members of `C[pivot]`, so `pivot` is
+in both incidence lists and each vertex lies in the other's reach. Given equal generators:
+
+```
+reach(u) | {u} = ( A[u] | C[c] for c in I[u] )      u is in C[pivot], so the - {u} is undone
+               = ( A[v] | C[c] for c in I[v] )      generators equal
+               = reach(v) | {v}
+```
+
+The `| {u}` and `| {v}` do the same job here as in the two sections above: each set omits only its
+own vertex, and each vertex is recovered from `C[pivot]`, which both lists name.
+
+### Two mechanisms, and only one of them decides
+
+**THE HASH IS A FILTER AND NEVER THE DECISION.** `hash = key % n`, chained through `hashHead` and
+`buckets.chain`, groups candidates so the exact comparison runs within a group instead of over all
+pairs. A collision costs a comparison and cannot cause a wrong merge, which is what lets the key be
+a cheap function of the lists rather than a perfect one.
+
+**THE EXACT TEST IS ONE STAMP AND TWO WALKS.** `w[x] = other` is written over every entry of u's
+lists once, hoisted above the candidate loop, and each candidate is then read against it:
+
+```
+reject on lengths   adjacencySize(v) != uAdjacencySize,  incidenceSize(v) != uIncidenceSize
+compare by stamp    every entry of A[v] and of I[v] carries `other`
+```
+
+Equal lengths plus every element of v's lists stamped by u gives equality in both directions, which
+is why one containment suffices and two are not needed.
+
+### Two subtleties that are easy to get wrong
+
+**INDEX 1, NOT 0, ON BOTH INCIDENCE WALKS.** The new clique sits at the front of every `I[u]` and is
+shared by every member of `C[pivot]`, so it cannot discriminate and is skipped on both sides.
+
+**THE LENGTHS ARE STORED LENGTHS, AND THAT IS DELIBERATE.** A vertex the hash absorbed earlier in
+this same loop is still listed by its neighbors, so both sides of a comparison count it and the
+answer stays consistent. Counting live entries instead would also be consistent, but it is a
+different quantity, it costs a test per entry, and it cannot reject a candidate until the whole list
+has been walked. `AMD_2` counts stored entries too, which is what keeps the two comparable.
+
+### What the merge does, and why the reach argument survives it
+
+`merge(u, v)` folds `v` into `u`, and **u's reachable set does not change**: the two were adjacent,
+`v` leaves the graph, and an external degree excludes u's own supervariable, so what `u` can reach
+is what it was. Every other member of `C[pivot]` is unaffected as well, `v` having been in
+`C[pivot]` with its weight moved to `u`, so the weighted size of `C[pivot]` is unchanged and so is
+the middle term of their bounds.
+
+What does change is u's weight, and the bound was computed with the pre-merge value, so the degree
+is corrected by one subtraction rather than recomputed. That is the amd twin of the seed-placement
+argument in the q2h section: in both branches a merge during detection moves weight into `u`, and in
+both the arithmetic is arranged so that the post-merge weight is the one that lands in the bucket.
+
+## The hash key round trip, and the one assumption nothing states, 2026-08-28
+
+The key is accumulated in `std::uint32_t` and stored in an `std::int32_t` slot. Both halves of that
+are forced, and for different reasons.
+
+**UNSIGNED TO COMPUTE, FOR TWO REASONS AND ONLY ONE OF THEM IS THE VENDORED ROUTINE'S.** `AMD_2`
+declares `UInt hval` and says why at the reduction: `a % b` is not defined by the standard when
+either operand is negative, so a signed key would index outside the bucket array. The stronger
+reason is the accumulation itself. The key WRAPS by design, the true sum being quadratic in the
+terms, and signed overflow is undefined behavior where unsigned wrapping is defined to be modular.
+So a signed accumulator is not merely at risk of a negative value, it is a construct the compiler
+may assume never occurs.
+
+**SIGNED TO STORE, BECAUSE THE SLOT IS `mPrev` AND IT HOLDS `NIL`.** Nothing reads the value as a
+signed quantity while it sits there: nothing orders it, nothing does arithmetic on it. It is a bit
+pattern in transport, and it comes back out through a cast to `std::uint32_t` and resumes being
+unsigned.
+
+### Consistency is not the condition; injectivity is
+
+The round trip is two conversions and they do not have the same status:
+
+```
+uint32 -> int32    IMPLEMENTATION-DEFINED in C++17, defined as modular from C++20
+int32  -> uint32   fully defined, modulo 2^32
+```
+
+so the value returns intact exactly when the first conversion is congruent mod 2^32, which is the
+two's complement reinterpretation. An implementation could be perfectly consistent and SATURATING,
+and then the round trip loses information. Every real target is modular and C++20 settles it by
+fiat, but "the implementation is consistent" and "the round trip is correct" are different claims.
+
+### THE ASSUMPTION THAT ACTUALLY BINDS IS CROSS-IMPLEMENTATION AGREEMENT
+
+The hash decides bucket assignment, which decides comparison order, which decides which of two
+indistinguishable vertices absorbs the other, which decides the permutation. `make digest` compares
+a recorded baseline against a later run, so if those two runs are on different machines the check
+assumes the two implementations agree about this conversion. That is stronger than per-machine
+consistency and it is stated nowhere.
+
+This project is exactly that pair: alpamayo is arm64 with Apple clang, the sandbox is x86-64 with
+gcc. `make amdorder` passing against a reference that relies on the same conversion is real
+evidence they agree. It is evidence and not a guarantee.
+
+### And the obvious tightening is not equivalent
+
+The exposure is ONE store. `pruneAmd` parks the UNREDUCED adjacency half, which can exceed
+`INT32_MAX`; the filing site stores the already-reduced value, always in `[0, n)` and so always in
+range. So the fix looks like reducing early, and it is not the same function:
+
+```
+wanted    ( (a + b) mod 2^32 ) mod n
+early     ( (a mod n) + b ) mod 2^32 mod n
+```
+
+The wrap at `2^32` is PART OF the hash, so reducing before it changes which vertices collide, which
+moves the permutation. The out-of-range store is load-bearing, and the only clean guarantee
+available is `-std=c++20`.
+
+## The detection loop in pseudocode, 2026-08-28
+
+Both amd drivers, which differ in one line of it and are otherwise identical.
+
+```
+# Runs inside the elimination of pivot p: after the bound pass, before the fourth pass.
+#
+# in     hashHead[b]      head of hash bucket b, filled by the bound pass
+#        chain(u)         next vertex in u's bucket          (mNext)
+#        hashBucket(u)    u's bucket                         (mPrev)
+#        work[]           the scan's values, up to workTag + maxCliqueWeight
+# out    merges, and work[] stamped above those values
+
+stamp = max(stamp, workTag + maxCliqueWeight)        # a stamp must clear every scan value
+
+for seed in C[p]:                                    # driven by the clique, not by the buckets
+    if dead(seed): continue
+    b = hashBucket(seed)
+    if hashHead[b] == NIL: continue                  # an earlier member already emptied it
+    head = hashHead[b]
+    hashHead[b] = NIL                                # emptied on arrival, so no clearing pass
+
+    for u = head; u != NIL and chain(u) != NIL; u = chain(u):
+        if dead(u): continue                         # absorbed earlier in this same loop
+
+        other = ++stamp                              # ONE stamp per outer vertex, hoisted
+        for x in A[u] + (I[u] - {p}): work[x] = other
+
+        for v = chain(u); v != NIL; v = chain(v):
+            if dead(v): continue
+            if |A[v]| != |A[u]|: continue            # stored lengths, reject before touching
+            if |I[v]| != |I[u]|: continue
+            if any x in A[v] + (I[v] - {p}) with work[x] != other: continue
+
+            merge v into u                           # weight(u) += weight(v); weight(v) = 0
+            numEliminated += 1
+```
+
+**FOUR THINGS THE SHAPE ENCODES**, in the order they appear.
+
+**`chain(u) != NIL` in the outer condition is the singleton skip.** A vertex at the end of its chain
+has nobody after it to compare against, so the stamp loop is never paid for it, and most buckets are
+singletons.
+
+**`A[u] + (I[u] - {p})` is the ONE line the two drivers spell differently**, and it is the only one.
+`AmdFlat` walks it as two spans, `A[u]` then `I[u]` from index 1; `AmdCompacted` walks it as one
+span from index 1, its run being contiguous with `p` at the front. Same set either way, and the
+difference is the layout rather than a choice.
+
+**The last `continue` is the exact test, and it is a CONTAINMENT.** Every entry of v's generators
+carries u's stamp. Equality follows from the two length checks together with the live/dead split of
+the id space, which is what stops an entry of `A[v]` matching against one of `I[u] - {p}`.
+
+**The outer loop does not re-anchor after a merge.** `u` advances by `chain(u)` regardless, and
+merged vertices are skipped by `dead()` when they come up. So a bucket of `k` vertices costs at most
+`k(k-1)/2` comparisons and the stamp is laid down once per OUTER vertex rather than once per pair.
+
+### What the tests decide, and what a collision is
+
+**SHARING A BUCKET IS NECESSARY; A COLLISION IS THE FAILURE CASE.** The two words are easy to run
+together and they name opposite outcomes:
+
+```
+same lists                    -> same key -> same bucket    a MATCH, guaranteed, never luck
+different lists, same bucket                                a COLLISION, pure cost
+```
+
+So a merge always happens between two vertices of one bucket and NEVER between a colliding pair:
+colliding means the lists differ, which is exactly what the third test rejects. A bucket can hold
+both, a genuine twin pair and an unrelated vertex, but the merge is not caused by the collision and
+would have happened without it.
+
+**AND A MERGE ON A COLLIDING PAIR WOULD NOT BE A WORSE ORDERING, IT WOULD BE A WRONG ONE.** A merge
+asserts `reach(u) | {u} == reach(v) | {v}` and acts on it: `v` leaves the graph, its weight moves to
+`u`, and every original behind `v` is committed to being eliminated with `u`. If the reaches differ,
+v's neighbours that `u` does not reach are lost, and the factorization is missing structure it
+needs.
+
+That is what makes the third test load-bearing in a way the other two are not. The two length checks
+could be dropped and the code would still be correct, only slower, the stamp walk catching the
+mismatch anyway. The stamp comparison cannot be dropped at all.
+
+**WHICH IS ALSO WHY THE HASH IS ALLOWED TO BE WEAK.** A filter that over-collects costs comparisons;
+a filter that under-collects would miss merges, which is a quality loss and still not a correctness
+one. Neither failure of the hash can produce a wrong answer, because the hash never decides.
+
+The counter that keeps this honest is `hash pairs tested` beside `hash merges`, in all three amd
+layers. It should read about one pair per merge, and on a 20x20 grid it reads 94 against 88, so
+nearly every pair tested is a real twin. Ledger entry 8 is what the opposite reading looks like:
+with the incidence half annihilated by the modulus it read 19.0 pairs per pivot against the
+vendored routine's 0.333, with buckets of 20 against essentially two.
+
+### Merges that are missed, and only one of the three is about the hash
+
+**THE HASH NEVER CAUSES A MISS.** Equal lists give equal keys and so the same bucket, by
+construction of the sum. There is no probabilistic failure in that direction, which is the direction
+that matters.
+
+**MISS ONE, the test is on GENERATORS and not on REACH.** Two vertices can reach the same set
+through different lists, and the exact test rejects them. Closing that gap means forming both
+reaches, which is the object the bound exists not to form.
+
+**MISS TWO, which is not one, and is worth ruling out.** The outer walk takes each `u` once and
+compares it against everything after it in its chain, so every pair in a bucket is tested. Stopping
+early would be the natural place to suspect a miss and there is nothing there.
+
+**MISS THREE, the real coverage limit: only members of `C[p]` are ever candidates.** Detection runs
+per elimination over the new clique alone, so two indistinguishable vertices elsewhere in the graph
+are never compared, and are found only if some later pivot reaches both. Pre-compression is the
+mechanism that looks at the whole matrix instead; see the family table above.
+
+**AND MISSING MERGES IS NOT OBVIOUSLY A LOSS.** A supervariable is a commitment to eliminate its
+members consecutively, so coarser detection is a smaller search space rather than a better one. The
+1996 paper reports AMD, MMD and CMMD finding orderings of about the same quality on very different
+detection reach, and on our own grids `amd2` fires the hash 2488 times and fills 7 per cent worse
+than `amd1`, which has no hash at all. The value of stronger detection is in TIME, not fill.
+
+**AND ONE LINE IS ABSENT THAT USED TO BE THERE.** A `degrees[u] -= weight(v)` sat at the merge until
+2026-08-28, with no vendored counterpart, and it was dead: the bound pass takes its
+`min(partial, degrees[u])` BEFORE detection and the fourth pass overwrites `degrees[u]` after it, so
+nothing read the value. Removing it also retired the `weight(v)` read, which had no other use. It is
+most likely a leftover from an arrangement in which the partial bound lived in `degrees[u]` rather
+than in `work[u]`, where the subtraction would have been load-bearing.
+
+## q2h against hashing, and why neither is tied to its branch, 2026-08-28
+
+The two live-vertex detectors are on opposite branches today because we follow two vendored codes.
+Nothing in either algorithm puts them there, and this section is the comparison written out so a
+future variation is a decision rather than a rediscovery.
+
+### The populations nest, and it is provable rather than measured
+
+**EVERY q2h MERGE IS A HASH MERGE.** A q2h pair has `A[u] = A[v] = {}` and `I[u] = I[v] = {rc, oc}`,
+so it passes the hash's exact test outright, and both are members of `C[rc]`, so both are
+candidates. The hash also takes pairs with any number of sources, so the containment is strict.
+
+```
+                    finds                                        cost of finding it
+q2h    pairs where BOTH have two sources and share both     free: a tag the degree walk reads anyway
+hash   any pair in C[p] with equal generators               a key per vertex, a stamp per outer
+                                                            vertex, a comparison per colliding pair
+```
+
+**AND NEITHER IS COMPLETE.** q2h misses everything with three or more sources. The hash misses pairs
+whose reaches agree through DIFFERENT generators, since it tests the lists rather than the sets.
+Both miss pairs outside `C[p]` entirely, which is pre-compression's territory.
+
+### What does not carry over, and it is one thing
+
+**q2h DOES THREE JOBS AND HASHING REPLACES ONE.**
+
+```
+q2h   a cheap degree from the closed form   hashing does not do this
+      MERGE on equality                     hashing does this, and strictly more
+      OUTMATCH on containment               hashing CANNOT do this at all
+```
+
+Outmatching needs `reach(u)` inside `reach(v)`, and a hash finds candidates for EQUALITY;
+containment is not decidable from a key, and no filter rescues it. So swapping hashing in for q2h on
+the mmd branch would give up incomplete update, which is one of Liu's two techniques.
+
+The reverse direction has no such loss. Adding q2h to amd would add a detector, not remove one,
+though it would need the two-source closed form and so a reach the bound never computes.
+
+### Why each sits where it does, and it is the SCHEDULE rather than the degree rule
+
+The usual explanation is that mmd can afford q2h because its degrees are exact and amd needs a hash
+because its degrees are bounds. That is the wrong axis. What decides it is whether the REACH SET is
+formed:
+
+```
+mmd   forms reach(u) to count it   so a shared tag falls out, and pairs are free to spot
+amd   decomposes and never forms it   so it has to go looking, which is what a hash is for
+```
+
+An exact degree materializes the set, so q2h merging and outmatching ride on a walk that was
+happening regardless. A bound opens no clique, so nothing is materialized and there is nothing to
+compare, which is why amd hashes and why it cannot outmatch. MA27 is the proof that the axis is the
+schedule and not the degree rule: true degrees AND hash detection, in one code.
+
+### So four cells exist and two are occupied
+
+```
+              q2h                       hash
+mmd           mmd2, mmd3, production    NOT BUILT, three constraints, see the section on it
+amd           NOT BUILT, needs a reach  amd2, amd3, production
+```
+
+The two empty cells are not symmetric. **The mmd-with-hashing cell is blocked by encoding rather
+than by algorithm**: it cannot be `MmdFlat`, the key has no walk to ride in on, and `mPrev` and
+`mNext` are not free when the overlay would want them. **The amd-with-q2h cell is blocked by the
+bound itself**, the two-source closed form needing `weight(C[rc])` and one other source walked,
+which is the reach the bound exists not to form.
+
+**AND MORE DETECTION IS NOT KNOWN TO BE BETTER**, which is the reason neither cell is urgent. A
+supervariable is a commitment to eliminate its members consecutively, so coarser is a smaller search
+space rather than a better one. The 1996 paper reports three schemes of very different detection
+reach finding orderings of about the same quality, and on our grids `amd2` fires the hash 2488 times
+and fills 7 per cent worse than `amd1`, which has no detector beyond mass elimination. Any
+experiment in the empty cells should be posed as a TIMING question with pivot count beside it, and
+should expect fill to move in both directions.
 
 ## Related
 

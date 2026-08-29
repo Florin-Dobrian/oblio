@@ -1,6 +1,6 @@
 #pragma once
 
-// QuotientGraphChained.h - the quotient graph on GENMMD'S CLIQUE STORAGE. Same algorithm and same
+// QuotientGraphChained.h - the quotient graph on a CHAINED CLIQUE STORE. Same algorithm and same
 // encoding as `QuotientGraph`; the difference is where a clique's members live, and pricing that
 // difference is the whole reason this class exists.
 //
@@ -49,9 +49,9 @@ public:
 
     bool eliminated(std::int32_t u) const { return mMark[u] == GONE; }
 
-    // The driver stamps into this same array rather than allocating a second one, which is what
-    // genmmd's `marker` does: `mmdelm` stamps at level `tag` and `mmdupd` at level
-    // `mt = tag + md0`, one array and one counter for both. Ours is one counter likewise, so two
+    // The driver stamps into this same array rather than allocating a second one: the eliminator
+    // stamps at one level and the refresh at another, one array and one counter for both. One
+    // counter is what makes it safe, so two
     // tags can never collide, and a comparison against a captured tag means what it says.
     std::int32_t advanceTag()                          { return ++mTag; }
     std::int32_t mark(std::int32_t u) const            { return mMark[u]; }
@@ -68,12 +68,10 @@ public:
     const std::int32_t* clique(std::int32_t c) const {
         return mSrc.data() + mSegment[c].srcPtr;
     }
-    // NO CLIQUE SIZE ARRAY. A clique ends where genmmd's ends: at a TERMINATOR value, or at the
-    // end of its last segment when the members fill it exactly. `mmdelm` writes
-    // `if (rl <= rm) adjncy[rl] = 0` and its walk carries both `j <= jt` and `if (nd == 0) break`,
-    // for precisely these two cases; ours does the same with one difference. genmmd's ids are
-    // 1-based so zero is free to mean "end"; ours are 0-based and vertex 0 is a real member, so
-    // the terminator has to be a value no member and no link can take. A link is `-(c + 1)` and so
+    // NO CLIQUE SIZE ARRAY. A clique ends at a TERMINATOR value, or at the end of its last segment
+    // when the members fill it exactly, and the walk carries a stop condition for each. The
+    // terminator has to be a value no member and no link can take, so zero will not do: ids are
+    // 0-based and vertex 0 is a real member. A link is `-(c + 1)` and so
     // lies in [-n, -1], which leaves the bottom of the range.
     static constexpr std::int32_t TERMINATOR = std::numeric_limits<std::int32_t>::lowest();
 
@@ -191,11 +189,11 @@ public:
 
     // Number u without eliminating it in the quotient-graph sense: no clique is formed, nothing is
     // pruned, and its neighbors keep degrees that still count it. That staleness is the point, and
-    // it is what genmmd's prepass does with the degree-0 and degree-1 vertices. The lists are left
+    // it is what the mmd prepass does with the degree-0 and degree-1 vertices. The lists are left
     // alone; every walk skips a numbered vertex from here on.
     void number(std::int32_t u);
 
-    // Walk I[u] from the back in the reachable-set walk, matching genmmd's clique stack. A
+    // Walk I[u] from the back in the reachable-set walk. A
     // tie-break
     // convention and nothing else: it changes which permutation comes out, never which sets are
     // computed. See the member's note.
@@ -239,7 +237,7 @@ public:
     // for its whole supervariable, whose members are eliminated consecutively, so this is where a
     // supervariable of size w becomes w columns, with the members in ASCENDING VERTEX INDEX rather
     // than merge order. Indistinguishable members, so only the permutation turns on that; the fill
-    // and the forest do not. It is genmmd's order.
+    // and the forest do not.
     //
     // NO `orderAsMerged` HERE, where the other two classes carry the pair. That one emits merge
     // order and the amd drivers are its only callers, and no amd driver uses this store.
@@ -299,14 +297,14 @@ private:
     std::vector<std::int32_t> mSuperNext;
     std::vector<std::int32_t> mSuperLast;
     // SIGNED, MIRRORING QuotientGraph. A one dimensional size is normally unsigned
-    // because it has nothing to stand in for; this one has. `AMD_2`'s `Nv`: positive is the
+    // because it has nothing to stand in for; this one has. Positive is the
     // weight, negative means already taken into the clique being built, zero means dead, so one
     // load answers what two arrays answered. No range is lost, a weight being bounded by n.
     //
     // IT IS HERE BECAUSE THIS FILE'S OBLIGATION IS TO STAY ENCODING-IDENTICAL TO `MmdFlat` rather
     // than because it pays on its own. Without it the time column stops being the price of the
     // storage and becomes that plus an encoding difference, which is what this file exists not to
-    // be. See docs/CODING_RULES.md for when a size may go signed.
+    // be.
     std::vector<std::int32_t> mWeight;
     // Mirrors QuotientGraph::mHasNumbered; always true here once the prepass has run.
     bool                      mHasNumbered = false;
@@ -314,7 +312,7 @@ private:
 
     std::vector<std::int32_t> mMerged;   // scratch for the vertices an elimination merges away
 
-    // Which end of I[u] the reachable-set walk starts from. genmmd threads its clique list
+    // Which end of I[u] the reachable-set walk starts from. The mmd branch threads its clique list
     // through an
     // integer array and pushes at the head, `list[nb] = el; el = nb`, then reads from the head, so
     // the clique seen LAST is expanded FIRST; we hold a vector and append. Same set either way and
@@ -324,7 +322,7 @@ private:
     // experiments/ordering/mmd3.py, where the same four walks are reversed together.
     bool mReverseIncidence = false;
 
-    // AMD_2's list conventions, off by default so the other five drivers are untouched. Read in
+    // The amd list conventions, off by default so the other drivers are untouched. Read in
     // the reachable-set walk and in the prune, hoisted at both sites for the same reason
     // mReverseIncidence
     // is: a member load the compiler cannot prove is unaliased by the stores in the loop. See the
@@ -338,8 +336,8 @@ private:
     // TWO STAMP SPACES IN ONE ARRAY: vertices at [v], cliques at [mSize + c]. Clique ids ARE
     // vertex ids, so one space cannot hold both once the vertex half carries GONE: stamping a
     // clique would write a live tag over the slot of the dead pivot that formed it, and a walk of
-    // an older clique still holding that pivot as a member would take it for live. Neither genmmd
-    // nor AMD_2 shares one array between the two kinds, and this is the cheap way to stop doing
+    // an older clique still holding that pivot as a member would take it for live. Neither
+    // reference shares one array between the two kinds, and this is the cheap way to stop doing
     // so. It is what lets the dead-clique test be a stamp again rather than a size, which is what
     // retires mCliqueSize.
     // PEAK LIVE CLIQUE MEMBERS, and this array is the price of having it here. See
@@ -443,9 +441,9 @@ inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int3
     const std::uint32_t adjN = mSegment[pivot].adjacencySize;
     const std::uint32_t incN = mSegment[pivot].incidenceSize;
 
-    // I[pivot] must be copied out before the segment holding it is overwritten. genmmd threads the
-    // same list through its `list[]` array; a small vector kept for its capacity costs no
-    // allocation after the first few pivots and keeps the walk order explicit.
+    // I[pivot] must be copied out before the segment holding it is overwritten. A small vector kept
+    // for its capacity costs no allocation after the first few pivots and keeps the walk order
+    // explicit.
     mAbsorbed.clear();
     for (std::uint32_t ck = 0; ck < incN; ++ck)
         mAbsorbed.push_back(mSrc[base + adjN + (reverse ? incN - 1 - ck : ck)]);
@@ -476,10 +474,10 @@ inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int3
     };
     // THE LIVE NEIGHBORS FIRST, AND WITHOUT THE BOUND CHECK. They are a subset of A[pivot], which
     // was read from this same segment, so the cursor cannot pass the reader and cannot leave the
-    // segment: at most adjN entries are written into a segment holding adjN + incN. genmmd's
-    // first loop is unchecked for exactly this reason, and checking here is not merely wasteful,
-    // it is wrong -- with incN == 0 the cursor legitimately lands on the last entry, and a check
-    // would read it as a link that was never written. Found by ASan on a 2 by 2 grid.
+    // segment: at most adjN entries are written into a segment holding adjN + incN. The first loop
+    // is unchecked for exactly this reason, and checking here is not merely wasteful, it is wrong:
+    // with incN == 0 the cursor legitimately lands on the last entry, and a check would read it as
+    // a link that was never written.
     std::uint32_t born = 0;                     // the clique's size; see numPeakCliqueMembers
     for (std::uint32_t vk = 0; vk < adjN; ++vk) {
         const std::int32_t v  = mSrc[base + vk];
@@ -508,13 +506,13 @@ inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int3
         });
     }
 
-    // THE TERMINATOR, where genmmd writes `if (rl <= rm) adjncy[rl] = 0`. The cursor stops one
+    // THE TERMINATOR. The cursor stops one
     // short of the segment end whenever a link was needed there, so there is room; the one case
     // with no room is a clique whose members fill its last segment exactly, and the walk's second
     // stop condition covers that.
     // Against `rm`, the CURRENT segment's last entry, not the pivot's: the cursor has followed
-    // every link the emit needed and is wherever that left it. genmmd writes `if (rl <= rm)` for
-    // exactly this reason. Comparing against the pivot's own segment end instead leaves a chain
+    // every link the emit needed and is wherever that left it. Comparing against the pivot's own
+    // segment end instead leaves a chain
     // unterminated and the walk runs off into whatever the next segment holds, which on a 2x2
     // grid is an immediate hang.
     if (rl <= rm) mSrc[rl] = TERMINATOR;
@@ -594,8 +592,8 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::eliminateMmd(std::
         // entries: only they move and c2..ck stay put. The pivot cannot be written first, which
         // is what the loop above would otherwise allow: the write cursor starts at `kept` and the
         // read at the original adjacencySize, and those are equal whenever nothing was pruned from
-        // A[u], so an extra write before the reads finish clobbers an unread entry. AMD_2 makes
-        // its three assignments after both compactions for exactly this reason.
+        // A[u], so an extra write before the reads finish clobbers an unread entry. The three
+        // assignments come after both compactions for exactly this reason.
         if (amdOrder && write - kept > 1) std::swap(source[kept], source[write - 1]);
     });
 
@@ -605,7 +603,7 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::eliminateMmd(std::
 // The same prune, with the driver's first scan folded into the two loops. The header carries the
 // argument for why this is one call and why it cannot be folded further; the loops below are the
 // plain ones with an accumulation added on each survivor, and nothing else differs.
-// The same prune again, with the driver's first scan folded in under `Amd.cpp`'s tagged-W
+// The same prune again, with the driver's first scan folded in under the tagged-workspace
 // encoding. This is the overload above with `outside`, `mark` and `tag` replaced by one array and
 // one tag, plus the hash key's adjacency half, which a driver that folds its scan in here has no
 // other walk of A[u] to accumulate. Everything the header says about why the fold is sound holds
@@ -636,7 +634,7 @@ QuotientGraphChained::finishElimination(std::int32_t pivot) {
 //
 // It runs from finishElimination by default and from the driver under mLateMassElimination, and
 // the body is the same either way: what moves is when the question is asked, since aggressive
-// absorption is what makes this cheap test agree with the true one. experiments/ordering/AMD3.md, entry 3.
+// absorption is what makes this cheap test agree with the true one.
 inline const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std::int32_t pivot) {
     mMerged.clear();   // a member scratch, kept for its capacity
     // THE SIGNS COME BACK HERE, IN A PASS THAT ALREADY EXISTS, mirroring QuotientGraph. The walk

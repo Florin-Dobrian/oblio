@@ -5,6 +5,15 @@ and `AmdFlat` use `QuotientGraphFlat` and nothing else, `MmdCompacted` and `AmdC
 `QuotientGraphCompacted` and nothing else. So there are two tables and neither loses anything to the
 other.
 
+**A DRIVER IS AN ENGINE INSTANTIATION AS OF 2026-08-30**, `MmdEngine<QuotientGraphFlat>` and its
+three siblings, the two bodies each being written once and instantiated per store. The four names
+survive as the free functions the `Ordering` enum dispatches to, and the tables below still read the
+same way: a row says which of the four reaches that entry point. What changed is that the two
+members of a pair now reach it from ONE body, so a difference between them is no longer something a
+reader has to find by diffing two files. Where a store genuinely cannot answer, the engine resolves
+it by an overload beside the instantiations rather than in the body; `numCompactions` is the only
+such case.
+
 **WHAT THIS DOCUMENT IS FOR.** Not the interfaces, which are in the headers and are authoritative
 there. This is the usage: which of each class's entry points each driver actually reaches, so that
 what the two branches share and where they part is visible in one place. It exists to support
@@ -74,7 +83,7 @@ as long as both classes agree about it, which is the usual case and the expected
 | `setReverseIncidence` | x |  | aligned |  |
 | `setLateMassElimination` |  | x | aligned |  |
 | **counters** | | | | |
-| `numBornCliqueMembers` | x | x | `layout` |  |
+| `numBornCliqueMembers` | x | x | aligned |  |
 | `numPeakCliqueMembers` | x | x | aligned |  |
 | `cliqueCountBalances` | x | x | aligned |  |
 
@@ -123,6 +132,7 @@ where the vendored routines disagree.
 | `setLateMassElimination` |  | x | aligned |  |
 | **counters** | | | | |
 | `numCompactions` | x | x | `layout` |  |
+| `numBornCliqueMembers` | x | x | aligned | added 2026-08-30 |
 | `numPeakCliqueMembers` | x | x | aligned |  |
 | `cliqueCountBalances` | x | x | aligned |  |
 
@@ -174,8 +184,8 @@ Both shapes are kept deliberately, to see which is the more useful to work from.
 | setLateMassElimination |  | x |  | x | aligned |  |  |
 | which half of the run comes first |  |  |  |  | done | 2026-08-21 | the flag went |
 | **counters** | | | | | | | |
-| numBornCliqueMembers | x | x |  |  | layout |  | only a growing store has to pay for it |
-| numCompactions |  |  | x | x | layout |  | the compacted class's whole storage figure |
+| numBornCliqueMembers | x | x | x | x | aligned | 2026-08-30 | compacted keeps a counter |
+| numCompactions |  |  | x | x | layout |  | only a bounded store can run out |
 | numPeakCliqueMembers | x | x | x | x | aligned |  |  |
 | cliqueCountBalances | x | x | x | x | aligned |  |  |
 
@@ -255,12 +265,23 @@ section below.
 **`setVendoredListOrder` is flat-only.** The compacted class has no such flag: the walk order is a
 suffixed pair instead. `MmdCompacted` carried a dead copy of the flag until 2026-08-19.
 
-**`numBornCliqueMembers` is flat-only, and the compacted drivers had a version of it briefly.** It
-answers how many members were ever put into a clique, which the benchmark prints as `cC`. The other
-two classes could compute the same number, the birth site being in all three; what is flat-only is
-having to PAY for it, since a compacted pool is sized at construction and reused. Their method
-reported the POOL's size instead, a different question with no caller, and both lost it.
-`numCompactions` is that class's storage figure alone.
+**`numBornCliqueMembers` IS NO LONGER FLAT-ONLY, 2026-08-30.** It answers how many members were ever
+put into a clique, which the benchmark prints as `cC`. The flat class reads it off its store's
+length, which it can because nothing there is reclaimed; the compacted class keeps a counter,
+incremented at its single birth site beside the live and peak counters it was already maintaining
+there.
+
+**IT WAS ADDED FOR THE CROSS-CHECK RATHER THAN THE FIGURE.** Members born is a property of the
+ALGORITHM and not of the layout, exactly as the peak is: a branch's two drivers return one
+permutation, so they form the same cliques with the same sizes at the same moments and MUST report
+the same `cC`. That check did not exist before. The objection recorded here previously, that a
+compacted pool is sized at construction and reused so its class should not pay for the figure, was
+answered by looking: the increment is one line at a site that already does the add, O(1) per
+elimination and not per member.
+
+An earlier version of this method on the compacted classes reported the POOL's size instead, a
+different question with no caller, and both lost it; that is a separate thing from the counter added
+now. `numCompactions` remains that class's alone.
 
 ## Aligning the two classes
 
@@ -270,9 +291,14 @@ should be traceable to arena against pool, and where it is not, it is an acciden
 were written and is worth removing. The compacted class is the flat one with positions into a
 different layout, and it should not differ from it at an algorithmic level.
 
-**Genuinely layout-driven, and to be left alone.** `numBornCliqueMembers` against `numCompactions`:
-one class has a store that only grows and the other a workspace that is compacted, so what each has
-to report about its storage is a different quantity. Nothing else in either table is of this kind.
+**Genuinely layout-driven, and to be left alone.** `numCompactions`: only a store with a bounded
+pool can run out and be compacted, so an arena has no such quantity to report. THE FLAT CLASS
+BRIEFLY ANSWERED IT WITH A `constexpr 0` and no longer does, that being an accessor for a thing the
+class does not have; the difference is absorbed instead by an overload pair local to each engine's
+unit, so the shared body asks `numCompactionsOf(qg)` and does not know which store it holds.
+
+`numBornCliqueMembers` was listed here as the other half of this pair until 2026-08-30 and is now
+aligned; see above. Nothing else in either table is of this kind.
 
 ### The ledger
 
@@ -286,7 +312,8 @@ column is the `align` value the tables carry.
 | 3, `done` | the `eliminate` wrapper | apart | **aligned** | 2026-08-21 |
 | 4, `done` | `eliminated` split, with `enableMarks` | apart | **aligned** | 2026-08-21 |
 | 5, `done` | `setVendoredListOrder` against the suffixes | apart | **aligned** | 2026-08-21 |
-| `layout` | `numBornCliqueMembers` against `numCompactions` | apart | apart, by design | |
+| `layout` | `numBornCliqueMembers` | apart | **aligned** | 2026-08-30 |
+| `layout` | `numCompactions` | apart | apart, by design | |
 
 **A closed item keeps its number and its row**, showing `done` in the tables rather than
 disappearing, so the numbering never shifts under a reader who has been following it.
@@ -390,7 +417,8 @@ are the gate at each one, and the baseline below is the second gate.
 
 **FOUR OF THE FIVE ARE CLOSED AS OF 2026-08-21, AND THE FIFTH WAS REVERSED ON 2026-08-23**, item 1
 having been a difference the layout causes rather than an accident; see its entry. What remains
-between the two classes is `numBornCliqueMembers` against `numCompactions`, which is layout. The two
+between the two classes is `numCompactions` alone, which is layout: `numBornCliqueMembers` joined it
+in that row until 2026-08-30 and is now on both classes. The two
 `adjacencyAmd` calls in `AmdFlat`'s hash-detection block are GONE as of 2026-08-28: the flat class
 took the amd run order and the two detection regions are now byte-identical.
 
@@ -413,19 +441,20 @@ the two `adjacencyAmd` calls named above and the order of two adjacent rejects.*
 above the table was right and the arithmetic beside it was not. Both of those amd differences are
 closed as of 2026-08-28, the rejects having been reordered and the run order flipped.
 
-**One residual the tables do not show, and it is the tail.** Three of the four drivers publish
-their counters in the same order and `MmdCompacted` does not:
+**The tail residual recorded here is CLOSED as of 2026-08-30.** Three of the four drivers used to
+publish their counters in one order and `MmdCompacted` in another; there is now no tail to differ,
+the four drivers being two engine instantiations apiece and the publication being four assignments
+in one shared body:
 
 ```
-MmdFlat         balances, peak, arena
-AmdFlat         balances, peak, arena
-AmdCompacted    balances, compactions, peak, arena
-MmdCompacted    balances, arena, compactions, peak
+eo.mOrder                = qg.orderAscending(pivots);   // orderAsMerged on the amd branch
+eo.mNumPeakCliqueMembers = qg.numPeakCliqueMembers();
+eo.mNumBornCliqueMembers = qg.numBornCliqueMembers();
+eo.mNumCompactions       = numCompactionsOf(qg);
 ```
 
-`AmdCompacted` is `AmdFlat` with one line inserted; `MmdCompacted` is neither `MmdFlat` with one
-line inserted nor a match for `AmdCompacted`. Nothing observable turns on it, which is exactly what
-the five closed items had in common.
+The counters left the drivers' signatures and three globals on the same day and now ride on
+`ElmOrder`, the object an ordering produces.
 
 ### The current reading, 2026-08-24, and it supersedes the baseline below
 

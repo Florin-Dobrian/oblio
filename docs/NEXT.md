@@ -11,8 +11,8 @@ specific to 3d.
 out.** `MmdCorrected` is our own port of genmmd: same allocation pattern, same n-sized vectors, same
 setup, so the fixed costs appear on both sides and cancel, leaving the algorithmic work. `AMD_2` is
 a different codebase with its own preprocessing, so its time is not made of the same parts as ours
-and nothing cancels. That alone can produce a U: our fixed cost dominant at small n and falling away as
-the ordering work grows superlinearly, theirs or our locality dominant at the top end.
+and nothing cancels. That alone can produce a U: our fixed cost dominant at small n and falling away
+as the ordering work grows superlinearly, theirs or our locality dominant at the top end.
 
 **THE INSTRUMENT EXISTS AND HAS NOT BEEN POINTED AT THIS.** `make phases3d` decomposes `AMD_2`'s own
 time into `AMD_aat` and the rest, which answers directly whether the denominator's composition moves
@@ -97,7 +97,34 @@ the file. CLOSED 2026-08-28: the accessor pair became `hashKey`/`setHashKey` wit
 `hashBucket`/`setHashBucket` for the reduced form, and the locals became `uHashKey` and
 `uHashBucket`, so nothing shadows in either direction.
 
-## PARTLY DONE 2026-08-28: the flat and compacted drivers could be ONE TEMPLATED BODY per branch
+## DONE 2026-08-30: the flat and compacted drivers are ONE TEMPLATED BODY per branch
+
+**BOTH BRANCHES ARE ENGINES.** `MmdEngine<QuotientGraph>` in `src/MmdEngine.cpp` and
+`AmdEngine<QuotientGraph>` in `src/AmdEngine.cpp`, each with its body written once and explicitly
+instantiated for `QuotientGraphFlat` and `QuotientGraphCompacted` in the same unit as both graph
+classes. The four drivers are adapters of about thirty lines, one per instantiation, and they exist
+so the `Ordering` enum has a function to dispatch to; whether they survive is an open question, and
+answering it means moving 33 call sites and three `OrderFn` tables.
+
+**THE HEADER-PLACEMENT PROBLEM THIS ENTRY WORRIED ABOUT DID NOT EXIST.** The body does not have to
+live in a header. `CODING_RULES.md` requires a driver to be in the same translation unit as its
+graph, not a unit to itself, and one `.cpp` holding the body and both explicit instantiations
+satisfies it exactly, both graph classes being visible there. That is `NumFactorEngine`'s
+arrangement followed rather than excepted, and it means no `extern template` conflict and no design
+decision was owed.
+
+**THE `if constexpr` THE ENTRY EXPECTED WAS NOT NEEDED EITHER.** The reporting tails stopped
+differing before the templating began: the counters left the drivers' signatures for `ElmOrder`, so
+both bodies end with the same four assignments. The one thing a store genuinely cannot answer,
+`numCompactions`, is resolved by an overload pair in an anonymous namespace beside the
+instantiations, so the body says `numCompactionsOf(qg)` and knows nothing about layouts.
+
+**AND THE ENGINES ABSORBED MORE THAN THE BODY.** `delta` became configuration on `MmdEngine` rather
+than a defaulted third argument, which deleted the forwarders `test_order`, `order_digest` and
+`order_timing` each kept to supply it. `AmdEngine` holds nothing at all, amd's one tunable being
+fixed rather than exposed, which is `SymFactorEngine`'s shape.
+
+The record of how the entry read before it was done follows.
 
 Compaction happens inside `QuotientGraphCompacted`, so a driver never sees it. Diffing the driver
 bodies with comments stripped shows how little is left once that is true:
@@ -2050,7 +2077,7 @@ be reverted, being a fixed sum at its declaration and an accumulator three lines
 against.** The `colPtr` parameters and the `cp` loop over them; `mSourcePtr` and `mCliquePtr`; the
 five accumulators, `bound` in the four accumulating amd drivers, `deg` in `AmdFlat` and the hash
 `key` in three, together with their `std::min<std::size_t>` calls and operand casts; `size()`;
-`Buckets`'s constructor; the driver-local `size`; and `numFlagSweeps`, a diagnostic counter bounded
+`Buckets`'s constructor; the driver-local `size`; and `numTagResets`, a diagnostic counter bounded
 by the tag range rather than by n, which the dimension rule does not decide and which was left
 deliberately.
 

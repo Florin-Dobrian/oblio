@@ -459,9 +459,10 @@ OrderEngine -> ElmForestEngine -> SymFactorEngine -> NumFactorEngine -> SolveEng
 Done:
 
 - [x] MMD and AMD ordering, vendored (AMD from SuiteSparse 3.3.4; MMD via Oblio 0.9)
-- [x] Oblio's own MMD and AMD, five drivers over three clique stores, each reproducing its
-      branch's reference permutation exactly. `AmdCompacted` is the default, so a build without
-      the vendored pair orders with ours
+- [x] Oblio's own MMD and AMD, two engines templated on the clique store plus a chained driver,
+      five orderings over three stores, each reproducing its branch's reference permutation
+      exactly. `AmdCompacted` is the default, so a build without the vendored pair orders with
+      ours
 - [x] Supernodal symbolic factorization (elimination forest + symbolic factor, ported from 0.9)
 - [x] Cholesky and static LDL, both LDL^T and LDL^H, left-looking and right-looking
 - [x] Single-RHS triangular solve (`Vector`)

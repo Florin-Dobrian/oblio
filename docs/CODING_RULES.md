@@ -105,14 +105,22 @@ softer layer: conventions for consistency, not correctness.
   it is promoted, `QuotientGraphChained` keep their bodies in their headers.** Two reasons, and
   neither is about how the code reads:
 
-  - **Every driver should be in the same translation unit as its quotient graph, so that our
-    drivers can be compared with each other.** A driver calling out of its own unit reloads the
+  - **An ordering's BODY must be in the same translation unit as its quotient graph, so that our
+    orderings can be compared with each other.** A body calling out of its own unit reloads the
     pool's and the run array's bases around every call and spills the pivot loop's registers.
     Until 2026-08-19 our drivers were split between the two arrangements, so a ratio between two
     of them was biased toward whichever happened to be in its own unit. Uniformity is what fixes
     that. It does NOT make a comparison against `AMD_2` or `genmmd` apples to apples: those are
     single units too, but they differ from us in other ways nobody has enumerated, and predicting
     that our ratios against them would improve turned out to be wrong.
+
+    **THE UNIT IS THE ENGINE'S AS OF 2026-08-30**, not the driver's. `MmdEngine.cpp` and
+    `AmdEngine.cpp` each hold one body, both graph headers, and both explicit instantiations, so
+    every instantiation is compiled with its store's bodies visible. The four driver files are
+    adapters that call out of their unit into the engine, which is what this rule forbids of a
+    BODY and is free for a wrapper: one call per ordering, outside every loop. What the rule is
+    about is the pivot loop, so it is stated in terms of the body rather than the file that
+    happens to carry the public name.
   - **It is also faster where it ships**, so this is not a bench-only arrangement.
 
   It measurably does not cost compile time here, which is what made it available: the flat

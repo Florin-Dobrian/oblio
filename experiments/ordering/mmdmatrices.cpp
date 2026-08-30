@@ -175,7 +175,7 @@ Outcome check(const std::string& path, const Options& options) {
     std::vector<std::size_t>  colPtr;
     std::vector<std::int32_t> rowIdx;
     toOurs(read.matrix, colPtr, rowIdx);
-    const std::vector<std::int32_t> ours = Oblio::orderMmdFlat(colPtr, rowIdx);
+    const std::vector<std::int32_t> ours = Oblio::orderMmdFlat(colPtr, rowIdx).order();
 
     std::vector<int> ap, ai;
     toVendored(read.matrix, ap, ai);

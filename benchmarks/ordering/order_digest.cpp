@@ -3,7 +3,7 @@
 // WHAT IT ANSWERS. "Did anything move?", asked of every driver at once. Almost every change to the
 // ordering code is a RE-ENCODING rather than an algorithm change: an array folded into another, a
 // fact read off a sign instead of a stamp, a pass reordered. Those must leave every permutation
-// exactly as it was, and when the change is in `QuotientGraph` that means every driver's, not the
+// exactly as it was, and when the change is in `QuotientGraphFlat` that means every driver's, not the
 // one being worked on. This asks all of them in about two seconds.
 //
 // WHAT IT IS NOT, and this matters more than what it is. It is SELF-REFERENTIAL: it says "same as
@@ -87,15 +87,15 @@ unsigned long long digest(const std::vector<std::int32_t>& perm) {
     return h;
 }
 
-using OrderFn = std::vector<std::int32_t> (*)(const std::vector<std::size_t>&,
-                                              const std::vector<std::int32_t>&);
+using OrderFn = ElmOrder (*)(const std::vector<std::size_t>&,
+                                const std::vector<std::int32_t>&);
 
 // EVERY MMD DRIVER TAKES A `delta` WITH A DEFAULT, so none of them has type OrderFn: a default
 // argument is not part of a function's type and cannot be bound through a pointer. Forwarded
 // rather than widening OrderFn, because delta is the mmd layers' business and the amd ones have no
 // counterpart to it. Zero is what OrderEngine passes.
 #define OBLIO_DIGEST_FORWARD(NAME, CALL)                                          \
-    std::vector<std::int32_t> NAME(const std::vector<std::size_t>&  colPtr,       \
+    ElmOrder NAME(const std::vector<std::size_t>&  colPtr,       \
                                    const std::vector<std::int32_t>& rowIdx) {     \
         return CALL(colPtr, rowIdx);                                              \
     }
@@ -155,7 +155,7 @@ int main(int argc, char** argv) {
         for (int side = 2; side <= last; ++side) {
             grid(side, cubic != 0, colPtr, rowIdx);
             for (const Driver& d : drivers()) {
-                const unsigned long long got = digest(d.fn(colPtr, rowIdx));
+                const unsigned long long got = digest(d.fn(colPtr, rowIdx).order());
                 char key[64];
                 std::snprintf(key, sizeof key, "%s/%s%d", d.name, cubic ? "cube" : "square", side);
                 if (record) {

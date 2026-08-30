@@ -66,6 +66,7 @@ OBLIO_SRCS = \
   src/SparseMatrix.cpp \
   src/Permutation.cpp \
   src/OrderEngine.cpp \
+  src/MmdEngine.cpp \
   src/MmdFlat.cpp \
   src/MmdChained.cpp \
   src/MmdCompacted.cpp \

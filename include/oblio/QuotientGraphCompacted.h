@@ -2,9 +2,9 @@
 
 // QuotientGraphCompacted.h - the quotient graph on a POOLED CLIQUE LAYOUT: one workspace holding a
 // vertex's two lists AND every live clique, with a free cursor and a compaction, where
-// `QuotientGraph` keeps C[c] in a separate store that only grows.
+// `QuotientGraphFlat` keeps C[c] in a separate store that only grows.
 //
-// SAME GRAPH, SAME ALGORITHMS, DIFFERENT STORAGE. Every idea in QuotientGraph.h holds here without
+// SAME GRAPH, SAME ALGORITHMS, DIFFERENT STORAGE. Every idea in QuotientGraphFlat.h holds here without
 // change. Read that file first; this one comments only what the storage makes different, which is
 // where the cliques live and what has to happen when the pool fills.
 //
@@ -42,7 +42,7 @@
 // the short circuit that keeps an empty array safe in the shared bodies carrying the
 // `mHasNumbered && mMark[v] == GONE` guard.
 
-#include "oblio/QuotientGraph.h"   // Buckets and TaggedScan, which are shared verbatim
+#include "oblio/Buckets.h"   // Buckets and TaggedScan, which are shared verbatim
 #include "oblio/Types.h"
 
 #include <algorithm>
@@ -56,7 +56,7 @@ namespace Oblio {
 
 class QuotientGraphCompacted {
 public:
-    // NO cliqueMarks ARGUMENT, unlike QuotientGraph's. That flag sized a mark array at n or 2n;
+    // NO cliqueMarks ARGUMENT, unlike QuotientGraphFlat's. That flag sized a mark array at n or 2n;
     // here the array is absent unless a driver asks for it, and no driver wants clique marks.
     QuotientGraphCompacted(const std::vector<std::size_t>&  colPtr,
                            const std::vector<std::int32_t>& rowIdx);
@@ -193,7 +193,7 @@ public:
     // that was already a no-op on one of them.
     const std::vector<std::int32_t>& finishElimination(std::int32_t pivot);
 
-    // AND THE THREE AS ONE CALL, overloaded on the scan exactly as `QuotientGraph`'s pair is: the
+    // AND THE THREE AS ONE CALL, overloaded on the scan exactly as `QuotientGraphFlat`'s pair is: the
     // mmd prune takes nothing and the amd one takes a `TaggedScan`, so the argument selects the
     // branch. The value of the wrapper is that the ORDER of the three steps lives here rather
     // than in each driver, where nothing could enforce it. The three remain public and remain
@@ -249,6 +249,13 @@ public:
     // still be caught doing different work, and have been. Checked in tests/test_order.cpp.
     std::size_t numPeakCliqueMembers() const { return mNumPeakCliqueMembers; }
     std::size_t numLiveCliqueMembers() const { return mNumLiveCliqueMembers; }
+
+    // MEMBERS BORN, the third of born, live and peak: they differ in WHEN rather than in what is
+    // counted, and nothing is ever subtracted from this one. It is a property of the algorithm on
+    // the same terms as the peak above, so a branch's two drivers must report the same figure. The
+    // flat class answers from its store's length, which it can because nothing there is reclaimed;
+    // this layout reclaims, so the count has to be kept.
+    std::size_t numBornCliqueMembers() const { return mNumBornCliqueMembers; }
 
     // THE COUNTER CHECKED AGAINST A RECOMPUTATION, debug builds only. Five sites move the count: a
     // birth in `beginElimination`, a death in `killClique`, the shrink in mass elimination, the
@@ -344,6 +351,7 @@ private:
 
     std::size_t mNumLiveCliqueMembers = 0;   // see numPeakCliqueMembers
     std::size_t mNumPeakCliqueMembers = 0;
+    std::size_t mNumBornCliqueMembers = 0;   // see numBornCliqueMembers; never decremented
 #ifndef NDEBUG
     // Every vertex that ever formed a clique, which is what the recomputation sums over. It cannot
     // be taken from a driver's pivot list: those also carry vertices that never formed one, the
@@ -1316,6 +1324,7 @@ inline void QuotientGraphCompacted::bearClique(std::int32_t pivot, std::size_t c
     // maximum is taken here alone since nothing else raises the total.
     mNumLiveCliqueMembers += cliqueLen;
     mNumPeakCliqueMembers  = std::max(mNumPeakCliqueMembers, mNumLiveCliqueMembers);
+    mNumBornCliqueMembers += cliqueLen;
 #ifndef NDEBUG
     mCliqueOwners.push_back(pivot);
 #endif

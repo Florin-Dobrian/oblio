@@ -116,7 +116,7 @@ extern "C" void pbRawOrder(const int* raw, int n) { gRaw.assign(raw, raw + n); }
 //
 // The five phases and the comparable region are set out in tools/hook_amd.py. In brief,
 // `build + core` is the vendored routine turning a caller's pattern into its working structure and
-// then ordering it, which is what `orderAmdFlat` does from `QuotientGraph`'s constructor onward.
+// then ordering it, which is what `orderAmdFlat` does from `QuotientGraphFlat`'s constructor onward.
 //
 // IT IS CHECKED BEFORE IT IS READ, on the rule this tree keeps rediscovering: an instrument that
 // silently declines to measure is worse than one that is absent. The copy must return the shipped
@@ -222,7 +222,7 @@ static constexpr double targetMs = 300.0;
 //
 // `MmdChained` is local for the same reason and is PERMANENT, 2026-08-16. It is MmdFlat on genmmd's
 // dead-segment clique storage, carried in src/MmdChained.cpp with its own private copy of
-// QuotientGraph. That storage keeps the ordering inside `O(n + m)`, so the answer is reachable whenever the input
+// QuotientGraphFlat. That storage keeps the ordering inside `O(n + m)`, so the answer is reachable whenever the input
 // fits, which our arena cannot promise; it is a maintained alternative rather than an experiment
 // awaiting a verdict, and the columns here are how its price stays measured. It returns MmdFlat's
 // permutation by construction, so its fill column carries nothing and its TIME column is the price.
@@ -231,8 +231,8 @@ static constexpr double targetMs = 300.0;
 // docs/DESIGN_DECISIONS.md (2026-08-16), and the section "The
 // vendored storage scheme, and what it is worth" in experiments/ordering/README.md for what is
 // being measured.
-using OrderFn = std::vector<std::int32_t>(*)(const std::vector<std::size_t>&,
-                                             const std::vector<std::int32_t>&);
+using OrderFn = ElmOrder(*)(const std::vector<std::size_t>&,
+                               const std::vector<std::int32_t>&);
 
 struct Method {
     std::string name;
@@ -309,7 +309,7 @@ static Permutation rawPermutation(const SparseMatrix<double>& A) {
 // The same shape as mmd3bPermutation below, for any B layer taken as a free function.
 static Permutation fnPermutation(const SparseMatrix<double>& A, OrderFn f) {
     Permutation P;
-    P.setNewToOld(f(A.colPtr(), A.rowIdx()));
+    P.setNewToOld(f(A.colPtr(), A.rowIdx()).order());
     return P;
 }
 
@@ -336,13 +336,13 @@ static double orderTimeFnB(const SparseMatrix<double>& A, OrderFn f) {
 // which is what MmdChained has for historical reasons. `orderMmdCompacted` carries a defaulted
 // `delta` so its type is not OrderFn and it cannot be named where one is wanted; this forwards it, exactly as
 // test_order.cpp and order_digest.cpp do. Zero is what OrderEngine passes.
-static std::vector<std::int32_t> mmdCompactedDefault(const std::vector<std::size_t>&  colPtr,
+static ElmOrder mmdCompactedDefault(const std::vector<std::size_t>&  colPtr,
                                               const std::vector<std::int32_t>& rowIdx) {
     return orderMmdCompacted(colPtr, rowIdx);
 }
 
 static Permutation mmd3bPermutation(const SparseMatrix<double>& A) {    Permutation P;
-    P.setNewToOld(orderMmdChained(A.colPtr(), A.rowIdx()));
+    P.setNewToOld(orderMmdChained(A.colPtr(), A.rowIdx()).order());
     return P;
 }
 

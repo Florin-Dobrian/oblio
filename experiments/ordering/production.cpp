@@ -72,8 +72,8 @@ static void run(const std::string& layer, const std::string& name, const Graph& 
     std::vector<std::size_t>  colPtr;
     std::vector<std::int32_t> rowIdx;
     toCsc(graph, colPtr, rowIdx);
-    if (layer == "mmd3") printOrder(Oblio::orderMmdFlat(colPtr, rowIdx));
-    if (layer == "amd3") printOrder(Oblio::orderAmdFlat(colPtr, rowIdx));
+    if (layer == "mmd3") printOrder(Oblio::orderMmdFlat(colPtr, rowIdx).order());
+    if (layer == "amd3") printOrder(Oblio::orderAmdFlat(colPtr, rowIdx).order());
     std::cout << "\n";
 }
 

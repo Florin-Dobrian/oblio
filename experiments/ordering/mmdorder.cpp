@@ -91,7 +91,7 @@ static bool check(const std::string& name, const Graph& graph) {
     std::vector<std::size_t>  colPtr;
     std::vector<std::int32_t> rowIdx;
     toCsc(graph, colPtr, rowIdx);
-    const std::vector<std::int32_t> ours = Oblio::orderMmdFlat(colPtr, rowIdx);
+    const std::vector<std::int32_t> ours = Oblio::orderMmdFlat(colPtr, rowIdx).order();
 
     std::vector<int> ap, ai;
     toCscNoDiagonal(graph, ap, ai);

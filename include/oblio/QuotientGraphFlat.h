@@ -1,7 +1,8 @@
 #pragma once
 
-// QuotientGraph.h - the representation Oblio's own minimum-degree orderings run on, and the degree
-// buckets they pick from. Shared by every driver on this layout, mmd and amd alike.
+// QuotientGraphFlat.h - the representation Oblio's own minimum-degree orderings run on, over a
+// CLIQUE ARENA: a store that only appends, in elimination order, and never reclaims. Shared by
+// every driver on this layout, mmd and amd alike.
 //
 // The idea, in one line: an elimination does not create fill edges, it creates a CLIQUE, and a
 // clique of d vertices is a d-clique list rather than d(d-1)/2 edges. So the neighbor relation
@@ -26,6 +27,7 @@
 // No sets anywhere. Membership is a mark array stamped with a monotone tag, so a query is one
 // comparison and nothing is allocated. Every list edit is a compaction in place.
 
+#include "oblio/Buckets.h"   // TaggedScan, which four of the amd entry points take
 #include "oblio/Types.h"
 
 #include <algorithm>
@@ -38,176 +40,11 @@
 
 namespace Oblio {
 
-// Written by every driver that tracks it; read by test_order. Defined with the bodies below,
-// `inline` so that every unit including this header shares the one object.
-extern std::size_t gPeakCliqueMembers;
-
-// The degree buckets: one doubly linked list per degree, threaded through arrays of size n, so
-// that filing, unfiling and taking the head are all O(1). MMD spells these fwd/bwd and AMD
-// Next/Last. An ordered container cannot give O(1) removal from the middle, which is what a
-// degree change needs and what happens far more often than a pick.
-//
-// The bodies are inline because they are single-statement pointer splices on the hot path, the
-// same exception the tree makes for trivial accessors.
-class Buckets {
-public:
-    // ALL THREE ARE SIZE n. The heads are indexed by DEGREE and the links by VERTEX, two ranges of
-    // the same extent: every branch files at the true degree, which reaches n - 1. A caller that
-    // reads a bucket must bound its own index; the mmd prepass does.
-
-    // FOUR FACTS IN `mPrev[u]`, told apart by sign, which is what lets three arrays be three
-    // rather than four:
-    //
-    //     mPrev[u] in [0, n)       filed; the vertex before it is mPrev[u]
-    //     mPrev[u] <= -2           filed AT THE HEAD of bucket -mPrev[u] - 2
-    //     mPrev[u] == UNFILED      not in any list                            (-1)
-    //     mPrev[u] == OUTMATCHED   withheld from the buckets; see outmatch()  (INT32_MAX)
-    //
-    // THE HEAD CASE IS WHAT DELETES A DEGREE ARRAY. `unfile` reads the bucket back out of the
-    // slot and takes no degree argument, so no caller has to keep one to unfile with. The amd
-    // drivers keep theirs for a different reason: their bound READS the value.
-    //
-    // A PREDECESSOR IS STORED RAW AND THE HEAD FORM IS SHIFTED BY TWO. The shift is two and not
-    // one because DEGREE 0 IS REACHABLE, an isolated vertex filing at 0, and -1 is taken by
-    // UNFILED.
-    //
-    // BOTH SENTINELS ARE EQUALITY-ONLY. Nothing here orders `mPrev` against either, so they sit at
-    // the two values a predecessor and a head cannot take, leaving the whole range below -1 to the
-    // head form.
-    //
-    // IT FITS EXACTLY AT THE LARGEST ADMISSIBLE n, with nothing to spare at either end: a head
-    // encodes a degree reaching n - 1, so the head form runs to -(n + 1) and lands on the type's
-    // minimum at n == MAX_IDX, while a predecessor reaches n - 1 and leaves INT32_MAX free above
-    // it. Filing at anything above the true degree does not fit.
-    //
-    // A DEGREE IS ONE DIMENSIONAL and so `std::uint32_t` in every signature here. The links stay
-    // `std::int32_t`, carrying NIL and UNFILED; only the key does not.
-    static constexpr std::int32_t UNFILED    = -1;
-    static constexpr std::int32_t OUTMATCHED = std::numeric_limits<std::int32_t>::max();
-
-    explicit Buckets(std::size_t size)
-        : mHead(size, NIL), mNext(size, NIL), mPrev(size, UNFILED) {}
-
-    // buckets[degree].add(u), at the head. The head is the only O(1) end of a singly reachable
-    // list, so the winner among equal degrees is whatever was filed last rather than the lowest
-    // index. That tie-break is what the oracles use, and it is why an ordering differs from an
-    // exact scan's in its ties.
-    void file(std::uint32_t degree, std::int32_t u) {
-        mNext[u] = mHead[degree];
-        mPrev[u] = -static_cast<std::int32_t>(degree) - 2;   // head of `degree`; see the encoding
-        if (mHead[degree] != NIL) mPrev[mHead[degree]] = u;
-        mHead[degree] = u;
-    }
-
-    // buckets[degree].discard(u). Idempotent, which matters during a batch: a vertex evicted
-    // early can be merged away by a later pivot in the same round, and unfiling it twice must
-    // not splice a list it is no longer in.
-    void unfile(std::int32_t u) {
-        const std::int32_t prev = mPrev[u];
-        if (prev == UNFILED || prev == OUTMATCHED) return;   // not in a list; see the encoding
-        if (prev >= 0) mNext[prev]      = mNext[u];
-        else           mHead[-prev - 2] = mNext[u];          // u headed bucket -prev - 2
-        if (mNext[u] != NIL) mPrev[mNext[u]] = prev;
-        mNext[u] = NIL;
-        mPrev[u] = UNFILED;
-    }
-
-    // Withhold u from the buckets without filing it anywhere. It stays live and reachable; it
-    // simply cannot be the minimum before the vertex that outmatched it, so it is not a candidate
-    // until an elimination reaches it and `restore` puts it back. Unfiling and restoring are one
-    // operation in two calls, which is why they sit together at every call site here.
-    void outmatch(std::int32_t u)         { unfile(u); mPrev[u] = OUTMATCHED; }
-    void restore(std::int32_t u)          { if (mPrev[u] == OUTMATCHED) mPrev[u] = UNFILED; }
-    bool outmatched(std::int32_t u) const { return mPrev[u] == OUTMATCHED; }
-
-    // The next vertex in the same bucket, and whether u is filed at all. Only mmd reads either.
-    // A VERTEX OUT OF EVERY LIST HAS BOTH LINKS FREE, and the amd branch parks the hash key in one
-    // and the hash chain in the other for the middle of an elimination step, which is why it needs
-    // no key array and no hash-head links of its own.
-    //
-    // TWO FORMS IN ONE SLOT, and a pair of names for each so a call site says which it means. The
-    // prune parks the UNREDUCED sum, `setHashKey`/`hashKey`; the driver reduces it modulo the
-    // bucket count and writes the result back over it, `setHashBucket`/`hashBucket`, which is what
-    // lets detection find a vertex's bucket from the vertex. Both pairs are the same slot, and the
-    // SIGNATURES are what tell them apart: a key is any bit pattern and cannot index anything, a
-    // bucket is in [0, n) and indexes the hash heads directly.
-    //
-    // THE KEY PAIR CARRIES THE CONVERSION, so no caller writes a cast. A key is accumulated
-    // unsigned, wrapping being defined there and `% n` being well defined only there, and the slot
-    // is `std::int32_t` because it also has to hold NIL and the two sentinels. The round trip is
-    // the two's complement reinterpretation; the uint32-to-int32 half of it is
-    // implementation-defined before C++20.
-    //
-    // LEGAL ONLY BETWEEN unfile() AND file(). Either form is an arbitrary int32 and can look like
-    // any of the encodings mPrev carries, so `unfile()`, `filed()` and `outmatched()` MUST NOT be
-    // called on a vertex holding one; they would splice a list on garbage. No mmd driver may call
-    // these: mmd leaves its candidates filed and asks `filed()` about them.
-    void          setHashKey(std::int32_t u, std::uint32_t uHashKey)
-                                       { mPrev[u] = static_cast<std::int32_t>(uHashKey); }
-    std::uint32_t hashKey(std::int32_t u) const
-                                       { return static_cast<std::uint32_t>(mPrev[u]); }
-    void          setHashBucket(std::int32_t u, std::int32_t uHashBucket)
-                                       { mPrev[u] = uHashBucket; }
-    std::int32_t  hashBucket(std::int32_t u) const
-                                       { return mPrev[u]; }
-    void         setChain(std::int32_t u, std::int32_t v)                { mNext[u] = v; }
-    std::int32_t chain(std::int32_t u) const                             { return mNext[u]; }
-
-    std::int32_t next(std::int32_t u) const      { return mNext[u]; }
-    bool         filed(std::int32_t u) const     { return mPrev[u] != UNFILED
-                                                          && mPrev[u] != OUTMATCHED; }
-
-    std::int32_t head(std::uint32_t degree) const  { return mHead[degree]; }
-    bool         empty(std::uint32_t degree) const { return mHead[degree] == NIL; }
-
-private:
-    std::vector<std::int32_t> mHead;   // mHead[d], the first live vertex of degree d
-    std::vector<std::int32_t> mNext;   // mNext[u], toward the tail
-    std::vector<std::int32_t> mPrev;   // mPrev[u], toward the head
-    // A byte per vertex, not std::vector<bool>. That specialization packs one bit per entry, and
-    // what it costs here is CONSTRUCTION: a vector of n false is built through the bit-reference
-    // machinery word by word where a vector of n zero bytes is a memset, and this is built once
-    // per ordering.
-};
-
-
-// The same, for a driver carrying a TAGGED array instead of a value array and a separate
-// seen-this-step mark. One array holds three facts: `work[c] == 0` is absorbed, `0 < work[c] <
-// workTag` is alive but stale, and `work[c] >= workTag` is seen this step with `work[c] - workTag`
-// the value. So there is no mark to carry and no clearing pass.
-//
-// `key` carries the ADJACENCY HALF of the hash key alone, and the reason is a phase boundary
-// rather than a preference: aggressive absorption runs between this prune and the driver's bound
-// pass and COMPACTS I[u] in place, so the list the other half must sum over does not exist yet
-// here.
-//
-// REDUCED AS IT ACCUMULATES, modulo the driver's bucket count, which is why it is an int32. The
-// key is only ever used modulo that number, so reducing early cannot change which bucket a vertex
-// lands in, and the running value stays narrow enough to ride in an array the driver already has.
-struct TaggedScan {
-    // THE BUCKETS, OR NOT. A driver that parks its hash key in the links passes them: the prune
-    // then takes every member of C[pivot] out of the degree lists and parks the adjacency half of
-    // the hash key in the predecessor link it has just freed. A driver that refiles inside its own
-    // bound pass, which is Amd2 and Amd2B, cannot have either: its links are still degree links
-    // when the hash runs. Those pass NULL and build their key in a pass of their own.
-    //
-    // Null therefore means "leave the degree lists alone and store no key". It does not change
-    // what the scan computes, only where the by-products go.
-    Buckets*                          buckets;
-    std::vector<std::int32_t>&        work;          // per clique, the tagged workspace
-    // Serves a LIVE vertex's degree and a DEAD one's clique weight from
-    // one array, the two being disjoint because a clique id is the id of the pivot that formed it.
-    // The scan reads only the clique half.
-    const std::vector<std::uint32_t>& degree;
-    std::vector<std::int32_t>&        touchedCliques;// the cliques this step reached, once each
-    std::int32_t                      workTag;       // the tag for this elimination
-    std::int32_t                      modulus;       // the driver's bucket count, n + 1
-};
 
 // The quotient graph itself: the three lists above, the liveness flags, and the supervariable
 // members that mass elimination grows. A driver owns one of these, picks a pivot, calls
 // the eliminator, and refreshes whatever the elimination reached.
-class QuotientGraph {
+class QuotientGraphFlat {
 public:
     // Built straight from A's pattern. A is stored with both triangles, so a column's rows are
     // already its neighbors, and the only conversion is dropping the diagonal. Oblio's input
@@ -216,7 +53,7 @@ public:
     //
     // ONE MARK PER VERTEX. Supervariable detection stamps into the driver's own tagged array, so
     // nothing asks for a second half.
-    QuotientGraph(const std::vector<std::size_t>&  colPtr,
+    QuotientGraphFlat(const std::vector<std::size_t>&  colPtr,
                   const std::vector<std::int32_t>& rowIdx);
 
     std::size_t size() const { return mSize; }
@@ -635,20 +472,14 @@ private:
 // read by tests/test_order.cpp. One symbol rather than one per driver, because the whole use is to
 // compare two drivers back to back: run one, read this, run the other, read it again.
 //
-// A GLOBAL RATHER THAN A RETURN VALUE, and deliberately. The figure is a cross-check between
-// implementations rather than a result anyone orders a matrix to obtain, so it does not belong in
-// the public ordering signature; `gAmdCompactions` is here for the same reason. Not thread safe,
-// and it does not need to be: nothing writes it outside a test.
-inline std::size_t gPeakCliqueMembers = 0;
-
 // ALLOCATED ON DEMAND, and the amd branch never calls this. `NIL` rather than zero as the initial
 // stamp, since zero is a tag a walk can reach and this array's whole job is to answer "have I seen
 // v this step" against `mTag`, which starts there.
-inline void QuotientGraph::enableMarks() {
+inline void QuotientGraphFlat::enableMarks() {
     mMark.assign(mSize, NIL);
 }
 
-inline QuotientGraph::QuotientGraph(const std::vector<std::size_t>&  colPtr,
+inline QuotientGraphFlat::QuotientGraphFlat(const std::vector<std::size_t>&  colPtr,
                              const std::vector<std::int32_t>& rowIdx)
     : mSize(colPtr.empty() ? 0 : colPtr.size() - 1), mSegment(mSize) {
 
@@ -690,7 +521,7 @@ inline QuotientGraph::QuotientGraph(const std::vector<std::size_t>&  colPtr,
 
 // APPENDS to `reached` and does not clear it, which is what lets beginElimination point it straight
 // at the clique arena instead of at a scratch. The returning overload below clears for itself.
-inline void QuotientGraph::formReachableSetMmd(std::int32_t u,
+inline void QuotientGraphFlat::formReachableSetMmd(std::int32_t u,
                                                std::vector<std::int32_t>& reachableSet) {
     // reach(u) = ( A[u] | C[c] for c in I[u] ) - {u}
     //
@@ -749,7 +580,7 @@ inline void QuotientGraph::formReachableSetMmd(std::int32_t u,
 
 // APPENDS to `reached` and does not clear it, which is what lets beginElimination point it straight
 // at the clique arena instead of at a scratch. The returning overload below clears for itself.
-inline void QuotientGraph::formReachableSetAmd(std::int32_t u,
+inline void QuotientGraphFlat::formReachableSetAmd(std::int32_t u,
                                                std::vector<std::int32_t>& reachableSet) {
     // reach(u) = ( A[u] | C[c] for c in I[u] ) - {u}
     //
@@ -803,7 +634,7 @@ inline void QuotientGraph::formReachableSetAmd(std::int32_t u,
     }
 }
 
-inline std::uint32_t QuotientGraph::reachableSetWeight(std::int32_t u) {
+inline std::uint32_t QuotientGraphFlat::reachableSetWeight(std::int32_t u) {
     // A sum over DISTINCT vertices, so bounded by n; see the header.
     std::uint32_t totalWeight = 0;
     ++mTag;
@@ -836,7 +667,7 @@ inline std::uint32_t QuotientGraph::reachableSetWeight(std::int32_t u) {
     return totalWeight;
 }
 
-inline void QuotientGraph::number(std::int32_t u) {
+inline void QuotientGraphFlat::number(std::int32_t u) {
     // A numbered vertex lingers in every list that named it, deliberately: its neighbors keep
     // degrees that still count it. GONE is what stops the walks following it back in.
     //
@@ -846,7 +677,7 @@ inline void QuotientGraph::number(std::int32_t u) {
     mMark[u]     = GONE;
 }
 
-inline void QuotientGraph::setAside(std::int32_t u) {
+inline void QuotientGraphFlat::setAside(std::int32_t u) {
     // ZERO WEIGHT IS THE WHOLE MECHANISM. `formReachableSet*` takes a vertex on `nv > 0` and the
     // prune keeps one on the same test, so a zero-weight vertex is unreachable and is dropped from
     // every list the first time that list is rewritten. GONE additionally stops `eliminated`
@@ -859,7 +690,7 @@ inline void QuotientGraph::setAside(std::int32_t u) {
     markGone(u);
 }
 
-inline void QuotientGraph::beginEliminationMmd(std::int32_t pivot) {
+inline void QuotientGraphFlat::beginEliminationMmd(std::int32_t pivot) {
     // The reach is written STRAIGHT INTO THE ARENA. C[pivot] is the reach, so the block the walk
     // fills is the clique's own block and no scratch is needed.
     //
@@ -919,7 +750,7 @@ inline void QuotientGraph::beginEliminationMmd(std::int32_t pivot) {
     mCliqueWeight = newCliqueWeight;
 }
 
-inline void QuotientGraph::beginEliminationAmd(std::int32_t pivot, TaggedScan& scan) {
+inline void QuotientGraphFlat::beginEliminationAmd(std::int32_t pivot, TaggedScan& scan) {
     // The reach is written STRAIGHT INTO THE ARENA. C[pivot] is the reach, so the block the walk
     // fills is the clique's own block and no scratch is needed.
     //
@@ -997,7 +828,7 @@ inline void QuotientGraph::beginEliminationAmd(std::int32_t pivot, TaggedScan& s
 //            I[u] = [ c1 c2 ... ct p ]        the pivot LAST, nothing rotated
 //
 // The new clique is read FIRST by walking I[u] REVERSED; see setReverseIncidence.
-inline void QuotientGraph::pruneMmd(std::int32_t pivot) {
+inline void QuotientGraphFlat::pruneMmd(std::int32_t pivot) {
     const std::int32_t* newClique     = mCliqueSrc.data() + mSegment[pivot].srcPtr;
     const std::uint32_t newCliqueSize = mSegment[pivot].adjacencySize;
 
@@ -1069,7 +900,7 @@ inline void QuotientGraph::pruneMmd(std::int32_t pivot) {
 // UNDER THE mmd LAYOUT IT WOULD BE CHEAPER, two moves and no adjacency rotation, the boundary not
 // moving when I[u] grows rightward. That is the trade this branch makes: three moves here against
 // the single detection span the layout buys.
-inline void QuotientGraph::pruneAmd(std::int32_t pivot, TaggedScan& scan) {
+inline void QuotientGraphFlat::pruneAmd(std::int32_t pivot, TaggedScan& scan) {
     const std::int32_t* newClique     = mCliqueSrc.data() + mSegment[pivot].srcPtr;
     const std::uint32_t newCliqueSize = mSegment[pivot].adjacencySize;
 
@@ -1187,7 +1018,7 @@ inline void QuotientGraph::pruneAmd(std::int32_t pivot, TaggedScan& scan) {
     }
 }
 
-inline const std::vector<std::int32_t>& QuotientGraph::finishElimination(std::int32_t pivot) {
+inline const std::vector<std::int32_t>& QuotientGraphFlat::finishElimination(std::int32_t pivot) {
     // Under mLateMassElimination the merge is the caller's, run after it has absorbed, so this
     // hands back an empty list and C[pivot] stays reach(pivot) exactly. See the setter.
     if (mLateMassElimination) {   // amd (the driver runs it later)
@@ -1204,13 +1035,13 @@ inline const std::vector<std::int32_t>& QuotientGraph::finishElimination(std::in
     return mMerged;
 }
 
-inline const std::vector<std::int32_t>& QuotientGraph::eliminateMmd(std::int32_t pivot) {
+inline const std::vector<std::int32_t>& QuotientGraphFlat::eliminateMmd(std::int32_t pivot) {
     beginEliminationMmd(pivot);
     pruneMmd(pivot);
     return finishElimination(pivot);
 }
 
-inline const std::vector<std::int32_t>& QuotientGraph::eliminateAmd(std::int32_t pivot,
+inline const std::vector<std::int32_t>& QuotientGraphFlat::eliminateAmd(std::int32_t pivot,
                                                                     TaggedScan& scan) {
     beginEliminationAmd(pivot, scan);
     pruneAmd(pivot, scan);
@@ -1227,7 +1058,7 @@ inline const std::vector<std::int32_t>& QuotientGraph::eliminateAmd(std::int32_t
 // It runs from finishElimination by default and from the driver under mLateMassElimination, and
 // the body is the same either way: what moves is when the question is asked, since aggressive
 // absorption is what makes this cheap test agree with the true one.
-inline const std::vector<std::int32_t>& QuotientGraph::massEliminate(std::int32_t pivot) {
+inline const std::vector<std::int32_t>& QuotientGraphFlat::massEliminate(std::int32_t pivot) {
     mMerged.clear();   // a member scratch, kept for its capacity
     // Walks C[pivot], which is still the full reach: the trim below is this function's own and
     // happens after the loop.
@@ -1302,7 +1133,7 @@ inline const std::vector<std::int32_t>& QuotientGraph::massEliminate(std::int32_
     // Write the survivors over the front of the clique and shorten it. What falls off the end is
     // what supervariable detection absorbed. The trimmed tail is left as a hole: this store never
     // reclaims.
-inline void QuotientGraph::trimClique(std::int32_t pivot, std::uint32_t kept) {
+inline void QuotientGraphFlat::trimClique(std::int32_t pivot, std::uint32_t kept) {
     mNumLiveCliqueMembers -= mSegment[pivot].adjacencySize - kept;   // the trimmed tail is not live
     mSegment[pivot].adjacencySize = kept;
 }
@@ -1314,7 +1145,7 @@ inline void QuotientGraph::trimClique(std::int32_t pivot, std::uint32_t kept) {
 // ONLY FOR A VERTEX THAT ACTUALLY FORMED ONE. A clique is born in `beginElimination` and nowhere
 // else, so `adjacencySize` means a clique's length only for a vertex that has been a pivot; for
 // any other it is still A[v]'s length. `merge` therefore does NOT call this, and says so.
-inline bool QuotientGraph::cliqueCountBalances() const {
+inline bool QuotientGraphFlat::cliqueCountBalances() const {
 #ifdef NDEBUG
     return true;
 #else
@@ -1324,12 +1155,12 @@ inline bool QuotientGraph::cliqueCountBalances() const {
 #endif
 }
 
-inline void QuotientGraph::killClique(std::int32_t c) {
+inline void QuotientGraphFlat::killClique(std::int32_t c) {
     mNumLiveCliqueMembers -= mSegment[c].adjacencySize;
     mSegment[c].adjacencySize = 0;
 }
 
-inline void QuotientGraph::merge(std::int32_t u, std::int32_t v) {
+inline void QuotientGraphFlat::merge(std::int32_t u, std::int32_t v) {
     mSuperNext[mSuperLast[u]] = v;                 // append v's chain, order preserved
     mSuperLast[u]             = mSuperLast[v];
     mWeight[u]                += mWeight[v];
@@ -1342,7 +1173,7 @@ inline void QuotientGraph::merge(std::int32_t u, std::int32_t v) {
     markGone(v);          // mmd only; the amd branch reads the zero weight above and has no array
 }
 
-inline void QuotientGraph::absorbAggressively(const std::vector<std::int32_t>& cliques,
+inline void QuotientGraphFlat::absorbAggressively(const std::vector<std::int32_t>& cliques,
                                               const std::int32_t*  vertices,
                                               std::uint32_t        vertexCount) {
     if (cliques.empty()) return;
@@ -1378,7 +1209,7 @@ inline void QuotientGraph::absorbAggressively(const std::vector<std::int32_t>& c
     }
 }
 
-inline std::vector<std::int32_t> QuotientGraph::orderAscending(
+inline std::vector<std::int32_t> QuotientGraphFlat::orderAscending(
         const std::vector<std::int32_t>& pivots) const {
     std::vector<std::int32_t> order(mSize);
     std::vector<std::int32_t> cursor(mSize, 0);
@@ -1406,7 +1237,7 @@ inline std::vector<std::int32_t> QuotientGraph::orderAscending(
 }
 
 inline std::vector<std::int32_t>
-QuotientGraph::orderAsMerged(const std::vector<std::int32_t>& pivots) const {
+QuotientGraphFlat::orderAsMerged(const std::vector<std::int32_t>& pivots) const {
     std::vector<std::int32_t> order;
     order.reserve(mSize);
     for (std::int32_t pivot : pivots)

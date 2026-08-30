@@ -49,7 +49,7 @@
 #include "oblio/MmdChained.h"
 #include "oblio/MmdCompacted.h"
 #include "oblio/Permutation.h"
-#include "oblio/QuotientGraph.h"
+#include "oblio/ElmOrder.h"
 #include "oblio/SparseMatrix.h"
 
 #include <algorithm>
@@ -231,11 +231,11 @@ void run(const std::string& path, const Options& options) {
         : bestOf([&] { const auto p = orderMmdFlat(colPtr, rowIdx); (void) p; }, repeats);
     // TWO CLIQUE FIGURES, AND THEY ANSWER DIFFERENT QUESTIONS.
     //
-    //   cC   MEMBERS BORN, from the ordering's own reporting overload: every vertex ever put into
+    //   cC   MEMBERS BORN, from the ordering's result: every vertex ever put into
     //        a clique. Nothing here is reclaimed, so the flat store still holds all of them, dead
     //        cliques AND the members that contractions dropped out of live ones, which is what
     //        makes this figure what the flat layout actually costs.
-    //   pC   PEAK LIVE MEMBERS, read from `gPeakCliqueMembers`: the most that was alive at any one
+    //   pC   PEAK LIVE MEMBERS, from the same result: the most that was alive at any one
     //        instant. It is what a CHUNKED clique store would ask the allocator for at its worst
     //        moment, and PAYLOAD ONLY, with no per-clique header, no allocator rounding and no
     //        capacity above size.
@@ -245,20 +245,20 @@ void run(const std::string& path, const Options& options) {
     // members at the same moments; the figure is identical for all three, and the same holds for
     // `AmdFlat` against `AmdCompacted`. Neither vendored routine can report one. Only cC is ours,
     // and a chunked version would show this same pC with a cC of nothing.
-    std::size_t cC = 0;
-    gPeakCliqueMembers = 0;
-    const std::vector<std::int32_t> order = amd ? orderAmdFlat(colPtr, rowIdx, cC)
-                                                : orderMmdFlat(colPtr, rowIdx, 0, cC);
-    const std::size_t pC   = gPeakCliqueMembers;
+    const ElmOrder result = amd ? orderAmdFlat(colPtr, rowIdx)
+                                : orderMmdFlat(colPtr, rowIdx);
+    const std::vector<std::int32_t>& order = result.order();
+    const std::size_t cC   = result.numBornCliqueMembers();
+    const std::size_t pC   = result.numPeakCliqueMembers();
     const std::size_t nnzL = fillOf(A, order);
 
     // THE B SIBLING RIDES ALONG ON BOTH BRANCHES, and only its time is reported: `AmdCompacted` on
     // the amd side, `MmdChained` on the mmd side. Each is its branch's driver on a DIFFERENT CLIQUE
-    // LAYOUT, `AMD_2`'s compacting pool and genmmd's chained segments respectively, so in neither
-    // case is there anything for a `cC` column to compare; see experiments/ordering/README.md on
-    // the three layouts. Everything else about a sibling MUST match its driver, the two being the
-    // same algorithm with the same encodings, so the order, the fill and the peak live members are
-    // CHECKED rather than printed and a mismatch is flagged at the end of the row.
+    // LAYOUT, `AMD_2`'s compacting pool and genmmd's chained segments respectively; see
+    // experiments/ordering/README.md on the three layouts. Everything else about a sibling MUST
+    // match its driver, the two being the same algorithm with the same encodings, so the order, the
+    // fill and the peak live members are CHECKED rather than printed and a mismatch is flagged at
+    // the end of the row.
     //
     // THE `pC` CHECK IS THE SHARP ONE, and it is why this exists. Peak live clique members is a
     // property of the ALGORITHM and not of the layout, so two drivers agreeing on the permutation
@@ -271,6 +271,10 @@ void run(const std::string& path, const Options& options) {
     // checks. `MmdCompacted` is the mmd algorithm on `AMD_2`'s compacting pool, the second layout
     // this branch has, so it belongs beside `MmdChained` rather than instead of it. The amd branch
     // has only one sibling because `AmdChained`, amd on genmmd's chained store, is not built.
+    //
+    // AND `MmdCompacted` GETS A FOURTH CHECK, `cC`, which is the same argument as `pC` at a
+    // different moment: members born is a property of the algorithm too, so the two drivers must
+    // report one figure. `MmdChained` keeps no such count and is not checked on it.
     double      sibMs[2] = {0.0, 0.0};
     std::size_t nCmp[2]  = {0, 0};
     const int   sibCount = amd ? 1 : 2;
@@ -282,18 +286,21 @@ void run(const std::string& path, const Options& options) {
             return si == 0 ? orderMmdChained(colPtr, rowIdx) : orderMmdCompacted(colPtr, rowIdx);
         };
         sibMs[si] = bestOf([&] { const auto p = sibling(); (void) p; }, repeats);
-        gPeakCliqueMembers = 0;
-        const std::vector<std::int32_t> sibOrder = sibling();
-        const std::size_t sibPC = gPeakCliqueMembers;
+        const ElmOrder sibResult = sibling();
+        const std::vector<std::int32_t>& sibOrder = sibResult.order();
+        const std::size_t sibPC = sibResult.numPeakCliqueMembers();
+        const std::size_t sibCC = sibResult.numBornCliqueMembers();
         // HOW OFTEN THE POOL HAD TO BE COMPACTED, for the two siblings that have one. Both size it
         // to `nzaat + nzaat/5 + n`, which is `AMD_2`'s `iwlen`, so the figure is directly against
-        // that routine's Info[AMD_NCMPA] below. `MmdChained` chains and never compacts, so it has
-        // none.
-        if (amd)          nCmp[si] = gAmdCompactions;
-        else if (si == 1) nCmp[si] = gMmdCompactions;
+        // that routine's Info[AMD_NCMPA] below. `MmdChained` chains and never compacts, so it
+        // reports zero.
+        nCmp[si] = sibResult.numCompactions();
         if (sibOrder != order)                extra += std::string("  ") + tag + " order differs";
         else if (fillOf(A, sibOrder) != nnzL) extra += std::string("  ") + tag + " fill differs";
         if (sibPC != pC)                      extra += std::string("  ") + tag + " pC differs";
+        // `MmdCompacted` is the one sibling that reports members born; `MmdChained` keeps no such
+        // count and reports zero, which is not a mismatch.
+        if (!amd && si == 1 && sibCC != cC)   extra += std::string("  ") + tag + " cC differs";
     }
     // Held as strings so a zero denominator, which a forest that failed to build would give, prints
     // as a dash rather than as a number nobody can read.

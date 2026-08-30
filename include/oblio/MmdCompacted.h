@@ -17,7 +17,7 @@
 // convention, the clique-by-clique refresh and its q2h path, and pairwise merging with outmatched
 // marking. That description is authoritative there and is not repeated here.
 
-#include "oblio/QuotientGraph.h"
+#include "oblio/ElmOrder.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -25,17 +25,12 @@
 
 namespace Oblio {
 
-// How many times the clique pool ran out and had to be compacted. Non-zero says `AMD_2`'s elbow
-// room is too small for mmd's cliques, which is the one part of this layout that could not be
-// copied across: the branches fill the pool at different rates. Written by orderMmdCompacted.
-extern std::size_t gMmdCompactions;
-
 // The elimination order, over the original vertices. delta is as in Mmd1: zero keeps a batch to
 // true minima, negative takes one pivot per round.
 //
 // It takes A's pattern, which is all an ordering reads, and builds its own quotient graph from it.
-std::vector<std::int32_t> orderMmdCompacted(const std::vector<std::size_t>&  colPtr,
-                                            const std::vector<std::int32_t>& rowIdx,
-                                            std::int32_t delta = 0);
+ElmOrder orderMmdCompacted(const std::vector<std::size_t>&  colPtr,
+                           const std::vector<std::int32_t>& rowIdx,
+                           std::int32_t delta = 0);
 
 } // namespace Oblio

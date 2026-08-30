@@ -64,12 +64,12 @@
 //   head: the survivor of an indistinguishable pair is the member seen LAST. This one is ours,
 //   below.
 //
-//   THE LIST ORDER, both halves, by QuotientGraph::setVendoredListOrder. The reachable set walks
+//   THE LIST ORDER, both halves, by QuotientGraphFlat::setVendoredListOrder. The reachable set walks
 //   the cliques before the explicit adjacency, and the prune puts the new clique at the front of
 //   I[u] with Amd.cpp's rotation rather than appending.
 //
 //   MASS ELIMINATION runs after aggressive absorption rather than inside the eliminator, by
-//   QuotientGraph::setLateMassElimination and a call to massEliminate below. Absorption is what
+//   QuotientGraphFlat::setLateMassElimination and a call to massEliminate below. Absorption is what
 //   makes the cheap structural test agree with the true one, which Amd.cpp says in its own
 //   comment, so asking first declines merges it makes.
 //
@@ -107,7 +107,7 @@
 // results had made it easy to stop looking for. See AMD3.md and DESIGN_DECISIONS.md.
 //
 // And the fourth, added later the same day: THE FIRST SCAN IS FOLDED INTO THE PRUNE, through
-// QuotientGraph's TaggedScan overload of `eliminate`. I[u] is walked twice per pivot and A[u]
+// QuotientGraphFlat's TaggedScan overload of `eliminate`. I[u] is walked twice per pivot and A[u]
 // once, which is `AMD_2`'s count exactly, where this driver walked them three times and twice.
 // Worth 10 to 16 percent on cubic grids, measured with both codes down the same harness path, and
 // 0 to 8 percent in 2D. Over eight runs this layer reads 0.83 to 0.89 ms at 16 cubed where the
@@ -118,7 +118,7 @@
 // which are dead at that point, and a version with two fresh vectors of size n was 12 percent
 // SLOWER in 2D. AMD3.md iteration 26.
 
-#include "oblio/QuotientGraph.h"
+#include "oblio/ElmOrder.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -126,17 +126,11 @@
 
 namespace Oblio {
 
-// The elimination order, over the original vertices.
+// The elimination order, over the original vertices, with what computing it cost in clique
+// storage.
 //
 // It takes A's pattern, which is all an ordering reads, and builds its own quotient graph from it.
-std::vector<std::int32_t> orderAmdFlat(const std::vector<std::size_t>&  colPtr,
-                                       const std::vector<std::int32_t>& rowIdx);
-
-// The same, reporting every member ever put into a clique, which benchmarks/matrices prints beside
-// nnz(L) as `cC`. An OVERLOAD rather than a defaulted parameter, so the two-argument form keeps its
-// type and goes on binding to a plain function pointer.
-std::vector<std::int32_t> orderAmdFlat(const std::vector<std::size_t>&  colPtr,
-                                       const std::vector<std::int32_t>& rowIdx,
-                                       std::size_t& numBornCliqueMembers);
+ElmOrder orderAmdFlat(const std::vector<std::size_t>&  colPtr,
+                      const std::vector<std::int32_t>& rowIdx);
 
 } // namespace Oblio

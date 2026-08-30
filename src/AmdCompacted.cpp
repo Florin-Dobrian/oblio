@@ -1,6 +1,6 @@
 #include "oblio/AmdCompacted.h"
 
-#include "oblio/QuotientGraph.h"          // Buckets and TaggedScan
+#include "oblio/Buckets.h"
 #include "oblio/QuotientGraphCompacted.h"
 #include "oblio/Types.h"
 
@@ -10,7 +10,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <utility>
 #include <vector>
 
 // AmdCompacted.cpp - AmdFlat on a COMPACTED CLIQUE STORE: one pool with a free cursor and a
@@ -55,14 +54,12 @@
 
 namespace Oblio {
 
-std::size_t gAmdCompactions = 0;   // read by the compaction probes
 
-
-std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  colPtr,
-                                            const std::vector<std::int32_t>& rowIdx) {
-    if (colPtr.empty()) return std::vector<std::int32_t>();
+ElmOrder orderAmdCompacted(const std::vector<std::size_t>&  colPtr,
+                           const std::vector<std::int32_t>& rowIdx) {
+    if (colPtr.empty()) return ElmOrder();
     const std::size_t size = colPtr.size() - 1;
-    if (size == 0) return std::vector<std::int32_t>();
+    if (size == 0) return ElmOrder();
 
     QuotientGraphCompacted qg(colPtr, rowIdx);
 
@@ -314,14 +311,12 @@ std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  col
     // survive.
     assert(qg.cliqueCountBalances() && "clique births and deaths do not balance");
 
-    // How often the pool actually needed compacting.
-    gAmdCompactions  = qg.numCompactions();
-    gPeakCliqueMembers = qg.numPeakCliqueMembers();
     // THE ROWS THE DENSE RULE SET ASIDE GO LAST, in index order. They were collected in an
     // ascending pass, and each stands only for itself, having been set aside before it could absorb
     // anything.
     pivots.insert(pivots.end(), denseRows.begin(), denseRows.end());
-    return qg.orderAsMerged(pivots);
+    return ElmOrder(qg.orderAsMerged(pivots), qg.numPeakCliqueMembers(),
+                    qg.numBornCliqueMembers(), qg.numCompactions());
 }
 
 } // namespace Oblio

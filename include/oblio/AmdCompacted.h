@@ -17,7 +17,7 @@
 // It is the amd counterpart of MmdChained, which prices our arena against genmmd's dead-segment
 // scheme. AMD_2's is a third design and had never been compared against.
 
-#include "oblio/Types.h"
+#include "oblio/ElmOrder.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -25,15 +25,10 @@
 
 namespace Oblio {
 
-// How often the pool had to be compacted during the last ordering. `AMD_2` reports the same figure
-// as Info[AMD_NCMPA]; `MmdCompacted` publishes `gMmdCompactions` for its half. See
-// src/AmdCompacted.cpp.
-extern std::size_t gAmdCompactions;
-
 // The elimination order, over the original vertices.
 //
 // It takes A's pattern, which is all an ordering reads, and builds its own quotient graph from it.
-std::vector<std::int32_t> orderAmdCompacted(const std::vector<std::size_t>&  colPtr,
-                                            const std::vector<std::int32_t>& rowIdx);
+ElmOrder orderAmdCompacted(const std::vector<std::size_t>&  colPtr,
+                           const std::vector<std::int32_t>& rowIdx);
 
 } // namespace Oblio

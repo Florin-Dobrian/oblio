@@ -157,7 +157,7 @@ bool OrderEngine::orderMmdFlat(std::size_t size,
     P.mNewToOld.assign(size, 0);
     if (size == 0) return true;
 
-    const std::vector<std::int32_t> order = Oblio::orderMmdFlat(colPtr, rowIdx);
+    const std::vector<std::int32_t> order = Oblio::orderMmdFlat(colPtr, rowIdx).order();
     if (order.size() != size) return false;
 
     for (std::size_t k = 0; k < size; ++k) {
@@ -206,7 +206,7 @@ bool OrderEngine::orderAmdFlat(std::size_t size,
     P.mNewToOld.assign(size, 0);
     if (size == 0) return true;
 
-    const std::vector<std::int32_t> order = Oblio::orderAmdFlat(colPtr, rowIdx);
+    const std::vector<std::int32_t> order = Oblio::orderAmdFlat(colPtr, rowIdx).order();
     if (order.size() != size) return false;
 
     for (std::size_t k = 0; k < size; ++k) {
@@ -229,7 +229,7 @@ bool OrderEngine::orderMmdChained(std::size_t size,
     P.mNewToOld.assign(size, 0);
     if (size == 0) return true;
 
-    const std::vector<std::int32_t> order = Oblio::orderMmdChained(colPtr, rowIdx);
+    const std::vector<std::int32_t> order = Oblio::orderMmdChained(colPtr, rowIdx).order();
     if (order.size() != size) return false;
 
     for (std::size_t k = 0; k < size; ++k) {
@@ -247,7 +247,7 @@ bool OrderEngine::orderMmdCompacted(std::size_t size,
     P.mNewToOld.assign(size, 0);
     if (size == 0) return true;
 
-    const std::vector<std::int32_t> order = Oblio::orderMmdCompacted(colPtr, rowIdx);
+    const std::vector<std::int32_t> order = Oblio::orderMmdCompacted(colPtr, rowIdx).order();
     if (order.size() != size) return false;
 
     for (std::size_t k = 0; k < size; ++k) {
@@ -265,7 +265,7 @@ bool OrderEngine::orderAmdCompacted(std::size_t size,
     P.mNewToOld.assign(size, 0);
     if (size == 0) return true;
 
-    const std::vector<std::int32_t> order = Oblio::orderAmdCompacted(colPtr, rowIdx);
+    const std::vector<std::int32_t> order = Oblio::orderAmdCompacted(colPtr, rowIdx).order();
     if (order.size() != size) return false;
 
     for (std::size_t k = 0; k < size; ++k) {

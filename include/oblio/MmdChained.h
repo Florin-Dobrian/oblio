@@ -44,7 +44,7 @@
 // several originals, so a degree counts what its neighbors stand for rather than how many entries
 // they occupy.
 
-#include "oblio/QuotientGraph.h"
+#include "oblio/ElmOrder.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -56,8 +56,8 @@ namespace Oblio {
 // true minima, negative takes one pivot per round.
 //
 // It takes A's pattern, which is all an ordering reads, and builds its own quotient graph from it.
-std::vector<std::int32_t> orderMmdChained(const std::vector<std::size_t>&  colPtr,
-                                          const std::vector<std::int32_t>& rowIdx,
-                                          std::int32_t delta = 0);
+ElmOrder orderMmdChained(const std::vector<std::size_t>&  colPtr,
+                         const std::vector<std::int32_t>& rowIdx,
+                         std::int32_t delta = 0);
 
 } // namespace Oblio

@@ -1,7 +1,7 @@
 #pragma once
 
 // QuotientGraphChained.h - the quotient graph on a CHAINED CLIQUE STORE. Same algorithm and same
-// encoding as `QuotientGraph`; the difference is where a clique's members live, and pricing that
+// encoding as `QuotientGraphFlat`; the difference is where a clique's members live, and pricing that
 // difference is the whole reason this class exists.
 //
 // A clique lives in the DEAD SEGMENT of the pivot that formed it, chaining into further dead
@@ -9,11 +9,11 @@
 // link test on every read of every clique, forever, and no headroom reduces it, because chaining
 // exists precisely to need none.
 //
-// ITS OBLIGATION IS TO STAY ENCODING-IDENTICAL TO `QuotientGraph`, so that the only difference
+// ITS OBLIGATION IS TO STAY ENCODING-IDENTICAL TO `QuotientGraphFlat`, so that the only difference
 // between them is storage. A fold that lands there lands here, or the comparison quietly stops
 // being about storage.
 
-#include "oblio/QuotientGraph.h"   // Buckets, which is shared verbatim
+#include "oblio/Buckets.h"   // Buckets, which is shared verbatim
 #include "oblio/Types.h"
 
 #include <algorithm>
@@ -269,7 +269,7 @@ private:
     std::vector<std::int32_t> mSrc;   // every A[u] then I[u], run after run
 
     // ONE OBJECT PER VERTEX, NOT THREE ARRAYS. The three numbers are never useful apart: any walk
-    // of u needs where its run starts and at least one length. The shared `QuotientGraph` carries
+    // of u needs where its run starts and at least one length. The shared `QuotientGraphFlat` carries
     // the same struct; read its member for the reasoning.
     struct Segment {
         // WHERE u'S SEGMENT STARTS in `mSrc`, fixed at construction and never moved. It is also
@@ -296,7 +296,7 @@ private:
     // `mSuperNext` links the members and `mSuperLast` names the tail, so a merge is O(1).
     std::vector<std::int32_t> mSuperNext;
     std::vector<std::int32_t> mSuperLast;
-    // SIGNED, MIRRORING QuotientGraph. A one dimensional size is normally unsigned
+    // SIGNED, MIRRORING QuotientGraphFlat. A one dimensional size is normally unsigned
     // because it has nothing to stand in for; this one has. Positive is the
     // weight, negative means already taken into the clique being built, zero means dead, so one
     // load answers what two arrays answered. No range is lost, a weight being bounded by n.
@@ -306,7 +306,7 @@ private:
     // storage and becomes that plus an encoding difference, which is what this file exists not to
     // be.
     std::vector<std::int32_t> mWeight;
-    // Mirrors QuotientGraph::mHasNumbered; always true here once the prepass has run.
+    // Mirrors QuotientGraphFlat::mHasNumbered; always true here once the prepass has run.
     bool                      mHasNumbered = false;
     std::uint32_t              mCliqueWeight = 0;  // see cliqueWeight(); per-pivot, not per-vertex
 
@@ -446,7 +446,7 @@ inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int3
     for (std::uint32_t ck = 0; ck < incN; ++ck)
         mAbsorbed.push_back(mSrc[base + adjN + (reverse ? incN - 1 - ck : ck)]);
 
-    // THE SIGN OF THE WEIGHT IS THE MEMBERSHIP MARK, mirroring QuotientGraph. The negation IS the
+    // THE SIGN OF THE WEIGHT IS THE MEMBERSHIP MARK, mirroring QuotientGraphFlat. The negation IS the
     // insertion, and it is undone in massEliminate, which walks this same set. The pivot is
     // negated so the walk cannot take it into its own clique.
     //
@@ -635,7 +635,7 @@ QuotientGraphChained::finishElimination(std::int32_t pivot) {
 // absorption is what makes this cheap test agree with the true one.
 inline const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std::int32_t pivot) {
     mMerged.clear();   // a member scratch, kept for its capacity
-    // THE SIGNS COME BACK HERE, IN A PASS THAT ALREADY EXISTS, mirroring QuotientGraph. The walk
+    // THE SIGNS COME BACK HERE, IN A PASS THAT ALREADY EXISTS, mirroring QuotientGraphFlat. The walk
     // below is the only other traversal of C[pivot], so the restore rides in it and costs no pass.
     // The pivot goes first, since the merge at the end adds into it and both operands must be
     // magnitudes by then. Every path through an elimination reaches this function: no mmd driver

@@ -5,7 +5,7 @@
 // WHY. On 2026-08-17 `MmdCompacted` was found to read 1.28x `MmdFlat` at exactly 200 a side and
 // about 0.99x at 199 and 201, and padding every size-n allocation by one page removed it: size-n arrays landing
 // in the same cache sets at that n. `MmdCompacted` is transitional and its addresses are about to
-// change, so the question that outlives it is whether `QuotientGraph` has such points, since `MmdFlat` and
+// change, so the question that outlives it is whether `QuotientGraphFlat` has such points, since `MmdFlat` and
 // `AmdFlat` allocate the same shaped set of vectors and would collide by the same mechanism at
 // whatever n aligns. The scaling ladder cannot see it: it visits twelve sides, and this one was
 // found only because 200 happens to be a rung.
@@ -85,8 +85,8 @@ double bestMs(const std::string& which, const std::vector<std::size_t>& colPtr,
     double best = 1e300;
     for (int r = 0; r < repeats; ++r) {
         const auto t0 = std::chrono::steady_clock::now();
-        const std::vector<std::int32_t> p = which == "amd3" ? orderAmdFlat(colPtr, rowIdx)
-                                                            : orderMmdFlat(colPtr, rowIdx);
+        const std::vector<std::int32_t> p = which == "amd3" ? orderAmdFlat(colPtr, rowIdx).order()
+                                                            : orderMmdFlat(colPtr, rowIdx).order();
         const auto t1 = std::chrono::steady_clock::now();
         if (p.empty()) std::abort();                       // keeps the call from being elided
         best = std::min(best, std::chrono::duration<double, std::milli>(t1 - t0).count());

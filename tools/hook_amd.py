@@ -45,7 +45,7 @@ THE PHASES, and what each is:
                                                             WE DO NOT DO THIS.
 
 `build + core` is the comparable region: it is the vendored routine turning a caller's pattern into
-its working structure and then ordering it, which is what `orderAmdFlat` does from `QuotientGraph`'s
+its working structure and then ordering it, which is what `orderAmdFlat` does from `QuotientGraphFlat`'s
 constructor to its last pivot.
 
 WHERE THIS LIVES, AND WHY NOT IN THE STUDY THAT FIRST NEEDED IT. It was written for
@@ -244,7 +244,7 @@ def transform_timed(s):
 
     # 2. the AMD_2 call, whose mark closes `build`: the S workspace allocated in AMD_order, and
     #    AMD_1's construction of Iw and Pe out of the A+A' pattern. That is the phase our own
-    #    QuotientGraph constructor corresponds to.
+    #    QuotientGraphFlat constructor corresponds to.
     two = "    AMD_2 (n, Pe, Iw, Len, iwlen, pfree,"
     need(s, two, "the AMD_2 call moved")
     s = s.replace(two, "    PB_mark (2) ;\n" + two)

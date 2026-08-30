@@ -1,74 +1,62 @@
-#include "oblio/MmdChained.h"
+#include "oblio/MmdEngine.h"
 
 #include "oblio/Buckets.h"
-#include "oblio/QuotientGraphChained.h"
+#include "oblio/ElmOrder.h"
+#include "oblio/QuotientGraphFlat.h"
+#include "oblio/QuotientGraphCompacted.h"
 #include "oblio/Types.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
 
-// MmdChained.cpp - MmdFlat on a CHAINED CLIQUE STORE, everything else identical: every clique lives
-// in the dead segment of the pivot that formed it, threaded through the runs it came from, so it
-// costs no storage of its own.
+// MmdEngine.cpp - the body of the mmd ordering, written once and instantiated for each clique
+// store. Both instantiations and both graph classes are in this one unit, so each is compiled with
+// its store's bodies visible and inlined into the pivot loop.
 //
-// WHAT IT IS FOR, AND IT IS TWO THINGS.
-//
-// FIRST, IT IS THE ALIGNMENT VEHICLE FOR A DIFFERENTIAL. Comparing our ordering against an oracle
-// is only clean when the two hold their cliques the same way, or every difference is confounded
-// with layout. What then remains is either LAYOUT or an IMPROVEMENT to carry back into our own
-// ladder.
-//
-// SECOND, IT IS A PREDICTABLE-SPACE VERSION OF MmdFlat. Given a machine you know whether A fits,
-// but you cannot know whether L fits, nnz(L) depending on the ordering being computed. So a method
-// that stays within `O(n + m)` carries a guarantee no amount of speed substitutes for: IF THE INPUT
-// FITS, THE ANSWER IS REACHABLE. Chaining is that guarantee bought deliberately, not frugality for
-// its own sake.
-//
-// WHAT IT CANNOT ANSWER. It prices our arena against a CHAINED store and says nothing about a
-// COMPACTED one, which is a different thing again: one workspace reused, with a clique taking over
-// the slots of the variable that formed it. That comparison is AmdCompacted's and MmdCompacted's.
-//
-// ITS OBLIGATION IS TWOFOLD. It must return MmdFlat's permutation exactly, and it must stay
-// ENCODING-IDENTICAL to MmdFlat: a fold that lands in the shared quotient graph lands here too, or
-// the comparison silently stops being about storage.
-//
-// `Buckets` is the shared type, nothing about degree buckets depending on how cliques are stored,
-// and the quotient graph is `QuotientGraphChained`, header-only and so compiled into this
-// translation unit, which is what keeps a comparison apples to apples.
+// THE STORES DIFFER IN WHAT THEY CAN BE ASKED. Only a store with a bounded pool can run out and be
+// compacted, so only that one answers `numCompactions`. The overload pair below is where the body
+// stops having to know which store it holds: the template answers zero for a store that does not
+// publish the figure, and the compacted store's own overload answers for it.
 
 namespace Oblio {
-
 namespace {
 
+template<class QuotientGraph> std::size_t numCompactionsOf(const QuotientGraph&) { return 0; }
+
+std::size_t numCompactionsOf(const QuotientGraphCompacted& qg) { return qg.numCompactions(); }
+
+} // namespace
 
 
-
-
-}  // anonymous namespace
-
-
-ElmOrder orderMmdChained(const std::vector<std::size_t>&  colPtr,
-                         const std::vector<std::int32_t>& rowIdx,
-                         std::int32_t delta) {
-    if (colPtr.empty()) return ElmOrder();
+template<class QuotientGraph>
+void MmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
+                               const std::vector<std::int32_t>& rowIdx,
+                               ElmOrder& eo) const {
+    eo = ElmOrder();
+    if (colPtr.empty()) return;
     const std::size_t size = colPtr.size() - 1;
-    if (size == 0) return ElmOrder();
+    if (size == 0) return;
 
-    QuotientGraphChained qg(colPtr, rowIdx);
+    QuotientGraph qg(colPtr, rowIdx);
     // The deepest of the four walk-order conventions: it fixes the order of C[pivot], hence the
     // content order of every list built from it, hence which of several equal-degree vertices is
     // picked. Same sets and same cost either way, different winner among equals.
     qg.setReverseIncidence(true);
+    qg.enableMarks();   // this branch needs the tag array; the amd one does not
     std::vector<std::int32_t> pivots;
     pivots.reserve(size);
     std::uint32_t numEliminated = 0;
 
-    // NO `degrees` ARRAY AND NO `outmatched` ARRAY. Both live in `Buckets::mPrev`; the only reader
-    // that needed a `degrees` array is `unfile`, which recovers the bucket from the link itself. We
-    // file at the DEGREE at every site, and the running minimum is maintained here, at the moment
-    // of filing, rather than recomputed after each round.
+    // WE FILE AT THE DEGREE, AT EVERY SITE. Filing a refreshed vertex one higher would penalise it
+    // against one no pivot has reached yet, and the minimum selected would not always be the
+    // minimum.
+    //
+    // NO `degrees` ARRAY: the only reader that needed one is `unfile`, which recovers the bucket
+    // from the link. The running minimum is maintained here, at the moment of filing, rather than
+    // recomputed after each round.
     Buckets buckets(size);
     std::uint32_t minDegree = static_cast<std::uint32_t>(size);
     for (std::int32_t u = 0; u < static_cast<std::int32_t>(size); ++u) {
@@ -76,6 +64,8 @@ ElmOrder orderMmdChained(const std::vector<std::size_t>&  colPtr,
         buckets.file(degree, u);
         minDegree = std::min(minDegree, degree);
     }
+
+    // NO `outmatched` ARRAY either: withholding is a value in the same link, `Buckets::outmatch`.
 
     // NO `prepassVertices` LIST: the prepass reads each successor before unfiling and needs none.
     std::vector<std::int32_t> batchPivots, refreshedCliqueMembers, twoSourceQueue, manySourceQueue;
@@ -107,8 +97,8 @@ ElmOrder orderMmdChained(const std::vector<std::size_t>&  colPtr,
 
         // ---- one batch, no degree refreshed inside it ---------------------------
         std::uint32_t batchLimit = minDegree;
-        if (delta > 0)
-            batchLimit = std::min(minDegree + static_cast<std::uint32_t>(delta),
+        if (mDelta > 0)
+            batchLimit = std::min(minDegree + static_cast<std::uint32_t>(mDelta),
                                   static_cast<std::uint32_t>(size) - 1);
 
         batchPivots.clear();
@@ -127,13 +117,16 @@ ElmOrder orderMmdChained(const std::vector<std::size_t>&  colPtr,
             numEliminated += 1 + static_cast<std::uint32_t>(merged.size());
             for (std::int32_t u : merged) buckets.unfile(u);
 
-            qg.forEachMember(pivot, [&](std::int32_t u) {
+            const std::int32_t* newClique     = qg.clique(pivot);
+            const std::uint32_t newCliqueSize = qg.cliqueSize(pivot);
+            for (std::uint32_t uk = 0; uk < newCliqueSize; ++uk) {
+                const std::int32_t u = newClique[uk];
                 buckets.unfile(u);                  // evict, and put a withheld
                 buckets.restore(u);                 //   vertex back: one operation, two calls
-            });
+            }
 
             if (numEliminated >= size) break;       // nothing left to update
-            if (delta < 0) break;
+            if (mDelta < 0) break;
         }
 
         // ---- one refresh, walked clique by clique ----------------------------- The LAST pivot of
@@ -141,13 +134,15 @@ ElmOrder orderMmdChained(const std::vector<std::size_t>&  colPtr,
         // degree vertices ends at a bucket head.
         for (auto rcit = batchPivots.rbegin(); rcit != batchPivots.rend(); ++rcit) {
             const std::int32_t rc = *rcit;
+            const std::int32_t* refreshedClique     = qg.clique(rc);
+            const std::uint32_t refreshedCliqueSize = qg.cliqueSize(rc);
+
             // The dead are dropped HERE, before anything stamps: `mMark` carries GONE as well as
             // the tag, so stamping a dead member would overwrite GONE and bring it back to life.
-            // This store never compacts a clique, so the mass eliminated are in the list too.
             refreshedCliqueMembers.clear();
-            qg.forEachMember(rc, [&](std::int32_t v) {
-                if (!qg.eliminated(v)) refreshedCliqueMembers.push_back(v);
-            });
+            for (std::uint32_t uk = 0; uk < refreshedCliqueSize; ++uk)
+                if (!qg.eliminatedMmd(refreshedClique[uk]))
+                    refreshedCliqueMembers.push_back(refreshedClique[uk]);
 
             const std::int32_t cliqueTag = qg.advanceTag();   // marked once for the clique
             for (std::int32_t u : refreshedCliqueMembers) qg.setMark(u, cliqueTag);
@@ -170,52 +165,57 @@ ElmOrder orderMmdChained(const std::vector<std::size_t>&  colPtr,
             for (auto uit = twoSourceQueue.rbegin(); uit != twoSourceQueue.rend(); ++uit) {
                 const std::int32_t u = *uit;
                 // merged or withheld by an earlier two-source vertex
-                if (qg.eliminated(u) || buckets.outmatched(u)) continue;
+                if (qg.eliminatedMmd(u) || buckets.outmatched(u)) continue;
                 const std::int32_t vertexTag = qg.advanceTag();
                 // refreshedCliqueWeight is kept WHOLE and u's own weight subtracted at the end,
                 // which is not the same as subtracting it now: the walk below can MERGE a vertex
                 // into u, growing that weight, and the post-merge value is the correct one to
                 // remove. Subtracting first files a supervariable one bucket too high per merged
                 // vertex, so it is not picked as early as its size has earned.
+                // Bounded by n: a sum of weights over DISJOINT sets, which is what the guards
+                // below make them. It reads as a fixed value here and accumulates further down.
                 std::uint32_t closedReachableSetWeight = refreshedCliqueWeight;
 
-                // NO LOOPS. A two-source vertex has exactly TWO sources and one of them is the
-                // refreshed clique, by the test that put it on this list, so the other is unique
-                // and can be indexed. Our lists are split rather than interleaved, so the case
-                // analysis reads off the two lengths: `incidenceSize` is at least 1, the prune
-                // having appended the pivot, so the two sources are either one variable and the
-                // clique, or two cliques of which one is the clique.
-                if (qg.adjacencySize(u) == 1) {                    // a variable
-                    const std::int32_t v = qg.adjacencyMmd(u)[0];
+                // Not hoisted, deliberately. A two-source vertex has adjacencySize + incidenceSize
+                // == 2 by the test that put it on this list, so these two loops run over at most
+                // two cliques between them and a length loaded up front is overhead rather than a
+                // saving.
+                const std::int32_t* uAdjacency = qg.adjacencyMmd(u);
+                for (std::uint32_t vk = 0; vk < qg.adjacencySize(u); ++vk) {
+                    const std::int32_t v = uAdjacency[vk];
                     // ONE LOAD FOR BOTH QUESTIONS. `vertexTag` is the newest tag drawn, so anything
                     // at or above it is either this pass's own stamp or GONE, and both mean skip.
                     const std::int32_t vMark = qg.mark(v);
-                    if (vMark < vertexTag && vMark != cliqueTag) {   // not seen, dead, or counted
-                        qg.setMark(v, vertexTag);
-                        closedReachableSetWeight += qg.weight(v);
-                    }
-                } else {                                           // two cliques; take the other
-                    const std::int32_t* uIncidence = qg.incidenceMmd(u);
-                    const std::int32_t  oc =
-                        (uIncidence[0] == rc) ? uIncidence[1] : uIncidence[0];
-                    qg.forEachMember(oc, [&](std::int32_t v) {
+                    if (vMark >= vertexTag) continue;              // seen this pass, or dead
+                    if (vMark == cliqueTag) continue;   // already in refreshedCliqueWeight
+                    qg.setMark(v, vertexTag);
+                    closedReachableSetWeight += qg.weight(v);
+                }
+                const std::int32_t* uIncidence = qg.incidenceMmd(u);
+                for (std::uint32_t ock = 0; ock < qg.incidenceSize(u); ++ock) {
+                    const std::int32_t oc = uIncidence[ock];
+                    if (oc == rc) continue;
+                    const std::int32_t* otherClique     = qg.clique(oc);
+                    const std::uint32_t otherCliqueSize = qg.cliqueSize(oc);
+                    for (std::uint32_t vk = 0; vk < otherCliqueSize; ++vk) {
+                        const std::int32_t v = otherClique[vk];
                         const std::int32_t vMark = qg.mark(v);
-                        if (v == u || vMark >= vertexTag) return;  // seen this pass, or dead
+                        if (v == u || vMark >= vertexTag) continue;    // seen this pass, or dead
                         if (vMark == cliqueTag) {
                             // v is in the new clique and in this same other source, so it sees
                             // at least what u sees.
-                            if (buckets.filed(v) || buckets.outmatched(v)) return;
+                            if (buckets.filed(v) || buckets.outmatched(v)) continue;
                             if (qg.adjacencySize(v) + qg.incidenceSize(v) - 1 == 1) {
                                 qg.merge(u, v);      // identical reach: u absorbs it
                                 ++numEliminated;
                             } else {
                                 buckets.outmatch(v);    // reaches more, so never minimal first
                             }
-                            return;
+                            continue;
                         }
                         qg.setMark(v, vertexTag);
                         closedReachableSetWeight += qg.weight(v);
-                    });
+                    }
                 }
 
                 const std::uint32_t degree = closedReachableSetWeight - qg.weight(u);
@@ -226,7 +226,7 @@ ElmOrder orderMmdChained(const std::vector<std::size_t>&  colPtr,
             // The many-source queue, the same stack.
             for (auto uit = manySourceQueue.rbegin(); uit != manySourceQueue.rend(); ++uit) {
                 const std::int32_t u = *uit;                 // the full union
-                if (qg.eliminated(u) || buckets.outmatched(u)) continue;
+                if (qg.eliminatedMmd(u) || buckets.outmatched(u)) continue;
                 const std::uint32_t degree = qg.reachableSetWeight(u); // reach excludes u already
                 buckets.file(degree, u);
                 minDegree = std::min(minDegree, degree);
@@ -235,10 +235,19 @@ ElmOrder orderMmdChained(const std::vector<std::size_t>&  colPtr,
 
     }
 
-    // The chained store tracks neither members born nor compactions: a clique lives in its own
-    // pivot's dead segment, so nothing is ever reclaimed and there is no room to run out of.
-    return ElmOrder(qg.orderAscending(pivots), qg.numPeakCliqueMembers(), 0, 0);
+    // THE COUNTER CROSS-CHECKED AGAINST A RECOMPUTATION, which the driver can do exactly because it
+    // holds the pivot list and a clique's owner is a pivot. NOT AN ASSERT THAT IT IS ZERO: at the
+    // close of a run the last cliques can have had every member MASS ELIMINATED into the pivot
+    // instead, leaving no one to absorb them, so a few entries legitimately survive.
+    assert(qg.cliqueCountBalances() && "clique births and deaths do not balance");
+    eo.mOrder                = qg.orderAscending(pivots);
+    eo.mNumPeakCliqueMembers = qg.numPeakCliqueMembers();
+    eo.mNumBornCliqueMembers = qg.numBornCliqueMembers();
+    eo.mNumCompactions       = numCompactionsOf(qg);
 }
 
 
-}  // namespace Oblio
+template class MmdEngine<QuotientGraphFlat>;
+template class MmdEngine<QuotientGraphCompacted>;
+
+} // namespace Oblio

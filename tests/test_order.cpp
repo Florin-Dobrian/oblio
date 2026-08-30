@@ -1,10 +1,11 @@
 #include "oblio/SparseMatrix.h"
 #include "oblio/Permutation.h"
 #include "oblio/OrderEngine.h"
+#include "oblio/AmdFlat.h"
 #include "oblio/MmdChained.h"
+#include "oblio/MmdFlat.h"
 #include "oblio/MmdCompacted.h"
 #include "oblio/AmdCompacted.h"
-#include "oblio/QuotientGraph.h"
 #include "test_util.h"
 #include <cstdint>
 #include <iostream>
@@ -31,51 +32,66 @@ template<class Val> static void checkOrder(const SparseMatrix<Val>& A, Ordering 
 // no assertion anywhere. The two absent matrices are the ones the experiment's own graphs cannot produce: n
 // isolated vertices, where every degree is zero and nothing ever merges, and the complex scalar
 // type, which exercises the structural overloads on a second instantiation.
-using OrderFn = std::vector<std::int32_t>(*)(const std::vector<std::size_t>&,
-                                             const std::vector<std::int32_t>&);
+using OrderFn = ElmOrder(*)(const std::vector<std::size_t>&,
+                               const std::vector<std::int32_t>&);
 // `orderMmdChained` and `orderMmdCompacted` take a third argument, `delta`, with a default, so
 // their type is not OrderFn and neither can be named directly where one is wanted. Forwarded rather than widening
 // OrderFn: the helpers exist to compare a free function against an enum member, and delta is the
 // mmd layers' business. `orderAmdCompacted` needs no forwarder, the amd branch having no delta.
-static std::vector<std::int32_t> mmdChainedDefault(const std::vector<std::size_t>&  colPtr,
+static ElmOrder mmdChainedDefault(const std::vector<std::size_t>&  colPtr,
                                               const std::vector<std::int32_t>& rowIdx) {
     return orderMmdChained(colPtr, rowIdx);
 }
 
-static std::vector<std::int32_t> mmdCompactedDefault(const std::vector<std::size_t>&  colPtr,
+static ElmOrder mmdCompactedDefault(const std::vector<std::size_t>&  colPtr,
                                               const std::vector<std::int32_t>& rowIdx) {
     return orderMmdCompacted(colPtr, rowIdx);
 }
 
+static ElmOrder mmdFlatDefault(const std::vector<std::size_t>&  colPtr,
+                                              const std::vector<std::int32_t>& rowIdx) {
+    return orderMmdFlat(colPtr, rowIdx);
+}
+
 template<class Val> static void checkOrderFn(const SparseMatrix<Val>& A, OrderFn f,
                                              const std::string& lbl){
-    const std::vector<std::int32_t> order = f(A.colPtr(), A.rowIdx());
+    const std::vector<std::int32_t> order = f(A.colPtr(), A.rowIdx()).order();
     Permutation P(A.size());
     const bool set = (order.size()==A.size()) && P.setNewToOld(order);
     ck(set && P.validate(), lbl); }
-// SAME PERMUTATION, AND SAME WORK BEHIND IT. The order comparison is the older half. The second
-// half compares PEAK LIVE CLIQUE MEMBERS, which is a property of the algorithm rather than of the
-// layout: two drivers running the same method form the same cliques and merge the same vertices at
-// the same moments whatever their storage, so the figure must agree exactly. Two orderings that
-// agree on output while doing different work is the failure this catches and the permutation
-// comparison cannot, and it is the shape of defect this tree has repeatedly found by hand.
+// SAME PERMUTATION, AND SAME WORK BEHIND IT. Three comparisons in one assertion, and they answer
+// three different questions.
 //
-// ZERO MEANS NOT TRACKED, and then only the order is compared. `MmdChained` does not track it:
+// THE ENUM REACHES THE DRIVER IT NAMES. `m` is the branch's flat driver and `ref` is that same
+// driver as a free function, so comparing the engine's permutation against `f`'s covers the
+// dispatch as well as the two drivers agreeing.
+//
+// AND THE TWO DRIVERS DID THE SAME WORK, which the permutation cannot say. Peak live clique
+// members and members born are properties of the ALGORITHM rather than of the layout: two drivers
+// running the same method form the same cliques and merge the same vertices at the same moments
+// whatever their storage, so both figures must agree exactly. Two orderings that agree on output
+// while doing different work is the failure this catches, and it is the shape of defect this tree
+// has repeatedly found by hand.
+//
+// THE WORK COMPARISON IS BETWEEN THE TWO FREE FUNCTIONS, not against the engine, because the engine
+// calls one of them: comparing its figures with that driver's would compare a call with itself.
+//
+// ZERO MEANS NOT TRACKED, and then that figure alone is skipped. `MmdChained` tracks neither:
 // chained storage ends a clique at a terminator and keeps no size, so subtracting a length on death would
 // need a per-vertex array in the one file whose purpose is genmmd's array economy.
 template<class Val> static void checkSameOrderFn(const SparseMatrix<Val>& A, Ordering m,
-                                                 OrderFn f, const std::string& lbl){
+                                                 OrderFn ref, OrderFn f, const std::string& lbl){
     OrderEngine a(m); Permutation pa;
-    gPeakCliqueMembers = 0;
     const bool ok = a.compute(A,pa);
-    const std::size_t peakEngine = gPeakCliqueMembers;
-    gPeakCliqueMembers = 0;
-    const std::vector<std::int32_t> order = f(A.colPtr(), A.rowIdx());
-    const std::size_t peakFn = gPeakCliqueMembers;
-    bool same = ok && order.size()==A.size();
-    for (std::size_t k = 0; same && k < order.size(); ++k)
-        same = (pa.newToOld()[k] == order[k]);
-    if (same && peakEngine != 0 && peakFn != 0) same = (peakEngine == peakFn);
+    const ElmOrder r = ref(A.colPtr(), A.rowIdx());
+    const ElmOrder s = f(A.colPtr(), A.rowIdx());
+    bool same = ok && s.order().size()==A.size();
+    for (std::size_t k = 0; same && k < s.order().size(); ++k)
+        same = (pa.newToOld()[k] == s.order()[k]);
+    if (same && r.numPeakCliqueMembers() != 0 && s.numPeakCliqueMembers() != 0)
+        same = (r.numPeakCliqueMembers() == s.numPeakCliqueMembers());
+    if (same && r.numBornCliqueMembers() != 0 && s.numBornCliqueMembers() != 0)
+        same = (r.numBornCliqueMembers() == s.numBornCliqueMembers());
     ck(same, lbl); }
 // TWO ENUMERATORS, ONE PERMUTATION. The mmd branch's oracle: our drivers must return exactly what
 // `MmdCorrected` returns, which is genmmd with its degree scale repaired. `MmdVendored` keeps the
@@ -137,11 +153,11 @@ int main(){
       checkOrderFn(A,mmdChainedDefault,"arrow 6x6      : MmdChained valid");
       checkOrderFn(A,mmdCompactedDefault,"arrow 6x6      : MmdCompacted valid");
       checkOrderFn(A,orderAmdCompacted,  "arrow 6x6      : AmdCompacted valid");
-      checkSameOrderFn(A,Ordering::MmdFlat,mmdChainedDefault,
+      checkSameOrderFn(A,Ordering::MmdFlat,mmdFlatDefault,mmdChainedDefault,
                        "arrow 6x6      : MmdChained == MmdFlat");
-      checkSameOrderFn(A,Ordering::MmdFlat,mmdCompactedDefault,
+      checkSameOrderFn(A,Ordering::MmdFlat,mmdFlatDefault,mmdCompactedDefault,
                        "arrow 6x6      : MmdCompacted == MmdFlat");
-      checkSameOrderFn(A,Ordering::AmdFlat,orderAmdCompacted,
+      checkSameOrderFn(A,Ordering::AmdFlat,orderAmdFlat,orderAmdCompacted,
                        "arrow 6x6      : AmdCompacted == AmdFlat"); }
     for(std::size_t size : {1u,2u,10u,100u}){ auto A=tridiagFull(size);
       reqSym(A,"tridiag n="+std::to_string(size)+" : symmetric");
@@ -155,11 +171,11 @@ int main(){
 #endif
       checkOrder(A,Ordering::MmdFlat,"tridiag n="+std::to_string(size)+" : MmdFlat valid");
       checkOrder(A,Ordering::AmdFlat,"tridiag n="+std::to_string(size)+" : AmdFlat valid");
-      checkSameOrderFn(A,Ordering::MmdFlat,mmdChainedDefault,
+      checkSameOrderFn(A,Ordering::MmdFlat,mmdFlatDefault,mmdChainedDefault,
                        "tridiag n="+std::to_string(size)+" : MmdChained == MmdFlat");
-      checkSameOrderFn(A,Ordering::MmdFlat,mmdCompactedDefault,
+      checkSameOrderFn(A,Ordering::MmdFlat,mmdFlatDefault,mmdCompactedDefault,
                        "tridiag n="+std::to_string(size)+" : MmdCompacted == MmdFlat");
-      checkSameOrderFn(A,Ordering::AmdFlat,orderAmdCompacted,
+      checkSameOrderFn(A,Ordering::AmdFlat,orderAmdFlat,orderAmdCompacted,
                        "tridiag n="+std::to_string(size)+" : AmdCompacted == AmdFlat"); }
     { std::size_t size=5; std::vector<std::size_t> cp(size+1); std::vector<std::int32_t> ri(size); std::vector<double> v(size,1.0);
       for(std::size_t j=0;j<size;++j){cp[j]=j; ri[j]=static_cast<std::int32_t>(j);} cp[size]=size;
@@ -177,11 +193,11 @@ int main(){
       // n ISOLATED VERTICES, where every degree is zero and nothing ever merges. None of the three
       // layers was checked on this shape until 2026-08-17, and it is the one the experiment's own
       // graphs cannot produce: all seven of them are connected and none is trivial.
-      checkSameOrderFn(A,Ordering::MmdFlat,mmdChainedDefault,
+      checkSameOrderFn(A,Ordering::MmdFlat,mmdFlatDefault,mmdChainedDefault,
                        "diagonal 5x5   : MmdChained == MmdFlat");
-      checkSameOrderFn(A,Ordering::MmdFlat,mmdCompactedDefault,
+      checkSameOrderFn(A,Ordering::MmdFlat,mmdFlatDefault,mmdCompactedDefault,
                        "diagonal 5x5   : MmdCompacted == MmdFlat");
-      checkSameOrderFn(A,Ordering::AmdFlat,orderAmdCompacted,
+      checkSameOrderFn(A,Ordering::AmdFlat,orderAmdFlat,orderAmdCompacted,
                        "diagonal 5x5   : AmdCompacted == AmdFlat"); }
     { std::vector<std::size_t> cp={0,6,8,10,12,14,16};
       std::vector<std::int32_t> ri={0,1,2,3,4,5, 0,1, 0,2, 0,3, 0,4, 0,5};
@@ -199,11 +215,11 @@ int main(){
       // THE SECOND SCALAR TYPE. An ordering reads only the pattern, so the permutation must be the
       // real arrow's; what this exercises is the structural overloads through a second
       // instantiation of the templated helpers.
-      checkSameOrderFn(C,Ordering::MmdFlat,mmdChainedDefault,
+      checkSameOrderFn(C,Ordering::MmdFlat,mmdFlatDefault,mmdChainedDefault,
                        "arrow complex  : MmdChained == MmdFlat");
-      checkSameOrderFn(C,Ordering::MmdFlat,mmdCompactedDefault,
+      checkSameOrderFn(C,Ordering::MmdFlat,mmdFlatDefault,mmdCompactedDefault,
                        "arrow complex  : MmdCompacted == MmdFlat");
-      checkSameOrderFn(C,Ordering::AmdFlat,orderAmdCompacted,
+      checkSameOrderFn(C,Ordering::AmdFlat,orderAmdFlat,orderAmdCompacted,
                        "arrow complex  : AmdCompacted == AmdFlat"); }
     std::cout<<"\nOrderEngine tests: "<<pass<<"/"<<(pass+fail)<<" passed\n";
     return fail==0?0:1;

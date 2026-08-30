@@ -184,17 +184,17 @@ int main(int argc, char** argv) {
     // The sum is only there to stop the optimizer deleting the calls.
     std::size_t sum = 0;
     for (int k = 0; k < repeats; ++k) {
-        if      (method == "mmd3") sum += orderMmdFlat(colPtr, rowIdx).size();
-        else if (method == "amd3") sum += orderAmdFlat(colPtr, rowIdx).size();
+        if      (method == "mmd3") sum += orderMmdFlat(colPtr, rowIdx).order().size();
+        else if (method == "amd3") sum += orderAmdFlat(colPtr, rowIdx).order().size();
         // THE THREE NON-ENUM LAYERS, added 2026-08-17. Each is its original computed differently,
         // so each is a thing whose cost is a question in its own right: MmdChained and AmdCompacted
         // carry the vendored clique storage schemes and MmdCompacted carries the port of the amd array folds onto
         // the mmd side. Profiling them through THIS driver rather than another is the same
         // argument the header already makes for the vendored pair: a comparison across two
         // programs measures their differences too.
-        else if (method == "mmd3b") sum += orderMmdChained(colPtr, rowIdx).size();
-        else if (method == "mmd3c") sum += orderMmdCompacted(colPtr, rowIdx).size();
-        else if (method == "amd3b") sum += orderAmdCompacted(colPtr, rowIdx).size();
+        else if (method == "mmd3b") sum += orderMmdChained(colPtr, rowIdx).order().size();
+        else if (method == "mmd3c") sum += orderMmdCompacted(colPtr, rowIdx).order().size();
+        else if (method == "amd3b") sum += orderAmdCompacted(colPtr, rowIdx).order().size();
         else if (vendored) { Permutation P; engine.compute(A, P); sum += P.size(); }
     }
     if (cubic)

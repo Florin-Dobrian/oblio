@@ -222,6 +222,21 @@ only be checked for validity, each being a different ordering whose permutation 
 differs; a driver that is its twin computed differently has no such licence, so an identical
 permutation is a requirement and any difference is a defect in one of the two.
 
+**THE SAMENESS ASSERTION COMPARES THREE THINGS, and only the first is the permutation.** Each also
+compares PEAK LIVE CLIQUE MEMBERS and MEMBERS BORN between the twin and its arena original, both of
+which are properties of the ALGORITHM rather than of the layout: two drivers running the same method
+form the same cliques and merge the same vertices at the same moments whatever their storage, so
+both figures must agree exactly. Two drivers agreeing on the permutation while doing different work
+is the failure this catches and the permutation cannot, and it is a shape of defect this tree has
+found by hand more than once. A figure of zero means the driver does not track it and that
+comparison alone is skipped, which today is `MmdChained` on both counts: chained storage ends a
+clique at a terminator and keeps no length to subtract on death.
+
+The permutation is compared against the ENGINE's, so the assertion also covers the enum reaching the
+driver it names; the two work figures are compared between the two FREE FUNCTIONS, because the
+engine calls one of them and comparing its figures with that driver's would compare a call with
+itself.
+
 | driver | is | permanent |
 |---|---|---|
 | `MmdChained` | MmdFlat on genmmd's dead-segment clique storage | yes |

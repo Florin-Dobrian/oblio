@@ -1,25 +1,26 @@
 #include "oblio/AmdFlat.h"
 
+#include "oblio/Buckets.h"
+#include "oblio/QuotientGraphFlat.h"
+#include "oblio/Types.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
-#include <utility>
+#include <vector>
 
 namespace Oblio {
-namespace {
 
-// The public forms are an overload pair rather than one function with a default argument: a default
-// argument is not part of a function's type, and `orderAmdFlat` has to bind to a plain two-argument
-// function pointer.
-std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colPtr,
-                                           const std::vector<std::int32_t>& rowIdx,
-                                           std::size_t* numBornCliqueMembers) {
-    if (colPtr.empty()) return std::vector<std::int32_t>();
+ElmOrder orderAmdFlat(const std::vector<std::size_t>&  colPtr,
+                      const std::vector<std::int32_t>& rowIdx) {
+    if (colPtr.empty()) return ElmOrder();
     const std::size_t size = colPtr.size() - 1;
-    if (size == 0) return std::vector<std::int32_t>();
+    if (size == 0) return ElmOrder();
 
-    QuotientGraph qg(colPtr, rowIdx);   // detection stamps into `work`, so no clique marks
+    QuotientGraphFlat qg(colPtr, rowIdx);   // detection stamps into `work`, so no clique marks
 
     // Mass elimination runs in this driver rather than inside the eliminator; see below.
     qg.setLateMassElimination(true);    // see the note above
@@ -424,28 +425,14 @@ std::vector<std::int32_t> orderAmdFlatImpl(const std::vector<std::size_t>&  colP
     // close of a run the last cliques can have had every member mass eliminated into the pivot,
     // leaving no one to absorb them, so a few entries legitimately survive.
     assert(qg.cliqueCountBalances() && "clique births and deaths do not balance");
-    gPeakCliqueMembers = qg.numPeakCliqueMembers();
-    if (numBornCliqueMembers != nullptr) *numBornCliqueMembers = qg.numBornCliqueMembers();
     // THE ROWS THE DENSE RULE SET ASIDE GO LAST, in index order. They were collected in an
     // ascending pass, and each stands only for itself, having been set aside before it could absorb
     // anything.
     pivots.insert(pivots.end(), denseRows.begin(), denseRows.end());
-    return qg.orderAsMerged(pivots);
-}
-
-
-} // namespace
-
-std::vector<std::int32_t> orderAmdFlat(const std::vector<std::size_t>&  colPtr,
-                                       const std::vector<std::int32_t>& rowIdx) {
-    return orderAmdFlatImpl(colPtr, rowIdx, nullptr);
-}
-
-// The same ordering, reporting every member ever put into a clique.
-std::vector<std::int32_t> orderAmdFlat(const std::vector<std::size_t>&  colPtr,
-                                       const std::vector<std::int32_t>& rowIdx,
-                                       std::size_t& numBornCliqueMembers) {
-    return orderAmdFlatImpl(colPtr, rowIdx, &numBornCliqueMembers);
+    // ZERO COMPACTIONS, an arena only appending and never reclaiming. A literal here because this
+    // driver is not yet an engine; when it becomes one it asks the store the way MmdEngine does.
+    return ElmOrder(qg.orderAsMerged(pivots), qg.numPeakCliqueMembers(),
+                    qg.numBornCliqueMembers(), 0);
 }
 
 } // namespace Oblio

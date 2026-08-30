@@ -115,9 +115,9 @@ each names a mechanism and says what it was for; read them as history. What rema
 `docs/NEXT.md`.
 
 `OrderEngine` offers two lineages. MMD and AMD are vendored; MMD1, AMD1 and AMD2 were ours, built
-from the matching prototypes over the shared `QuotientGraphFlat`. The intent was to keep both lineages
-while ours developed, and to deprecate the vendored pair only once they could replace it. The
-vendored routines are the default for neither lineage now: `AmdCompacted` is.
+from the matching prototypes over the shared `QuotientGraphFlat`. The intent was to keep both
+lineages while ours developed, and to deprecate the vendored pair only once they could replace it.
+The vendored routines are the default for neither lineage now: `AmdCompacted` is.
 
 What ours do not yet have, and each is a step rather than a question:
 
@@ -1259,8 +1259,8 @@ guard, production does not, and the ceiling is a placeholder rather than a deriv
 it. IT HAS NOW COST TWO DEFECTS, 2026-08-09.**
 
 **And the gap widened again the same day, deliberately.** Production's four amd drivers now take
-the weighted clique size off `QuotientGraphFlat::cliqueWeight()` and fold the minimum degree into the
-refile loop; the `amd2`, `amd3` and `amd4` prototypes still compute both in passes of their own.
+the weighted clique size off `QuotientGraphFlat::cliqueWeight()` and fold the minimum degree into
+the refile loop; the `amd2`, `amd3` and `amd4` prototypes still compute both in passes of their own.
 Behaviour is identical and `make test` says so, so this is drift rather than a defect, and it is
 recorded because it is the third widening and because both defects above began exactly here. The
 fusions were not carried across on purpose: they are encoding rather than concept, and the
@@ -1325,11 +1325,10 @@ and the other three are covered elsewhere.
 calls `checkIndexRange(mNnz, ...)` and throws before any ordering is chosen. The 2026-07-15 entry in
 DESIGN_DECISIONS explains why, and that explanation is now partly wrong: it says the cap comes from
 "the ordering handoff," as though there were one. There are nine paths and only two have it. The
-vendored `orderMmdVendored` and `orderAmdVendored` narrow `nnz` to `int` at `OrderEngine.cpp`
-lines 88 and 155, for `amd_order` and `mmd_order`, which are the `int`-based builds. **Ours
-impose nothing**: they take
-`colPtr` and `rowIdx` directly, `QuotientGraphFlat` holds every position as `std::size_t`, and its only
-`int32_t` values are vertex indices, capped by `n` rather than by nnz.
+vendored `orderMmdVendored` and `orderAmdVendored` narrow `nnz` to `int` at `OrderEngine.cpp` lines
+88 and 155, for `amd_order` and `mmd_order`, which are the `int`-based builds. **Ours impose
+nothing**: they take `colPtr` and `rowIdx` directly, `QuotientGraphFlat` holds every position as
+`std::size_t`, and its only `int32_t` values are vertex indices, capped by `n` rather than by nnz.
 
 So a matrix with more than 2^31 nonzeros is representable, orderable by six of the nine methods and
 factorable, and `SparseMatrix` refuses to construct it anyway. Three ways out: move the check into
@@ -1359,7 +1358,7 @@ genmmd in 2D to 1.02 to 1.19x, and to 0.81 at 32 cubed. `docs/DESIGN_DECISIONS.m
 carries the account.
 
 **What remains of this item is the amd branch**, which has had none of it: `degrees`, `outside`,
-`cliqueDegree`, `explicitPart`, `hashHead`, `hashNext` and a 2n `mark` across five drivers, and
+`cliqueDegree`, `explicitPart`, `hashHead`, `hashNext` and a 2n `markMmd` across five drivers, and
 `AMD_2` allocates not one of them.
 
 **The original text follows, since its reasoning is what produced the struct.**
@@ -1393,11 +1392,11 @@ only if 7 percent of a one-shot solve is worth it.
 counter as the witness that it stays inert. What follows is the reasoning that produced it and
 what is left to do, which is the production half and the ceiling.
 
-**What the prototypes settled, and it transfers.** The sweep is unconditional, `mark` back to
+**What the prototypes settled, and it transfers.** The sweep is unconditional, `markMmd` back to
 `NIL` and `tag` to 0, because ours carries no permanent sentinel where both references do, so
 neither their selective loop nor AMD's `wbig = Int_MAX_VAL - n` headroom is needed. The rule for
 where a check may go is **one before each region that advances the tag, at a point where nothing
-in `mark` is live**, which gives one site in md1 and mda2, two in nine layers, and three in amd2
+in `markMmd` is live**, which gives one site in md1 and mda2, two in nine layers, and three in amd2
 and amd4, whose hash pair loop advances a tag per pair tested and so must be guarded inside the
 loop rather than before it. The eliminators are the standing hazard, holding two stamps live
 across the prune loop and a third across the `C[pivot]` compaction. `experiments/ordering`'s
@@ -1466,9 +1465,9 @@ thirteen layers now have grid mode and the same seven examples, where five had t
 the C++ before.
 
 The mark array is how every set operation in the ordering is done: a set is a number, membership is
-`mMark[v] == mTag`, insertion is one store, and nothing is ever cleared because the next set uses a
-larger number and every older stamp is then stale. It is the tool, and it is what makes each pass
-linear in what it touches instead of quadratic.
+`mMarkMmd[v] == mTagMmd`, insertion is one store, and nothing is ever cleared because the next set
+uses a larger number and every older stamp is then stale. It is the tool, and it is what makes each
+pass linear in what it touches instead of quadratic.
 
 **The counter is the one quantity in the ordering bounded by neither `n` nor nnz.** It counts sets
 built, and the rate depends on the layer: about `3n` on the AMD branch, but `nnz(L)` on the MMD
@@ -1476,11 +1475,11 @@ branch, since `reachableSize` burns one per refreshed vertex per elimination. AM
 is worse still, advancing once per pair tested inside a hash bucket, which has no clean quadratic
 bound at all and is `O(n^3)` in the worst case.
 
-At `int32` that is a real ceiling and it is crossed silently: signed overflow is undefined
-behavior, in practice the counter wraps negative, `mMark[v] == mTag` starts matching stale stamps,
-and the ordering comes out wrong with nothing reported. Two billion comparisons is a couple of
-seconds of work, so this is inside runs we already do, and `mTag` on the MMD branch overflows at
-roughly `n = 716 million`, well inside the `2^31 - 1` dimension that `SparseMatrix` advertises.
+At `int32` that is a real ceiling and it is crossed silently: signed overflow is undefined behavior,
+in practice the counter wraps negative, `mMarkMmd[v] == mTagMmd` starts matching stale stamps, and
+the ordering comes out wrong with nothing reported. Two billion comparisons is a couple of seconds
+of work, so this is inside runs we already do, and `mTagMmd` on the MMD branch overflows at roughly
+`n = 716 million`, well inside the `2^31 - 1` dimension that `SparseMatrix` advertises.
 
 **Both vendored routines carry a guard and we dropped it in the port.** `genmmd` line 42 and AMD's
 `clear_flag` do the same thing: when the counter nears its ceiling, sweep the mark array clearing
@@ -1502,7 +1501,7 @@ would be `n^2`, which is exactly the cost the stamp scheme exists to avoid.
   `if (W[x] != 0) W[x] = 1` and restarts at `wflg = 2`. Both are selective because both park a
   permanent state in the same array, `maxint` for a dead vertex and zero for an absorbed element,
   and neither can rest at its own sentinel. **Ours carries nothing but tags.** So the sweep is an
-  unconditional fill back to the state the constructor left: `mark` to `NIL`, `tag` to 0, after
+  unconditional fill back to the state the constructor left: `markMmd` to `NIL`, `tag` to 0, after
   which the invariant is identical to the one at startup and there is no second resting pair to
   reason about. AMD's `wbig = Int_MAX_VAL - n` headroom is likewise not needed, since it exists
   because `W[e]` can hold `wflg + size`, and ours holds only tags.
@@ -1510,12 +1509,12 @@ would be `n^2`, which is exactly the cost the stamp scheme exists to avoid.
   The one open detail is where the guard goes: at every `++tag` site, which is seven in
   `QuotientGraphFlat` plus the drivers' own, or once inside a small `nextTag()`. Presumably the
   second, and it is a decision for when the code is written rather than now.
-- **Widen to `std::size_t`**, which `mMark` must follow, since it stores tag values. No branch, no
-  sweep, no sentinel rule. But correct by an argument about achievable run lengths rather than by
+- **Widen to `std::size_t`**, which `mMarkMmd` must follow, since it stores tag values. No branch,
+no   sweep, no sentinel rule. But correct by an argument about achievable run lengths rather than by
   construction: `2^64` is reachable in principle, at `n` around 2.6 million on AMD2's cubic bound,
   and unreachable in practice only because every increment is a comparison actually executed, so
   exhausting the type means executing `2^64` comparisons, centuries of machine time. Sound, and a
-  premise rather than a proof. It also doubles `mMark`, the hottest array in the ordering.
+  premise rather than a proof. It also doubles `mMarkMmd`, the hottest array in the ordering.
 - **Stamp with a composite entity instead of a counter**, `(pivot, u)` in md1's shape or
   `(pivot, which-of-three)` in md2's, in two arrays. Bounded by `n` rather than by work, so `int32`
   is safe permanently with no guard. Rejected on two counts: the query costs two loads and two
@@ -1537,9 +1536,9 @@ so needing either a sweep or a width. The ordering cannot use the first form: a 
 set is rebuilt at every elimination that touches it, so the vertex names the vertex and not the
 occasion, and md2 has three sets live at once besides.
 
-The counters are five, not one: `QuotientGraphFlat`'s `mMark` and `mTag`, plus the drivers' own in
-`Mmd2`, `Amd1` and `Amd2`. `Amd2` sizes its mark at `2 * size`, since it stamps cliques at
-`c + size`; widening changes the element type and not the length.
+The counters are five, not one: `QuotientGraphFlat`'s `mMarkMmd` and `mTagMmd`, plus the drivers'
+own in `Mmd2`, `Amd1` and `Amd2`. `Amd2` sizes its mark at `2 * size`, since it stamps cliques at `c
++ size`; widening changes the element type and not the length.
 
 **5. The experiment's amd2 and production's Amd2 diverged on grids: DONE, 2026-08-03.** Kept
 rather than deleted, because the shape recurred three times in two sessions and will recur again

@@ -136,18 +136,47 @@ void AmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
     // stamped.
     std::int32_t stampAmd = 2;                    // detection's marks, above tagAmd
     std::int32_t maxCliqueWeight = 0;
-    // `tagAmd + n` must not overflow.
-    const std::int32_t wbig = std::numeric_limits<std::int32_t>::max() - static_cast<std::int32_t>(size);
+    // ONE n IS THE EXACT MARGIN, and the two guards below are what make it exact. Each raise adds
+    // at most n to the value the guard before it left: `tagAmd + maxCliqueWeight + 1 <= tagAmd + n`
+    // since a clique excludes its own pivot, and at most n stamps follow. So a value AT the ceiling
+    // is admissible, `ceiling + n == INT32_MAX`, which is why both tests are `>` and not `>=`.
+    const std::int32_t tagCeilingAmd =
+        std::numeric_limits<std::int32_t>::max() - static_cast<std::int32_t>(size);
     std::size_t numTagResets = 0;               // how often the guard below actually fires
 
-    // Reset the array and the tag when the tag can no longer be advanced safely. Every live clique
-    // goes back to 1, the alive-and-unseen state, and the dead ones stay 0.
-    const auto clearFlag = [&]() {
-        if (tagAmd < 2 || tagAmd >= wbig) {
-            for (std::int32_t x = 0; x < static_cast<std::int32_t>(size); ++x)
-                if (markAmd[x] != 0) markAmd[x] = 1;
-            tagAmd  = 2;
+    // THE TAG GUARD, run first in every step. `AMD_2`'s `clear_flag` at Amd.cpp:1694. It resets the
+    // array and the tag when the tag can no longer be advanced safely: every live clique goes back
+    // to 1, the alive-and-unseen state, and the dead ones stay 0.
+    //
+    // `AMD_2` ALSO TESTS `wflg < 2` HERE AND WE DO NOT, because that test is its INITIALIZATION.
+    // It calls `clear_flag(0, ...)` once at Amd.cpp:1350 to put `W` at 1 and `wflg` at 2, so the
+    // low test is what performs the setup. We do that setup in the declarations above, and the tag
+    // only ever climbs, so a value below 2 is unreachable and a test for one would be dead.
+    const auto resetAtTag = [&]() {
+        if (tagAmd > tagCeilingAmd) {
+            for (std::int32_t k = 0; k < static_cast<std::int32_t>(size); ++k)
+                if (markAmd[k] != 0) markAmd[k] = 1;
+            tagAmd   = 2;
             stampAmd = 2;         // same array, same scale
+            ++numTagResets;
+        }
+    };
+
+    // THE STAMP GUARD, run in the middle of the step. `AMD_2`'s second `clear_flag`, at
+    // Amd.cpp:1949. ONE CHECK CANNOT COVER BOTH RAISES: the first is bounded by `maxCliqueWeight`
+    // and the second by the candidate count, each reaching n, and they belong to DIFFERENT cliques,
+    // `maxCliqueWeight` being a maximum over all previous steps, so their sum is not bounded by n.
+    // Measured worst climb is 1.21n, and with one guard the `stampAmd++` below overflows a tag that
+    // entered the step at the ceiling. See docs/NEXT.md.
+    //
+    // It sweeps on the RAISED STAMP rather than on the tag, that being the value about to be
+    // incremented.
+    const auto resetAtStamp = [&]() {
+        if (stampAmd > tagCeilingAmd) {
+            for (std::int32_t k = 0; k < static_cast<std::int32_t>(size); ++k)
+                if (markAmd[k] != 0) markAmd[k] = 1;
+            tagAmd   = 2;
+            stampAmd = 2;
             ++numTagResets;
         }
     };
@@ -165,9 +194,9 @@ void AmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
         // the prune, so the eliminator accumulates |C[c] - C[p]| into the tagged `markAmd` on the
         // walk it already makes.
         //
-        // clearFlag RUNS FIRST because that scan is inside the eliminator, so the tag has to be
+        // THE TAG GUARD RUNS FIRST because that scan is inside the eliminator, so the tag has to be
         // valid before it. `maxCliqueWeight` still advances after, needing the clique weight.
-        clearFlag();
+        resetAtTag();
         touchedCliques.clear();
         TaggedScan scan{&buckets, markAmd, degrees, touchedCliques, tagAmd,
                         static_cast<std::int32_t>(size + 1)};
@@ -289,17 +318,24 @@ void AmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
                 if (c != pivot) uHashKey += static_cast<std::uint32_t>(c);   // not the pivot
             }
 
-            // TERMS ONE AND THREE MEET HERE, `markAmd[u]` carrying the adjacency weight in and the
-            // sum of both back out. What the slot holds therefore changes at this line, from one
-            // term to two.
+            // TERMS ONE AND THREE MEET HERE, `markAmd[u]` carrying the adjacency weight in and
+            // `degrees[u]` taking the sum of both back out. The adjacency half is SPENT at this
+            // line, which is what leaves the tag array holding nothing but tags from here on.
+            //
+            // THE PARTIAL BOUND GOES INTO `degrees` AND NOT BACK INTO `markAmd`, which is `AMD_2`'s
+            // arrangement: `Degree[i] = MIN(Degree[i], deg)` there, read back after detection as
+            // `Degree[i] + degme - nvi`. It is not a preference. A sweep of the tag array has to be
+            // possible between the two terms that raise the tag, and a live vertex's bound sitting
+            // in that array is exactly what a sweep would destroy. See the entry in docs/NEXT.md.
             //
             // AND IT IS THE ONE PLACE THE WIDE ACCUMULATOR MEETS A NARROW DEGREE. The stored degree
             // is a full one from an earlier step and this is two terms of three, so the two are
             // comparable only once the pass below adds the clique weight and subtracts u's. The
             // minimum is taken WIDE and is what makes the result representable, being at most
-            // `degrees[u]` and so at most n.
+            // `degrees[u]` and so at most n. The slot is read as the cap and written as the
+            // destination in one statement, the read happening first.
             const std::size_t twoTerms = static_cast<std::size_t>(markAmd[u]) + otherCliqueBound;
-            markAmd[u] = static_cast<std::int32_t>(std::min<std::size_t>(twoTerms, degrees[u]));
+            degrees[u] = static_cast<std::uint32_t>(std::min<std::size_t>(twoTerms, degrees[u]));
 
             // AND THE VERTEX IS FILED HERE, in the pass that completes its key. The skip for an
             // eliminated vertex moves onto the FILING alone: a bound computed for one is written
@@ -331,10 +367,14 @@ void AmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
         // merge is one too.
         //
         // THE STAMP BASE IS RAISED FIRST, and this is CORRECTNESS. `markAmd` holds the scan's
-        // values, up to `tagAmd + maxCliqueWeight`, and detection's stamps. A stampAmd at or below
-        // a scan value makes that clique read as marked, so two vertices that are not duplicates
-        // compare equal.
-        stampAmd = std::max(stampAmd, tagAmd + maxCliqueWeight);
+        // values, which occupy `[tagAmd, tagAmd + maxCliqueWeight]` INCLUSIVE, and detection's
+        // stamps. A stamp at or below a scan value makes that clique read as marked, so two
+        // vertices that are not duplicates compare equal. The base is therefore ONE PAST the top of
+        // that block, and it is the FIRST STAMP rather than the value below it: `stampAmd` names
+        // the next stamp to hand out, so every value from `tagAmd` to the next tag is either
+        // written by the scan or handed out as a stamp, and none is skipped.
+        stampAmd = std::max(stampAmd, tagAmd + maxCliqueWeight + 1);
+        resetAtStamp();
 
         for (std::uint32_t uk = 0; uk < newCliqueSize; ++uk) {
             const std::int32_t seed = newClique[uk];
@@ -361,7 +401,7 @@ void AmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
                 // span, and the prune's rotation puts the new clique at index 0. That entry is
                 // shared by every member of C[pivot], so it can never discriminate and is skipped
                 // by starting at 1.
-                const std::int32_t  other          = ++stampAmd;
+                const std::int32_t  other          = stampAmd++;
                 const std::uint32_t uAdjacencySize = qg.adjacencySize(u);
                 const std::uint32_t uIncidenceSize = qg.incidenceSize(u);
                 const std::int32_t* uSegment       = qg.incidenceAmd(u);   // the segment's start
@@ -414,13 +454,13 @@ void AmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
             if (qg.eliminatedAmd(u)) continue;         // absorbed by the hash a moment ago
             const std::uint32_t uWeight = qg.weight(u);          // POST-merge
             // ONE OPERAND WIDENED, so the sum is formed in `std::size_t`; widening cannot be done
-            // after the addition the way narrowing is done after the subtraction. `markAmd[u]` and
+            // after the addition the way narrowing is done after the subtraction. `degrees[u]` and
             // the clique weight each reach n, so the sum reaches 2n.
-            std::size_t bound = static_cast<std::size_t>(markAmd[u]) + newCliqueWeight - uWeight;
-            // THE SLOT GOES BACK TO ALIVE-AND-UNSEEN, the last read having just happened. Without
-            // it a survivor later chosen as pivot would form a clique whose `markAmd` already held
-            // a bound. A vertex the hash eliminated is skipped and never reset, which is right: it
-            // is dead and no clique is ever named after it.
+            std::size_t bound = static_cast<std::size_t>(degrees[u]) + newCliqueWeight - uWeight;
+            // THE TAG SLOT GOES BACK TO ALIVE-AND-UNSEEN. It holds this step's detection stamp, and
+            // before that the spent adjacency weight the prune left; either can exceed a small tag
+            // and would then read as seen-this-step. A vertex the hash eliminated is skipped and
+            // never reset, which is right: it is dead and no clique is ever named after it.
             markAmd[u] = 1;
             bound = std::min<std::size_t>(bound, numLeft - uWeight);
             // THE NARROWING POINT, after the cap, which is where the value is at most n.
@@ -436,13 +476,13 @@ void AmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
         }
         qg.trimClique(pivot, kept);
 
-        // The whole array is invalidated in ONE ADDITION rather than by walking the touched list
-        // and zeroing each entry. After the scan no entry exceeds `tagAmd + maxCliqueWeight`, so
-        // advancing past that puts every one of them into the stale range. PAST EVERY STAMP THIS
-        // STEP LAID DOWN, not merely past the scan's values, since detection writes into this same
-        // array above `tagAmd + maxCliqueWeight`, and a stampAmd must read as alive-and-unseen next
-        // step, which means strictly below the new tag.
-        tagAmd = stampAmd + 1;                 // past every stampAmd this step laid down
+        // The whole array is invalidated in ONE ASSIGNMENT rather than by walking the touched list
+        // and zeroing each entry. `stampAmd` is already one past the last stamp handed out, and
+        // every stamp was above every scan value, so taking it as the next tag puts the whole of
+        // this step's range into the stale-and-therefore-alive band. NO `+ 1` IS NEEDED: the
+        // post-increment left `stampAmd` on the first UNUSED value, which is exactly what a tag
+        // must be.
+        tagAmd = stampAmd;                     // one past the last stamp this step laid down
     }
 
     // THE COUNTER CROSS-CHECKED AGAINST A RECOMPUTATION, which the driver can do exactly because it

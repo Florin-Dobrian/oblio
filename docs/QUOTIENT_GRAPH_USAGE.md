@@ -64,8 +64,8 @@ as long as both classes agree about it, which is the usual case and the expected
 | `setAside` |  | x | aligned |  |
 | **marks** | | | | |
 | `enableMarks` | x |  | done | 2026-08-21 |
-| `advanceTag` | x |  | aligned |  |
-| `mark`, `setMark` | x |  | aligned |  |
+| `advanceTagMmd` | x |  | aligned |  |
+| `markMmd`, `setMarkMmd` | x |  | aligned |  |
 | `number` | x |  | aligned |  |
 | `eliminatedMmd` / `eliminatedAmd` | x | x | done | 2026-08-21 |
 | **elimination** | | | | |
@@ -112,8 +112,8 @@ where the vendored routines disagree.
 | `setAside` |  | x | aligned |  |
 | **marks** | | | | |
 | `enableMarks` | x |  | done | 2026-08-21 |
-| `advanceTag` | x |  | aligned |  |
-| `mark`, `setMark` | x |  | aligned |  |
+| `advanceTagMmd` | x |  | aligned |  |
+| `markMmd`, `setMarkMmd` | x |  | aligned |  |
 | `number` | x |  | aligned |  |
 | `eliminatedMmd` / `eliminatedAmd` | x | x | done | 2026-08-21 |
 | **elimination** | | | | |
@@ -164,8 +164,8 @@ Both shapes are kept deliberately, to see which is the more useful to work from.
 | setAside |  | x |  | x | aligned |  |  |
 | **marks** | | | | | | | |
 | mark array on demand | x |  | x |  | done | 2026-08-21 | amd allocates none |
-| advanceTag | x |  | x |  | aligned |  |  |
-| mark, setMark | x |  | x |  | aligned |  |  |
+| advanceTagMmd | x |  | x |  | aligned |  |  |
+| mark, setMarkMmd | x |  | x |  | aligned |  |  |
 | number | x |  | x |  | aligned |  |  |
 | eliminated | x | x | x | x | done | 2026-08-21 | a zero weight on amd, a tag on mmd |
 | **elimination** | | | | | | | |
@@ -255,7 +255,7 @@ undoes it: the flat class restores inside `massEliminate` for both branches, whi
 exposes the two accessors so amd's driver can restore in a pass it already makes over `C[pivot]`.
 
 **`eliminated` is ONE method in the flat class and TWO in the compacted one, and the layout has
-nothing to do with it.** The flat class answers "is u dead" with `mMark[u] == GONE` for both
+nothing to do with it.** The flat class answers "is u dead" with `mMarkMmd[u] == GONE` for both
 branches, allocating the mark array at construction and writing GONE at every retirement site. The
 compacted class allocates the array on demand, so the amd branch has none and answers with
 `mWeight[u] == 0` instead. That is a footprint decision taken in one class and not the other, worth
@@ -379,7 +379,7 @@ the wrapper is a sequence rather than a replacement, and its value is that the O
 class where nothing in a driver could enforce it.
 
 **4. `eliminated` split in two, and `enableMarks` with it. CLOSED 2026-08-21.** The flat class
-answered "is u dead" with `mMark[u] == GONE` for both branches and allocated the array always; it
+answered "is u dead" with `mMarkMmd[u] == GONE` for both branches and allocated the array always; it
 now does what the compacted class does, a zero weight on the amd branch and the tag on the mmd one,
 with the array allocated by `enableMarks`. `AmdFlat` drops n int32 it never read.
 

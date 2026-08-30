@@ -362,12 +362,12 @@ agree: genmmd widened is 1.17x of itself, ours narrowed is 1.16x of genmmd. That
 check that the mechanism was identified rather than a number being fitted.
 
 **It is not being taken, and that is the design trade.** `docs/CODING_RULES.md` defines a position
-as an offset into a vector which "measures, so it is never negative, never `NIL`, and free to
-exceed 2^31", and a measure is the same kind of quantity. Nothing in `QuotientGraphFlat` violates that
+as an offset into a vector which "measures, so it is never negative, never `NIL`, and free to exceed
+2^31", and a measure is the same kind of quantity. Nothing in `QuotientGraphFlat` violates that
 rule; the finding CONFLICTS with it. Keeping `std::size_t` for sizes and positions is a decision
-about what the code MEANS, not an oversight, and the price of it is now known rather than
-suspected. The subsection after next follows the question to where it actually leads, which is not
-the ordering at all but whether `A` and `L` can share one encoding.
+about what the code MEANS, not an oversight, and the price of it is now known rather than suspected.
+The subsection after next follows the question to where it actually leads, which is not the ordering
+at all but whether `A` and `L` can share one encoding.
 
 **And the one operational conclusion: this cannot be tested piecemeal.** One array at a time sits
 below the noise floor and will read as "no significant difference" every time it is tried, which
@@ -589,7 +589,7 @@ At 400x400, `1.619 / 1.255 = 1.29x` remains after width. In descending order of 
 1. **Vector against flat arena.** Our clique members live in `mCliqueArena` behind `mCliquePtr`
    and `mCliqueSize`; genmmd's live in `adjncy` in a linked segment structure it walks in place.
    Not measured separately.
-2. **Two arrays for one test.** Our membership test is `mMark[v] != mTag && (!live ||
+2. **Two arrays for one test.** Our membership test is `mMarkMmd[v] != mTagMmd && (!live ||
    mEliminated[v] == 0)`, two loads from two arrays. genmmd's is `marker[nb] < tag`, ONE load,
    because its `marker` carries a permanent `maxint` sentinel for dead vertices, so a single
    ordered comparison decides membership and liveness together. AMD does the same fusion by the
@@ -766,10 +766,10 @@ profiling the share taken by `touchedCliques` and the clearing pass.
 It cannot explain any fill gap. Encoding does not change which pivot is chosen.
 
 **2. Our own mark and tag have no overflow guard, and both vendored routines do.** `QuotientGraphFlat`
-holds `mMark` and `mTag`, and the drivers `Mmd2`, `Amd1`, `Amd1B`, `Amd2` and `Amd2B` hold their
-own, all unguarded. Measured on 2D and 3D grids, the stamp advances about 15n over a run, so an
-`int32` wrap needs n near 140 million and nothing is at risk at any size we run. The reason it is
-still worth recording is that our `mMark` carries no permanent sentinel, so a wrap would give a
+holds `mMarkMmd` and `mTagMmd`, and the drivers `Mmd2`, `Amd1`, `Amd1B`, `Amd2` and `Amd2B` hold
+their own, all unguarded. Measured on 2D and 3D grids, the stamp advances about 15n over a run, so
+an `int32` wrap needs n near 140 million and nothing is at risk at any size we run. The reason it is
+still worth recording is that our `mMarkMmd` carries no permanent sentinel, so a wrap would give a
 stale MATCH rather than a collision: silent, data-dependent, and benign-looking.
 
 **The prototypes now have one, 2026-08-06**, at a `TAG_CEILING` of `2^30 - 1`, in all thirteen

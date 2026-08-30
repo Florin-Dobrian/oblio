@@ -1,9 +1,44 @@
 # NEXT: the mmd and amd branches are being aligned against each other; one regression is open
 
-## OPEN, FOUND 2026-08-30: the amd tag ceiling reserves half the room it needs
+## DONE 2026-08-30: the amd tag ceiling reserved half the room it needed
 
-`AmdEngine.cpp` guards its tag with `wbig = INT32_MAX - n` and sweeps when the tag reaches it. The
-margin covers ONE of the two terms that raise the tag in a step, and there are two.
+**FIXED THE SAME DAY, by adding `AMD_2`'s SECOND `clear_flag` call and moving one value out of the
+tag array so that call is safe.** The margin is unchanged at `INT32_MAX - n`; what was missing was
+the second check, not the room. Three lines of code, in `src/AmdEngine.cpp`:
+
+```
+degrees[u] = min(twoTerms, degrees[u])       the partial bound, where AMD_2's Degree[i] holds it
+bound = degrees[u] + newCliqueWeight - ...   read back after detection, as AMD_2:2094 does
+resetAtStamp()                               the second guard, AMD_2:1949
+```
+
+plus `wbig` taking this tree's name, `tagCeilingAmd`.
+
+**IT COST NO BOUNDARY, which the analysis below gets wrong.** That analysis says moving the stash
+means `TaggedScan::degree` losing its `const`, and it does not: the prune's write to `markAmd[u]` is
+CONSUMED into `twoTerms` one line before the destination, so only the destination moves. The graph
+writes exactly what it wrote before. After the bound pass `markAmd` then holds nothing but spent
+adjacency weights and tags, which is `AMD_2`'s state at that point and is what makes a sweep there
+safe.
+
+**VERIFIED BY FORCING, on the file as applied.** Tag started one below the ceiling AND the sweep
+made to reset there, so both guards fire on every step: 37 resets on a 65-vertex graph, ZERO UBSan
+runtime errors, and every permutation identical to the reference across 28 graphs. The same forcing
+on the previous code gave six runtime errors including the `++stampAmd` overflow. Unforced, resets
+read 0 everywhere, all 270 counter rows are identical, and `make scale2d` and `make scale3d` sit
+inside the harness floor with every `nnzL` column unchanged.
+
+**WHAT IS STILL OPEN FROM THIS ENTRY:** the range analysis below, which recommends computing the
+margin in `std::size_t` and REJECTING a size that leaves no positive ceiling; and mmd, which has no
+guard at all. Neither was touched.
+
+The finding as it read before the fix follows, because the derivation and the measurements are the
+part worth keeping.
+
+### The defect
+
+`AmdEngine.cpp` guarded its tag with `wbig = INT32_MAX - n` and swept when the tag reached it. The
+margin covered ONE of the two terms that raise the tag in a step, and there are two.
 
 ```
 337   stampAmd = max(stampAmd, tagAmd + maxCliqueWeight)     bounded by n
@@ -31,7 +66,7 @@ below: there is a band where this matters and a band above it where nothing work
 
 ### The existing sweep is CORRECT, which had to be established separately
 
-Forced to fire on every step, 20 resets on a 65-vertex graph, `clearFlag` leaves every permutation
+Forced to fire on every step, 20 resets on a 65-vertex graph, `resetAtTag` leaves every permutation
 identical to the reference across 28 graphs, and the flat and compacted pair still agree. So the
 defect is the margin and not the sweep.
 
@@ -41,7 +76,7 @@ defect is the margin and not the sweep.
 1948   wflg += lemax ;                          our line 337
 1949   wflg = clear_flag (wflg, wbig, W, n) ;   WE HAVE NO EQUIVALENT
 2067   wflg++ ;                                 our line 364
-1694   wflg = clear_flag (wflg, wbig, W, n) ;   our clearFlag, top of the step
+1694   wflg = clear_flag (wflg, wbig, W, n) ;   our resetAtTag, top of the step
 1349   wbig = Int_MAX_VAL - n ;                 the identical margin
 ```
 
@@ -69,17 +104,14 @@ all, accumulating `deg` in a local during its scan loop. We stash it from inside
 (`QuotientGraphFlat.h:988`), our prune and bound pass being separate walks, so the value has to
 survive between them and it crosses the driver/graph boundary.
 
-### Three ways, and the second is the one to take
+### Three ways, and the second was taken
 
 1. **Sweep clique slots only**, telling the populations apart with `eliminatedAmd(x)`. Keeps the
    boundary, costs a predicate per entry in a sweep that fires almost never, and diverges from the
    oracle by keeping one guard where it has two.
 2. **MOVE THE STASH TO `degrees`, as `AMD_2` does.** Then `markAmd` carries tags alone, the second
-   `clear_flag` ports verbatim, and the margin stays `n`. The cost is the `const` on
-   `TaggedScan::degree`: the graph would write that array, so the promise stops being true. That is
-   the boundary telling the truth rather than a guarantee lost, since after the move both sides
-   genuinely write it. Two graph headers, two engine lines, and the `int32`/`uint32` reconciliation
-   at line 302 to check.
+   `clear_flag` ports verbatim, and the margin stays `n`. DONE. The cost stated here, the `const` on
+   `TaggedScan::degree`, turned out not to be a cost at all; see the head of this entry.
 3. **Margin `2n`.** Simplest, no second guard, and sweeping starts earlier in the band where it
    happens at all.
 
@@ -90,7 +122,7 @@ permutation changing, which is how option 1's naive form was caught.
 
 ### The range, because it bounds how much any of this buys
 
-`MAX_IDX` is `INT32_MAX`, so n reaches `2^31 - 1` and at that n the margin is zero: `clearFlag`
+`MAX_IDX` is `INT32_MAX`, so n reaches `2^31 - 1` and at that n the margin is zero: `resetAtTag`
 fires before every one of n eliminations and sweeps n entries, an O(n^2) ordering that is correct
 and never finishes. `INT32_MAX - 2n` is negative there and the subtraction itself overflows.
 
@@ -201,9 +233,9 @@ The alignment work is close to done on `reachableSetWeight`, the two form functi
 `massEliminate` are now identical modulo the arena name, checked by substitution rather than by eye.
 BOTH PRUNES JOINED THEM ON 2026-08-29, 33 and 59 code lines each side and three hunks each, every
 one of them the array member. What remains is comments rather than code: the compacted
-`massEliminate` is missing four comment blocks flat has, and the chained `merge` writes
-`mMark[v] = GONE` directly where the other two call `markGone`, that class having no `markGone` to
-call, so closing it means adding one.
+`massEliminate` is missing four comment blocks flat has, and the chained `merge` writes `mMarkMmd[v]
+= GONE` directly where the other two call `markGone`, that class having no `markGone` to call, so
+closing it means adding one.
 
 `pruneAmd` still holds `key`, which shadows `Buckets::key`, and it is the last shadowing local in
 the file. CLOSED 2026-08-28: the accessor pair became `hashKey`/`setHashKey` with a second pair
@@ -497,8 +529,8 @@ has the account.
   **THE MECHANISM IS ALREADY BRANCH-NEUTRAL AND THE SHARED CLASS NEEDS NOTHING**, checked
   2026-08-24. `setAside` does two things and each branch reads a different one: `mWeight[u] = 0`,
   which amd's `reachableSet` and prune skip on `nv > 0`, and `markGone(u)`, which mmd's
-  `eliminatedMmd` skips on `mMark[u] == GONE`. Both halves are there because one class serves both,
-  and each is inert on the branch that does not read it.
+  `eliminatedMmd` skips on `mMarkMmd[u] == GONE`. Both halves are there because one class serves
+both,   and each is inert on the branch that does not read it.
 
   **THREE THINGS TO SETTLE, none of them the mechanism.**
 
@@ -586,15 +618,15 @@ even mean. It follows from reading `pruneMmd` and `pruneAmd` against `formReacha
 `formReachableSetAmd`, and nothing has instrumented it.
 
 **THE MARK ARRAY, AND THE FOUR-LINK CHAIN THAT MAKES ITS WORST TEST LOOK ARBITRARY.** Traced
-2026-08-24 by reading, not measured. The condition in question is
-`formReachableSetMmd`'s adjacency test, `vWeight > 0 && !(mHasNumbered && mMark[v] == GONE)`, which
-is three terms where the amd twin has one.
+2026-08-24 by reading, not measured. The condition in question is `formReachableSetMmd`'s adjacency
+test, `vWeight > 0 && !(mHasNumbered && mMarkMmd[v] == GONE)`, which is three terms where the amd
+twin has one.
 
 ```
 orderAscending reads mWeight[pivot] to reserve a supervariable's room
    -> a prepass-numbered vertex must keep weight 1 or it loses its slot
       -> the weight cannot record that it is dead
-         -> mMark must carry GONE, and the walks must ask
+         -> mMarkMmd must carry GONE, and the walks must ask
             -> mHasNumbered exists to skip that load when nothing was numbered
 ```
 
@@ -605,11 +637,13 @@ so it can count the members instead of reading the weight, and the count equals 
 construction. Then a numbered vertex can be weight zero, `vWeight > 0` catches it like any other
 death, and `number()`, `mHasNumbered` and the three-term test all go. The gate is the digest.
 
-**WHAT REMAINS AFTER THAT, and it is structural rather than contingent.** `mMark` and `mTag` stay,
-doing DISTINCTNESS in `reachableSetWeight`: an exact degree counts each reached vertex once and u
+**WHAT REMAINS AFTER THAT, and it is structural rather than contingent.** `mMarkMmd` and `mTagMmd`
+stay, doing DISTINCTNESS in `reachableSetWeight`: an exact degree counts each reached vertex once
+and u
 reaches the same v through two cliques. That is what mmd IS, and amd escapes it by not
 deduplicating at all, which is exactly what makes its number a bound rather than a degree. The
-drivers' q2h stamps stay too, seven sites per mmd driver through `advanceTag`, `setMark` and `mark`.
+drivers' q2h stamps stay too, seven sites per mmd driver through `advanceTagMmd`, `setMarkMmd`
+and `markMmd`.
 
 **AND THE ELIMINATION WALKS NEED NO STAMP EITHER WAY**, on both branches, which is the part that
 makes the above worth doing rather than merely tidy. `formReachableSet*` negates as it goes, so a
@@ -620,7 +654,7 @@ array is the price of the DEGREE REFRESH alone, the one call that forms a reach 
 anything, and that call is also where the mmd branch's factor of 21 lives.
 
 **A SMALLER ALTERNATIVE, independent of all of it.** `formReachableSetMmd`'s adjacency test can be
-written `mMark[v] != GONE` today. It is equivalent THERE and nowhere else: mmd walks adjacency
+written `mMarkMmd[v] != GONE` today. It is equivalent THERE and nowhere else: mmd walks adjacency
 FIRST, so nothing is negated yet, `vWeight > 0` is doing liveness alone, and every mmd death carries
 GONE. It would not be equivalent in `formReachableSetAmd`, which walks cliques first, nor in either
 clique loop, where the sign is doing distinctness. It costs one extra scattered load per adjacency
@@ -630,9 +664,9 @@ test. Not taken; the argument against is that it narrows defence in depth, the w
 catching a death that stopped being marked.
 
 **AND TWO COMMENTS ARE NOW STALE ON THIS SUBJECT.** Both class headers still call `mHasNumbered`
-"load bearing and not merely an optimization", the short circuit that keeps an empty `mMark` safe in
-shared bodies. That was true until 2026-08-24, when the two amd sites carrying the guard were
-removed; every reader is now mmd-only and `mMark` is always allocated there, so the safety job is
+"load bearing and not merely an optimization", the short circuit that keeps an empty `mMarkMmd` safe
+in shared bodies. That was true until 2026-08-24, when the two amd sites carrying the guard were
+removed; every reader is now mmd-only and `mMarkMmd` is always allocated there, so the safety job is
 finished and only the load-skipping remains.
 
 **AND THE DOCUMENTATION WAS CORRECTED BEFORE ANY OF IT**, six files, all uncommitted with the three
@@ -703,10 +737,11 @@ QuotientGraphCompacted 1308 -> 1280 533 ->  505  (39%)     13 -> 12     56 -> 41
   body assigns, plus `k`: `vk` over an adjacency or a clique's members, `ck` over an incidence,
   `uk` over `C[pivot]`. It replaces `k`, `i`, `ii`, `ri`, `a`, `kk`, `uak` and `uik`. The rule is
   script-checkable and the only five loops that disagree are correct.
-- **TWO DEAD `++mTag` BUMPS REMOVED** from the two `formReachableSet` walks, which read `mMark`
-  only against the CONSTANT `GONE` and never write it. The tag is a consumable, `GONE` being
+- **TWO DEAD `++mTagMmd` BUMPS REMOVED** from the two `formReachableSet` walks, which read
+`mMarkMmd`   only against the CONSTANT `GONE` and never write it. The tag is a consumable, `GONE`
+being
   `INT32_MAX`, so this is slightly more than tidiness.
-- **AND THE TWO amd SITES THAT MENTIONED `mMark` ARE GONE**, in `formReachableSetAmd` and
+- **AND THE TWO amd SITES THAT MENTIONED `mMarkMmd` ARE GONE**, in `formReachableSetAmd` and
   `pruneAmd`. Both were provably dead, `mHasNumbered` being written only by `number()` and called
   only by the mmd drivers. **The justification is that `QuotientGraphCompacted` ALREADY DID THIS**:
   its three amd functions mention neither array, so the flat class was the outlier and this is an
@@ -714,8 +749,8 @@ QuotientGraphCompacted 1308 -> 1280 533 ->  505  (39%)     13 -> 12     56 -> 41
 
 **THE EXPERIMENT README GAINED FOUR SECTIONS**, all reference material rather than narrative: the
 `Buckets` interface against the two branches, the class surface of flat against compacted,
-indistinguishability with the three mechanisms that find it, and what `mWeight` and `mMark` encode
-between them as a state table per branch.
+indistinguishability with the three mechanisms that find it, and what `mWeight` and `mMarkMmd`
+encode between them as a state table per branch.
 
 ## DONE 2026-08-23: the mmd branch files at the true degree, and the oracle changed
 
@@ -1156,7 +1191,8 @@ the full reading.
 ## What was borrowed into production, 2026-08-18
 
 Two of the audit's findings were not `AmdCompacted` defects but shared ones, so they went into
-`AmdFlat` and `QuotientGraphFlat` as well. Both verified by digest, `make amdorder` and `make mmdorder`.
+`AmdFlat` and `QuotientGraphFlat` as well. Both verified by digest, `make amdorder` and `make
+mmdorder`.
 
 - **THE CLIQUE TRIM AFTER DETECTION.** `trimClique` on the shared class, called from `AmdFlat`'s
   restore pass, which now writes survivors back as it walks. One difference from `AmdCompacted`:
@@ -1480,8 +1516,8 @@ cubes, but nothing driver-side has been touched. That is where the remaining hea
 
 **One item to watch there.** The absorbed-clique stamp was deleted from the shared class, replaced
 by `mCliqueSize[c] != 0`. It helps mmd, which the two folds it enabled more than pay for, and it
-costs amd, whose aggressive absorption makes that loop heavy and which has no compensating fold
-yet. Splitting `mMark` to 2n, vertices at `[v]` and cliques at `[c + n]`, would let the stamp come
+costs amd, whose aggressive absorption makes that loop heavy and which has no compensating fold yet.
+Splitting `mMarkMmd` to 2n, vertices at `[v]` and cliques at `[c + n]`, would let the stamp come
 back hot and is what both references effectively have, neither of them sharing one stamp array
 between the two kinds. Costs n extra int32, and footprint has killed three changes in this tree.
 
@@ -1960,7 +1996,8 @@ and the bucket size distribution, on 2D and 3D at comparable n, against the vend
 of three last time, and it is the only output any of these four can change.
 
 **A FIFTH DIVERGENCE, in a different mechanism, found 2026-08-12 while reading the twins.** The
-mass-elimination test in `QuotientGraphFlat::massEliminate` has three conjuncts where `AMD_2` has two:
+mass-elimination test in `QuotientGraphFlat::massEliminate` has three conjuncts where `AMD_2` has
+two:
 
 ```
 Amd.cpp:   if (Elen [i] == 1 && p3 == pn)
@@ -2173,11 +2210,11 @@ stream hypothesis at no risk to the default.
 **2e. NARROW THE ONE-DIMENSIONAL SIZES. THE ORDERING IS COMPLETE, 2026-08-11.** Eleven steps, each
 with the permutation checked against the pre-change tree on 2D grids to 80 a side, 3D to 16 and
 three random patterns at n = 2000, all identical, and each clean under `-Wall -Wextra` and under
-`-fsanitize=address,undefined`. What landed: the four `QuotientGraphFlat` arrays and the accessors over
-them, `Buckets`'s signatures, `degrees` with the scalars that travel with it, the four scan arrays
-with the two structs that bind them, then `usedKeys` and its hash locals, `sizeU` and `sizeV`,
-`reachableSize`, `absorb`'s `vertexCount`, and one entity loop in `AmdFlat` brought back to the
-`int32_t` form. `docs/DESIGN_DECISIONS.md` (2026-08-11) carries the account and
+`-fsanitize=address,undefined`. What landed: the four `QuotientGraphFlat` arrays and the accessors
+over them, `Buckets`'s signatures, `degrees` with the scalars that travel with it, the four scan
+arrays with the two structs that bind them, then `usedKeys` and its hash locals, `sizeU` and
+`sizeV`, `reachableSize`, `absorb`'s `vertexCount`, and one entity loop in `AmdFlat` brought back to
+the `int32_t` form. `docs/DESIGN_DECISIONS.md` (2026-08-11) carries the account and
 `docs/CODING_RULES.md` now states the three-way rule.
 
 **Three things came out of it that the list below did not anticipate**, all in the design entry:
@@ -2243,7 +2280,7 @@ which is the rule doing its job rather than the rule being slack.
   `refreshed`, `mMerged`.
 - Links: `mSuperNext`, `mSuperLast`, `hashHead`, `hashNext`, and `Buckets`'s `mHead`, `mNext`,
   `mPrev`, which carries two sentinels, `NIL` and `UNFILED = -2`.
-- Stamps: `mMark` and `mTag`, the drivers' `mark` and `tag`, `touchedRound`.
+- Stamps: `mMarkMmd` and `mTagMmd`, the amd drivers' `markAmd` and `tagAmd`, `touchedRound`.
 - `AmdFlat`'s `w`, `wflg`, `lemax`, `wbig`, signed by requirement rather than by sentinel; see
 below.
 
@@ -2299,8 +2336,8 @@ is what keeps the change mechanical afterwards.
    invariant today and nothing enforces it; narrowing changes the wrap distance and not the
    hazard.
 
-**The NIL-carrying set needs no work.** `mMark`, `mTag`, `mHead`, `mNext`, `mPrev`, `mSuperNext`,
-`mSuperLast`, `hashHead`, `hashNext` and `touchedCliques` are already `std::int32_t`.
+**The NIL-carrying set needs no work.** `mMarkMmd`, `mTagMmd`, `mHead`, `mNext`, `mPrev`,
+`mSuperNext`, `mSuperLast`, `hashHead`, `hashNext` and `touchedCliques` are already `std::int32_t`.
 
 **One quantity is deliberately SIGNED and must stay so**, and it is the only one. `AmdFlat`'s tagged
 W
@@ -2391,17 +2428,17 @@ element visits on both families, of which the fusion removed a fifth. What remai
 
 ## The parked attempt
 
-Give cliques their own mark space in `QuotientGraphFlat`, then fold liveness into the vertex marks and
-delete `mEliminated`.
+Give cliques their own mark space in `QuotientGraphFlat`, then fold liveness into the vertex marks
+and delete `mEliminated`.
 
 ```
-mMark becomes 2n:  vertices at [v], cliques at [c + n]
+mMarkMmd becomes 2n:  vertices at [v], cliques at [c + n]
                    (the amd driver already does exactly this with cliqueStamp)
 
 then the membership test becomes ONE load:
-    mMark[v] <  mTag     live, not yet seen this step
-    mMark[v] == mTag     seen this step
-    mMark[v] == GONE     eliminated, permanently   (GONE above any tag reachable)
+    mMarkMmd[v] <  mTagMmd     live, not yet seen this step
+    mMarkMmd[v] == mTagMmd     seen this step
+    mMarkMmd[v] == GONE     eliminated, permanently   (GONE above any tag reachable)
 
 merge(), number() and massEliminate() write GONE where they now set the byte
 ```
@@ -2454,8 +2491,9 @@ list. `make test` catches it, but check `mmd2` specifically and early.
 arena use-after-free, and a change that moves what a mark array means is exactly the shape that
 would introduce another.
 
-Also needed: an overflow guard on `mTag`, as `AmdFlat`'s `w` array has with `clearFlag`, since
-`mTag` only ever increments and `GONE` must stay above it.
+Also needed: an overflow guard on `mTagMmd`, as the amd engine's `markAmd` has with `resetAtTag`,
+since
+`mTagMmd` only ever increments and `GONE` must stay above it.
 
 ## If it does not pay
 

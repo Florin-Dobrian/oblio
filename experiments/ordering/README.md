@@ -1001,12 +1001,12 @@ can now be profiled against an implementation known to compute the identical ans
 ### One production consequence worth knowing
 
 Three of the four reversed walks are in `Mmd3.cpp`. The fourth, the `I[u]` expansion, lives in
-`QuotientGraphFlat::reachableSet`, which all six drivers share, so it is a flag, `setReverseIncidence`,
-off by default and turned on only by `Mmd3`, with the branch hoisted and per clique rather than per
-member. Entry 6 needed the same treatment for `QuotientGraphFlat::order`, and became a second named
-method, `orderAscending`, a counting layout with one ascending pass and no sort. A mode flag and a
-parallel method on a shared class are not free to the reader; the alternatives were duplicating
-the walks or changing the permutation for every driver.
+`QuotientGraphFlat::reachableSet`, which all six drivers share, so it is a flag,
+`setReverseIncidence`, off by default and turned on only by `Mmd3`, with the branch hoisted and per
+clique rather than per member. Entry 6 needed the same treatment for `QuotientGraphFlat::order`, and
+became a second named method, `orderAscending`, a counting layout with one ascending pass and no
+sort. A mode flag and a parallel method on a shared class are not free to the reader; the
+alternatives were duplicating the walks or changing the permutation for every driver.
 
 mmd3 is in `LAYERS`, `GRID_LAYERS` and `PORTED`, so `make test` holds the twins to each other and
 production to the prototype. Production carries `Mmd3` and `Ordering::MMD3`, and `make scale2d` in
@@ -1231,8 +1231,9 @@ than a shift of both. Both rotations are load-bearing here, because entry 2 made
 walk the cliques and then the adjacency, so both feed `C[pivot]`'s content order, and that order
 decides entry 1's hash survivor.
 
-Worth noting that production is a better fit for this than the prototype: `QuotientGraphFlat` already
-holds both lists in one run behind `mSourcePtr`, which is the layout that motivated the trick.
+Worth noting that production is a better fit for this than the prototype: `QuotientGraphFlat`
+already holds both lists in one run behind `mSourcePtr`, which is the layout that motivated the
+trick.
 
 ### Entry 4, the defect, and what it was costing
 
@@ -1312,11 +1313,11 @@ and on grids, and in `PORTED` since production `Amd3` was extracted from it on 2
 production is held to it entry for entry as well.
 
 **The extraction was a port rather than a copy**, three of the six entries landing in code the six
-drivers share. `QuotientGraphFlat` gained `setVendoredListOrder` for entries 2 and 5, grouped because
-they are one fact and are only ever wanted together, and `setLateMassElimination` with
+drivers share. `QuotientGraphFlat` gained `setVendoredListOrder` for entries 2 and 5, grouped
+because they are one fact and are only ever wanted together, and `setLateMassElimination` with
 `massEliminate` for entry 3. Both flags are off for every other driver, and were verified inert
-before `Amd3` existed at all: every suite passed and every fill figure across all nine orderings
-was identical digit for digit. Entry 1 is `Amd3`'s own and entry 4 was already fixed everywhere.
+before `Amd3` existed at all: every suite passed and every fill figure across all nine orderings was
+identical digit for digit. Entry 1 is `Amd3`'s own and entry 4 was already fixed everywhere.
 
 **One defect the extraction introduced, and only a grid caught it.** Entry 5's rotation was written
 as a `std::rotate`, which yields `[pivot, c1, ..., ck]` where AMD moves the FIRST element to the end
@@ -1450,7 +1451,7 @@ constant is revised: too low costs one `O(n)` fill per sweep, amortized to nothi
 is a correctness cliff with a silent wrong answer past it.
 
 **Where a check may go is the whole of the difficulty, and it is per layer.** A check is legal only
-where nothing in `mark` is live, and the eliminators are the obvious hazard: each holds
+where nothing in `markMmd` is live, and the eliminators are the obvious hazard: each holds
 `pivot_clique_tag` and `absorbed_cliques_tag` live across the prune loop and then the merged set
 across the `C[pivot]`
 compaction, so the guard goes before the call and never inside. Several other regions hold a stamp
@@ -1600,7 +1601,7 @@ worst case then lands at `INT32_MAX - 1` rather than exactly on `INT32_MAX`.
 **md2 spends 3 in the eliminator and `n` in the search, and the swap is the point of the layer.**
 The eliminator advances three times and none of them is in a loop: once inside `md2_neighbors`
 for the reachable set, then `pivot_clique_tag`, then `absorbed_cliques_tag`. Every loop after that
-only reads `mark` against those two stamps. That is the quotient graph paying off, one set built
+only reads `markMmd` against those two stamps. That is the quotient graph paying off, one set built
 and many membership tests against it, where md1 built one set per neighbor. The cost moves to the
 pivot search, which calls `md2_neighbors` once per live vertex, so up to `n`.
 
@@ -4186,7 +4187,7 @@ The two codes form the same union and form it in different places. Recording the
 because it looks like a candidate whenever MMD1's speed comes up, and it is not one.
 
 **Ours accumulates during the batch.** A second stamp array, `touchedIteration`, alongside the
-`mark` and `tag` pair the eliminator already uses:
+`markMmd` and `tag` pair the eliminator already uses:
 
 ```
 for u in C[pivot]:                          # EVICT, with a stale degree
@@ -4196,8 +4197,8 @@ for u in C[pivot]:                          # EVICT, with a stale degree
         touched.append(u)                   # a marker, so O(1) per eviction
 ```
 
-It has to be a second array rather than the shared one. `mark` and `tag` are scratch inside
-`mmd1Neighbors` and inside the eliminator, and a batch calls those many times, so `mark` cannot
+It has to be a second array rather than the shared one. `markMmd` and `tag` are scratch inside
+`mmd1Neighbors` and inside the eliminator, and a batch calls those many times, so `markMmd` cannot
 survive one elimination while `touchedIteration` must survive the whole iteration. Two lifetimes,
 two arrays. Using the iteration number as the stamp is the frugal part: it is monotone and already
 maintained, so the array never needs clearing and there is no counter to forget to bump. The union
@@ -6558,7 +6559,7 @@ early exit on the first mismatch.
 The removal of `v` from `A[u]` and of `u` from `A[v]` is not a detail: indistinguishable vertices
 are adjacent to each other, so without it no pair would ever match.
 
-`mark` is sized `2 * size` for this pass, with cliques stamped at `c + size`. That is the same
+`markMmd` is sized `2 * size` for this pass, with cliques stamped at `c + size`. That is the same
 separation the key's stride achieves, done a second time and for the same reason: a vertex and a
 clique of the same index must not be confused.
 
@@ -6572,8 +6573,9 @@ hash            other                     the exact set comparison
 ```
 
 **The hash's use is the unusual one, in two ways.** It stamps BOTH vertices and cliques under one
-tag, which is why `mark` is `2n` long in this file and nowhere else; the eliminator gets away with a
-single range because a clique's id IS a vertex and only one kind is ever live under a given tag.
+tag, which is why `markMmd` is `2n` long in this file and nowhere else; the eliminator gets away
+with a single range because a clique's id IS a vertex and only one kind is ever live under a given
+tag.
 
 And it is the only place where the mark answers EQUALITY OF TWO SETS rather than membership in one.
 The scheme does not do equality directly, so it is built from two membership passes and a count:
@@ -6740,7 +6742,7 @@ kept it out of every clique. Two encodings covering two regions, where amd needs
 
 ### The clique side, where the asymmetry runs the other way
 
-Amd stamps clique ids and mmd never does, which is why `mMark` is 2n on one branch and n on the
+Amd stamps clique ids and mmd never does, which is why `mMarkMmd` is 2n on one branch and n on the
 other, and why the width is a constructor argument rather than always the larger.
 
 The reason is the section above: amd's exact test is set equality over `I[u]` and `I[v]`, two
@@ -6799,7 +6801,7 @@ stamping pass, and the prune answers three of its four questions from the sign. 
 was DECLINED rather than blocked, for the reason in the next paragraph. Permutations identical to
 `Mmd3` on 24 cases and across all nine drivers under `make digest`.
 
-**The bad half: the tag scheme invalidates in O(1) and the sign scheme cannot.** `++mTag` retires
+**The bad half: the tag scheme invalidates in O(1) and the sign scheme cannot.** `++mTagMmd` retires
 every mark in the array at once, which is exactly why `reachableSetWeight` can count a reach without
 materializing it and without cleaning up after itself. A negation has no such trick. Every one must
 be undone individually, and these two functions keep no record of what they negated, having been
@@ -7517,9 +7519,9 @@ biases by one instead, storing `u + 1`, because its ids are 1-based and zero is 
 mean unfiled; ours are 0-based, so copying that would cost a `+ 1` on every predecessor store and a
 `- 1` on every read.
 
-**CONTRAST `GONE`, WHICH IS ORDERED AND CANNOT MOVE.** It lives in `mMark`, not here, and the hot
-line is `mMark[v] < mTag`: one load answering two questions, not seen this step and not dead. That
-works only if every tag sorts above the initial value and below the dead value, so `NIL` is the
+**CONTRAST `GONE`, WHICH IS ORDERED AND CANNOT MOVE.** It lives in `mMarkMmd`, not here, and the hot
+line is `mMarkMmd[v] < mTagMmd`: one load answering two questions, not seen this step and not dead.
+That works only if every tag sorts above the initial value and below the dead value, so `NIL` is the
 floor, the tags are the middle and `GONE` is the ceiling. A negative `GONE` would sort with `NIL`
 and a dead vertex would read as live-and-unseen. `GONE` and `OUTMATCHED` are both `INT32_MAX` today,
 in different arrays, and only one of them had a choice about it.
@@ -7725,9 +7727,9 @@ and nine that were really zero and two, from prose naming a method.
 ### The surface each class actually has, 2026-08-24
 
 The table above is one class against two branches. This one is one branch's machinery against two
-CLASSES: every member `QuotientGraphFlat` and `QuotientGraphCompacted` declare, side by side. It exists
-to be re-read after a change, since the whole claim of the pair is that they differ in STORAGE and
-nothing else, and that claim is checkable only by looking.
+CLASSES: every member `QuotientGraphFlat` and `QuotientGraphCompacted` declare, side by side. It
+exists to be re-read after a change, since the whole claim of the pair is that they differ in
+STORAGE and nothing else, and that claim is checkable only by looking.
 
 ```
                                      flat   compacted
@@ -7756,8 +7758,8 @@ nothing else, and that claim is checkable only by looking.
     setAside                          x         x
 
   marks
-    mark / setMark                    x         x
-    advanceTag                        x         x
+    mark / setMarkMmd                    x         x
+    advanceTagMmd                        x         x
     markGone                          x         x
     number                            x         x
     eliminatedAmd / eliminatedMmd     x         x
@@ -7975,19 +7977,19 @@ a vertex from the graph, so zeroing its weight is enough to make every walk skip
 vertex is still live, still in every list that names it, still contributing to its neighbours'
 degrees; only its candidacy is withheld. That is `OUTMATCHED` in `mPrev`, and it is mmd's alone.
 
-## What `mWeight` and `mMark` encode between them, 2026-08-24
+## What `mWeight` and `mMarkMmd` encode between them, 2026-08-24
 
 Every question either branch asks about a vertex is answered from these two arrays. Below is what
 each combination means, over the flat class; the compacted and chained ones agree.
 
 **One table per branch, because neither branch has all the states.** mmd never sets a row aside,
-having no dense-row rule; amd never numbers, its prepass taking degree 0 alone. And `mMark` is
+having no dense-row rule; amd never numbers, its prepass taking degree 0 alone. And `mMarkMmd` is
 EMPTY on the amd branch, `enableMarks` being called by the three mmd drivers alone, so it has no
 column there at all.
 
 ```
-MMD                         mWeight[u]        mMark[u]        eliminatedMmd
-                                                              (mMark[u] == GONE)
+MMD                         mWeight[u]        mMarkMmd[u]        eliminatedMmd
+                                                              (mMarkMmd[u] == GONE)
 
 live, principal             > 0, its size     NIL or old tag  false
 live, in the reach          < 0, negated      unchanged       false
@@ -8040,12 +8042,12 @@ sees one. That is what lets `vWeight > 0` answer two questions in one load: v is
 already in this reach.
 
 ```
-formReachableSetMmd   adjacency   vWeight > 0 && !(mHasNumbered && mMark[v] == GONE)
+formReachableSetMmd   adjacency   vWeight > 0 && !(mHasNumbered && mMarkMmd[v] == GONE)
                       cliques     vWeight > 0
 formReachableSetAmd   adjacency   vWeight > 0
                       cliques     vWeight > 0
-reachableSetWeight    adjacency   mMark[v] != GONE
-                      cliques     mMark[v] < mTag
+reachableSetWeight    adjacency   mMarkMmd[v] != GONE
+                      cliques     mMarkMmd[v] < mTagMmd
 ```
 
 **ALL FOUR ASK THE SAME TWO QUESTIONS. What differs is the currency each has to pay with.**
@@ -8057,9 +8059,9 @@ form*, adjacency        vWeight > 0           vWeight > 0     one load, both ans
 form*, cliques          vWeight > 0           vWeight > 0     one load, both answers
 
 reachableSetWeight
-        adjacency       mMark[v] != GONE      not needed      A[u] has no duplicates,
+        adjacency       mMarkMmd[v] != GONE      not needed      A[u] has no duplicates,
                                                               and it runs first
-        cliques         mMark[v] < mTag       mMark[v] < mTag one load, both answers
+        cliques         mMarkMmd[v] < mTagMmd       mMarkMmd[v] < mTagMmd one load, both answers
 ```
 
 **THE NEGATION IS THE DISTINCTNESS MARK IN THE `form*` WALKS.** A vertex already in this reach is
@@ -8088,14 +8090,14 @@ clique exists yet, and every clique since is built from a reach whose adjacency 
 skipped it. A guard in the clique loops would be dead code.
 
 **`reachableSetWeight` IS THE ODD ONE AND HAS A REASON.** It leads with the mark rather than the
-weight because it must touch `mMark[v]` anyway, writing `mMark[v] = mTag` on the next line for
-DISTINCTNESS: an exact degree counts each reached vertex once, and u can reach the same v through
-two cliques. The load is happening regardless, so `!= GONE` rides on it free, and guarding it with
-`mHasNumbered` would add a test to save nothing.
+weight because it must touch `mMarkMmd[v]` anyway, writing `mMarkMmd[v] = mTagMmd` on the next line
+for DISTINCTNESS: an exact degree counts each reached vertex once, and u can reach the same v
+through two cliques. The load is happening regardless, so `!= GONE` rides on it free, and guarding
+it with `mHasNumbered` would add a test to save nothing.
 
-Its clique loop's `mMark[v] < mTag` then answers THREE questions from one load, `GONE` sorting above
-every tag: distinct this call, not numbered, not merged. That fold is why `GONE` cannot simply be
-retired in favour of a zero weight. Merged vertices linger in other cliques' member lists, so
+Its clique loop's `mMarkMmd[v] < mTagMmd` then answers THREE questions from one load, `GONE` sorting
+above every tag: distinct this call, not numbered, not merged. That fold is why `GONE` cannot simply
+be retired in favour of a zero weight. Merged vertices linger in other cliques' member lists, so
 dropping `GONE` would cost that loop a second test, in the hottest loop in the ordering.
 
 **AND AMD NEEDS NO DISTINCTNESS STAMP AT ALL**, which is the real reason it has no mark array. Its
@@ -8391,8 +8393,8 @@ graph" and "does it have a position in the permutation":
 ```
                            in graph   has a position       weight     mark (mmd)   mark (amd)
 
-live                       yes        not yet              1 .. n     < mTag       none
-live, in the current reach yes        not yet              -(1 .. n)  < mTag       none
+live                       yes        not yet              1 .. n     < mTagMmd       none
+live, in the current reach yes        not yet              -(1 .. n)  < mTagMmd       none
 pivot, eliminated          no         yes, at that step    KEPT       GONE         none
 merged                     no         no, rides later      0          GONE         none
 prepass-numbered           no         yes, at that step    1          GONE         none
@@ -8406,10 +8408,10 @@ membership mark, which is why the prune's test is `mWeight[v] <= 0` and why the 
 ahead of the loop that consumes it.
 
 **AND THE amd COLUMN IS EMPTY ALL THE WAY DOWN, WHICH IS NOT AN OVERSIGHT.** That branch never
-calls `enableMarks`, so `mMark` is empty, and `markGone` is `if (!mMark.empty()) mMark[u] = GONE;`,
-a no-op there. Every `markGone` call in the class is therefore mmd's alone at run time even though
-the code is shared. What amd has instead is the zero weight, in every case but one: a pivot keeps
-its weight, so `eliminatedAmd` must never be asked about a pivot, and the driver never does.
+calls `enableMarks`, so `mMarkMmd` is empty, and `markGone` is `if (!mMarkMmd.empty()) mMarkMmd[u] =
+GONE;`, a no-op there. Every `markGone` call in the class is therefore mmd's alone at run time even
+though the code is shared. What amd has instead is the zero weight, in every case but one: a pivot
+keeps its weight, so `eliminatedAmd` must never be asked about a pivot, and the driver never does.
 
 **A WEIGHT'S RANGE IS WHAT MAKES THAT WORK, AND IT DIFFERS FROM AN INDEX'S.** A weight counts
 original vertices, so it runs 1 to n and n is capped at `MAX_IDX`, which is `INT32_MAX`. Zero is
@@ -8462,14 +8464,14 @@ genmmd's `if (dg == 0) dg = 1` lumps degree zero and degree one into one bucket,
 takes both; `AMD_2`'s initialization pass tests `deg == 0` alone. The difference is not cosmetic. A
 degree-ZERO vertex is in nobody's adjacency, so no walk can reach it and nothing has to be marked;
 a degree-ONE vertex is still named by its neighbor, so numbering it requires a mark and that is what
-`number` writes. Everything mmd pays for `mMark` on this path follows from taking bucket 1.
+`number` writes. Everything mmd pays for `mMarkMmd` on this path follows from taking bucket 1.
 
 **WHICH IS THE TOP OF THE CHAIN RECORDED IN `docs/NEXT.md`**, seen from the other end. That chain
 runs `orderAscending` reads `mWeight[pivot]` -> a numbered vertex must keep weight one -> the weight
-cannot say dead -> `mMark` must carry GONE -> `mHasNumbered` guards the load. The prepass is where
-the numbered vertex comes from, so a variation taking only bucket 0 would remove the case the chain
-exists to serve. It would also change the order, bucket 1 being genmmd's, so it belongs with the
-other variations rather than with the alignment work.
+cannot say dead -> `mMarkMmd` must carry GONE -> `mHasNumbered` guards the load. The prepass is
+where the numbered vertex comes from, so a variation taking only bucket 0 would remove the case the
+chain exists to serve. It would also change the order, bucket 1 being genmmd's, so it belongs with
+the other variations rather than with the alignment work.
 
 ## Absorb, reclaim and prune, and where each half lives, 2026-08-26
 
@@ -9095,9 +9097,9 @@ A multiplexed slot is safe only because of a claim about WHEN two uses can coexi
 spans functions and sometimes files:
 
 ```
-work[u]    free because NO CLIQUE IS NAMED AFTER A LIVE VERTEX
+markAmd[u]    free because NO CLIQUE IS NAMED AFTER A LIVE VERTEX
 mPrev[u]   free because THE PRUNE UNFILED EVERY MEMBER of C[pivot]
-mMark      GONE sits above every tag only because NOTHING STAMPS A DEAD VERTEX
+mMarkMmd      GONE sits above every tag only because NOTHING STAMPS A DEAD VERTEX
 ```
 
 None of those can be checked by reading the line, or the function, or in one case even the file. The
@@ -9119,8 +9121,8 @@ the gate set that FAILS IF IT BREAKS.
 question rather than an encoding one. The two are linked, folding driver state into entity-indexed
 arrays being what creates the shared write, but they are not the same axis, and treating them as one
 means paying for a fold in coupling that the fold did not require. The open question about whether
-`work` should become a member is exactly that shape: the fold already happened, and where the array
-lives is still undecided.
+`markAmd` should become a member is exactly that shape: the fold already happened, and where the
+array lives is still undecided.
 
 ## The bound in three terms, and where each is computed, 2026-08-28
 
@@ -9136,8 +9138,8 @@ all three.
 the formula looking incomplete:
 
 ```
-|A[u] - C[p]|            the PRUNE, as explicitPart, parked in work[u]
-sum |C[c] - C[p]|        the BOUND PASS, work[c] - workTag summed over I[u] - {p}
+|A[u] - C[p]|            the PRUNE, as explicitPart, parked in markAmd[u]
+sum |C[c] - C[p]|        the BOUND PASS, markAmd[c] - tagAmd summed over I[u] - {p}
 |C[p] - {u}|             the FOURTH PASS, as newCliqueWeight - weight(u)
 ```
 
@@ -9168,47 +9170,52 @@ in the intermediate, and the minimum brings it back to at most `degrees[u]` and 
 second is the trivial ceiling, `u` being unable to reach more than the live originals other than
 itself.
 
-## `TaggedScan`, and whether `work` should become a member, 2026-08-28
+## `TaggedScan`, and whether `markAmd` should become a member, 2026-08-28
 
 `TaggedScan` is a PARAMETER BUNDLE and nothing more: six fields, no methods, passed by reference to
-the three `...Amd` entry points. `QuotientGraphCompacted` includes `QuotientGraphFlat.h` specifically
-for `Buckets` and `TaggedScan`, which it uses verbatim.
+the three `...Amd` entry points. `QuotientGraphCompacted` includes `QuotientGraphFlat.h`
+specifically for `Buckets` and `TaggedScan`, which it uses verbatim.
 
 **THE mmd AND amd FORK IS VISIBLE IN ONE FIELD**, `Buckets* buckets` being a POINTER and nullable.
 The mmd prune needs no buckets, mmd parking nothing there and leaving its candidates filed to ask
 `filed()` about them. That is not incidental to the bundle, it is why the bundle exists: the AMD
-PRUNE PRODUCES TWO BY-PRODUCTS AND THE MMD PRUNE PRODUCES NONE. `explicitPart` into `work[u]` and
+PRUNE PRODUCES TWO BY-PRODUCTS AND THE MMD PRUNE PRODUCES NONE. `explicitPart` into `markAmd[u]` and
 the adjacency half of the key into `mPrev[u]`, both borrowed slots belonging to structures the
 vertex is temporarily outside of. mmd's prune computes nothing anyone else wants.
 
-### Could `work` and `workTag` become members, like `mMark` and `mTag`?
+### Could `markAmd` and `tagAmd` become members, like `mMarkMmd` and `mTagMmd`?
 
 They could, opt-in the same way through an `enableWork()` beside `enableMarks()`, so no mmd driver
 pays for an array it never touches. Two things make it less clean than that parallel, and both are
 worth weighing rather than assuming.
 
-**THE LIVE-VERTEX HALF IS DRIVER STATE.** The array has four uses, and if the detection walks move
-into the classes they split like this:
+**THE LIVE-VERTEX HALF LEFT THE ARRAY ON 2026-08-30, and that changes the answer here.** The partial
+bound moved to `degrees[u]`, where `AMD_2` has always kept it, so a sweep of the tag array between
+the two terms that raise the tag is safe and the second `clear_flag` could be ported. See the entry
+in `docs/NEXT.md`. What follows was written when the bound still sat in `markAmd[u]`; the objection
+it raises is now weaker, THREE of the array's uses being the class's and none the driver's:
 
 ```
-work[c]  tag + count        the class writes it in the prune, the driver reads it       SHARED
-work[x]  detection stamp    moves into the class with the walk                          CLASS
-work[u]  partial bound      parked between the bound pass and the fourth pass           DRIVER
-work[c]  zero, absorbed     written by the class                                        CLASS
+markAmd[c]  tag + count        the class writes it in the prune, the driver reads it       SHARED
+markAmd[x]  detection stamp    moves into the class with the walk                          CLASS
+degrees[u]  partial bound      parked between the bound pass and the fourth pass           DRIVER
+                               (in markAmd[u] until 2026-08-30; see below)
+markAmd[c]  zero, absorbed     written by the class                                        CLASS
 ```
 
-Three of four become the class's and one stays the driver's. Survivable, `mMark` being class-owned
-while the mmd driver stamps into it through `setMark`, but it means the class would own an array
-whose live-vertex slots are none of its business.
+Three of four become the class's and one stays the driver's, and after the move that one is no longer
+in this array at all. So the objection this paragraph raised, that the class would own an array whose
+live-vertex slots are none of its business, no longer applies: the live-vertex slots hold detection
+stamps and nothing else, and those move into the class with the walk.
 
-**AND `workTag` ADVANCES BY A DRIVER QUANTITY.** `workTag = stamp + 1` with `stamp` raised to
-`workTag + maxCliqueWeight`, and `maxCliqueWeight` is maintained by the driver. As a member it would
-need a setter the driver drives, which is weaker ownership than `mTag`, which the graph advances
+**AND `tagAmd` ADVANCES BY A DRIVER QUANTITY.** `tagAmd = stamp + 1` with `stamp` raised to
+`tagAmd + maxCliqueWeight`, and `maxCliqueWeight` is maintained by the driver. As a member it would
+need a setter the driver drives, which is weaker ownership than `mTagMmd`, which the graph advances
 inside its own walks.
 
 **SO DO NOT DECIDE IT YET: THE WALK MOVE DECIDES IT.** If the detection walks go into the classes,
-the class touches `work` in three of four uses and membership is the natural shape. If they do not,
-`TaggedScan` is already the right answer and moving the array in would be ownership without a
+the class touches `markAmd` in every remaining use and membership is the natural shape. If they do
+not, `TaggedScan` is already the right answer and moving the array in would be ownership without a
 reason.
 
 One thing to know before anyone edits scan structures: `TaggedScan` is shared VERBATIM across two
@@ -9234,21 +9241,21 @@ for u in C[p]:
         explicitPart += weight(v)
         uHashKey     += v                  # NO +1, NO reduction
         keep v
-    work[u]          = explicitPart        # borrowed slot: u is live, so work[u] is free
+    markAmd[u]          = explicitPart        # borrowed slot: u is live, so markAmd[u] is free
     setHashKey(u, uHashKey)                # borrowed slot: mPrev, u having been unfiled
 
 # ---- part B: the bound pass, one walk per member u of C[p] ----------------
 # The key's other half rides on the walk the bound was making anyway.
 
 for u in C[p]:
-    partialBound = work[u]                 # the adjacency half, from part A       BOUND
+    partialBound = markAmd[u]                 # the adjacency half, from part A       BOUND
     uHashKey     = hashKey(u)              # the adjacency half, from part A       KEY
 
     for c in I[u]:
         if c != p: uHashKey     += c                                            # KEY
-        if c != p: partialBound += work[c] - workTag                            # BOUND
+        if c != p: partialBound += markAmd[c] - tagAmd                            # BOUND
 
-    work[u] = min(partialBound, degrees[u])        # narrow again, and park it    BOUND
+    degrees[u] = min(partialBound, degrees[u])        # narrow again, and park it    BOUND
 
     if u is not dead:                              # the ONLY skip that survives
         b = uHashKey mod n                         # ONE reduction, over a wrapped sum
@@ -9260,8 +9267,8 @@ for u in C[p]:
 `A[u]` is only in hand while the prune is rewriting it. The incidence half has to be part B because
 AGGRESSIVE ABSORPTION RUNS BETWEEN THE TWO and compacts `I[u]`, so at prune time the list to sum
 over does not exist yet. That is the whole reason the key is split rather than computed in one
-place, and it is also why the two halves travel in different slots, `work[u]` and `mPrev[u]`, both
-borrowed for exactly the span that needs them.
+place, and it is also why the two halves travel in different slots, `markAmd[u]` and `mPrev[u]`,
+both borrowed for exactly the span that needs them.
 
 **TWO ACCUMULATORS IN ONE LOOP, AND ONE RULE.** The bound and the key ride the same walk of `I[u]`
 and both skip the pivot, so the two `c != pivot` tests are one rule written twice. Excluding the
@@ -9301,10 +9308,11 @@ Both amd drivers, which differ in one line of it and are otherwise identical.
 # in     hashHead[b]      head of hash bucket b, filled by the bound pass
 #        chain(u)         next vertex in u's bucket          (mNext)
 #        hashBucket(u)    u's bucket                         (mPrev)
-#        work[]           the scan's values, up to workTag + maxCliqueWeight
-# out    merges, and work[] stamped above those values
+#        markAmd[]           the scan's values, up to tagAmd + maxCliqueWeight
+# out    merges, and markAmd[] stamped above those values
 
-stamp = max(stamp, workTag + maxCliqueWeight)        # a stamp must clear every scan value
+stampAmd = max(stampAmd, tagAmd + maxCliqueWeight)   # a stamp must clear every scan value
+resetAtStamp()                                       # the SECOND guard; see docs/NEXT.md
 
 for seed in C[p]:                                    # driven by the clique, not by the buckets
     if dead(seed): continue
@@ -9317,13 +9325,13 @@ for seed in C[p]:                                    # driven by the clique, not
         if dead(u): continue                         # absorbed earlier in this same loop
 
         other = ++stamp                              # ONE stamp per outer vertex, hoisted
-        for x in A[u] + (I[u] - {p}): work[x] = other
+        for x in A[u] + (I[u] - {p}): markAmd[x] = other
 
         for v = chain(u); v != NIL; v = chain(v):
             if dead(v): continue
             if |A[v]| != |A[u]|: continue            # stored lengths, reject before touching
             if |I[v]| != |I[u]|: continue
-            if any x in A[v] + (I[v] - {p}) with work[x] != other: continue
+            if any x in A[v] + (I[v] - {p}) with markAmd[x] != other: continue
 
             merge v into u                           # weight(u) += weight(v); weight(v) = 0
             numEliminated += 1
@@ -9414,7 +9422,7 @@ than `amd1`, which has no hash at all. The value of stronger detection is in TIM
 `min(partial, degrees[u])` BEFORE detection and the fourth pass overwrites `degrees[u]` after it, so
 nothing read the value. Removing it also retired the `weight(v)` read, which had no other use. It is
 most likely a leftover from an arrangement in which the partial bound lived in `degrees[u]` rather
-than in `work[u]`, where the subtraction would have been load-bearing.
+than in `markAmd[u]`, where the subtraction would have been load-bearing.
 
 ## q2h against hashing, and why neither is tied to its branch, 2026-08-28
 
@@ -9547,6 +9555,238 @@ Hashing reduces the cost of the comparisons you decided to make. It does not wid
 compare. Detection over `C[pivot]` alone cannot find indistinguishable vertices elsewhere in the
 graph, hashed or not, and that limit comes from the schedule rather than from the filter. Widening
 it is pre-compression's job, not the hash's.
+
+## The amd mark, tag and stamp, end to end, 2026-08-30
+
+Written after a tag-ceiling defect took two rounds of reasoning to find. The mechanism is one array
+and two counters, and it is easy to describe wrongly, so this is the whole of it in execution order.
+`src/AmdEngine.cpp` line numbers, valid at `94eda23`.
+
+### Setup, once per ordering
+
+```
+129   markAmd(size, 1)      every slot alive-and-unseen
+130   tagAmd = 2            the clique tag
+137   stampAmd = 2          the NEXT STAMP to hand out, on the same array at a higher scale
+138   maxCliqueWeight = 0   the largest clique weight seen so far, over ALL steps
+143   tagCeilingAmd = INT32_MAX - n
+```
+
+### One step
+
+```
+199   resetAtTag()                     GUARD 1: on the tag, before anything writes
+201   scan gets markAmd by reference and tagAmd by value
+        the graph writes markAmd[c] = tagAmd + |C[c] - C[p]|
+        the prune writes markAmd[u] = uAdjacencyWeight        for live members of C[p]
+231   maxCliqueWeight = max(maxCliqueWeight, newCliqueWeight)  monotone; never decreases
+239   markAmd[c] == tagAmd  ->  |C[c]-C[p]| == 0, absorb: markAmd[c] = 0
+317   otherCliqueBound += markAmd[c] - tagAmd                 the third bound term
+337   twoTerms = markAmd[u] + otherCliqueBound                the adjacency half is SPENT here
+338   degrees[u] = min(twoTerms, degrees[u])                  parked OUTSIDE the tag array
+376   stampAmd = max(stampAmd, tagAmd + maxCliqueWeight + 1)  RAISE 1: the FIRST stamp
+377   resetAtStamp()                   GUARD 2: on the raised stamp, before RAISE 2
+404   other = stampAmd++                                      RAISE 2, once per candidate
+409   markAmd[uSegment[a]] = other                            stamp the whole run
+423   markAmd[vSegment[a]] != other  ->  not a duplicate
+464   markAmd[u] = 1                   the slot goes back to alive-and-unseen
+485   tagAmd = stampAmd                one past the last stamp; no `+ 1` is needed
+```
+
+### Three facts hold it together
+
+**ONE ARRAY, THREE STATES, told apart by the tag rather than by clearing.**
+
+```
+markAmd[c] == 0             absorbed and gone
+0 < markAmd[c] < tagAmd     alive, not seen this step; the value is stale
+markAmd[c] >= tagAmd        seen this step, and markAmd[c] - tagAmd is |C[c] - C[p]|
+```
+
+**TWO POPULATIONS IN ONE ARRAY, DISJOINT BY CONSTRUCTION.** Clique slots are indexed by dead pivots
+and vertex slots by live members of `C[p]`. A clique id is the id of the pivot that made it, and
+that vertex is dead from the moment the clique exists, so the two can never name the same slot. This
+is what lets the prune park a by-product in a live vertex's slot at 194 without a fourth array.
+
+**TWO SCALES, INTERLEAVED RATHER THAN COLLIDING.** The scan writes up to `tagAmd + maxCliqueWeight`;
+`stampAmd` starts one above that and rises by one per candidate; `tagAmd = stampAmd` then puts the
+next step's threshold above every stamp, so each stamped entry reads back as alive-and-unseen.
+THAT is what invalidates the whole array in one addition instead of a clearing pass, and it is why
+the array is SIGNED: `tagAmd - weight(u)` is legitimately negative while the tag is small, and the
+arithmetic only comes right again at `markAmd[c] - tagAmd`.
+
+### Why there are TWO guards and not one
+
+The tag rises by TWO terms per step, at 376 and at 404. Each is bounded by n, and they belong to
+DIFFERENT cliques: `maxCliqueWeight` is a maximum over all previous steps and the candidate count is
+this step's. So their sum is not bounded by n, and a ceiling reserving one n covers only the first.
+
+`AMD_2` puts a `clear_flag` before each, at its lines 1694 and 1949, which is why `Int_MAX_VAL - n`
+is the right margin there. We had only the first until 2026-08-30. Measured worst climb over 7200
+graphs is 1.21n, and with one guard the `stampAmd++` at 404 overflows a tag that entered the step
+just under the ceiling; UBSan says so when the state is forced. See `docs/NEXT.md`.
+
+### And why the bound is parked in `degrees` rather than in `markAmd`
+
+Because GUARD 2 sweeps the tag array, and a live vertex's partial bound sitting there is exactly
+what a sweep would destroy. `AMD_2` keeps that value in `Degree[i]` for the same reason. We kept it
+in `markAmd[u]` until 2026-08-30, which produced identical permutations on every matrix ever run and
+was discovered only when a guard that has never fired needed the array clean.
+
+Line 454's reset is the remaining obligation: after the step `markAmd[u]` holds a detection stamp,
+and before that the spent adjacency weight, either of which can exceed a small tag and would then
+read as seen-this-step.
+
+### What the two guards actually buy, and where the real limit is
+
+WITH BOTH GUARDS IN PLACE THE TWO RAISES CANNOT OVERFLOW AT ANY n. Guard 1 leaves
+`tagAmd < INT32_MAX - n` and raise 1 adds at most n; guard 2 leaves `stampAmd < INT32_MAX - n` and
+raise 2 adds at most n. Each guard reserves exactly what the term after it can consume. That is why
+`AMD_2` calls `clear_flag` twice and why one n is the right margin.
+
+**SO WHAT DEGRADES AT LARGE n IS COST, NOT CORRECTNESS.** `tagCeilingAmd = INT32_MAX - n` shrinks as
+n grows while the per-step climb grows with n, so the guards begin firing somewhere near
+n = 9.7e8 and the cost degrades continuously from there. At n = 2^31 - 1 the ceiling is 0, BOTH
+guards fire on every step, and the ordering pays 2n per elimination and 2n^2 overall. Slow and
+right.
+
+```
+n up to ~1e8      the tag never approaches the ceiling; today
+n ~1e8 to ~1e9    the guards fire on some steps; cost degrades continuously
+n = 2^31 - 1      ceiling 0, both guards fire every step, 2n^2 in sweeping alone
+```
+
+**EXCEPT IN ONE CORNER, AND IT IS A HARD BOUNDARY OF EXACTLY TWO VALUES.** After a sweep the tag is
+2, and the scan then writes `markAmd[c] = tagAmd + |C[c]|`, at most `2 + n`. That must be
+representable. With `MAX_IDX == INT32_MAX` an n of `INT32_MAX` makes it `INT32_MAX + 2`. So the
+ordering's true limit is `n <= INT32_MAX - 2`, two below what the matrix accepts. NOT VERIFIED BY
+FORCING; do that before acting on it.
+
+### Could the tag range use the negative half?
+
+The two special values sit BELOW the tag range, so they could move to `INT32_MIN` and
+`INT32_MIN + 1` with the tag running from `INT32_MIN + 2 + n` to `INT32_MAX - n`. Roughly
+`2^32 - 2n` of range instead of `2^31 - n`.
+
+**THE LOW END WOULD NEED A MARGIN TOO**, which is the part easy to miss.
+`QuotientGraphFlat.h:927` computes `firstSeenBase = tagAmd - uWeight`, DELIBERATELY negative while
+the tag is small. With the tag near `INT32_MIN` that underflows, so the floor has to reserve n
+exactly as the ceiling does.
+
+**AND IT BUYS ONE BIT.** The tag climbs about 1.21n per step, so doubling the range doubles the
+number of steps before a sweep. It moves each band boundary by a factor of two and changes none of
+the bands, at the cost of an encoding where both sentinels live at the extreme negative end and
+every reader has to know it.
+
+**THE ALTERNATIVE IS TO STATE A LIMIT THE MATRIX DOES NOT.** `checkIndexRange` is the pattern: the
+ordering rejects an n it cannot serve, with `std::length_error` naming the phase, rather than
+overflowing or sweeping every step. Where to put the threshold is the open judgment: at the true
+`INT32_MAX - 2`, which is correctness alone, or lower and defensible, say where sweeping begins to
+dominate the ordering.
+
+### Two special values at the bottom, against mmd's one
+
+```
+mmd     mMarkMmd = NIL (-1),  mTagMmd = 0,  advanceTagMmd() = ++mTagMmd  ->  first tag is 1
+amd     markAmd  = 1,         tagAmd  = 2,  the first usable tag is 2
+```
+
+Amd spends two values at the bottom and each is spent for a reason: `0` is ABSORBED, a permanent
+state that must never read as a stale tag, and `1` is the fresh alive-and-unseen value, which has to
+sit strictly below the smallest tag, so the smallest tag is 2. Mmd spends one, `-1`, and needs no
+absorbed state at all because its dead marker is `GONE` at the TOP of the range.
+
+So amd's range is `[2, INT32_MAX - n)` and mmd's is `[1, INT32_MAX)` with `GONE` on the top value.
+The shift is real and it is two values out of two billion; it bounds nothing.
+
+### `tagAmd` against `stampAmd`: a moving window, not a partition
+
+The two counters are easy to conflate, both being tags into one array, and they mark different
+things at different moments.
+
+```
+tagAmd     one per step      carries a NUMBER      markAmd[c] - tagAmd is |C[c] - C[p]|
+stampAmd   many per step     carries IDENTITY      markAmd[x] == other is membership, nothing more
+```
+
+**WITHIN ONE STEP THE SPACE IS PARTITIONED**, cleanly, into four disjoint ranges:
+
+```
+[0]                                   absorbed
+[1, tagAmd)                           alive, unseen this step
+[tagAmd, tagAmd + mcw]                the scan's clique values; the offset is a magnitude
+[tagAmd + mcw + 1, stampAmd - 1]      detection's stamps; identity only
+```
+
+Line 376, `stampAmd = max(stampAmd, tagAmd + maxCliqueWeight + 1)`, enforces the boundary between
+the last two. A stamp at or below a scan value would make that clique read as marked, and two
+vertices that are not duplicates would compare equal.
+
+**THE PROPERTY THE CODE DEPENDS ON IS STRONGER THAN DISJOINT RANGES: THE TWO NEVER SHARE A VALUE.**
+Not merely that clique values and stamps fall in different intervals, but that no integer is ever
+both. A stamp equal to some `tagAmd + k` would be read by the bound pass as a clique whose
+`|C[c] - C[p]|` is k, and a clique value equal to some stamp would make detection call two distinct
+vertices duplicates. Line 376 is what buys it, and it is the only thing that does.
+
+**WITHIN A STEP IT IS TWO ADJACENT BLOCKS, NOT AN ALTERNATION.** Each step lays down one contiguous
+run of clique values and then one contiguous run of stamps. What INTERLEAVES is the sequence across
+steps: clique block, stamp block, clique block, stamp block, marching up the range. So the two words
+describe different axes and both are right:
+
+```
+across the range, at one instant   partitioned; disjoint, and never sharing a value
+across steps, over time            interleaved blocks, retired as the boundary slides past them
+```
+
+**ACROSS STEPS THEY DO NOT PARTITION, THEY SLIDE.** Line 485 sets the next step's `tagAmd` to
+`stampAmd`, already one past the last stamp, so the range that was STAMPS falls below the new tag
+and becomes ALIVE AND UNSEEN.
+The same integers change meaning as the tag moves past them. That is the whole trick: nothing is
+cleared because the BOUNDARY MOVES INSTEAD OF THE DATA.
+
+So the honest picture is a MOVING WINDOW. At any instant `[tagAmd, stampAmd)` is this step's window,
+split into a magnitude part and an identity part, and everything below it is stale and therefore
+alive. The window advances monotonically, which is exactly why it reaches the ceiling and needs the
+sweep to bring it back to the bottom.
+
+AND THE TWO COUNTERS ARE THE WINDOW'S TWO EDGES. `tagAmd` is where it starts and `stampAmd` is how
+far it has grown. Both raises push the far edge up, which is why the guard has to be checked before
+each of them. `AMD_2` does the same arithmetic with ONE variable, `wflg`, advanced by `lemax` and
+then incremented per candidate; the two names here split the roles without changing the scheme.
+
+### The accounting is EXACT, and that is what the post-increment buys
+
+`stampAmd` names the NEXT STAMP TO HAND OUT, not the last one handed out. Line 376 sets it one past
+the top of the clique block and line 404 is a post-increment, so:
+
+```
+[t(i), t(i) + mcw]            the scan's block, mcw + 1 values, mcw <= n - 1
+[s(i), s(i) + k - 1]          k stamps, s(i) = t(i) + mcw + 1, k <= n
+t(i+1) = s(i) + k             the first value above the last stamp
+```
+
+EVERY INTEGER FROM `t(i)` TO `t(i+1) - 1` IS EITHER WRITTEN BY THE SCAN OR HANDED OUT AS A STAMP.
+None is skipped. The form before 2026-08-30 set the base to `t(i) + mcw` and pre-incremented, which
+consumed one more per step and forced `t(i+1) = last stamp + 1`, an asymmetry that made the two
+guards want different comparisons.
+
+**WHICH IS WHY BOTH GUARDS ARE `>` AND NOT `>=`.** Each raise adds at most n to whatever the guard
+before it left: `mcw + 1 <= n` because a clique excludes its own pivot, and at most n stamps follow.
+So a value AT the ceiling is admissible, `ceiling + n == INT32_MAX`, and the two tests are the same
+test on the same margin.
+
+**AND `AMD_2`'s `wflg < 2` HAS NO COUNTERPART HERE.** That test is its INITIALIZATION: it calls
+`clear_flag(0, ...)` once at `Amd.cpp:1350` to put `W` at 1 and `wflg` at 2. We do that in the
+declarations, and the tag only climbs, so a value below 2 is unreachable and a test for one would be
+dead code.
+
+### The method note, because it is the transferable part
+
+This region defeated two rounds of reading in one session. What settled it every time was FORCING:
+start the tag one below the ceiling AND make the sweep reset there, so both guards fire on every
+step, then compare permutations against the reference. A wrong placement shows as EVERY permutation
+changing, which is how the first attempt at GUARD 2 was caught. A guard that never fires is untested
+by every ordinary run, exactly as the compactor is until the pool is shrunk.
 
 ## Related
 

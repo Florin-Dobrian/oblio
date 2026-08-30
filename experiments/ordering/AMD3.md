@@ -73,13 +73,13 @@ Nv   live (> 0), taken into Lme this step (< 0), and the weight |nvi|
 Pe   the list pointer, and FLIPped, the assembly-tree parent
 ```
 
-We had `mark` plus `outside` plus deadness-by-removal where it has `W`; `mMark` plus `mEliminated`
-plus `mWeight` where it has `Nv`. **Two of the three were portable and are taken. The third is
-not**, and iteration 17's read establishes why: `Nv` is negated in the construct loop and restored
-in the very last pass, so it is negative across the entire body of an elimination and four separate
-readers are written to expect that. It works because `AMD_2` is one function. Ours is a shared
-class with six drivers, three of them MMD with different invariants: and the `mmd2` counterexample
-in iteration 17 is what that costs when a convention crosses the seam.
+We had `markMmd` plus `outside` plus deadness-by-removal where it has `W`; `mMarkMmd` plus
+`mEliminated` plus `mWeight` where it has `Nv`. **Two of the three were portable and are taken. The
+third is not**, and iteration 17's read establishes why: `Nv` is negated in the construct loop and
+restored in the very last pass, so it is negative across the entire body of an elimination and four
+separate readers are written to expect that. It works because `AMD_2` is one function. Ours is a
+shared class with six drivers, three of them MMD with different invariants: and the `mmd2`
+counterexample in iteration 17 is what that costs when a convention crosses the seam.
 
 **So the remaining gap does NOT have a name, and an earlier draft of this line said it did.** It is
 not algorithmic: the counts are equal: same eliminations, same reachable-set elements, same prune
@@ -435,8 +435,8 @@ hash survivor.
 **Result: fill exact at every grid size tested, and pivot sequences identical to grid 50.**
 
 **Worth recording for the port.** Production is a better fit for this than the prototype:
-`QuotientGraphFlat` already holds both lists in one run behind `mSourcePtr`, which is the layout that
-motivated the trick, so AMD's three moves transcribe almost literally.
+`QuotientGraphFlat` already holds both lists in one run behind `mSourcePtr`, which is the layout
+that motivated the trick, so AMD's three moves transcribe almost literally.
 
 ---
 
@@ -1357,8 +1357,8 @@ is `AMD_SYMMETRY`, and a zeroed `Control` array, which is not the default `Contr
 turns aggressive absorption off.
 
 **And our half was wrong, which the vendored half is what found.** `QuotientGraphI.cpp` carries the
-same symbols as `QuotientGraphFlat.cpp`, so it is linked instead of it and both drivers share it, and
-the probe read its counters after a control run of the uninstrumented driver. Six of fifteen
+same symbols as `QuotientGraphFlat.cpp`, so it is linked instead of it and both drivers share it,
+and the probe read its counters after a control run of the uninstrumented driver. Six of fifteen
 columns were doubled and nine were not. The check was free and existed only because the vendored
 numbers were beside it: the alignment forces our `reachAdj` to equal `AMD_2`'s construct-adjacency
 count, and after the correction it does, 2.61 against 2.61 in 2D and 4.18 against 4.18 on cubes,
@@ -1520,17 +1520,18 @@ was concentrated: we walked `I[u]` three times per pivot where `AMD_2` walks it 
 twice where it walks it once, and those two rows were 96 percent of what was left.
 
 **The transformation for exactly that already existed and had already failed.**
-`QuotientGraphFlat::eliminate(pivot, ApproximateScan&)` folds the driver's first scan into the prune,
-which is what `Amd1B` and `Amd2B` are. It measured zero on both, five percent slower on `Amd1B`.
-Three things made it worth re-running: it had never been tried on `Amd3`; the reading was 2D, and
-the direction is now 3D; and it predates entry 8, when a different pass dominated the profile. That
-is the same pair of conditions that had made the key fusion look worthless the day before.
+`QuotientGraphFlat::eliminate(pivot, ApproximateScan&)` folds the driver's first scan into the
+prune, which is what `Amd1B` and `Amd2B` are. It measured zero on both, five percent slower on
+`Amd1B`. Three things made it worth re-running: it had never been tried on `Amd3`; the reading was
+2D, and the direction is now 3D; and it predates entry 8, when a different pass dominated the
+profile. That is the same pair of conditions that had made the key fusion look worthless the day
+before.
 
 **It could not be reused as it stood, and the detour was the right one.** That overload carries the
 pre-iteration-15 encoding, a value array plus a separate seen-this-step mark, where `Amd3` carries
 `Amd.cpp`'s tagged W. Adopting it would have bundled a revert of that consolidation into the
-measurement, and the record prices W only together with the stamp hoist. So `QuotientGraphFlat` gained
-a `TaggedScan` overload and the vehicle differed from `Amd3` in the fold alone.
+measurement, and the record prices W only together with the stamp hoist. So `QuotientGraphFlat`
+gained a `TaggedScan` overload and the vehicle differed from `Amd3` in the fold alone.
 
 **Result, alpamayo, and the vendored routine is unmoved throughout:**
 

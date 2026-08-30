@@ -72,8 +72,8 @@ void MmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
 
     // NO DRIVER MARK ARRAY. The two levels this refresh needs, one surviving a whole clique and one
     // fresh per vertex, are two tags rather than two arrays, drawn from the graph's own counter
-    // through advanceTag/mark/setMark. One counter is what makes it safe, since two tags drawn from
-    // it can never be equal.
+    // through advanceTagMmd/mark/setMarkMmd. One counter is what makes it safe, since two tags
+    // drawn from it can never be equal.
 
     // ---- the prepass ------------------------------------------------------------ Buckets 0 and 1
     // hold the isolated and the degree-1 vertices, and both eliminate without fill. Number them and
@@ -137,15 +137,15 @@ void MmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
             const std::int32_t* refreshedClique     = qg.clique(rc);
             const std::uint32_t refreshedCliqueSize = qg.cliqueSize(rc);
 
-            // The dead are dropped HERE, before anything stamps: `mMark` carries GONE as well as
+            // The dead are dropped HERE, before anything stamps: `mMarkMmd` carries GONE as well as
             // the tag, so stamping a dead member would overwrite GONE and bring it back to life.
             refreshedCliqueMembers.clear();
             for (std::uint32_t uk = 0; uk < refreshedCliqueSize; ++uk)
                 if (!qg.eliminatedMmd(refreshedClique[uk]))
                     refreshedCliqueMembers.push_back(refreshedClique[uk]);
 
-            const std::int32_t cliqueTag = qg.advanceTag();   // marked once for the clique
-            for (std::int32_t u : refreshedCliqueMembers) qg.setMark(u, cliqueTag);
+            const std::int32_t cliqueTag = qg.advanceTagMmd();   // marked once for the clique
+            for (std::int32_t u : refreshedCliqueMembers) qg.setMarkMmd(u, cliqueTag);
             std::uint32_t refreshedCliqueWeight = 0;
             for (std::int32_t u : refreshedCliqueMembers) refreshedCliqueWeight += qg.weight(u);
 
@@ -166,7 +166,7 @@ void MmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
                 const std::int32_t u = *uit;
                 // merged or withheld by an earlier two-source vertex
                 if (qg.eliminatedMmd(u) || buckets.outmatched(u)) continue;
-                const std::int32_t vertexTag = qg.advanceTag();
+                const std::int32_t vertexTag = qg.advanceTagMmd();
                 // refreshedCliqueWeight is kept WHOLE and u's own weight subtracted at the end,
                 // which is not the same as subtracting it now: the walk below can MERGE a vertex
                 // into u, growing that weight, and the post-merge value is the correct one to
@@ -185,10 +185,10 @@ void MmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
                     const std::int32_t v = uAdjacency[vk];
                     // ONE LOAD FOR BOTH QUESTIONS. `vertexTag` is the newest tag drawn, so anything
                     // at or above it is either this pass's own stamp or GONE, and both mean skip.
-                    const std::int32_t vMark = qg.mark(v);
+                    const std::int32_t vMark = qg.markMmd(v);
                     if (vMark >= vertexTag) continue;              // seen this pass, or dead
                     if (vMark == cliqueTag) continue;   // already in refreshedCliqueWeight
-                    qg.setMark(v, vertexTag);
+                    qg.setMarkMmd(v, vertexTag);
                     closedReachableSetWeight += qg.weight(v);
                 }
                 const std::int32_t* uIncidence = qg.incidenceMmd(u);
@@ -199,7 +199,7 @@ void MmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
                     const std::uint32_t otherCliqueSize = qg.cliqueSize(oc);
                     for (std::uint32_t vk = 0; vk < otherCliqueSize; ++vk) {
                         const std::int32_t v = otherClique[vk];
-                        const std::int32_t vMark = qg.mark(v);
+                        const std::int32_t vMark = qg.markMmd(v);
                         if (v == u || vMark >= vertexTag) continue;    // seen this pass, or dead
                         if (vMark == cliqueTag) {
                             // v is in the new clique and in this same other source, so it sees
@@ -213,7 +213,7 @@ void MmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
                             }
                             continue;
                         }
-                        qg.setMark(v, vertexTag);
+                        qg.setMarkMmd(v, vertexTag);
                         closedReachableSetWeight += qg.weight(v);
                     }
                 }

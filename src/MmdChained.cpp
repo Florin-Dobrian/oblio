@@ -82,8 +82,8 @@ ElmOrder orderMmdChained(const std::vector<std::size_t>&  colPtr,
 
     // NO DRIVER MARK ARRAY. The two levels this refresh needs, one surviving a whole clique and one
     // fresh per vertex, are two tags rather than two arrays, drawn from the graph's own counter
-    // through advanceTag/mark/setMark. One counter is what makes it safe, since two tags drawn from
-    // it can never be equal.
+    // through advanceTagMmd/mark/setMarkMmd. One counter is what makes it safe, since two tags
+    // drawn from it can never be equal.
 
     // ---- the prepass ------------------------------------------------------------ Buckets 0 and 1
     // hold the isolated and the degree-1 vertices, and both eliminate without fill. Number them and
@@ -141,7 +141,7 @@ ElmOrder orderMmdChained(const std::vector<std::size_t>&  colPtr,
         // degree vertices ends at a bucket head.
         for (auto rcit = batchPivots.rbegin(); rcit != batchPivots.rend(); ++rcit) {
             const std::int32_t rc = *rcit;
-            // The dead are dropped HERE, before anything stamps: `mMark` carries GONE as well as
+            // The dead are dropped HERE, before anything stamps: `mMarkMmd` carries GONE as well as
             // the tag, so stamping a dead member would overwrite GONE and bring it back to life.
             // This store never compacts a clique, so the mass eliminated are in the list too.
             refreshedCliqueMembers.clear();
@@ -149,8 +149,8 @@ ElmOrder orderMmdChained(const std::vector<std::size_t>&  colPtr,
                 if (!qg.eliminated(v)) refreshedCliqueMembers.push_back(v);
             });
 
-            const std::int32_t cliqueTag = qg.advanceTag();   // marked once for the clique
-            for (std::int32_t u : refreshedCliqueMembers) qg.setMark(u, cliqueTag);
+            const std::int32_t cliqueTag = qg.advanceTagMmd();   // marked once for the clique
+            for (std::int32_t u : refreshedCliqueMembers) qg.setMarkMmd(u, cliqueTag);
             std::uint32_t refreshedCliqueWeight = 0;
             for (std::int32_t u : refreshedCliqueMembers) refreshedCliqueWeight += qg.weight(u);
 
@@ -171,7 +171,7 @@ ElmOrder orderMmdChained(const std::vector<std::size_t>&  colPtr,
                 const std::int32_t u = *uit;
                 // merged or withheld by an earlier two-source vertex
                 if (qg.eliminated(u) || buckets.outmatched(u)) continue;
-                const std::int32_t vertexTag = qg.advanceTag();
+                const std::int32_t vertexTag = qg.advanceTagMmd();
                 // refreshedCliqueWeight is kept WHOLE and u's own weight subtracted at the end,
                 // which is not the same as subtracting it now: the walk below can MERGE a vertex
                 // into u, growing that weight, and the post-merge value is the correct one to
@@ -189,9 +189,9 @@ ElmOrder orderMmdChained(const std::vector<std::size_t>&  colPtr,
                     const std::int32_t v = qg.adjacencyMmd(u)[0];
                     // ONE LOAD FOR BOTH QUESTIONS. `vertexTag` is the newest tag drawn, so anything
                     // at or above it is either this pass's own stamp or GONE, and both mean skip.
-                    const std::int32_t vMark = qg.mark(v);
+                    const std::int32_t vMark = qg.markMmd(v);
                     if (vMark < vertexTag && vMark != cliqueTag) {   // not seen, dead, or counted
-                        qg.setMark(v, vertexTag);
+                        qg.setMarkMmd(v, vertexTag);
                         closedReachableSetWeight += qg.weight(v);
                     }
                 } else {                                           // two cliques; take the other
@@ -199,7 +199,7 @@ ElmOrder orderMmdChained(const std::vector<std::size_t>&  colPtr,
                     const std::int32_t  oc =
                         (uIncidence[0] == rc) ? uIncidence[1] : uIncidence[0];
                     qg.forEachMember(oc, [&](std::int32_t v) {
-                        const std::int32_t vMark = qg.mark(v);
+                        const std::int32_t vMark = qg.markMmd(v);
                         if (v == u || vMark >= vertexTag) return;  // seen this pass, or dead
                         if (vMark == cliqueTag) {
                             // v is in the new clique and in this same other source, so it sees
@@ -213,7 +213,7 @@ ElmOrder orderMmdChained(const std::vector<std::size_t>&  colPtr,
                             }
                             return;
                         }
-                        qg.setMark(v, vertexTag);
+                        qg.setMarkMmd(v, vertexTag);
                         closedReachableSetWeight += qg.weight(v);
                     });
                 }

@@ -4,9 +4,9 @@
 // descriptor the amd branch passes alongside them. Shared by every driver and by all three
 // quotient graph classes, none of which owns either type.
 //
-// They are here rather than in QuotientGraphFlat.h because they belong to no one graph: the compacted
-// and chained classes used to include the flat class's header to reach them, which made two
-// siblings depend on a third for something none of them defines.
+// They are here rather than in QuotientGraphFlat.h because they belong to no one graph: the
+// compacted and chained classes used to include the flat class's header to reach them, which made
+// two siblings depend on a third for something none of them defines.
 
 #include "oblio/Types.h"
 
@@ -147,9 +147,9 @@ private:
 
 
 // The same, for a driver carrying a TAGGED array instead of a value array and a separate
-// seen-this-step mark. One array holds three facts: `work[c] == 0` is absorbed, `0 < work[c] <
-// workTag` is alive but stale, and `work[c] >= workTag` is seen this step with `work[c] - workTag`
-// the value. So there is no mark to carry and no clearing pass.
+// seen-this-step mark. One array holds three facts: `markAmd[c] == 0` is absorbed, `0 < markAmd[c]
+// < tagAmd` is alive but stale, and `markAmd[c] >= tagAmd` is seen this step with `markAmd[c] -
+// tagAmd` the value. So there is no mark to carry and no clearing pass.
 //
 // `key` carries the ADJACENCY HALF of the hash key alone, and the reason is a phase boundary
 // rather than a preference: aggressive absorption runs between this prune and the driver's bound
@@ -169,13 +169,13 @@ struct TaggedScan {
     // Null therefore means "leave the degree lists alone and store no key". It does not change
     // what the scan computes, only where the by-products go.
     Buckets*                          buckets;
-    std::vector<std::int32_t>&        work;          // per clique, the tagged workspace
+    std::vector<std::int32_t>&        markAmd;       // per clique, the tagged workspace
     // Serves a LIVE vertex's degree and a DEAD one's clique weight from
     // one array, the two being disjoint because a clique id is the id of the pivot that formed it.
     // The scan reads only the clique half.
     const std::vector<std::uint32_t>& degree;
     std::vector<std::int32_t>&        touchedCliques;// the cliques this step reached, once each
-    std::int32_t                      workTag;       // the tag for this elimination
+    std::int32_t                      tagAmd;        // the tag for this elimination
     std::int32_t                      modulus;       // the driver's bucket count, n + 1
 };
 

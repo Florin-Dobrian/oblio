@@ -88,8 +88,8 @@ public:
     // pushes prepass vertices onto that list, and for those `cliqueSize` still reports A[p]'s
     // length. That was the second wrong version of this check.
     bool cliqueCountBalances() const;
-    // GONE: one value reserved above every tag, so the stamp array answers "is v dead" on the load
-    // it was making anyway and no array is spent on liveness at any walk site.
+    // GONE: one value reserved above every tag, so the stampAmd array answers "is v dead" on the
+    // load it was making anyway and no array is spent on liveness at any walk site.
     //
     // NOT the weight. `mWeight[v] != 0` is a PARTIAL flag: `number()` leaves a prepass vertex at
     // weight one deliberately, so its neighbors' degrees still count it. Used as the universal
@@ -110,18 +110,18 @@ public:
 
     // AND A TAG ON THE MMD BRANCH, because a zero weight is not available to it: `number` leaves
     // a prepass vertex live at weight one so that its neighbors' degrees still count it.
-    bool eliminatedMmd(std::int32_t u) const { return mMark[u] == GONE; }
+    bool eliminatedMmd(std::int32_t u) const { return mMarkMmd[u] == GONE; }
 
     bool eliminatedAmd(std::int32_t u) const { return mWeight[u] == 0; }
 
-    // A driver may stamp into this same array rather than allocating one of its own, which is
+    // A driver may stampAmd into this same array rather than allocating one of its own, which is
     // one array at two levels: the eliminator stamps at level `tag` and the refresh at level
     // `mt = tag + md0`, one array and one counter serving both. One counter is what makes it
     // safe, since two tags drawn from it can never be equal.
 
-    std::int32_t advanceTag()                        { return ++mTag; }
-    std::int32_t mark(std::int32_t u) const          { return mMark[u]; }
-    void setMark(std::int32_t u, std::int32_t tag)   { mMark[u] = tag; }
+    std::int32_t advanceTagMmd()                        { return ++mTagMmd; }
+    std::int32_t markMmd(std::int32_t u) const          { return mMarkMmd[u]; }
+    void setMarkMmd(std::int32_t u, std::int32_t tag)   { mMarkMmd[u] = tag; }
 
     // The members of clique c, which after eliminating p is the pattern of p's column of L: the
     // vertices the pivot reached, less those it absorbed. A pointer and a length, as the
@@ -233,7 +233,7 @@ public:
     //     C[p]   = C[p] - merged
     //
     // The new clique is C[p] and gets no name of its own. None of the three differences builds a
-    // set; each is a stamp of the subtrahend and one compaction pass over the minuend.
+    // set; each is a stampAmd of the subtrahend and one compaction pass over the minuend.
     const std::vector<std::int32_t>& eliminateMmd(std::int32_t pivot);
 
     // The same elimination with an approximate-degree driver's first scan folded in. That driver
@@ -450,12 +450,12 @@ private:
 
     // WHETHER ANY VERTEX HAS BEEN NUMBERED WITHOUT BEING ELIMINATED, which only the mmd prepass
     // does. While it is false the walks skip their GONE test.
-    void markGone(std::int32_t u) { if (!mMark.empty()) mMark[u] = GONE; }
+    void markGone(std::int32_t u) { if (!mMarkMmd.empty()) mMarkMmd[u] = GONE; }
 
     bool mHasNumbered = false;
 
-    std::vector<std::int32_t> mMark;     // membership scratch, read against mTag
-    std::int32_t              mTag = 0;
+    std::vector<std::int32_t> mMarkMmd;     // membership scratch, read against mTagMmd
+    std::int32_t              mTagMmd = 0;
 };
 
 // ------------------------------------------------------------------------------------------------
@@ -473,10 +473,10 @@ private:
 // compare two drivers back to back: run one, read this, run the other, read it again.
 //
 // ALLOCATED ON DEMAND, and the amd branch never calls this. `NIL` rather than zero as the initial
-// stamp, since zero is a tag a walk can reach and this array's whole job is to answer "have I seen
-// v this step" against `mTag`, which starts there.
+// stampAmd, since zero is a tag a walk can reach and this array's whole job is to answer "have I
+// seen v this step" against `mTagMmd`, which starts there.
 inline void QuotientGraphFlat::enableMarks() {
-    mMark.assign(mSize, NIL);
+    mMarkMmd.assign(mSize, NIL);
 }
 
 inline QuotientGraphFlat::QuotientGraphFlat(const std::vector<std::size_t>&  colPtr,
@@ -525,16 +525,16 @@ inline void QuotientGraphFlat::formReachableSetMmd(std::int32_t u,
                                                std::vector<std::int32_t>& reachableSet) {
     // reach(u) = ( A[u] | C[c] for c in I[u] ) - {u}
     //
-    // The mark array is the set: `mMark[v] == mTag` is the membership test and `mMark[v] = mTag`
-    // the insertion, so the union costs one pass per source and comes out in walk order. The
-    // buffer is the caller's, so a caller in a loop can keep one.
+    // The mark array is the set: `mMarkMmd[v] == mTagMmd` is the membership test and `mMarkMmd[v] =
+    // mTagMmd` the insertion, so the union costs one pass per source and comes out in walk order.
+    // The buffer is the caller's, so a caller in a loop can keep one.
     //
     // ELIMINATED VERTICES ARE SKIPPED RATHER THAN PURGED, since a live merge leaves the vertex it
-    // folds away where it lies and every clique that named it still does. `mMark[v] < mTag`
+    // folds away where it lies and every clique that named it still does. `mMarkMmd[v] < mTagMmd`
     // answers liveness and membership from one load, which is why GONE must sort above every tag,
     // and GONE is WRITTEN at every death site rather than inferred from a value.
     //
-    // THE ADJACENCY LOOPS ASK mMark AND THE CLIQUE LOOPS DO NOT, and the asymmetry is exact.
+    // THE ADJACENCY LOOPS ASK mMarkMmd AND THE CLIQUE LOOPS DO NOT, and the asymmetry is exact.
     // `number()` leaves a prepass vertex at weight one and in the adjacency of every neighbor, so
     // a positive weight does not mean live there. It cannot appear in a CLIQUE: the prepass
     // completes before the first elimination and every clique since is built from a reach that
@@ -550,7 +550,7 @@ inline void QuotientGraphFlat::formReachableSetMmd(std::int32_t u,
     const std::int32_t* uIncidence     = uAdjacency + uAdjacencySize;
     // Hoisted like `live`, and for the same reason: member loads the compiler cannot prove are
     // unaliased by the stores below. Both branches are per SOURCE rather than per member, so
-    // neither sits in the loop that does the work. See the members' notes for what each decides.
+    // neither sits in the loop that does the markAmd. See the members' notes for what each decides.
     const bool reverse  = mReverseIncidence;
 
     // Which source is walked first. The mmd branch expands the variables and then the cliques,
@@ -561,7 +561,7 @@ inline void QuotientGraphFlat::formReachableSetMmd(std::int32_t u,
     for (std::uint32_t vk = 0; vk < uAdjacencySize; ++vk) {
         const std::int32_t v = uAdjacency[vk];
         const std::int32_t vWeight = mWeight[v];
-        if (vWeight > 0 && !(mHasNumbered && mMark[v] == GONE)) {
+        if (vWeight > 0 && !(mHasNumbered && mMarkMmd[v] == GONE)) {
             mWeight[v] = -vWeight; reachableSet.push_back(v);
         }
     }
@@ -584,16 +584,16 @@ inline void QuotientGraphFlat::formReachableSetAmd(std::int32_t u,
                                                std::vector<std::int32_t>& reachableSet) {
     // reach(u) = ( A[u] | C[c] for c in I[u] ) - {u}
     //
-    // The mark array is the set: `mMark[v] == mTag` is the membership test and `mMark[v] = mTag`
-    // the insertion, so the union costs one pass per source and comes out in walk order. The
-    // buffer is the caller's, so a caller in a loop can keep one.
+    // The mark array is the set: `mMarkMmd[v] == mTagMmd` is the membership test and `mMarkMmd[v] =
+    // mTagMmd` the insertion, so the union costs one pass per source and comes out in walk order.
+    // The buffer is the caller's, so a caller in a loop can keep one.
     //
     // ELIMINATED VERTICES ARE SKIPPED RATHER THAN PURGED, since a live merge leaves the vertex it
-    // folds away where it lies and every clique that named it still does. `mMark[v] < mTag`
+    // folds away where it lies and every clique that named it still does. `mMarkMmd[v] < mTagMmd`
     // answers liveness and membership from one load, which is why GONE must sort above every tag,
     // and GONE is WRITTEN at every death site rather than inferred from a value.
     //
-    // THE ADJACENCY LOOPS ASK mMark AND THE CLIQUE LOOPS DO NOT, and the asymmetry is exact.
+    // THE ADJACENCY LOOPS ASK mMarkMmd AND THE CLIQUE LOOPS DO NOT, and the asymmetry is exact.
     // `number()` leaves a prepass vertex at weight one and in the adjacency of every neighbor, so
     // a positive weight does not mean live there. It cannot appear in a CLIQUE: the prepass
     // completes before the first elimination and every clique since is built from a reach that
@@ -609,7 +609,7 @@ inline void QuotientGraphFlat::formReachableSetAmd(std::int32_t u,
     const std::int32_t* uAdjacency     = uIncidence + uIncidenceSize;
     // Hoisted like `live`, and for the same reason: member loads the compiler cannot prove are
     // unaliased by the stores below. Both branches are per SOURCE rather than per member, so
-    // neither sits in the loop that does the work. See the members' notes for what each decides.
+    // neither sits in the loop that does the markAmd. See the members' notes for what each decides.
     const bool reverse  = mReverseIncidence;
 
     // Which source is walked first. The mmd branch expands the variables and then the cliques,
@@ -637,10 +637,10 @@ inline void QuotientGraphFlat::formReachableSetAmd(std::int32_t u,
 inline std::uint32_t QuotientGraphFlat::reachableSetWeight(std::int32_t u) {
     // A sum over DISTINCT vertices, so bounded by n; see the header.
     std::uint32_t totalWeight = 0;
-    ++mTag;
-    mMark[u] = mTag;
+    ++mTagMmd;
+    mMarkMmd[u] = mTagMmd;
     // The bounds are hoisted, all of them. Each is a load from a member vector, and the bodies
-    // below store through mMark, which the compiler cannot prove does not alias the sizes, so a
+    // below store through mMarkMmd, which the compiler cannot prove does not alias the sizes, so a
     // bound left in the condition is re-loaded once per clique.
     const Segment&      uSegment       = mSegment[u];          // one fetch; see the member
     const std::int32_t* uAdjacency     = mAdjIncSrc.data() + uSegment.srcPtr;
@@ -648,8 +648,8 @@ inline std::uint32_t QuotientGraphFlat::reachableSetWeight(std::int32_t u) {
     const std::uint32_t uIncidenceSize = uSegment.incidenceSize;
     for (std::uint32_t vk = 0; vk < uAdjacencySize; ++vk) {
         const std::int32_t v = uAdjacency[vk];
-        if (mMark[v] != GONE) {
-            mMark[v] = mTag; totalWeight += static_cast<std::uint32_t>(mWeight[v]);
+        if (mMarkMmd[v] != GONE) {
+            mMarkMmd[v] = mTagMmd; totalWeight += static_cast<std::uint32_t>(mWeight[v]);
         }
     }
     const std::int32_t* uIncidence = uAdjacency + uAdjacencySize;
@@ -659,8 +659,9 @@ inline std::uint32_t QuotientGraphFlat::reachableSetWeight(std::int32_t u) {
         const std::uint32_t cCliqueSize = mSegment[c].adjacencySize;
         for (std::uint32_t vk = 0; vk < cCliqueSize; ++vk) {
             const std::int32_t v = cClique[vk];
-            if (mMark[v] < mTag) {   // includes mMark[v] != GONE, GONE sorting above every tag
-                mMark[v] = mTag; totalWeight += static_cast<std::uint32_t>(mWeight[v]);
+            // The test includes mMarkMmd[v] != GONE, GONE sorting above every tag.
+            if (mMarkMmd[v] < mTagMmd) {
+                mMarkMmd[v] = mTagMmd; totalWeight += static_cast<std::uint32_t>(mWeight[v]);
             }
         }
     }
@@ -674,7 +675,7 @@ inline void QuotientGraphFlat::number(std::int32_t u) {
     // AND THE FLAG IS WHAT TELLS THE WALKS TO ASK. See mHasNumbered: this is the only thing that
     // sets it, so a run that never calls this function never pays for the test.
     mHasNumbered = true;
-    mMark[u]     = GONE;
+    mMarkMmd[u]     = GONE;
 }
 
 inline void QuotientGraphFlat::setAside(std::int32_t u) {
@@ -785,17 +786,17 @@ inline void QuotientGraphFlat::beginEliminationAmd(std::int32_t pivot, TaggedSca
     // copy and no scratch is needed to keep them alive across the passes that follow.
     //
     // A CLIQUE DIES TWO WAYS AND THE TAGGED W MUST LEARN ABOUT BOTH. Aggressive absorption zeroes
-    // `work[c]` in the driver; elimination-time absorption is this list. The amd branch writes both
-    // deaths into W, `Pe[e] = FLIP(me)` with `W[e] = 0`, and its scan then tests `we != 0` off the
-    // load it already needs for the value. The store rides on the walk that kills the clique, so
-    // one read of the entry records both facts.
+    // `markAmd[c]` in the driver; elimination-time absorption is this list. The amd branch writes
+    // both deaths into W, `Pe[e] = FLIP(me)` with `W[e] = 0`, and its scan then tests `we != 0` off
+    // the load it already needs for the value. The store rides on the walk that kills the clique,
+    // so one read of the entry records both facts.
     const std::int32_t* pivotIncidence     = mAdjIncSrc.data() + mSegment[pivot].srcPtr;
     const std::uint32_t pivotIncidenceSize = mSegment[pivot].incidenceSize;
     // C = C - I[p] (reclaim I[p])
     for (std::uint32_t ck = 0; ck < pivotIncidenceSize; ++ck) {
         const std::int32_t c = pivotIncidence[ck];
         killClique(c);                               // dead, its block left behind
-        scan.work[c] = 0;                               // and dead to the scan; see above
+        scan.markAmd[c] = 0;                               // and dead to the scan; see above
     }
 
     // Both readers of the pivot's own run are past, so the run becomes the clique's descriptor.
@@ -847,7 +848,7 @@ inline void QuotientGraphFlat::pruneMmd(std::int32_t pivot) {
         for (std::uint32_t vk = 0; vk < uAdjacencySize; ++vk) {
             const std::int32_t v = uAdjacency[vk];
             if (mWeight[v] <= 0) continue;             // in the new clique, the pivot, or merged
-            if (mHasNumbered && mMark[v] == GONE) continue;   // numbered by a prepass
+            if (mHasNumbered && mMarkMmd[v] == GONE) continue;   // numbered by a prepass
             uAdjacency[cursor++] = v;
         }
         const std::uint32_t keptAdjacencySize = cursor;   // the boundary; it does not move again
@@ -910,26 +911,26 @@ inline void QuotientGraphFlat::pruneAmd(std::int32_t pivot, TaggedScan& scan) {
     if (scan.buckets != nullptr)
         for (std::uint32_t uk = 0; uk < newCliqueSize; ++uk) scan.buckets->unfile(newClique[uk]);
 
-    const std::int32_t  workTag        = scan.workTag;          // hoisted, as the flags are
+    const std::int32_t  tagAmd        = scan.tagAmd;          // hoisted, as the flags are
 
     for (std::uint32_t uk = 0; uk < newCliqueSize; ++uk) {
         const std::int32_t  u                = newClique[uk];
         // NEGATED, BECAUSE u IS A MEMBER OF C[pivot] AND SO READS NEGATIVE. Taking the magnitude is
-        // the whole of it: `firstSeenBase` below is `workTag - uWeight` and comes out wrong by
+        // the whole of it: `firstSeenBase` below is `tagAmd - uWeight` and comes out wrong by
         // twice the weight otherwise. No cast, `mWeight` being signed.
         //
         // `firstSeenBase` SEEDS A CLIQUE'S FIRST SIGHTING. The loop maintains, per clique c that
-        // C[p] touches, `work[c] = workTag + |C[c]| - (weights of the members seen in c so far)`,
+        // C[p] touches, `markAmd[c] = tagAmd + |C[c]| - (weights of the members seen in c so far)`,
         // and does it in two branches that both subtract this member's weight:
         //
         //     seen already      cWork -= uWeight
-        //     first sighting    cWork = degree[c] + workTag - uWeight
+        //     first sighting    cWork = degree[c] + tagAmd - uWeight
         //
         // so this is the constant part of the second, hoisted to once per member rather than once
         // per first-seen clique. It MUST be able to go negative, the tag being small in the early
-        // eliminations while the weight is not, and that is the reason `work` is signed.
+        // eliminations while the weight is not, and that is the reason `markAmd` is signed.
         const std::int32_t  uWeight          = -mWeight[u];
-        const std::int32_t  firstSeenBase    = workTag - uWeight;   // signed, deliberately
+        const std::int32_t  firstSeenBase    = tagAmd - uWeight;   // signed, deliberately
         const Segment&      uSegment         = mSegment[u];
         std::int32_t*       source           = mAdjIncSrc.data() + uSegment.srcPtr;
         const std::uint32_t uIncidenceSize   = uSegment.incidenceSize;
@@ -951,12 +952,12 @@ inline void QuotientGraphFlat::pruneAmd(std::int32_t pivot, TaggedScan& scan) {
             //
             // ONE LOAD, TWO QUESTIONS. `cWork == 0` is dead, which would otherwise be a
             // `mCliqueSize` probe, an array it read for nothing else, and the value is wanted
-            // anyway two lines down. The other half of the change is the work-zeroing above.
-            std::int32_t cWork = scan.work[c];
+            // anyway two lines down. The other half of the change is the markAmd-zeroing above.
+            std::int32_t cWork = scan.markAmd[c];
             if (cWork == 0) continue;                        // absorbed and gone
             source[cursor++] = c;
             if (c == pivot) continue;                     // the new clique subtracts from nothing
-            if (cWork >= workTag) {
+            if (cWork >= tagAmd) {
                 cWork -= uWeight;
             } else {
                 // A SIGNEDNESS cast: the clique degree is already 32 bits, and `firstSeenBase` is
@@ -964,7 +965,7 @@ inline void QuotientGraphFlat::pruneAmd(std::int32_t pivot, TaggedScan& scan) {
                 cWork = static_cast<std::int32_t>(scan.degree[c]) + firstSeenBase;
                 scan.touchedCliques.push_back(c);
             }
-            scan.work[c] = cWork;
+            scan.markAmd[c] = cWork;
         }
         const std::uint32_t keptIncidenceSize = cursor;   // the boundary; it does not move again
 
@@ -977,14 +978,14 @@ inline void QuotientGraphFlat::pruneAmd(std::int32_t pivot, TaggedScan& scan) {
             uHashKey += static_cast<std::uint32_t>(v);     // no + 1, no reduction; see above
             source[cursor++] = v;
         }
-        // THE ADJACENCY HALF GOES INTO work[u], NOT INTO AN ARRAY OF ITS OWN. `work` is indexed by
-        // CLIQUE id and a clique id is a dead pivot's id, so for a LIVE vertex the slot carries
-        // nothing: u is in C[pivot] and therefore alive, and no clique is named after it until it
-        // is eliminated, by which time this value is long consumed. It cannot collide with the
-        // clique writes above: those are indexed by c drawn from I[u], every one of which is a
+        // THE ADJACENCY HALF GOES INTO markAmd[u], NOT INTO AN ARRAY OF ITS OWN. `markAmd` is
+        // indexed by CLIQUE id and a clique id is a dead pivot's id, so for a LIVE vertex the slot
+        // carries nothing: u is in C[pivot] and therefore alive, and no clique is named after it
+        // until it is eliminated, by which time this value is long consumed. It cannot collide with
+        // the clique writes above: those are indexed by c drawn from I[u], every one of which is a
         // dead pivot, and u is live. The driver's obligation is one store: the slot goes back to
         // alive-and-unseen once the bound has been read.
-        scan.work[u] = static_cast<std::int32_t>(uAdjacencyWeight);
+        scan.markAmd[u] = static_cast<std::int32_t>(uAdjacencyWeight);
         // Through the int32 slot the key rides in, read back as uint32 in the driver's bound pass.
         // The slot is the vertex's degree-list predecessor, free because every member of C[pivot]
         // was unfiled above. The key is accumulated either way, one add per surviving neighbour,
@@ -1105,7 +1106,7 @@ inline const std::vector<std::int32_t>& QuotientGraphFlat::massEliminate(std::in
     }
     if (!mMerged.empty()) {
         // THE MERGE HAPPENS FIRST, so the compaction can read the ZERO WEIGHT it leaves rather
-        // than a stamp of its own. The old order was the reverse and needed a tag pass over
+        // than a stampAmd of its own. The old order was the reverse and needed a tag pass over
         // `mMerged` plus a mark read per member; the weight says the same thing and the
         // supervariable bookkeeping had to write it anyway.
         //
@@ -1220,7 +1221,7 @@ inline std::vector<std::int32_t> QuotientGraphFlat::orderAscending(
         cursor[pivot] = static_cast<std::int32_t>(k + 1);   // where its first member goes
         k += static_cast<std::uint32_t>(mWeight[pivot]);    // the whole supervariable's room
         // The chain starts at mSuperNext[pivot], the pivot not being a member of itself, so the
-        // stamp never lands on the cursor just written.
+        // stampAmd never lands on the cursor just written.
         for (std::int32_t u = mSuperNext[pivot]; u != NIL; u = mSuperNext[u])
             cursor[u] = -(pivot + 1);
     }

@@ -1,8 +1,8 @@
 #pragma once
 
 // QuotientGraphChained.h - the quotient graph on a CHAINED CLIQUE STORE. Same algorithm and same
-// encoding as `QuotientGraphFlat`; the difference is where a clique's members live, and pricing that
-// difference is the whole reason this class exists.
+// encoding as `QuotientGraphFlat`; the difference is where a clique's members live, and pricing
+// that difference is the whole reason this class exists.
 //
 // A clique lives in the DEAD SEGMENT of the pivot that formed it, chaining into further dead
 // segments when one will not hold it, so no clique store is allocated at all. What that costs is a
@@ -47,15 +47,15 @@ public:
     static constexpr std::int32_t GONE =
         std::numeric_limits<std::int32_t>::max();   // above every reachable tag
 
-    bool eliminated(std::int32_t u) const { return mMark[u] == GONE; }
+    bool eliminated(std::int32_t u) const { return mMarkMmd[u] == GONE; }
 
     // The driver stamps into this same array rather than allocating a second one: the eliminator
     // stamps at one level and the refresh at another, one array and one counter for both. One
     // counter is what makes it safe, so two
     // tags can never collide, and a comparison against a captured tag means what it says.
-    std::int32_t advanceTag()                          { return ++mTag; }
-    std::int32_t mark(std::int32_t u) const            { return mMark[u]; }
-    void setMark(std::int32_t u, std::int32_t tag)     { mMark[u] = tag; }
+    std::int32_t advanceTagMmd()                          { return ++mTagMmd; }
+    std::int32_t markMmd(std::int32_t u) const            { return mMarkMmd[u]; }
+    void setMarkMmd(std::int32_t u, std::int32_t tag)     { mMarkMmd[u] = tag; }
 
     // The members of clique c, which after eliminating p is the pattern of p's column of L: the
     // vertices the pivot reached, less those it absorbed. A pointer and a length, as the
@@ -269,8 +269,8 @@ private:
     std::vector<std::int32_t> mSrc;   // every A[u] then I[u], run after run
 
     // ONE OBJECT PER VERTEX, NOT THREE ARRAYS. The three numbers are never useful apart: any walk
-    // of u needs where its run starts and at least one length. The shared `QuotientGraphFlat` carries
-    // the same struct; read its member for the reasoning.
+    // of u needs where its run starts and at least one length. The shared `QuotientGraphFlat`
+    // carries the same struct; read its member for the reasoning.
     struct Segment {
         // WHERE u'S SEGMENT STARTS in `mSrc`, fixed at construction and never moved. It is also
         // where the clique formed by u begins, once u has eliminated.
@@ -344,8 +344,8 @@ private:
     std::size_t mNumLiveCliqueMembers = 0;
     std::size_t mNumPeakCliqueMembers = 0;
 
-    std::vector<std::int32_t> mMark;     // membership scratch, read against mTag
-    std::int32_t              mTag = 0;
+    std::vector<std::int32_t> mMarkMmd;     // membership scratch, read against mTagMmd
+    std::int32_t              mTagMmd = 0;
 };
 
 
@@ -355,7 +355,7 @@ inline QuotientGraphChained::QuotientGraphChained(const std::vector<std::size_t>
     : mSize(colPtr.empty() ? 0 : colPtr.size() - 1),
       mSegment(mSize + 1),
       mCliqueLiveMembers(mSize, 0),
-      mMark(2 * mSize, NIL) {
+      mMarkMmd(2 * mSize, NIL) {
 
     // One pass to place each column's run, dropping the diagonal. The runs are laid out in column
     // order and never move afterwards, so the offsets are written once here and only the lengths
@@ -390,10 +390,10 @@ inline QuotientGraphChained::QuotientGraphChained(const std::vector<std::size_t>
 inline std::uint32_t QuotientGraphChained::reachableSetWeight(std::int32_t u) {
     // A sum over DISTINCT vertices, so bounded by n; see the header.
     std::uint32_t totalWeight = 0;
-    ++mTag;
-    mMark[u] = mTag;
+    ++mTagMmd;
+    mMarkMmd[u] = mTagMmd;
     // The bounds are hoisted, all of them. Each is a load from a member vector, and the bodies
-    // below store through mMark, which the compiler cannot prove does not alias the sizes, so a
+    // below store through mMarkMmd, which the compiler cannot prove does not alias the sizes, so a
     // bound left in the condition is re-loaded once per clique.
     const Segment&      uSegment       = mSegment[u];          // one fetch; see the member
     const std::int32_t* uAdjacency     = mSrc.data() + uSegment.srcPtr;
@@ -401,8 +401,8 @@ inline std::uint32_t QuotientGraphChained::reachableSetWeight(std::int32_t u) {
     const std::uint32_t uIncidenceSize = uSegment.incidenceSize;
     for (std::uint32_t vk = 0; vk < uAdjacencySize; ++vk) {
         const std::int32_t v = uAdjacency[vk];
-        if (mMark[v] != GONE) {
-            mMark[v] = mTag; totalWeight += static_cast<std::uint32_t>(mWeight[v]);
+        if (mMarkMmd[v] != GONE) {
+            mMarkMmd[v] = mTagMmd; totalWeight += static_cast<std::uint32_t>(mWeight[v]);
         }
     }
     const std::int32_t* uIncidence = uAdjacency + uAdjacencySize;
@@ -412,8 +412,9 @@ inline std::uint32_t QuotientGraphChained::reachableSetWeight(std::int32_t u) {
     for (std::uint32_t ck = 0; ck < uIncidenceSize; ++ck) {
         const std::int32_t c = uIncidence[ck];
         forEachMember(c, [&](std::int32_t v) {
-            if (mMark[v] < mTag) {   // includes mMark[v] != GONE, GONE sorting above every tag
-                mMark[v] = mTag; totalWeight += static_cast<std::uint32_t>(mWeight[v]);
+            // The test includes mMarkMmd[v] != GONE, GONE sorting above every tag.
+            if (mMarkMmd[v] < mTagMmd) {
+                mMarkMmd[v] = mTagMmd; totalWeight += static_cast<std::uint32_t>(mWeight[v]);
             }
         });
     }
@@ -422,7 +423,7 @@ inline std::uint32_t QuotientGraphChained::reachableSetWeight(std::int32_t u) {
 
 inline void QuotientGraphChained::number(std::int32_t u) {
     mHasNumbered = true;     // see the member: what makes the GONE test worth asking
-    mMark[u]     = GONE;     // a numbered vertex lingers in lists; GONE is what filters it
+    mMarkMmd[u]     = GONE;     // a numbered vertex lingers in lists; GONE is what filters it
 }
 
 inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int32_t& absorbed) {
@@ -446,15 +447,15 @@ inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int3
     for (std::uint32_t ck = 0; ck < incN; ++ck)
         mAbsorbed.push_back(mSrc[base + adjN + (reverse ? incN - 1 - ck : ck)]);
 
-    // THE SIGN OF THE WEIGHT IS THE MEMBERSHIP MARK, mirroring QuotientGraphFlat. The negation IS the
-    // insertion, and it is undone in massEliminate, which walks this same set. The pivot is
+    // THE SIGN OF THE WEIGHT IS THE MEMBERSHIP MARK, mirroring QuotientGraphFlat. The negation IS
+    // the insertion, and it is undone in massEliminate, which walks this same set. The pivot is
     // negated so the walk cannot take it into its own clique.
     //
     // The adjacency loop keeps the GONE test, guarded: `number()` leaves a prepass vertex at
     // weight one and in every neighbour's adjacency, so a positive weight does not mean live
     // there. A clique cannot hold one, the prepass completing before the first elimination, so
     // the clique loop asks nothing else.
-    ++mTag;
+    ++mTagMmd;
     mWeight[pivot] = -mWeight[pivot];          // never its own neighbor
 
     std::size_t   rl    = base;                        // write cursor
@@ -480,7 +481,7 @@ inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int3
     for (std::uint32_t vk = 0; vk < adjN; ++vk) {
         const std::int32_t v  = mSrc[base + vk];
         const std::int32_t vWeight = mWeight[v];
-        if (vWeight > 0 && !(mHasNumbered && mMark[v] == GONE)) {
+        if (vWeight > 0 && !(mHasNumbered && mMarkMmd[v] == GONE)) {
             mWeight[v] = -vWeight;
             mSrc[rl++] = v;
             ++born;
@@ -521,7 +522,7 @@ inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int3
 
     // NO STAMPING PASS AND NO `inClique`. Membership is written by the walk, in the sign of the
     // weight, so there is nothing to stamp and nothing for a tag to say. Only `absorbed` survives,
-    // and it marks the CLIQUE half of mMark, which this file alone keeps.
+    // and it marks the CLIQUE half of mMarkMmd, which this file alone keeps.
     //
     // The pivot reads negative from the negation above, so it reads as a member of its own clique
     // and the prune's `mWeight[v] <= 0` drops it with the rest.
@@ -529,10 +530,11 @@ inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int3
     mNumLiveCliqueMembers    += born;
     mNumPeakCliqueMembers     = std::max(mNumPeakCliqueMembers, mNumLiveCliqueMembers);
 
-    ++mTag;
-    absorbed = mTag;
+    ++mTagMmd;
+    absorbed = mTagMmd;
     const std::size_t cliqueBase = mSize;
-    for (const std::int32_t c : mAbsorbed) mMark[cliqueBase + static_cast<std::size_t>(c)] = absorbed;
+    for (const std::int32_t c : mAbsorbed)
+        mMarkMmd[cliqueBase + static_cast<std::size_t>(c)] = absorbed;
 }
 
 inline const std::vector<std::int32_t>& QuotientGraphChained::eliminateMmd(std::int32_t pivot) {
@@ -563,10 +565,10 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::eliminateMmd(std::
             // ONE LOAD, THREE QUESTIONS. A negative weight is a member of the new clique, the
             // pivot included, so the explicit pivot test goes with the membership test; a zero is
             // a vertex a live merge folded away. The fourth question, whether v was numbered by
-            // the prepass, still needs mMark.
+            // the prepass, still needs mMarkMmd.
             const std::int32_t v = source[vk];
             if (mWeight[v] <= 0) continue;             // in the new clique, the pivot, or merged
-            if (mHasNumbered && mMark[v] == GONE) continue;   // numbered by a prepass
+            if (mHasNumbered && mMarkMmd[v] == GONE) continue;   // numbered by a prepass
             if (amdOrder && heldVertex == NIL) { heldVertex = v; continue; }
             source[kept++] = v;
         }
@@ -581,7 +583,7 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::eliminateMmd(std::
         std::uint32_t       write         = kept;      // follows `kept`; see the note above
         for (std::uint32_t ck = 0; ck < incidenceSize; ++ck) {
             const std::int32_t c = incidence[ck];
-            if (mMark[cliqueBase + static_cast<std::size_t>(c)] != absorbed)
+            if (mMarkMmd[cliqueBase + static_cast<std::size_t>(c)] != absorbed)
                 source[write++] = c;
         }
         source[write++]   = pivot;                     // u joins the new clique, id = pivot
@@ -619,7 +621,7 @@ QuotientGraphChained::finishElimination(std::int32_t pivot) {
 
     mSegment[pivot].adjacencySize = 0;
     mSegment[pivot].incidenceSize = 0;
-    mMark[pivot]          = GONE;
+    mMarkMmd[pivot]          = GONE;
     return mMerged;
 }
 
@@ -635,9 +637,9 @@ QuotientGraphChained::finishElimination(std::int32_t pivot) {
 // absorption is what makes this cheap test agree with the true one.
 inline const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std::int32_t pivot) {
     mMerged.clear();   // a member scratch, kept for its capacity
-    // THE SIGNS COME BACK HERE, IN A PASS THAT ALREADY EXISTS, mirroring QuotientGraphFlat. The walk
-    // below is the only other traversal of C[pivot], so the restore rides in it and costs no pass.
-    // The pivot goes first, since the merge at the end adds into it and both operands must be
+    // THE SIGNS COME BACK HERE, IN A PASS THAT ALREADY EXISTS, mirroring QuotientGraphFlat. The
+    // walk below is the only other traversal of C[pivot], so the restore rides in it and costs no
+    // pass. The pivot goes first, since the merge at the end adds into it and both operands must be
     // magnitudes by then. Every path through an elimination reaches this function: no mmd driver
     // sets late mass elimination.
     mWeight[pivot] = -mWeight[pivot];
@@ -652,7 +654,7 @@ inline const std::vector<std::int32_t>& QuotientGraphChained::massEliminate(std:
         if (mSegment[u].adjacencySize == 0 && mSegment[u].incidenceSize == 1 &&
             mSrc[mSegment[u].srcPtr] == pivot) {         // A[u] empty, so I[u] starts at the run
             mSegment[u].incidenceSize = 0;
-            mMark[u]          = GONE;
+            mMarkMmd[u]          = GONE;
             mMerged.push_back(u);
         }
     });
@@ -697,7 +699,7 @@ inline void QuotientGraphChained::merge(std::int32_t u, std::int32_t v) {
 
     mSegment[v].adjacencySize = 0;
     mSegment[v].incidenceSize = 0;
-    mMark[v]                  = GONE;
+    mMarkMmd[v]                  = GONE;
 }
 
 inline std::vector<std::int32_t> QuotientGraphChained::orderAscending(

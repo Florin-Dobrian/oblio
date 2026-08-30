@@ -390,7 +390,8 @@ extern \"C\" void mmd_order64(std::int32_t n, const std::int32_t colPtr[], const
 amd_raw.cpp: ../../private/AmdVendored.cpp ../../tools/hook_amd.py
 	@python3 ../../tools/hook_amd.py $< $@
 
-amdorder_cpp: amdorder.cpp graphs.h $(VENDOR_SRCS) amd_raw.cpp ../../src/AmdFlat.cpp ../../include/oblio/QuotientGraphFlat.h ../../src/Types.cpp \
+amdorder_cpp: amdorder.cpp graphs.h $(VENDOR_SRCS) amd_raw.cpp ../../src/AmdFlat.cpp \
+              ../../src/AmdEngine.cpp ../../include/oblio/QuotientGraphFlat.h ../../src/Types.cpp \
               ../../src/Permutation.cpp ../../src/ElmForestEngine.cpp ../../src/SymFactorEngine.cpp ../../src/SparseMatrix.cpp
 	$(CXX) -std=c++17 -O3 -DNDEBUG -w -I../../include $(filter-out %.h,$^) -o $@
 

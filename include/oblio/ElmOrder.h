@@ -29,14 +29,15 @@
 
 namespace Oblio {
 
+template<class QuotientGraph> class AmdEngine;
 template<class QuotientGraph> class MmdEngine;
 
 class ElmOrder {
 public:
     ElmOrder() = default;
 
-    // TEMPORARY, for the drivers not yet converted to engines: `AmdFlat`, `AmdCompacted` and
-    // `MmdChained` still build the whole object and return it. It goes when they follow.
+    // TEMPORARY, for the one driver not yet converted to an engine: `MmdChained` still builds the
+    // whole object and returns it. It goes when that one follows.
     ElmOrder(std::vector<std::int32_t> order, std::size_t numPeakCliqueMembers,
              std::size_t numBornCliqueMembers, std::size_t numCompactions)
         : mOrder(std::move(order)),
@@ -66,13 +67,22 @@ public:
     // needs no room.
     std::size_t numCompactions() const { return mNumCompactions; }
 
+    // HOW OFTEN THE TAG ARRAY HAD TO BE RESET. A tag scheme is cheap only while the tag can keep
+    // advancing; when it approaches its type's ceiling the array has to be swept back to the
+    // alive-and-unseen state and the tag restarted, which is O(n) each time. Zero on everything the
+    // suite runs today, and that is what makes it worth reporting: the day it is not, the scheme has
+    // started paying for itself and nothing else would say so.
+    std::size_t numTagResets() const { return mNumTagResets; }
+
 private:
-    template<class QuotientGraph> friend class MmdEngine;   // fills the order via the engine
+    template<class QuotientGraph> friend class AmdEngine;   // fills the order via the engine
+    template<class QuotientGraph> friend class MmdEngine;
 
     std::vector<std::int32_t> mOrder;
     std::size_t               mNumPeakCliqueMembers = 0;
     std::size_t               mNumBornCliqueMembers = 0;
     std::size_t               mNumCompactions       = 0;
+    std::size_t               mNumTagResets         = 0;
 };
 
 } // namespace Oblio

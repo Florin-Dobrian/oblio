@@ -1,5 +1,31 @@
 # NEXT: the mmd and amd branches are being aligned against each other; one regression is open
 
+## OPEN, FOUND 2026-08-30: the amd time ratio dips and comes back, where the mmd one only falls
+
+`make scale3d`, `AmdFlat / AmdVendored`: 1.19, 1.11, 0.98, 0.95, 1.05, 1.06, 1.22, 1.32 from `9^3`
+to `81^3`. The mmd column over the same grids only falls, 1.00 down to 0.77. `make scale2d` shows a
+milder version of the same shape, 1.24 down to 1.13 at `1025^2` and back to 1.40, so it is not
+specific to 3d.
+
+**THE TWO RATIOS ARE NOT AGAINST THE SAME KIND OF REFERENCE, and that is the first thing to rule
+out.** `MmdCorrected` is our own port of genmmd: same allocation pattern, same n-sized vectors, same
+setup, so the fixed costs appear on both sides and cancel, leaving the algorithmic work. `AMD_2` is
+a different codebase with its own preprocessing, so its time is not made of the same parts as ours
+and nothing cancels. That alone can produce a U: our fixed cost dominant at small n and falling away as
+the ordering work grows superlinearly, theirs or our locality dominant at the top end.
+
+**THE INSTRUMENT EXISTS AND HAS NOT BEEN POINTED AT THIS.** `make phases3d` decomposes `AMD_2`'s own
+time into `AMD_aat` and the rest, which answers directly whether the denominator's composition moves
+across the range. Do that before theorising about cache behaviour at 600 million nonzeros.
+
+### And one row where the four fills disagree
+
+`amd 3d`, `81^3`: `Vnd nnzL` 628021440 against `Raw`, `Flt` and `Com` all at 628021443. Three
+entries, in the only row of either table where anything disagrees. OUR TWO DRIVERS AGREE WITH `Raw`,
+which is what they are required to reproduce, so this is `amd_order`'s postordered output differing
+from its own raw elimination order. A postorder permutes the tree and cannot change nnz(L), so a
+difference of three is not what that operation should produce. Small, reproducible, one row.
+
 ## DONE 2026-08-28: the ordering code took the naming conventions, and three defects fell out
 
 Two commits, `98af0bf` and `64020aa`, both named "Ordering code alignments". Most of it is naming

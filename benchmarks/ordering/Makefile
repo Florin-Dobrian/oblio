@@ -239,7 +239,13 @@ order_profile_cpp: order_profile.cpp $(OBLIO_SRCS) $(OBLIO_HDRS) $(VENDOR_SRCS) 
 # The comment lives ABOVE the rule and not inside it: make echoes every recipe line before running
 # it, and a # there is a shell comment rather than a make one, so an explanation written in the
 # recipe gets printed in full every time someone types `make clean`.
+# `.digest-baseline` IS NOT REMOVED, and it is the one thing here that make cannot regenerate: the
+# rest are binaries and a mode marker, rebuilt from source on demand, while the baseline is a
+# RECORDED MEASUREMENT of what the drivers produced at a chosen moment. Deleting it on clean left
+# the check silently disarmed until someone remembered to re-record, which is the opposite of what
+# a check is for. Drop it deliberately with `rm .digest-baseline` when a permutation is meant to
+# move.
 clean:
-	rm -f .build-mode order_timing_cpp order_profile_cpp order_digest_cpp .digest-baseline
+	rm -f .build-mode order_timing_cpp order_profile_cpp order_digest_cpp
 	rm -f AmdVendored.o MmdVendored.o MmdCorrected.o amd_raw.cpp amd_timed.cpp
 	rm -rf *.dSYM

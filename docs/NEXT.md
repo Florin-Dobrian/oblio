@@ -1,5 +1,118 @@
 # NEXT: the mmd and amd branches are being aligned against each other; one regression is open
 
+## OPEN, FOUND 2026-08-30: the amd tag ceiling reserves half the room it needs
+
+`AmdEngine.cpp` guards its tag with `wbig = INT32_MAX - n` and sweeps when the tag reaches it. The
+margin covers ONE of the two terms that raise the tag in a step, and there are two.
+
+```
+337   stampAmd = max(stampAmd, tagAmd + maxCliqueWeight)     bounded by n
+364   ++stampAmd, once per detection candidate                bounded by n
+445   tagAmd = stampAmd + 1
+```
+
+**THE TWO TERMS BELONG TO DIFFERENT CLIQUES**, `maxCliqueWeight` being a maximum over all previous
+steps and the candidate count being this step's, so their sum is not bounded by n. The comment above
+`wbig` says `tagAmd + n must not overflow`, which is exactly the first term and nothing else.
+
+**MEASURED, over 1200 structured and 6000 random graphs**: the worst per-step climb is `1.21 n`, at
+n = 357, density 0.388, climb 433. The ratio sits near 1.2 and does not grow with n. Grids stay
+under 0.2 and a single near-complete graph reaches 0.98, which is why nothing above n ever appeared
+in ordinary use.
+
+**AND THE OVERFLOW IS REAL, not merely arithmetic.** Forcing the tag to start one below the ceiling
+AND the sweep to reset there, so every step begins at the boundary, UBSan reports
+`signed integer overflow: 2147483647 + 1` at line 364, the `++stampAmd`. Both changes are states the
+shipped code can legitimately be in, the guard being checked at the TOP of a step.
+
+**IT IS UNREACHABLE TODAY AND THAT IS NOT A REASON TO LEAVE IT.** A cold run needs about `2^31 /
+climb` steps to arrive, so n would have to reach the hundreds of millions. See the range analysis
+below: there is a band where this matters and a band above it where nothing works anyway.
+
+### The existing sweep is CORRECT, which had to be established separately
+
+Forced to fire on every step, 20 resets on a 65-vertex graph, `clearFlag` leaves every permutation
+identical to the reference across 28 graphs, and the flat and compacted pair still agree. So the
+defect is the margin and not the sweep.
+
+### `AMD_2` covers it with a SECOND `clear_flag`, and we dropped that call
+
+```
+1948   wflg += lemax ;                          our line 337
+1949   wflg = clear_flag (wflg, wbig, W, n) ;   WE HAVE NO EQUIVALENT
+2067   wflg++ ;                                 our line 364
+1694   wflg = clear_flag (wflg, wbig, W, n) ;   our clearFlag, top of the step
+1349   wbig = Int_MAX_VAL - n ;                 the identical margin
+```
+
+Their guard is checked BETWEEN the two terms, so each check covers one term and `INT32_MAX - n` is
+the right margin. Ours is checked once, before both. **The margin is not the defect; the missing
+second call is.**
+
+### But the call cannot be ported as-is, and the reason is one value in the wrong array
+
+Adding it at line 337 changes every permutation. `markAmd` is not a clique array only: line 302
+stores a live vertex's partial bound in `markAmd[u]` and line 419 reads it back AFTER detection, so
+a sweep between them wipes it.
+
+`AMD_2` keeps that partial bound in `Degree` (line 1890, read back at 2094). After its bound pass,
+`W` holds only spent clique tags, every value already consumed into `Degree`, so `W` is sweepable at
+that point. After ours, `markAmd` holds spent clique tags AND live vertex bounds together.
+
+**NEITHER CODE USES MORE ARRAYS THAN THE OTHER.** Both are dual-population and both say so: `AMD_2`
+at 1160-1178 documents `W` as element tags plus variable stamps, and `Degree` as a variable's bound
+plus an element's `|Le|`. We have `markAmd` and `degrees` with the same split. The port diverged on
+WHICH array holds the stash, and nothing surfaced it because permutations are identical either way.
+
+A second, smaller divergence makes the move non-trivial: `AMD_2` never stashes an adjacency half at
+all, accumulating `deg` in a local during its scan loop. We stash it from inside `pruneAmd`
+(`QuotientGraphFlat.h:988`), our prune and bound pass being separate walks, so the value has to
+survive between them and it crosses the driver/graph boundary.
+
+### Three ways, and the second is the one to take
+
+1. **Sweep clique slots only**, telling the populations apart with `eliminatedAmd(x)`. Keeps the
+   boundary, costs a predicate per entry in a sweep that fires almost never, and diverges from the
+   oracle by keeping one guard where it has two.
+2. **MOVE THE STASH TO `degrees`, as `AMD_2` does.** Then `markAmd` carries tags alone, the second
+   `clear_flag` ports verbatim, and the margin stays `n`. The cost is the `const` on
+   `TaggedScan::degree`: the graph would write that array, so the promise stops being true. That is
+   the boundary telling the truth rather than a guarantee lost, since after the move both sides
+   genuinely write it. Two graph headers, two engine lines, and the `int32`/`uint32` reconciliation
+   at line 302 to check.
+3. **Margin `2n`.** Simplest, no second guard, and sweeping starts earlier in the band where it
+   happens at all.
+
+**VERIFY BY FORCING, NOT BY READING.** This region defeated two rounds of reasoning in one session.
+The probe is: force the tag to start at the ceiling and the sweep to reset there, run the graph
+ladder, and compare permutations against the reference. A wrong placement shows as every
+permutation changing, which is how option 1's naive form was caught.
+
+### The range, because it bounds how much any of this buys
+
+`MAX_IDX` is `INT32_MAX`, so n reaches `2^31 - 1` and at that n the margin is zero: `clearFlag`
+fires before every one of n eliminations and sweeps n entries, an O(n^2) ordering that is correct
+and never finishes. `INT32_MAX - 2n` is negative there and the subtraction itself overflows.
+
+```
+n up to ~1e8      the tag never approaches the ceiling; today
+n ~1e8 to ~1e9    the sweep genuinely fires; the band where the margin has to be right
+n above ~1e9      the margin arithmetic breaks and the ordering is unusable regardless
+```
+
+`AMD_2` has the same three bands and the same collapse. It buys the middle one and no more. So the
+margin should be computed in `std::size_t` and a size that leaves no positive ceiling REJECTED, as
+`checkIndexRange` rejects an out-of-range size, rather than silently sweeping every step.
+
+### And mmd has no guard at all
+
+`advanceTagMmd()` is `return ++mTagMmd;`, with nothing watching the ceiling and nothing counting. It
+rises by one per clique and once per refreshed vertex, far more slowly than amd's, but there is no
+backstop. `GONE` is `INT32_MAX` and lives in the same array, so a collision would revive dead
+members rather than merely misreading a bound. THE SWEEP HAS TO BE A METHOD ON THE THREE GRAPH
+CLASSES, the state being theirs, and it must preserve `GONE` from the top of the range where amd's
+preserves 0 at the bottom.
+
 ## OPEN, FOUND 2026-08-30: the amd time ratio dips and comes back, where the mmd one only falls
 
 `make scale3d`, `AmdFlat / AmdVendored`: 1.19, 1.11, 0.98, 0.95, 1.05, 1.06, 1.22, 1.32 from `9^3`

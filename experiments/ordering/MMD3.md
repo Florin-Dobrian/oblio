@@ -383,14 +383,14 @@ instrument the next layer gets aligned with. That was judged worth one function.
 ## Iteration 7: production, and one self-inflicted wound
 
 **Three of the four reversed walks are in `Mmd3.cpp`.** The fourth, the `I[u]` expansion, lives in
-`QuotientGraph::reachableSet`, which all six drivers share.
+`QuotientGraphFlat::reachableSet`, which all six drivers share.
 
 **Decided: a flag, `setReverseIncidence`, off by default and turned on only by `Mmd3`.** The branch
 is hoisted like `live` and is per CLIQUE, not per member, so it sits outside the loop that does the
 work. The alternatives were duplicating the walk or changing the permutation for every driver.
 A mode flag on a shared class is not free to the reader, and that is recorded where it lives.
 
-**Entry 6 needed the same treatment**, since `QuotientGraph::order` is shared too. It became a
+**Entry 6 needed the same treatment**, since `QuotientGraphFlat::order` is shared too. It became a
 second named method, `orderAscending`, rather than a second flag: an output convention reads better
 as a named method than as a boolean at a call site.
 

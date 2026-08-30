@@ -101,7 +101,7 @@ softer layer: conventions for consistency, not correctness.
   same rule, which is why the clique store's is `numBornCliqueMembers`: a clique's contents ARE
   one kind and do have a word. Reasoning in `docs/DESIGN_DECISIONS.md` (2026-08-23).
 
-- **The quotient graphs are header-only: `QuotientGraph`, `QuotientGraphCompacted` and, when
+- **The quotient graphs are header-only: `QuotientGraphFlat`, `QuotientGraphCompacted` and, when
   it is promoted, `QuotientGraphChained` keep their bodies in their headers.** Two reasons, and
   neither is about how the code reads:
 
@@ -357,7 +357,7 @@ softer layer: conventions for consistency, not correctness.
     flag. The rule for doing this safely is that the encodings must be **disjoint by construction
     and stated at the declaration**, not inferred: write out which value means what, and say which
     caller depends on each, because the compiler checks none of it.
-  - **Pack what is always read together.** `QuotientGraph::VertexRun` holds a run's position and
+  - **Pack what is always read together.** `QuotientGraphFlat::VertexRun` holds a run's position and
     its two lengths in 16 bytes, four to a cache line, where three arrays cost three lines per
     vertex.
 
@@ -431,7 +431,7 @@ softer layer: conventions for consistency, not correctness.
   - **A one dimensional size is a `std::uint32_t`, and nothing forces it signed.** It counts along
     one side of the matrix, is bounded by n, and has nothing to stand in for, so no sentinel and no
     sign bit spent. The length of an adjacency list is a size, not an index, however close to one
-    it looks. E.g. `QuotientGraph::mAdjacencySize`, `mIncidenceSize`, `mCliqueSize`, the
+    it looks. E.g. `QuotientGraphFlat::mAdjacencySize`, `mIncidenceSize`, `mCliqueSize`, the
     drivers' `degrees` and the arrays the scan structs bind.
 
     **UNLESS AN ENCODING IN THE SIGN BUYS SPEED, and then it is a `std::int32_t`. Only then.** The
@@ -452,7 +452,7 @@ softer layer: conventions for consistency, not correctness.
       reachable. This does NOT contradict the half-range clause below, which is about ARITHMETIC
       that can exceed n; spending a bit no value reaches costs nothing.
 
-    **The worked example, and the only field carrying this today, is `QuotientGraph::mWeight`**,
+    **The worked example, and the only field carrying this today, is `QuotientGraphFlat::mWeight`**,
     which becomes a `std::int32_t` so that `AMD_2`'s `Nv` encoding can be carried:
 
     ```
@@ -473,14 +473,14 @@ softer layer: conventions for consistency, not correctness.
     THING.** A weight is bounded by n, so the negated range is `[-(2^31 - 1), -1]` and `-2^31` is
     unreachable from either direction. The tempting use is a fourth state for a vertex the mmd
     prepass has numbered, which is the one case a positive weight fails to exclude. **It does not
-    work**: `QuotientGraph::orderAscending` reads `mWeight[pivot]` for every pivot to size a
+    work**: `QuotientGraphFlat::orderAscending` reads `mWeight[pivot]` for every pivot to size a
     supervariable's run in the permutation, and a prepass vertex IS a pivot, so its weight is
     load-bearing and cannot be overwritten. Checked 2026-08-17 while folding `Mmd3C`, and it is why
     that file keeps a mark array. The slot remains free for a state carried by a vertex whose weight
     is never read, if one ever appears.
   - **A two dimensional size or position is a `std::size_t`.** It measures or offsets into an
     object sized by an AREA, so it is bounded by nnz rather than by n and routinely exceeds 2^31.
-    E.g. `SparseMatrix::colPtr`, `QuotientGraph::VertexRun::srcPtr`, `nnz()`, and every fill or
+    E.g. `SparseMatrix::colPtr`, `QuotientGraphFlat::VertexRun::srcPtr`, `nnz()`, and every fill or
     storage total.
 
   **THE NAMES CARRY THE DIMENSION TOO.** A one dimensional index is `i`, `j` or `k`, or a word
@@ -490,7 +490,7 @@ softer layer: conventions for consistency, not correctness.
   `std::size_t` is a sign the loop is offsetting rather than counting.
 
   **The two dimensions meet only where a difference of positions is written as a size**, which is
-  where the narrowing cast belongs. There are exactly two such crossings in `QuotientGraph`, both a
+  where the narrowing cast belongs. There are exactly two such crossings in `QuotientGraphFlat`, both a
   block being sized from the arena that holds it.
 
   **THE HALF RANGE IS DELIBERATE, AND IS NOT HEADROOM TO SPEND.** Because n is capped by the index
@@ -518,7 +518,7 @@ softer layer: conventions for consistency, not correctness.
   variable that reads as a fixed sum where it is declared may be an accumulator three lines later.
 
   **n itself is a one dimensional size**, so the rule says `std::uint32_t` for it too. Today
-  `QuotientGraph::size()`, `SparseMatrix::mSize` and every driver's `colPtr.size() - 1` are
+  `QuotientGraphFlat::size()`, `SparseMatrix::mSize` and every driver's `colPtr.size() - 1` are
   `std::size_t`, and the casts at `numLive`, `numLeft` and `batchLimit` exist only because of that.
   Known drift, listed here so it is not rediscovered as a finding.
   - **A loop counter takes the type of what it counts, and direction does not change the type.**

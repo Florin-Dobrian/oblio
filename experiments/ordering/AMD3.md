@@ -94,7 +94,7 @@ is a locality hypothesis and is untested.
 The profile is diffuse now. `orderAmd3` is 48 percent of the run with no line above 378 ms, and
 everything with a name has been taken. Getting from 2.3x to 1.5x is a third of the total and there
 is no item of that size left in it. It would have to come from a driver owning its own storage
-instead of sharing `QuotientGraph`: which is a real option, and is the trade `AMD_2` made, and
+instead of sharing `QuotientGraphFlat`: which is a real option, and is the trade `AMD_2` made, and
 gives up the shared class, the six-driver ladder and the prototype-against-production check.
 
 **And fix the benchmark first.** `order_timing` uses a fixed repeat count and two runs of the same
@@ -435,7 +435,7 @@ hash survivor.
 **Result: fill exact at every grid size tested, and pivot sequences identical to grid 50.**
 
 **Worth recording for the port.** Production is a better fit for this than the prototype:
-`QuotientGraph` already holds both lists in one run behind `mSourcePtr`, which is the layout that
+`QuotientGraphFlat` already holds both lists in one run behind `mSourcePtr`, which is the layout that
 motivated the trick, so AMD's three moves transcribe almost literally.
 
 ---
@@ -607,7 +607,7 @@ rather than a direction, but it is the same kind of thing: a step made in a diff
 **Three of the six entries land in code the six drivers share**, so this was a port rather than a
 copy. Entry 1 is `Amd3`'s own and entry 4 was already fixed everywhere.
 
-**Decided: two flags and one method on `QuotientGraph`, all inert for the other five drivers**, in
+**Decided: two flags and one method on `QuotientGraphFlat`, all inert for the other five drivers**, in
 the shape `setReverseIncidence` already established for `Mmd3`.
 
 ```
@@ -981,7 +981,7 @@ rather than a bound: it leaves at most one doubling on a 2D grid and a problem w
 times its input will still grow, now from a large base and so amortized. Reclaiming the dead blocks
 the way `Amd.cpp` does is the real fix and is not this.
 
-**It is in `QuotientGraph`, so it reaches every driver**, and the MMD branch forms cliques the same
+**It is in `QuotientGraphFlat`, so it reaches every driver**, and the MMD branch forms cliques the same
 way. If it is worth what the trace says, MMD3 should move with AMD3.
 
 **And the method note, which is the point of this iteration.** Four structural hypotheses of mine
@@ -1155,7 +1155,7 @@ between two machines cannot be a legitimate result. Something unspecified was be
 about integer code" and was reached for instead of a sixth hypothesis:
 
 ```
-heap-use-after-free   QuotientGraph::reachableSet   QuotientGraph.cpp:122
+heap-use-after-free   QuotientGraphFlat::reachableSet   QuotientGraphFlat.cpp:122
   freed by:  vector<int>::_M_realloc_insert        a push_back that outgrew its reserve
 ```
 
@@ -1357,7 +1357,7 @@ is `AMD_SYMMETRY`, and a zeroed `Control` array, which is not the default `Contr
 turns aggressive absorption off.
 
 **And our half was wrong, which the vendored half is what found.** `QuotientGraphI.cpp` carries the
-same symbols as `QuotientGraph.cpp`, so it is linked instead of it and both drivers share it, and
+same symbols as `QuotientGraphFlat.cpp`, so it is linked instead of it and both drivers share it, and
 the probe read its counters after a control run of the uninstrumented driver. Six of fifteen
 columns were doubled and nine were not. The check was free and existed only because the vendored
 numbers were beside it: the alignment forces our `reachAdj` to equal `AMD_2`'s construct-adjacency
@@ -1520,7 +1520,7 @@ was concentrated: we walked `I[u]` three times per pivot where `AMD_2` walks it 
 twice where it walks it once, and those two rows were 96 percent of what was left.
 
 **The transformation for exactly that already existed and had already failed.**
-`QuotientGraph::eliminate(pivot, ApproximateScan&)` folds the driver's first scan into the prune,
+`QuotientGraphFlat::eliminate(pivot, ApproximateScan&)` folds the driver's first scan into the prune,
 which is what `Amd1B` and `Amd2B` are. It measured zero on both, five percent slower on `Amd1B`.
 Three things made it worth re-running: it had never been tried on `Amd3`; the reading was 2D, and
 the direction is now 3D; and it predates entry 8, when a different pass dominated the profile. That
@@ -1529,7 +1529,7 @@ is the same pair of conditions that had made the key fusion look worthless the d
 **It could not be reused as it stood, and the detour was the right one.** That overload carries the
 pre-iteration-15 encoding, a value array plus a separate seen-this-step mark, where `Amd3` carries
 `Amd.cpp`'s tagged W. Adopting it would have bundled a revert of that consolidation into the
-measurement, and the record prices W only together with the stamp hoist. So `QuotientGraph` gained
+measurement, and the record prices W only together with the stamp hoist. So `QuotientGraphFlat` gained
 a `TaggedScan` overload and the vehicle differed from `Amd3` in the fold alone.
 
 **Result, alpamayo, and the vendored routine is unmoved throughout:**

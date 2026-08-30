@@ -137,7 +137,7 @@ constexpr std::uint32_t SHOW_THRESHOLD = 32;
 // `mSize` is what makes them classes rather than pairs of vectors: it is the id space, a one
 // dimensional size, so `std::uint32_t`. Holding it here is what keeps `n` out of `std::size_t` for
 // the whole layer, and every vector length in the file is then bounded by it. Oblio's
-// QuotientGraph owns both roles in one class and will get the same treatment iteratively.
+// QuotientGraphFlat owns both roles in one class and will get the same treatment iteratively.
 class AdjacencyGraph {
 public:
     explicit AdjacencyGraph(std::uint32_t size) : mSize(size), mAdjacency(size) {}

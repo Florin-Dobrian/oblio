@@ -82,7 +82,7 @@ MmdFlat  / MmdCompacted   149 / 136        NONE
 AmdFlat  / AmdCompacted   169 / 162        NONE, since the run order was flipped
 ```
 
-**THE FOURTH OPTION BELOW WAS DONE ON 2026-08-28 AND STEP 1 IS GONE.** `QuotientGraph` now carries
+**THE FOURTH OPTION BELOW WAS DONE ON 2026-08-28 AND STEP 1 IS GONE.** `QuotientGraphFlat` now carries
 the run order per branch, `[A, I]` for mmd and `[I, A]` for amd, so `AmdFlat`'s detection is a
 single loop and the two amd detection regions are BYTE-IDENTICAL. What is left of this entry is the
 templating itself, in two steps rather than three.
@@ -93,7 +93,7 @@ The precedent is in this tree already: `NumFactorEngine`'s traversals are
 
 ### The mmd pair needs no design work
 
-Three differences, all at the ends: the signature, `QuotientGraph qg` against
+Three differences, all at the ends: the signature, `QuotientGraphFlat qg` against
 `QuotientGraphCompacted qg`, and the reporting tail, `gMmdCompactions = qg.numCompactions()` against
 `*numBornCliqueMembers = qg.numBornCliqueMembers()`. Everything between, including the batch loop,
 the refresh, and both the q2h and qxh walks, is BYTE-IDENTICAL. Template on the graph, instantiate
@@ -134,7 +134,7 @@ For the mmd pair the body is ALREADY identical; what is left is the signature an
 those without the template means adding a counter to a class that has no use for it:
 
 ```
-QuotientGraph            has numBornCliqueMembers, no numCompactions
+QuotientGraphFlat            has numBornCliqueMembers, no numCompactions
 QuotientGraphCompacted   has numCompactions, no numBornCliqueMembers
 ```
 
@@ -153,7 +153,7 @@ OTHER HAS.
 
 `QuotientGraphCompacted` carries the run order PER BRANCH, two accessor pairs over one segment:
 `adjacencyMmd`/`incidenceMmd` give `[A, I]` and `incidenceAmd`/`adjacencyAmd` give `[I, A]`.
-`QuotientGraph` has one pair serving both branches, always `[A, I]`. The four cells:
+`QuotientGraphFlat` has one pair serving both branches, always `[A, I]`. The four cells:
 
 ```
                 run       pivot in I    pivot in the RUN     detection
@@ -509,7 +509,7 @@ and UBSan.
 
 ```
                         lines            comment          >10 blocks   longest
-QuotientGraph.h    1922 -> 1370   1239 ->  687  (50%)      38 -> 11     52 -> 27
+QuotientGraphFlat.h    1922 -> 1370   1239 ->  687  (50%)      38 -> 11     52 -> 27
 QuotientGraphChained  980 -> 734   615 ->  369  (50%)      20 ->  5     48 -> 17
 QuotientGraphCompacted 1308 -> 1280 533 ->  505  (39%)     13 -> 12     56 -> 41
 ```
@@ -675,7 +675,7 @@ section before it carries: the account of what translation units cost does not p
 results, and one movement it cannot explain is on the record.
 
 **WHAT THE LAST TWO COMMITS DID.** `19efe5f`: the three quotient graphs became shared and
-header-only, `src/QuotientGraph.cpp` deleted with its bodies folded into its header, so every
+header-only, `src/QuotientGraphFlat.cpp` deleted with its bodies folded into its header, so every
 ordering driver now compiles its graph into its own translation unit; `MmdCompacted` and
 `MmdChained` were both
 brought onto shared classes; the real-matrix tables gained compaction counts and `MmdCompacted`;
@@ -990,7 +990,7 @@ the full reading.
 ## What was borrowed into production, 2026-08-18
 
 Two of the audit's findings were not `AmdCompacted` defects but shared ones, so they went into
-`AmdFlat` and `QuotientGraph` as well. Both verified by digest, `make amdorder` and `make mmdorder`.
+`AmdFlat` and `QuotientGraphFlat` as well. Both verified by digest, `make amdorder` and `make mmdorder`.
 
 - **THE CLIQUE TRIM AFTER DETECTION.** `trimClique` on the shared class, called from `AmdFlat`'s
   restore pass, which now writes survivors back as it walks. One difference from `AmdCompacted`:
@@ -1050,7 +1050,7 @@ The terminology and the four-class scheme behind these names are in docs/DESIGN_
 set is `QuotientGraphFlat`, `QuotientGraphChunked`, `QuotientGraphCompacted` and
 `QuotientGraphChained`.
 
-**`tmp/` STILL GENERATES THE OLD NAMES.** `make_amd3b.py` and `make_mmd3c.py` rename `QuotientGraph`
+**`tmp/` STILL GENERATES THE OLD NAMES.** `make_amd3b.py` and `make_mmd3c.py` rename `QuotientGraphFlat`
 to `QuotientGraphA` and `QuotientGraphC`, so regenerating either file undoes this. They also carry
 sandbox paths from a previous session. Fix both before running them.
 
@@ -1303,7 +1303,7 @@ and q2h indexed rather than looped. Read that entry before reaching for any of t
 essentially exactly: one array of nnz(A), cliques in their pivot's dead segment, negative links, a
 value terminator, no clique length array, no liveness array, the degree list in one link array. Its
 obligation from here is to stay ENCODING-IDENTICAL to `MmdFlat`, so that the only difference between
-them is storage; a fold that lands in `QuotientGraph` lands there too, or the comparison quietly
+them is storage; a fold that lands in `QuotientGraphFlat` lands there too, or the comparison quietly
 stops being about storage.
 
 **And the amd branch has had NONE of this.** Its five drivers still carry `degrees`, `outside`,
@@ -1399,7 +1399,7 @@ said about the orderings, in order of how much it should affect the plan:
    by a dead pivot's id, and folding the arrays away removed them. The container question is
    therefore still open as a question and is no longer a suspect.
 
-3. **A dense-row threshold in `QuotientGraph`.** NEW on 2026-08-11 and the largest ordering-time
+3. **A dense-row threshold in `QuotientGraphFlat`.** NEW on 2026-08-11 and the largest ordering-time
    item the real matrices found. A single vertex adjacent to everything makes minimum degree
    quadratic; the vendored AMD sets such rows aside before ordering, above `max(16, 10*sqrt(n))`
    entries, and places them last, and its own source says the cost of not doing so is O(n^2). Oblio
@@ -1457,7 +1457,7 @@ and
      the compiler appears to be doing the work already.
    - **Per ARRAY, at setup**, which is the axis nothing has isolated. A pure diagonal is the case
      that shows it: with no elimination work at all, an `MmdFlat` ordering is roughly a third
-     `QuotientGraph` CONSTRUCTION and a sixth `orderAscending`, and construction allocates and
+     `QuotientGraphFlat` CONSTRUCTION and a sixth `orderAscending`, and construction allocates and
      initializes about ten size-n arrays where genmmd allocates five plus its 1-based copies. That
      is the array-count finding of the same day, moved from the loops into the constructor, and it
      is invisible on a grid because real work amortizes it.
@@ -1576,7 +1576,7 @@ Getting there found three things, none of them visible before:
 
 - a defect in production `AmdFlat`, ledger entry 7, the stored clique degree not rewritten after
 mass   elimination trimmed the clique;
-- a use-after-free in the shared `QuotientGraph` that every ordering had, benign until an allocator
+- a use-after-free in the shared `QuotientGraphFlat` that every ordering had, benign until an allocator
   recycled the block, which is why it surfaced as two machines disagreeing about integer code;
 - two harness faults that looked like divergences, a dense threshold turned off by undefined
   behavior and a 3D grid builder emitting unsorted columns.
@@ -1794,7 +1794,7 @@ and the bucket size distribution, on 2D and 3D at comparable n, against the vend
 of three last time, and it is the only output any of these four can change.
 
 **A FIFTH DIVERGENCE, in a different mechanism, found 2026-08-12 while reading the twins.** The
-mass-elimination test in `QuotientGraph::massEliminate` has three conjuncts where `AMD_2` has two:
+mass-elimination test in `QuotientGraphFlat::massEliminate` has three conjuncts where `AMD_2` has two:
 
 ```
 Amd.cpp:   if (Elen [i] == 1 && p3 == pn)
@@ -1804,7 +1804,7 @@ ours:      if (mAdjacencySize[u] == 0 && mIncidenceSize[u] == 1 &&
 
 `AMD_2` asks for one element left and no surviving variables, and never checks WHICH element.
 Ours adds that check, and **it is provably redundant**: all three prune variants append the pivot
-unconditionally, at `src/QuotientGraph.cpp` lines 395, 460 and 533, each followed immediately by
+unconditionally, at `src/QuotientGraphFlat.cpp` lines 395, 460 and 533, each followed immediately by
 `mIncidenceSize[u] = write - kept`, so a count of one forces the sole entry to be the pivot. The
 `mVendoredListOrder` swap is guarded by `write - kept > 1` and cannot move anything at a count of
 one, and the first conjunct is what puts the incidence run at `mSourcePtr[u]`.
@@ -1966,7 +1966,7 @@ vertex's descriptor touches three cache lines where one struct touches one. Each
 sweeps opens by reading exactly that, so this attacks all seven at once rather than deleting one,
 and deleting one is what B1 tried and measured nothing. It is also the only candidate left that
 targets STREAMS rather than passes, which is what paid three times on 2026-08-10. It lives in
-`QuotientGraph`, so all six drivers move together and no vehicle can isolate it: `make amdorder`
+`QuotientGraphFlat`, so all six drivers move together and no vehicle can isolate it: `make amdorder`
 and `make mmdorder` are the guard. The known ceiling is small, about 7 percent of a one-shot solve
 for closing `AMD1`'s whole remaining gap, and this is a fraction of that. Narrowing the arrays was
 tried once and measured nothing despite cutting simulated misses 17 percent.
@@ -2007,7 +2007,7 @@ stream hypothesis at no risk to the default.
 **2e. NARROW THE ONE-DIMENSIONAL SIZES. THE ORDERING IS COMPLETE, 2026-08-11.** Eleven steps, each
 with the permutation checked against the pre-change tree on 2D grids to 80 a side, 3D to 16 and
 three random patterns at n = 2000, all identical, and each clean under `-Wall -Wextra` and under
-`-fsanitize=address,undefined`. What landed: the four `QuotientGraph` arrays and the accessors over
+`-fsanitize=address,undefined`. What landed: the four `QuotientGraphFlat` arrays and the accessors over
 them, `Buckets`'s signatures, `degrees` with the scalars that travel with it, the four scan arrays
 with the two structs that bind them, then `usedKeys` and its hash locals, `sizeU` and `sizeV`,
 `reachableSize`, `absorb`'s `vertexCount`, and one entity loop in `AmdFlat` brought back to the
@@ -2060,7 +2060,7 @@ nothing has to be re-derived per session. Four buckets. **The split came out cle
 nothing currently `std::int32_t` wants to become `std::uint32_t`, so the narrowing set is exactly
 the currently-`std::size_t` set minus the two `Ptr` arrays, minus the two accumulators.**
 
-**Bucket 1, stays `std::size_t`, being two-dimensional.** Two arrays, both in `QuotientGraph`, and
+**Bucket 1, stays `std::size_t`, being two-dimensional.** Two arrays, both in `QuotientGraphFlat`, and
 both positions rather than counts:
 
 - `mSourcePtr[u]`, where u's run starts in `mSource`; bounded by nnz(A).
@@ -2083,7 +2083,7 @@ below.
 
 `mEliminated` and `Mmd2`/`MmdFlat`'s `outmatched` are `std::uint8_t` and stay.
 
-**Bucket 3, narrows to `std::uint32_t`.** In `QuotientGraph`, four arrays and one scalar, all
+**Bucket 3, narrows to `std::uint32_t`.** In `QuotientGraphFlat`, four arrays and one scalar, all
 bounded by n: `mAdjacencySize`, `mIncidenceSize`, `mCliqueSize`, `mWeight`, and the per-pivot
 `mCliqueWeight`. **`mWeight` IS NOW WRONG IN THIS LIST, 2026-08-17.** It goes back to
 `std::int32_t` so that `AMD_2`'s `Nv` encoding can ride in its sign, which is the rule deriving
@@ -2120,7 +2120,7 @@ per-array reading does not.
 Each is a decision rather than a consequence, and each reaches every file, so taking them in order
 is what keeps the change mechanical afterwards.
 
-1. **Does `n` itself narrow?** `QuotientGraph::size()` returns `mAdjacencySize.size()`, a container
+1. **Does `n` itself narrow?** `QuotientGraphFlat::size()` returns `mAdjacencySize.size()`, a container
    size, so it is `std::size_t` whatever the element type becomes. If the accessors return
    `std::uint32_t` while `size()` does not, every comparison between a count and n is a
    mixed-width one. The likely answer is that `size()` returns `std::uint32_t` with the cast in
@@ -2163,7 +2163,7 @@ which reads as a large degree rather than an absurd one. Worth knowing when one 
 tried on 2026-08-01: 17 percent fewer simulated D1 misses and zero on alpamayo. What it does buy is
 that the hot loops stop casting: `const std::int32_t adjacencySize = static_cast<std::int32_t>(
 mAdjacencySize[u])` and its siblings exist only because the array is wider than the loop. **Eight
-of the eleven casts in `src/QuotientGraph.cpp` are that shape**, seven hoisting an adjacency or
+of the eleven casts in `src/QuotientGraphFlat.cpp` are that shape**, seven hoisting an adjacency or
 incidence length and one narrowing `cliqueDegree[c]` to add it to `wnvi`, so the count is a
 before-and-after worth recording rather than an estimate. And it composes with item 2d:
 `{ size_t sourcePtr; uint32 adjacencySize; uint32 incidenceSize; }` is 16
@@ -2225,7 +2225,7 @@ element visits on both families, of which the fusion removed a fifth. What remai
 
 ## The parked attempt
 
-Give cliques their own mark space in `QuotientGraph`, then fold liveness into the vertex marks and
+Give cliques their own mark space in `QuotientGraphFlat`, then fold liveness into the vertex marks and
 delete `mEliminated`.
 
 ```
@@ -2295,7 +2295,7 @@ Also needed: an overflow guard on `mTag`, as `AmdFlat`'s `w` array has with `cle
 
 Stop rather than continue. The alternative account of the remaining gap is data layout, one `Iw`
 pool against our `mSource` plus a separate clique arena, with per-vertex arrays as independent heap
-allocations. The fix for that is a pooled-storage redesign of `QuotientGraph`, which is a much
+allocations. The fix for that is a pooled-storage redesign of `QuotientGraphFlat`, which is a much
 bigger change, trades away part of what the shared class buys, and should be a deliberate decision
 rather than the next thing tried.
 

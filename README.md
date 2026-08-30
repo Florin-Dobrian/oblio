@@ -307,7 +307,7 @@ include/oblio/      , public headers (declarations only)
   Vector.h          , dense vector (one right-hand side)
   Permutation.h     , bidirectional index map (oldToNew / newToOld)
   OrderEngine.h     , fill-reducing ordering, both branches behind one enum
-  QuotientGraph.h   , the representation Oblio's own orderings run on, and its degree buckets
+  QuotientGraphFlat.h   , the representation Oblio's own orderings run on, and its degree buckets
   MmdFlat.h  AmdFlat.h , Oblio's own MMD and AMD orderings on our arena, each reproducing
                       its reference's permutation exactly
   QuotientGraphCompacted.h  , AMD_2's clique store: one compacted workspace with a free cursor

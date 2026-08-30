@@ -90,7 +90,7 @@ underneath it is carrying its weight:
 - **Both degree kinds.** The exact degree in the MMD branch and the approximate bound in the AMD
   branch, with the bound's three-way minimum. The bound never falls below the true degree, checked
   now at every step in the prototypes and verified directly in production by comparing against
-  `QuotientGraph::reachableWeight`, zero violations on grids of 10, 20, 32 and 50.
+  `QuotientGraphFlat::reachableWeight`, zero violations on grids of 10, 20, 32 and 50.
 
 So the report is not that the design is wrong. It is that a small number of decisions are wrong,
 and they are identifiable.
@@ -330,7 +330,7 @@ Same permutation, same fill, same work. So the remaining time is implementation 
 
 ### The width of our arrays is the largest single contributor
 
-`QuotientGraph` stores positions and measures as `std::size_t`, eight bytes; genmmd stores
+`QuotientGraphFlat` stores positions and measures as `std::size_t`, eight bytes; genmmd stores
 everything in `int`, four. **Narrowing one of ours to test that is what we tried first and it
 proves nothing**: `mWeight` alone moved the total by nothing at 140x140 and about four percent at
 400x400, unreadable against noise, because it is one of five eight-byte arrays read in the same
@@ -363,7 +363,7 @@ check that the mechanism was identified rather than a number being fitted.
 
 **It is not being taken, and that is the design trade.** `docs/CODING_RULES.md` defines a position
 as an offset into a vector which "measures, so it is never negative, never `NIL`, and free to
-exceed 2^31", and a measure is the same kind of quantity. Nothing in `QuotientGraph` violates that
+exceed 2^31", and a measure is the same kind of quantity. Nothing in `QuotientGraphFlat` violates that
 rule; the finding CONFLICTS with it. Keeping `std::size_t` for sizes and positions is a decision
 about what the code MEANS, not an oversight, and the price of it is now known rather than
 suspected. The subsection after next follows the question to where it actually leads, which is not
@@ -597,7 +597,7 @@ At 400x400, `1.619 / 1.255 = 1.29x` remains after width. In descending order of 
    our unconditional tag sweep, which is only possible because our mark array has no sentinel.
    Fusing would trade a load in the hot loop for a selective sweep and a derived ceiling, which is
    genmmd's exact bargain.
-3. **Setup.** `QuotientGraph`'s constructor against `mmdint`, 194 ms against 57 in the
+3. **Setup.** `QuotientGraphFlat`'s constructor against `mmdint`, 194 ms against 57 in the
    Instruments trace of 2026-08-07, the worst ratio at 3.4x though only four percent of the
    run. This has NO independent fix: it initializes 61 bytes per vertex against genmmd's 28,
    and narrowing the four measures makes it 15 to 20 percent faster on its own, so it is the
@@ -608,7 +608,7 @@ At 400x400, `1.619 / 1.255 = 1.29x` remains after width. In descending order of 
 
 ### One thing that was fixed rather than documented
 
-`QuotientGraph::orderAscending`, written on 2026-08-07 for MMD3's numbering, cost 244 ms of a
+`QuotientGraphFlat::orderAscending`, written on 2026-08-07 for MMD3's numbering, cost 244 ms of a
 4.94 s profile where genmmd's `mmdint` and `mmdnum` together cost 116 ms, while doing strictly
 less work. It allocated four arrays of size `n` and made six passes. Rewritten to one scratch array
 and two passes, with the root's cursor and the member's root marker sharing that array by sign, it
@@ -765,7 +765,7 @@ profiling the share taken by `touchedCliques` and the clearing pass.
 
 It cannot explain any fill gap. Encoding does not change which pivot is chosen.
 
-**2. Our own mark and tag have no overflow guard, and both vendored routines do.** `QuotientGraph`
+**2. Our own mark and tag have no overflow guard, and both vendored routines do.** `QuotientGraphFlat`
 holds `mMark` and `mTag`, and the drivers `Mmd2`, `Amd1`, `Amd1B`, `Amd2` and `Amd2B` hold their
 own, all unguarded. Measured on 2D and 3D grids, the stamp advances about 15n over a run, so an
 `int32` wrap needs n near 140 million and nothing is at risk at any size we run. The reason it is

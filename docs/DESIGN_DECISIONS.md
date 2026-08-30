@@ -67,7 +67,7 @@ combination to reject. The answer was not hard. Asking the right question was.
 
 ## 2026-08-28: `order` is `orderAsMerged`, and the branch mapping is where the oracle is cut
 
-`QuotientGraph::order` and `QuotientGraphCompacted::order` are `orderAsMerged`. The pair is now
+`QuotientGraphFlat::order` and `QuotientGraphCompacted::order` are `orderAsMerged`. The pair is now
 `orderAscending` and `orderAsMerged`, named for the MEMBER ORDER each emits inside a supervariable
 rather than for the driver that calls it.
 
@@ -110,7 +110,7 @@ and because `DirectSolver`'s constructor never touches its `mSize`.
 The chained class gained most: `mSegment.size() - 1` appeared five times and the `+ 1` sentinel is
 now stated once, at `mSegment(mSize + 1)`.
 
-**AND THE ARENA GUARD GOT SIMPLER FOR A REASON THAT IS PROVABLE.** `QuotientGraph`'s clique store
+**AND THE ARENA GUARD GOT SIMPLER FOR A REASON THAT IS PROVABLE.** `QuotientGraphFlat`'s clique store
 must not reallocate under a reach walk, since the walk reads absorbed cliques through pointers into
 the same arena it is appending to. The guard was
 
@@ -814,8 +814,8 @@ layer with its own twin.
 
 ## 2026-08-19: the quotient graphs are header-only, which removes ONE asymmetry and not all of them
 
-**`QuotientGraph` and `QuotientGraphCompacted` now keep their bodies in their headers**, and
-`QuotientGraphChained` will be written that way when `Mmd3B` is promoted. `src/QuotientGraph.cpp`
+**`QuotientGraphFlat` and `QuotientGraphCompacted` now keep their bodies in their headers**, and
+`QuotientGraphChained` will be written that way when `Mmd3B` is promoted. `src/QuotientGraphFlat.cpp`
 and `src/QuotientGraphCompacted.cpp` are deleted.
 
 **THE REASON IS THE ENTRY ABOVE.** A driver calling out of its own translation unit reloads the
@@ -856,7 +856,7 @@ anonymous namespace, since a file included by several units gives each its own c
 member calling into a per-unit copy is an ODR violation; the compacted file's became a named
 `detail` namespace. And `throw` still stays out, per the earlier in-header-throw finding.
 
-**AND ONE THING THE BUILD FOUND:** `experiments/ordering/Makefile` named `src/QuotientGraph.cpp` in
+**AND ONE THING THE BUILD FOUND:** `experiments/ordering/Makefile` named `src/QuotientGraphFlat.cpp` in
 three rules, as both prerequisite and compile input. The header takes its place, and
 `$(filter-out %.h,$^)` already keeps it off the command line. The generators in `tmp/` read that
 source too, and are obsolete now that the class is shared.
@@ -1052,7 +1052,7 @@ mistakes is the same: a site that changes a clique's length WITHOUT going throug
 writer of the underlying state goes through it. Neither of these did, and neither was visible by
 reading, because both sites look like storage bookkeeping rather than like liveness. The way to
 make such a claim checkable is a RECOMPUTATION from independent state, which is what
-`QuotientGraph::cliqueCountBalances` does and what `Amd3B` still lacks.
+`QuotientGraphFlat::cliqueCountBalances` does and what `Amd3B` still lacks.
 
 **And on what found them: not a test.** The digest, the vendored acceptance checks, `test_order`
 and the sanitizers were all green throughout. What caught them was a cross-driver comparison in a
@@ -1127,7 +1127,7 @@ QuotientGraphChained     C unified, chaining     private copy in Mmd3B.cpp
 ```
 
 **All four are meant to ship**, as NumFactor's two do, so eventually none is unqualified and
-today's `QuotientGraph` becomes `QuotientGraphFlat`. That rename waits until the chunked one is
+today's `QuotientGraphFlat` becomes `QuotientGraphFlat`. That rename waits until the chunked one is
 actually being added, since it touches six drivers and a great deal of prose and is worth doing
 once.
 
@@ -1200,7 +1200,7 @@ matrix. Chaining with headroom is the cell explicitly not worth building.
 
 ## 2026-08-17: a one dimensional size may go signed, but only to buy an encoding
 
-The 2026-08-11 entry narrowed four `QuotientGraph` arrays to `std::uint32_t` and named `mWeight`
+The 2026-08-11 entry narrowed four `QuotientGraphFlat` arrays to `std::uint32_t` and named `mWeight`
 among them, on the reasoning that a size has nothing to stand in for and so spends no sign bit.
 `Amd3B` then found that `mWeight` does have something to stand in for, and the rule bends to admit
 it rather than being weakened.
@@ -1313,7 +1313,7 @@ That exclusion is still sound and is recorded in `benchmarks/ordering/order_timi
 
 `Mmd3C` is transitional and about to be replaced, at which point every address changes and this
 particular point disappears. **The open question is whether the shared class has such points**, since
-`QuotientGraph` allocates the same shaped set of size-n vectors and `Mmd3` and `Amd3` would collide
+`QuotientGraphFlat` allocates the same shaped set of size-n vectors and `Mmd3` and `Amd3` would collide
 by the same mechanism at whatever n happens to align. The ladder found this one only because 200 is
 a rung; a spike at a size nobody runs would be invisible, and would show up as an ordering that is
 mysteriously slow on one customer's matrix.
@@ -1400,7 +1400,7 @@ list and the clique blocks.
 ### The reason it matters right now, and not only for coverage
 
 **The shared-class port has to work under every layout.** Three of the five folds from the entry
-below land in `QuotientGraph`: the weight sign as the membership mark, `eliminated()` off a zero
+below land in `QuotientGraphFlat`: the weight sign as the membership mark, `eliminated()` off a zero
 weight, and mass elimination merging before it compacts. That class serves every cell of the matrix.
 Four cells exercise all three layouts against both algorithms; two exercise each layout once and
 each algorithm once, which is the thinnest coverage that can still be called coverage.
@@ -1568,7 +1568,7 @@ Names may change later. What matters is the status.
 
 ### The cost of keeping them, stated plainly because it is real
 
-Each carries a **private copy of `QuotientGraph`**, so every shared fold has to be written three
+Each carries a **private copy of `QuotientGraphFlat`**, so every shared fold has to be written three
 times. The five folds of 2026-08-16 would have been fifteen. That is precisely what the stop-condition
 language existed to prevent, and it is being accepted on purpose.
 
@@ -2022,7 +2022,7 @@ grid**, and it moved those five rows to 2.0 to 2.3x. Applied to all three layers
 prepass, `Mmd2`, `Mmd3` and `Mmd3B`, measuring 8.8, 8.6 and 7.8 percent.
 
 **What remains of the constant is CONSTRUCTION**, and this is the part worth carrying forward. With
-no elimination work at all, an `Mmd3` ordering is roughly a third `QuotientGraph` construction and a
+no elimination work at all, an `Mmd3` ordering is roughly a third `QuotientGraphFlat` construction and a
 sixth `orderAscending`. Construction allocates and initializes about ten size-n arrays where genmmd
 allocates five plus its 1-based copies. **That is the array-count finding of the same morning,
 moved from the loops into the constructor**, and the reason nobody saw it is that a grid amortizes
@@ -2420,7 +2420,7 @@ the dependency; not overflowing is the side benefit.**
 ### What this makes drift rather than a decision
 
 n itself is a one dimensional size, so by the rule it is a `std::uint32_t`. Today
-`QuotientGraph::size()`, `SparseMatrix::mSize` and every driver's `colPtr.size() - 1` are
+`QuotientGraphFlat::size()`, `SparseMatrix::mSize` and every driver's `colPtr.size() - 1` are
 `std::size_t`, and the three casts added at `numLive`, `numLeft` and `batchLimit` exist only
 because of that. The symbolic and numeric phases hold their one dimensional sizes wide throughout.
 **None of that is a second rule; it is code the rule has not reached yet**, to be closed
@@ -2442,7 +2442,7 @@ anything carrying `NIL`. This reverses half of the 2026-08-08 entry, which kept 
 dimensional types as a considered trade and named the count sweep as the cheap half; this is that
 half, taken in the ordering alone, which is self contained and holds the shared class.
 
-**What moved, in seven steps with the permutation checked after each.** The four `QuotientGraph`
+**What moved, in seven steps with the permutation checked after each.** The four `QuotientGraphFlat`
 arrays (`mAdjacencySize`, `mIncidenceSize`, `mCliqueSize`, `mWeight`, plus the `mCliqueWeight`
 scalar and the accessors over them), `Buckets`'s signatures, `degrees` in all eight drivers with
 the scalars that travel with it, and the four scan arrays (`outside`, `cliqueDegree`,
@@ -2562,7 +2562,7 @@ this change also deleted six casts from the hottest loop in the ordering and nar
 variables, which the earlier one did not.
 
 **What was expected and did land regardless of the timing:** nine casts gone from
-`src/QuotientGraph.cpp`'s prune and read walks, and one model in place of a per array judgment.
+`src/QuotientGraphFlat.cpp`'s prune and read walks, and one model in place of a per array judgment.
 
 ---
 
@@ -2637,7 +2637,7 @@ exist yet at prune time. Every square grid passed and every cubic and random gra
 absorption fires far more there. The 2D-only checks this project ran until 2026-08-09 would have
 shipped it.
 
-**And the shared class gained one thing, deliberately narrow.** `QuotientGraph` has a `TaggedScan`
+**And the shared class gained one thing, deliberately narrow.** `QuotientGraphFlat` has a `TaggedScan`
 overload of `eliminate` beside the existing `ApproximateScan` one. The obvious move was to reuse
 the existing overload, but it carries the pre-iteration-15 encoding, a value array plus a separate
 mark, where `Amd3` carries `Amd.cpp`'s tagged W. Reusing it would have bundled a revert of that
@@ -2926,7 +2926,7 @@ turns at two or three rather than at a dozen.
 ## 2026-08-09: the ordering read freed memory for a week, and the acceptance test is what found it
 
 Two defects and one bug, all found by widening `make amdorder` from one shape to four. The bug is
-the entry: it is the shared `QuotientGraph` rather than any driver, and it had been live since
+the entry: it is the shared `QuotientGraphFlat` rather than any driver, and it had been live since
 2026-08-08.
 
 **`reachableSet` held a pointer into the buffer it was appending to.** `beginElimination` writes
@@ -3167,7 +3167,7 @@ those want different fixes: the change above is the right one for chains, and a 
 redesign would be the one for layout. An attempt to get L1D counters out of Instruments established
 only that the guided modes are not reachable from `xctrace`; see benchmarks/README.md.
 
-**The trade this names, with the correction above applied.** The shared `QuotientGraph`, the
+**The trade this names, with the correction above applied.** The shared `QuotientGraphFlat`, the
 six-driver ladder and the prototype-against-production check cost a constant factor on the amd
 branch. What this entry can say is that the factor exists, that it is not algorithmic, and that two
 plausible accounts of it have now been measured and rejected. What it CANNOT say is what the factor
@@ -3342,7 +3342,7 @@ mid-factorization.
 too.** Only the BOUND is one-dimensional; the TYPE is wide. That is convenience rather than
 necessity, and it has a price and a benefit, both now measured.
 
-**The price is width in the hot loops.** In `QuotientGraph` six arrays are `std::size_t` where the
+**The price is width in the hot loops.** In `QuotientGraphFlat` six arrays are `std::size_t` where the
 vendored genmmd's equivalents are `int`. Measured two ways in `experiments/ordering/REPORT.md`:
 widening genmmd to `int64_t` costs it 17 to 26 percent doing byte-for-byte identical work, and
 narrowing our four one-dimensional counts recovers most of it, 1.159x of genmmd against 1.373x at
@@ -3549,7 +3549,7 @@ smaller sizes, with identical fill and identical permutations. The visits were n
 **And the second hypothesis failed the same way.** A comparative profile, the first in this
 project, put AMD1's gap at 46 percent data stalls, 27 percent work and 17 percent branch
 mispredicts. Work being third explains AMD1B. Data stalls being first pointed at footprint, so the
-six `std::size_t` arrays in `QuotientGraph` were narrowed to `int32_t` as an experiment: cachegrind
+six `std::size_t` arrays in `QuotientGraphFlat` were narrowed to `int32_t` as an experiment: cachegrind
 reported D1 misses down 17 percent with instructions flat, and alpamayo reported nothing, with both
 vendored controls unmoved. Reverted. **`std::size_t` for a position stands, and now has a
 measurement behind it rather than only a rule.**
@@ -3588,7 +3588,7 @@ more than the duplication costs. Revisit when someone needs those files to be si
 ## 2026-08-01, Fine-grained allocation in the ordering is closed, and all four sites had one cause
 
 Two last sites, both small: AMD2's hash buckets were a vector per bucket over n + 1, constructed and
-destroyed per ordering, and `QuotientGraph::eliminate` returned its `merged` list by value. The
+destroyed per ordering, and `QuotientGraphFlat::eliminate` returned its `merged` list by value. The
 buckets are now `hashHead` and `hashNext`, the idiom `Buckets` already carries and `Amd.cpp` uses
 for the same job, and `merged` is a member scratch returned by const reference. Allocations per
 ordering at 140x140 went from 31915, 29499, 32256 and 46351 to 70, 105, 62 and 56. Measured on
@@ -3644,7 +3644,7 @@ Also: `g++` at `-O3` performs this hoist itself, so a Linux measurement reports 
 does not. **A negative result on one toolchain is not a result about another**, which the gprof
 entry in `benchmarks/README.md` already said about profilers and is now said about optimizers.
 
-**The boolean flags off `std::vector<bool>`.** Three arrays, `QuotientGraph::mEliminated`,
+**The boolean flags off `std::vector<bool>`.** Three arrays, `QuotientGraphFlat::mEliminated`,
 `Buckets::mFiled` and `Mmd2`'s `outmatched`, moved to `std::vector<std::uint8_t>`. Measured on
 alpamayo at 140x140, the four branches gained 8 to 12 percent against controls that drifted 3, so
 call it 5 to 9.
@@ -3817,7 +3817,7 @@ before it merged only into the pivot, which is eliminated in the same breath, so
 vertex could linger in a live clique. A hash merge folds one live vertex into another and leaves it
 where it lies at weight zero, since purging it from every clique that names it would cost a pass
 over the structure per merge and buy nothing, the merge test having established that it is
-redundant wherever it appears. `QuotientGraph::merge` is that operation, and the reachable set now
+redundant wherever it appears. `QuotientGraphFlat::merge` is that operation, and the reachable set now
 has to skip dead vertices, which is what `amd2Neighbors` does and `amd1Neighbors` does not.
 
 **And that filter had to be made conditional, on measurement.** Adding it unconditionally cost MMD1
@@ -3849,7 +3849,7 @@ the incidence list and the supervariable weight) and a refile on the buckets, an
 **One core, two drivers.** `Cliques`, `Buckets`, `Neighbors`, `Eliminate` and `Refile` are
 byte-identical between `mmd1.cpp` and `amd1.cpp`, the duplication being deliberate in an experiment
 where each layer must read standalone. That reason does not survive the move, so production has one
-`QuotientGraph` unit holding the adjacency, incidence and clique lists, the degree buckets, the
+`QuotientGraphFlat` unit holding the adjacency, incidence and clique lists, the degree buckets, the
 reachable-set query, the eliminator and the CSC-to-adjacency builder, with the drivers holding only
 what the two algorithms actually disagree about: a batch loop with eviction against one pivot per
 step with the bound.

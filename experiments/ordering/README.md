@@ -214,7 +214,7 @@ The target links `../../src` directly rather than copying it, which is the oppos
 vendored target does and deliberately so: a copy is right for code that is not ours to edit and
 wrong for code being actively changed at both ends, since noticing when the two come apart is the
 whole point. The harness feeds each graph as a full-symmetric CSC with the diagonal present, which
-is what a `SparseMatrix` holds, so the production path under check includes `QuotientGraph`
+is what a `SparseMatrix` holds, so the production path under check includes `QuotientGraphFlat`
 dropping the diagonal rather than only the driver.
 
 The vendored routines have their own target, since they are not layers and have no Python twin:
@@ -1001,9 +1001,9 @@ can now be profiled against an implementation known to compute the identical ans
 ### One production consequence worth knowing
 
 Three of the four reversed walks are in `Mmd3.cpp`. The fourth, the `I[u]` expansion, lives in
-`QuotientGraph::reachableSet`, which all six drivers share, so it is a flag, `setReverseIncidence`,
+`QuotientGraphFlat::reachableSet`, which all six drivers share, so it is a flag, `setReverseIncidence`,
 off by default and turned on only by `Mmd3`, with the branch hoisted and per clique rather than per
-member. Entry 6 needed the same treatment for `QuotientGraph::order`, and became a second named
+member. Entry 6 needed the same treatment for `QuotientGraphFlat::order`, and became a second named
 method, `orderAscending`, a counting layout with one ascending pass and no sort. A mode flag and a
 parallel method on a shared class are not free to the reader; the alternatives were duplicating
 the walks or changing the permutation for every driver.
@@ -1231,7 +1231,7 @@ than a shift of both. Both rotations are load-bearing here, because entry 2 made
 walk the cliques and then the adjacency, so both feed `C[pivot]`'s content order, and that order
 decides entry 1's hash survivor.
 
-Worth noting that production is a better fit for this than the prototype: `QuotientGraph` already
+Worth noting that production is a better fit for this than the prototype: `QuotientGraphFlat` already
 holds both lists in one run behind `mSourcePtr`, which is the layout that motivated the trick.
 
 ### Entry 4, the defect, and what it was costing
@@ -1312,7 +1312,7 @@ and on grids, and in `PORTED` since production `Amd3` was extracted from it on 2
 production is held to it entry for entry as well.
 
 **The extraction was a port rather than a copy**, three of the six entries landing in code the six
-drivers share. `QuotientGraph` gained `setVendoredListOrder` for entries 2 and 5, grouped because
+drivers share. `QuotientGraphFlat` gained `setVendoredListOrder` for entries 2 and 5, grouped because
 they are one fact and are only ever wanted together, and `setLateMassElimination` with
 `massEliminate` for entry 3. Both flags are off for every other driver, and were verified inert
 before `Amd3` existed at all: every suite passed and every fill figure across all nine orderings
@@ -2196,7 +2196,7 @@ and no clique but the new one, `|A[u]| == 0 && I[u] == {pivot}`.
 
 **PAIRWISE MERGING merges two vertices that are indistinguishable FROM EACH OTHER**, neither of
 them the pivot, and the survivor stays LIVE and carries the other's weight onward. That is the
-difference that matters downstream: `QuotientGraph::merge` therefore does not call `killClique`,
+difference that matters downstream: `QuotientGraphFlat::merge` therefore does not call `killClique`,
 the absorbed vertex never having formed a clique, and the absorbed vertex is left where it lies at
 weight zero rather than purged from every clique that names it.
 
@@ -2732,7 +2732,7 @@ share a type with the values it stands in for. A link is a second reason for the
 the two do not collide: `NIL` never appears in an arena and a link never appears in a field that
 could hold `NIL`.
 
-**It is shared-class work, so it lands on both branches.** `QuotientGraph` serves `Mmd1` through
+**It is shared-class work, so it lands on both branches.** `QuotientGraphFlat` serves `Mmd1` through
 `Mmd3` and `Amd1` through `Amd3`, and the placement result was measured on mmd only. The amd
 branch's own gap is 1.60 to 2.03 in 2D, larger than mmd's, and nothing has tested whether the same
 cause is behind it.
@@ -7725,7 +7725,7 @@ and nine that were really zero and two, from prose naming a method.
 ### The surface each class actually has, 2026-08-24
 
 The table above is one class against two branches. This one is one branch's machinery against two
-CLASSES: every member `QuotientGraph` and `QuotientGraphCompacted` declare, side by side. It exists
+CLASSES: every member `QuotientGraphFlat` and `QuotientGraphCompacted` declare, side by side. It exists
 to be re-read after a change, since the whole claim of the pair is that they differ in STORAGE and
 nothing else, and that claim is checkable only by looking.
 
@@ -7876,7 +7876,7 @@ are mmd drivers, and it is where the branch's factor of 21 on the benchmark set 
 better data structure, the same reach formed a different number of times.
 
 `reachableSet` returned the neighborhood of a live vertex BY VALUE, which is what an external user
-of `QuotientGraph` would reach for, and that was the one argument for keeping it. It lost to the
+of `QuotientGraphFlat` would reach for, and that was the one argument for keeping it. It lost to the
 plainer one: an uncalled member is read by everyone who opens the file and used by nobody. If a
 caller ever wants the query, it is five lines over `formReachableSetMmd` and the restore the prune
 now does anyway.
@@ -9171,7 +9171,7 @@ itself.
 ## `TaggedScan`, and whether `work` should become a member, 2026-08-28
 
 `TaggedScan` is a PARAMETER BUNDLE and nothing more: six fields, no methods, passed by reference to
-the three `...Amd` entry points. `QuotientGraphCompacted` includes `QuotientGraph.h` specifically
+the three `...Amd` entry points. `QuotientGraphCompacted` includes `QuotientGraphFlat.h` specifically
 for `Buckets` and `TaggedScan`, which it uses verbatim.
 
 **THE mmd AND amd FORK IS VISIBLE IN ONE FIELD**, `Buckets* buckets` being a POINTER and nullable.

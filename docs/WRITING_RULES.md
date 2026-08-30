@@ -94,7 +94,7 @@ commits to neither.
 both call it an *element*, and every ordering paper in that lineage follows them, so the word is
 in every source we read and it leaks into our own writing constantly. It is still not our word.
 Clique says what the object IS, a set of vertices now mutually adjacent, and it is the word the
-rest of this tree already uses: `QuotientGraph::clique`, `cliqueSize`, `cliqueDegree`, the clique
+rest of this tree already uses: `QuotientGraphFlat::clique`, `cliqueSize`, `cliqueDegree`, the clique
 arena, and the counter "clique-member visits".
 
 The one place *element* is correct is inside a quotation of code that uses it. When the prose is

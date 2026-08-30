@@ -115,7 +115,7 @@ each names a mechanism and says what it was for; read them as history. What rema
 `docs/NEXT.md`.
 
 `OrderEngine` offers two lineages. MMD and AMD are vendored; MMD1, AMD1 and AMD2 were ours, built
-from the matching prototypes over the shared `QuotientGraph`. The intent was to keep both lineages
+from the matching prototypes over the shared `QuotientGraphFlat`. The intent was to keep both lineages
 while ours developed, and to deprecate the vendored pair only once they could replace it. The
 vendored routines are the default for neither lineage now: `AmdCompacted` is.
 
@@ -165,7 +165,7 @@ structural, which four negative results and a cycle-level profile establish betw
   component rather than the first. **The item is closed as a negative result**, and the 86 percent
   figure above was a misreading of what useful-cycle percentage measures.
 
-  A second hypothesis followed from the same profile and also failed: narrowing `QuotientGraph`'s
+  A second hypothesis followed from the same profile and also failed: narrowing `QuotientGraphFlat`'s
   six `std::size_t` arrays halved their footprint and cut simulated D1 misses 17 percent, and
   measured nothing on alpamayo. Reverted. **AMD1's remaining gap, nearer 1.6x than 1.46x once the
   vendored routine's `AMD_aat` and `AMD_postorder` are excluded, is unexplained.** What is left is
@@ -192,7 +192,7 @@ retired without having been written.
 **Nothing measured remains outstanding.** The driver restructuring, which was the last item, was
 built as `AMD1B` and is not faster; see the bullet above. **The two allocation sites it exposed are
 done, 2026-08-01**: AMD2's `hashGroup` became `hashHead` and
-`hashNext`, and `QuotientGraph::eliminate` returns its `merged` list from a member scratch.
+`hashNext`, and `QuotientGraphFlat::eliminate` returns its `merged` list from a member scratch.
 Allocations per ordering at 140x140 fell from about 30000 on every branch to under 110, so
 fine-grained allocation is closed here.
 
@@ -1259,7 +1259,7 @@ guard, production does not, and the ceiling is a placeholder rather than a deriv
 it. IT HAS NOW COST TWO DEFECTS, 2026-08-09.**
 
 **And the gap widened again the same day, deliberately.** Production's four amd drivers now take
-the weighted clique size off `QuotientGraph::cliqueWeight()` and fold the minimum degree into the
+the weighted clique size off `QuotientGraphFlat::cliqueWeight()` and fold the minimum degree into the
 refile loop; the `amd2`, `amd3` and `amd4` prototypes still compute both in passes of their own.
 Behaviour is identical and `make test` says so, so this is drift rather than a defect, and it is
 recorded because it is the third widening and because both defects above began exactly here. The
@@ -1328,7 +1328,7 @@ DESIGN_DECISIONS explains why, and that explanation is now partly wrong: it says
 vendored `orderMmdVendored` and `orderAmdVendored` narrow `nnz` to `int` at `OrderEngine.cpp`
 lines 88 and 155, for `amd_order` and `mmd_order`, which are the `int`-based builds. **Ours
 impose nothing**: they take
-`colPtr` and `rowIdx` directly, `QuotientGraph` holds every position as `std::size_t`, and its only
+`colPtr` and `rowIdx` directly, `QuotientGraphFlat` holds every position as `std::size_t`, and its only
 `int32_t` values are vertex indices, capped by `n` rather than by nnz.
 
 So a matrix with more than 2^31 nonzeros is representable, orderable by six of the nine methods and
@@ -1343,7 +1343,7 @@ way, and that is the only part with any urgency.
 the answer to the whole ordering-speed question rather than the marginal item below.**
 
 The version this item proposed, packing `mSourcePtr`, `mAdjacencySize` and `mIncidenceSize` into
-one struct, is built. It is `QuotientGraph::VertexRun`, and the prediction here was exact: 16
+one struct, is built. It is `QuotientGraphFlat::VertexRun`, and the prediction here was exact: 16
 bytes, four to a cache line, and it reads as a named descriptor rather than three parallel arrays
 kept in step by hand. Measured before the change on a 100x100 grid, its three lines carried 20446
 of 129143 D1 read misses, 15.8 percent, against genmmd's 4070 for the same three facts; after it,
@@ -1508,7 +1508,7 @@ would be `n^2`, which is exactly the cost the stamp scheme exists to avoid.
   because `W[e]` can hold `wflg + size`, and ours holds only tags.
 
   The one open detail is where the guard goes: at every `++tag` site, which is seven in
-  `QuotientGraph` plus the drivers' own, or once inside a small `nextTag()`. Presumably the
+  `QuotientGraphFlat` plus the drivers' own, or once inside a small `nextTag()`. Presumably the
   second, and it is a decision for when the code is written rather than now.
 - **Widen to `std::size_t`**, which `mMark` must follow, since it stores tag values. No branch, no
   sweep, no sentinel rule. But correct by an argument about achievable run lengths rather than by
@@ -1537,7 +1537,7 @@ so needing either a sweep or a width. The ordering cannot use the first form: a 
 set is rebuilt at every elimination that touches it, so the vertex names the vertex and not the
 occasion, and md2 has three sets live at once besides.
 
-The counters are five, not one: `QuotientGraph`'s `mMark` and `mTag`, plus the drivers' own in
+The counters are five, not one: `QuotientGraphFlat`'s `mMark` and `mTag`, plus the drivers' own in
 `Mmd2`, `Amd1` and `Amd2`. `Amd2` sizes its mark at `2 * size`, since it stamps cliques at
 `c + size`; widening changes the element type and not the length.
 
@@ -1709,7 +1709,7 @@ three things, and only one of them was an ordering defect.
   time for exactly that reason. Half a mechanism, from ledger entry 3, which moved mass elimination
   out of the eliminator and did not carry the write the move makes necessary. `Amd1` and `Amd2`
   cannot have it. No published fill figure moves.
-- **A use-after-free in the shared `QuotientGraph`, which every ordering had.** `reachableSet`
+- **A use-after-free in the shared `QuotientGraphFlat`, which every ordering had.** `reachableSet`
   reads clique members through a pointer into the arena it is appending to, so a growth past the
   reserve leaves it dangling. Benign until an allocator recycles the block, which is why it
   surfaced as two machines disagreeing about integer code rather than as a failure.

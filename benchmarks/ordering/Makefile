@@ -65,7 +65,7 @@ endif
 OBLIO_SRCS  = $(wildcard ../../src/*.cpp)
 
 # The headers are prerequisites too, and leaving them out was a real defect: a change to
-# include/oblio/QuotientGraph.h alone left the run targets reporting the OLD binary, silently,
+# include/oblio/QuotientGraphFlat.h alone left the run targets reporting the OLD binary, silently,
 # because
 # every source was older than the target. The library's own Makefile has always carried LIB_HDRS
 # for this reason; the benchmarks link ../../src directly and had never been given the same.

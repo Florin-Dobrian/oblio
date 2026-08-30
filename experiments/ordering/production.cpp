@@ -37,7 +37,7 @@
 #include <vector>
 
 // The prototypes' own shape for a graph, from graphs.h. The production side has no type for it:
-// QuotientGraph is built from a matrix pattern directly, its adjacency being one flat array
+// QuotientGraphFlat is built from a matrix pattern directly, its adjacency being one flat array
 // rather than a list per vertex, so the conversion below is the whole of the difference.
 using OrderingExperiment::Graph;
 using OrderingExperiment::gridGraph;

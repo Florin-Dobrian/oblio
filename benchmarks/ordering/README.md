@@ -40,12 +40,12 @@ that work.**
 > ```
 > c++ -std=c++17 -O3 -DNDEBUG -Wall -Wextra -I../../include -DOBLIO_BLAS_UNDERSCORE \
 >   -DOBLIO_VENDORED_ORDERINGS -DOBLIO_AMD_RAW -DOBLIO_AMD_TIMED order_timing.cpp \
->   $(ls ../../src/*.cpp | grep -vE '(Mmd3C|QuotientGraphCompacted|Mmd3|QuotientGraph)\.cpp') \
+>   $(ls ../../src/*.cpp | grep -vE '(Mmd3C|QuotientGraphCompacted|Mmd3|QuotientGraphFlat)\.cpp') \
 >   ../../tmp/unity_mmd3.cpp ../../tmp/unity_mmd3c.cpp amd_raw.cpp amd_timed.cpp Amd.o Mmd.o \
 >   -framework Accelerate -o order_timing_unity2
 > ```
 >
-> `Mmd1` and `Mmd2` read the out-of-line `QuotientGraph` in that binary while `Mmd3` reads its own
+> `Mmd1` and `Mmd2` read the out-of-line `QuotientGraphFlat` in that binary while `Mmd3` reads its own
 > inlined copy, so their columns are not controls in such a run.
 
 What each ordering method costs: wall time to produce the permutation, and nnz(L) under it. Six
@@ -97,7 +97,7 @@ make digest            # did any driver's output move?
 cubes from 2 to 20, hashes each permutation and writes 657 lines keyed by driver and grid into
 `.digest-baseline`. `digest` runs the same drivers over the same grids and compares. Half a second
 either way. It reports WHICH driver moved and at which size, which is what makes it useful for a
-change to `QuotientGraph`, where nine drivers read the code being edited.
+change to `QuotientGraphFlat`, where nine drivers read the code being edited.
 
 **`MmdCompacted` joined on 2026-08-17** and is the reason the count moved from eight. It is
 transitional
@@ -361,7 +361,7 @@ restructuring, and it is unchanged by this.
 
 ## Hoisting the loop bounds, 2026-08-01
 
-The Time Profiler trace taken after the change above put `QuotientGraph::incidenceSize(int) const`
+The Time Profiler trace taken after the change above put `QuotientGraphFlat::incidenceSize(int) const`
 fourth in the run, 309 ms weight and 300 ms self, which is absurd for an inlined accessor that
 returns one `std::size_t`. The cause was the call sites, written as
 
@@ -392,7 +392,7 @@ one toolchain says nothing about the other, which is the same lesson as the gpro
 ## The boolean flags off `std::vector<bool>`, 2026-08-01
 
 `std::vector<bool>` is the standard's bit-packed specialization: one bit per element, a proxy
-rather than a reference, and no `data()`. `QuotientGraph::mEliminated`, `Buckets::mFiled` and
+rather than a reference, and no `data()`. `QuotientGraphFlat::mEliminated`, `Buckets::mFiled` and
 `Mmd2`'s `outmatched` were all built on it, inherited from the prototypes, where it is the right
 choice. All three are now `std::vector<std::uint8_t>`, a plain byte each.
 
@@ -417,7 +417,7 @@ Profiler runs of MMD2 agreeing with each other:
 
 ```
                       before    after    after
-QuotientGraph (ctor)   710 ms   188 ms   184 ms
+QuotientGraphFlat (ctor)   710 ms   188 ms   184 ms
 eliminated(int)        208 ms   189 ms   225 ms
 Buckets::filed(int)     94 ms    92 ms    89 ms
 total                 5.44 s    4.78 s   4.92 s
@@ -492,7 +492,7 @@ hundred times per run.
 **AMD2's hash buckets** were a `std::vector<std::vector<std::int32_t>>` over n + 1, constructed and
 destroyed once per ordering plus one allocation per bucket a step used. They are now `hashHead` over
 n + 1 and `hashNext` over n, which is the idiom `Buckets` already uses and which `Amd.cpp` uses for
-the same job. **`QuotientGraph::eliminate` returned its `merged` list by value**, one allocation per
+the same job. **`QuotientGraphFlat::eliminate` returned its `merged` list by value**, one allocation per
 elimination that merged anything; it is a member scratch returned by const reference now, the shape
 `mReached` already had.
 
@@ -558,7 +558,7 @@ element of `A[u]` twice and each element of `I[u]` three times. 557568 element v
 266892 on a 100x100 grid. It was called the driver restructuring, and it was expected to be worth a
 fifth of AMD1.
 
-**AMD1B is that change, built.** `QuotientGraph::eliminate` split into a private
+**AMD1B is that change, built.** `QuotientGraphFlat::eliminate` split into a private
 `beginElimination` and `finishElimination` with the prune loop between them, and a second public
 overload taking an `ApproximateScan` that folds the driver's first scan into the prune. `A[u]`
 falls to one visit and `I[u]` to two, which is what `amd_2` costs; the bound cannot be folded
@@ -608,7 +608,7 @@ front end          +0.75 G    10%
 is consistent.
 
 **The second hypothesis, and it failed too.** Data stalls being the largest component, the obvious
-lever was footprint: `QuotientGraph` holds six `std::size_t` arrays read in the innermost loops,
+lever was footprint: `QuotientGraphFlat` holds six `std::size_t` arrays read in the innermost loops,
 940 KB at n = 19600 where `int32_t` would need 470. Narrowed as an experiment, cachegrind reported
 **D1 misses down 17 percent and last-level misses down 13, with the instruction count flat.** On
 alpamayo it measured nothing at all, and if anything slightly slower, with both vendored controls
@@ -1008,7 +1008,7 @@ beats `AMD_2`.
 `AMD_2` accumulates the weighted clique size inside the loops that build the element, `degme +=
 nvi`, and takes its minimum degree inside the loop that restores the degree lists. All four amd
 drivers did the first in a pass of their own and three of them did the second, so both were ported
-on 2026-08-09: `QuotientGraph::cliqueWeight()` accumulates in the walk that already stamps each
+on 2026-08-09: `QuotientGraphFlat::cliqueWeight()` accumulates in the walk that already stamps each
 member, `massEliminate` decrements it as members leave, and the minimum folds into the refile loop.
 Two passes over `C[p]` per pivot removed, about 13 scattered loads per pivot on cubes and 6 in 2D.
 
@@ -1128,7 +1128,7 @@ entry, its `gc` counter against `AMD_NCMPA`, and its `AMD_LNZ` against the six f
 file already records, which it matches digit for digit.
 
 **Our half as previously recorded was wrong, by up to a factor of two on six of fifteen columns.**
-The instrumented `QuotientGraph` carries the same symbols as the original, so it is linked instead
+The instrumented `QuotientGraphFlat` carries the same symbols as the original, so it is linked instead
 of it and both drivers share it, and the probe read its counters after a control run of the
 uninstrumented driver. The passes living in the shared class were counted twice and those in the
 driver once.
@@ -1265,7 +1265,7 @@ lives on the amd branch alone and is not made of passes.
 ## The first scan folded into the prune, 2026-08-10
 
 **`AmdFlat` reaches the vendored routine on cubic grids.** The driver walked `I[u]` three times per
-pivot and `A[u]` twice; `AMD_2` walks them twice and once. `QuotientGraph::eliminate` now
+pivot and `A[u]` twice; `AMD_2` walks them twice and once. `QuotientGraphFlat::eliminate` now
 accumulates |C[c] - C[p]| and the bound's adjacency term on the walk the prune is already making,
 so scan 1 goes entirely and the bound's adjacency loop with it.
 
@@ -1649,7 +1649,7 @@ whole, and two of that routine's phases have no counterpart on our side:
 
 - **`AMD_aat`** forms the pattern of `A + A'`, because AMD takes a one-sided matrix. Ours arrives
   full-symmetric with the diagonal present, which is what a `SparseMatrix` holds and what
-  `QuotientGraph` reads directly.
+  `QuotientGraphFlat` reads directly.
 - **`AMD_postorder`** relabels the assembly tree. `ElmForestEngine` postorders the exact supernodal
   tree later with real front and update sizes, so the vendored one is redone and discarded, and
   `Amd.cpp`'s own header says that tree "is not guaranteed to be the precise supernodal elimination
@@ -1677,7 +1677,7 @@ comp    build + core, the comparable region
 
 **`build` belongs with `core` rather than with the excluded pair**, which is the one judgment in
 the split. It is the vendored routine turning a caller's pattern into its own working structure,
-and `orderAmd3` does the same thing in `QuotientGraph`'s constructor, so excluding it would flatter
+and `orderAmd3` does the same thing in `QuotientGraphFlat`'s constructor, so excluding it would flatter
 us by exactly the phase we have most recently been folding arrays out of.
 
 ### It is a second generated copy, not a second use of the first
@@ -1942,7 +1942,7 @@ entry's home never moves. That is exactly the condition under which a flat array
 apparatus the vendored pool carries, no copy on growth, no compaction, no `pfree` and no `ncmpa`,
 since all of that exists for lists that grow. It is now one array sized once from the pattern, with
 a fixed offset per vertex and a length that falls, and `buildGraph` and the graph-shaped type went
-with it: `QuotientGraph` takes A's pattern directly.
+with it: `QuotientGraphFlat` takes A's pattern directly.
 
 I[u] and C[c] stay containers, and honestly so. A vertex joins a new clique every time it is
 reached, so its incidence list grows; a clique's members are not known until its pivot is reached.

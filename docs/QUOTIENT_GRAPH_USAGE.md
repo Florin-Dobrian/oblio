@@ -1,7 +1,7 @@
 # Quotient graph usage: which driver calls what
 
 Two quotient graph classes and four drivers, and the drivers PARTITION across the classes: `MmdFlat`
-and `AmdFlat` use `QuotientGraph` and nothing else, `MmdCompacted` and `AmdCompacted` use
+and `AmdFlat` use `QuotientGraphFlat` and nothing else, `MmdCompacted` and `AmdCompacted` use
 `QuotientGraphCompacted` and nothing else. So there are two tables and neither loses anything to the
 other.
 
@@ -19,7 +19,7 @@ cannot drift apart; if one is edited by hand the others must be edited with it.
 kept as a permanent alternative rather than a candidate, so aligning it buys nothing.
 
 **A blank cell means the driver does not call that entry point.** It does not mean the class lacks
-it: every method in the flat table exists in `QuotientGraph`, and every method in the compacted
+it: every method in the flat table exists in `QuotientGraphFlat`, and every method in the compacted
 table exists in `QuotientGraphCompacted`.
 
 **THE `align` COLUMN, in all three tables.**
@@ -35,7 +35,7 @@ A number or `layout` on a row means the FLAT and COMPACTED classes differ there.
 about mmd against amd: a row where one branch calls something and the other does not is `aligned`
 as long as both classes agree about it, which is the usual case and the expected one.
 
-## The flat class: `QuotientGraph`
+## The flat class: `QuotientGraphFlat`
 
 | API | `MmdFlat` | `AmdFlat` | align | since |
 |---|:---:|:---:|:---:|:---:|

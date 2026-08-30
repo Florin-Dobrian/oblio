@@ -920,7 +920,7 @@ time by up to O(n^2), unless they are removed prior to ordering". Its remedy is 
 `max(16, 10 * sqrt(n))` by default, above which a row is called dense, pulled out before ordering
 and placed last in the output.
 
-**Oblio implements no such rule**, in `Amd3.cpp` or in `QuotientGraph`, and neither does MmdFlat or
+**Oblio implements no such rule**, in `Amd3.cpp` or in `QuotientGraphFlat`, and neither does MmdFlat or
 the vendored genmmd. So all three carry a vertex adjacent to everything through every degree
 update, and the vendored AMD does not.
 
@@ -939,7 +939,7 @@ to two orders of magnitude. **`bloweybq` has exactly one column of degree 10000 
 degree 5**, so a single vertex accounts for a factor of 300.
 
 **Fill is unaffected**, 39996 against 39997 across all four on `bloweybq`, so this is time and not
-quality. A dense-row threshold in `QuotientGraph` would fix all six ordering drivers at once and is
+quality. A dense-row threshold in `QuotientGraphFlat` would fix all six ordering drivers at once and is
 its own piece of work.
 
 ### The other is minimum degree's own weakness, and it is not ours
@@ -1101,7 +1101,7 @@ successor before unfiling and needs no list. That was worth 8.6 percent of a pur
 and 0.2 percent of a grid, and it moved those five rows from 2.5 to 2.8x down to 2.0 to 2.3x.
 
 **What remains of that constant is CONSTRUCTION**, and it is measured: with no elimination work at
-all, an `Mmd3` ordering is roughly a third `QuotientGraph` construction and a sixth
+all, an `Mmd3` ordering is roughly a third `QuotientGraphFlat` construction and a sixth
 `orderAscending`. Construction allocates and initializes about ten size-n arrays where genmmd
 allocates five plus its 1-based copies, which is the array-count finding of that morning moved into
 the constructor, invisible on a grid because real work amortizes it. `docs/NEXT.md` item 8 carries
@@ -1128,7 +1128,7 @@ to experiment on.
   is a library change rather than a benchmark one, and it is the first thing that would improve
   this table.
 - **A dense-row threshold**, which is the single largest ordering-time item and the one with a
-  documented remedy. It belongs in `QuotientGraph` so that all six ordering drivers gain it at
+  documented remedy. It belongs in `QuotientGraphFlat` so that all six ordering drivers gain it at
   once. See "Why some matrices order slowly" above.
 - **Why AmdFlat and the vendored AMD disagree on fill** on a minority of real matrices, where the 38
   acceptance cases in `experiments/ordering` show exact agreement. Ours fills less where they

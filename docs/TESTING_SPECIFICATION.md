@@ -119,7 +119,7 @@ pair read as two unlike things.
 rather than thorough for its own sake. Widening a square grid exercises scale and never mechanism,
 and the 2D-only version of the amd check was green while production `Amd3` carried a stale clique
 degree that a 3D grid at 16 a side finds. It also found a use-after-free in the shared
-`QuotientGraph` that every ordering had, which no assertion in this suite could see because the
+`QuotientGraphFlat` that every ordering had, which no assertion in this suite could see because the
 program was reading its own freed memory and getting the right answer back. Both are in
 `docs/DESIGN_DECISIONS.md` (2026-08-09).
 

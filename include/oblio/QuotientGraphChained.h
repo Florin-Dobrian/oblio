@@ -452,10 +452,10 @@ inline void QuotientGraphChained::beginElimination(std::int32_t pivot, std::int3
     // negated so the walk cannot take it into its own clique.
     //
     // The adjacency loop keeps the GONE test, guarded: `number()` leaves a prepass vertex at
-    // weight one and in every neighbour's adjacency, so a positive weight does not mean live
+    // weight one and in every neighbor's adjacency, so a positive weight does not mean live
     // there. A clique cannot hold one, the prepass completing before the first elimination, so
-    // the clique loop asks nothing else.
-    ++mTagMmd;
+    // the clique loop asks nothing else. That read is against the CONSTANT GONE, never against the
+    // tag, so this walk raises nothing, as in the other two classes.
     mWeight[pivot] = -mWeight[pivot];          // never its own neighbor
 
     std::size_t   rl    = base;                        // write cursor

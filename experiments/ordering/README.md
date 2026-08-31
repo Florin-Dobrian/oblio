@@ -9311,8 +9311,8 @@ Both amd drivers, which differ in one line of it and are otherwise identical.
 #        markAmd[]           the scan's values, up to tagAmd + maxCliqueWeight
 # out    merges, and markAmd[] stamped above those values
 
-stampAmd = max(stampAmd, tagAmd + maxCliqueWeight)   # a stamp must clear every scan value
-resetAtStamp()                                       # the SECOND guard; see docs/NEXT.md
+tagAmd += maxCliqueWeight + 1                        # a stamp must clear every scan value
+resetMarkAndTag()                                    # the guard's SECOND call; see docs/NEXT.md
 
 for seed in C[p]:                                    # driven by the clique, not by the buckets
     if dead(seed): continue
@@ -9324,7 +9324,7 @@ for seed in C[p]:                                    # driven by the clique, not
     for u = head; u != NIL and chain(u) != NIL; u = chain(u):
         if dead(u): continue                         # absorbed earlier in this same loop
 
-        other = ++stamp                              # ONE stamp per outer vertex, hoisted
+        other = tagAmd++                             # ONE stamp per outer vertex, hoisted
         for x in A[u] + (I[u] - {p}): markAmd[x] = other
 
         for v = chain(u); v != NIL; v = chain(v):
@@ -9556,42 +9556,53 @@ compare. Detection over `C[pivot]` alone cannot find indistinguishable vertices 
 graph, hashed or not, and that limit comes from the schedule rather than from the filter. Widening
 it is pre-compression's job, not the hash's.
 
-## The amd mark, tag and stamp, end to end, 2026-08-30
+## The amd mark and tag, end to end, 2026-08-30
 
 Written after a tag-ceiling defect took two rounds of reasoning to find. The mechanism is one array
-and two counters, and it is easy to describe wrongly, so this is the whole of it in execution order.
-`src/AmdEngine.cpp` line numbers, valid at `94eda23`.
+and one counter, and it is easy to describe wrongly, so this is the whole of it in execution order.
+`src/AmdEngine.cpp` line numbers, valid at the merge of the two counters.
+
+**IT WAS TWO COUNTERS UNTIL 2026-08-30**, `tagAmd` and a `stampAmd` above it, and the second name is
+what made "where does the base get raised" a question that could be answered wrongly. It was, and it
+cost a false merge; see `docs/NEXT.md`. `AMD_2` has always had one, `wflg`, advanced by `lemax` and
+then incremented per candidate, and that is the shape below.
 
 ### Setup, once per ordering
 
 ```
-129   markAmd(size, 1)      every slot alive-and-unseen
-130   tagAmd = 2            the clique tag
-137   stampAmd = 2          the NEXT STAMP to hand out, on the same array at a higher scale
-138   maxCliqueWeight = 0   the largest clique weight seen so far, over ALL steps
-143   tagCeilingAmd = INT32_MAX - n
+135   markAmd(size, 1)      every slot alive-and-unseen
+136   tagAmd = 2            the clique tag, and detection's stamps above it
+137   maxCliqueWeight = 0   the largest clique weight seen so far, over ALL steps
+142   tagCeilingAmd = INT32_MAX - n
 ```
 
 ### One step
 
 ```
-199   resetAtTag()                     GUARD 1: on the tag, before anything writes
-201   scan gets markAmd by reference and tagAmd by value
+184   resetMarkAndTag()                GUARD 1: before RAISE 1, and before anything writes
+186   scan gets markAmd by reference and tagAmd by value
         the graph writes markAmd[c] = tagAmd + |C[c] - C[p]|
         the prune writes markAmd[u] = uAdjacencyWeight        for live members of C[p]
-231   maxCliqueWeight = max(maxCliqueWeight, newCliqueWeight)  monotone; never decreases
-239   markAmd[c] == tagAmd  ->  |C[c]-C[p]| == 0, absorb: markAmd[c] = 0
-317   otherCliqueBound += markAmd[c] - tagAmd                 the third bound term
-337   twoTerms = markAmd[u] + otherCliqueBound                the adjacency half is SPENT here
-338   degrees[u] = min(twoTerms, degrees[u])                  parked OUTSIDE the tag array
-376   stampAmd = max(stampAmd, tagAmd + maxCliqueWeight + 1)  RAISE 1: the FIRST stamp
-377   resetAtStamp()                   GUARD 2: on the raised stamp, before RAISE 2
-404   other = stampAmd++                                      RAISE 2, once per candidate
-409   markAmd[uSegment[a]] = other                            stamp the whole run
-423   markAmd[vSegment[a]] != other  ->  not a duplicate
-464   markAmd[u] = 1                   the slot goes back to alive-and-unseen
-485   tagAmd = stampAmd                one past the last stamp; no `+ 1` is needed
+216   maxCliqueWeight = max(maxCliqueWeight, newCliqueWeight)  monotone; never decreases
+224   markAmd[c] == tagAmd  ->  |C[c]-C[p]| == 0, absorb: markAmd[c] = 0
+302   otherCliqueBound += markAmd[c] - tagAmd                 the third bound term
+322   twoTerms = markAmd[u] + otherCliqueBound                the adjacency half is SPENT here
+323   degrees[u] = min(twoTerms, degrees[u])                  parked OUTSIDE the tag array
+363   tagAmd += maxCliqueWeight + 1                           RAISE 1: now the FIRST stamp
+364   resetMarkAndTag()                GUARD 2: before RAISE 2
+391   other = tagAmd++                                        RAISE 2, once per candidate
+396   markAmd[uSegment[a]] = other                            stamp the whole run
+410   markAmd[vSegment[a]] != other  ->  not a duplicate
+451   markAmd[u] = 1                   the slot goes back to alive-and-unseen
 ```
+
+**NOTHING CLOSES THE STEP**, which is what the merge deleted. The post-increment at 391 leaves the
+counter on the first unused value, above every stamp and so above every scan value, which is exactly
+what the next step's tag must be. The two-counter form needed a `tagAmd = stampAmd` to say so.
+
+**AND THE SCAN'S BY-VALUE CAPTURE AT 186 IS NOT A DIFFICULTY**, which was expected to be one. Every
+read of the scan's scale, at 224 and 302, happens ABOVE the raise at 363, so the counter has not
+moved when they run and the scan's copy is the step's tag by construction.
 
 ### Three facts hold it together
 
@@ -9608,23 +9619,28 @@ and vertex slots by live members of `C[p]`. A clique id is the id of the pivot t
 that vertex is dead from the moment the clique exists, so the two can never name the same slot. This
 is what lets the prune park a by-product in a live vertex's slot at 194 without a fourth array.
 
-**TWO SCALES, INTERLEAVED RATHER THAN COLLIDING.** The scan writes up to `tagAmd + maxCliqueWeight`;
-`stampAmd` starts one above that and rises by one per candidate; `tagAmd = stampAmd` then puts the
-next step's threshold above every stamp, so each stamped entry reads back as alive-and-unseen.
-THAT is what invalidates the whole array in one addition instead of a clearing pass, and it is why
-the array is SIGNED: `tagAmd - weight(u)` is legitimately negative while the tag is small, and the
-arithmetic only comes right again at `markAmd[c] - tagAmd`.
+**TWO SCALES ON ONE COUNTER, INTERLEAVED RATHER THAN COLLIDING.** The scan writes up to
+`tagAmd + maxCliqueWeight`; the raise then puts the counter one above that and detection hands out
+the values above it, one per candidate; the last post-increment leaves it above every stamp, so next
+step each stamped entry reads back as alive-and-unseen. THAT is what invalidates the whole array by
+moving a boundary instead of clearing, and it is why the array is SIGNED: `tagAmd - weight(u)` is
+legitimately negative while the tag is small, and the arithmetic only comes right again at
+`markAmd[c] - tagAmd`.
 
-### Why there are TWO guards and not one
+### Why the guard is called TWICE and not once
 
-The tag rises by TWO terms per step, at 376 and at 404. Each is bounded by n, and they belong to
+The tag rises by TWO terms per step, at 363 and at 391. Each is bounded by n, and they belong to
 DIFFERENT cliques: `maxCliqueWeight` is a maximum over all previous steps and the candidate count is
 this step's. So their sum is not bounded by n, and a ceiling reserving one n covers only the first.
 
 `AMD_2` puts a `clear_flag` before each, at its lines 1694 and 1949, which is why `Int_MAX_VAL - n`
 is the right margin there. We had only the first until 2026-08-30. Measured worst climb over 7200
-graphs is 1.21n, and with one guard the `stampAmd++` at 404 overflows a tag that entered the step
-just under the ceiling; UBSan says so when the state is forced. See `docs/NEXT.md`.
+graphs is 1.21n, and with one call the `tagAmd++` at 391 overflows a tag that entered the step just
+under the ceiling; UBSan says so when the state is forced. See `docs/NEXT.md`.
+
+**IT IS ONE FUNCTION AT TWO CALL SITES**, `resetMarkAndTag`, which is what the merge bought beyond
+the deleted variable: the two guards had identical bodies and differed only in which counter they
+tested, so with one counter there is nothing left to differ about.
 
 ### And why the bound is parked in `degrees` rather than in `markAmd`
 
@@ -9633,27 +9649,27 @@ what a sweep would destroy. `AMD_2` keeps that value in `Degree[i]` for the same
 in `markAmd[u]` until 2026-08-30, which produced identical permutations on every matrix ever run and
 was discovered only when a guard that has never fired needed the array clean.
 
-Line 454's reset is the remaining obligation: after the step `markAmd[u]` holds a detection stamp,
+Line 451's reset is the remaining obligation: after the step `markAmd[u]` holds a detection stamp,
 and before that the spent adjacency weight, either of which can exceed a small tag and would then
 read as seen-this-step.
 
-### What the two guards actually buy, and where the real limit is
+### What the two calls actually buy, and where the real limit is
 
-WITH BOTH GUARDS IN PLACE THE TWO RAISES CANNOT OVERFLOW AT ANY n. Guard 1 leaves
-`tagAmd < INT32_MAX - n` and raise 1 adds at most n; guard 2 leaves `stampAmd < INT32_MAX - n` and
-raise 2 adds at most n. Each guard reserves exactly what the term after it can consume. That is why
-`AMD_2` calls `clear_flag` twice and why one n is the right margin.
+WITH BOTH CALLS IN PLACE THE TWO RAISES CANNOT OVERFLOW AT ANY n. Each leaves
+`tagAmd <= INT32_MAX - n` and the raise after it adds at most n, so each call reserves exactly what
+the term after it can consume. That is why `AMD_2` calls `clear_flag` twice and why one n is the
+right margin.
 
 **SO WHAT DEGRADES AT LARGE n IS COST, NOT CORRECTNESS.** `tagCeilingAmd = INT32_MAX - n` shrinks as
-n grows while the per-step climb grows with n, so the guards begin firing somewhere near
+n grows while the per-step climb grows with n, so the guard begins firing somewhere near
 n = 9.7e8 and the cost degrades continuously from there. At n = 2^31 - 1 the ceiling is 0, BOTH
-guards fire on every step, and the ordering pays 2n per elimination and 2n^2 overall. Slow and
+calls fire on every step, and the ordering pays 2n per elimination and 2n^2 overall. Slow and
 right.
 
 ```
 n up to ~1e8      the tag never approaches the ceiling; today
-n ~1e8 to ~1e9    the guards fire on some steps; cost degrades continuously
-n = 2^31 - 1      ceiling 0, both guards fire every step, 2n^2 in sweeping alone
+n ~1e8 to ~1e9    the guard fires on some steps; cost degrades continuously
+n = 2^31 - 1      ceiling 0, both calls fire every step, 2n^2 in sweeping alone
 ```
 
 **EXCEPT IN ONE CORNER, AND IT IS A HARD BOUNDARY OF EXACTLY TWO VALUES.** After a sweep the tag is
@@ -9699,28 +9715,33 @@ absorbed state at all because its dead marker is `GONE` at the TOP of the range.
 So amd's range is `[2, INT32_MAX - n)` and mmd's is `[1, INT32_MAX)` with `GONE` on the top value.
 The shift is real and it is two values out of two billion; it bounds nothing.
 
-### `tagAmd` against `stampAmd`: a moving window, not a partition
+### One counter, two roles: a moving window, not a partition
 
-The two counters are easy to conflate, both being tags into one array, and they mark different
-things at different moments.
-
-```
-tagAmd     one per step      carries a NUMBER      markAmd[c] - tagAmd is |C[c] - C[p]|
-stampAmd   many per step     carries IDENTITY      markAmd[x] == other is membership, nothing more
-```
-
-**WITHIN ONE STEP THE SPACE IS PARTITIONED**, cleanly, into four disjoint ranges:
+The counter carries a different kind of thing before and after the raise, which is why it read as
+two variables for so long, and the two roles are easy to conflate.
 
 ```
-[0]                                   absorbed
-[1, tagAmd)                           alive, unseen this step
-[tagAmd, tagAmd + mcw]                the scan's clique values; the offset is a magnitude
-[tagAmd + mcw + 1, stampAmd - 1]      detection's stamps; identity only
+before the raise   one value per step    carries a NUMBER    markAmd[c] - tagAmd is |C[c] - C[p]|
+after the raise    many per step         carries IDENTITY    markAmd[x] == other is membership only
 ```
 
-Line 376, `stampAmd = max(stampAmd, tagAmd + maxCliqueWeight + 1)`, enforces the boundary between
-the last two. A stamp at or below a scan value would make that clique read as marked, and two
-vertices that are not duplicates would compare equal.
+**WITHIN ONE STEP THE SPACE IS PARTITIONED**, cleanly, into four disjoint ranges. Write `t` for the
+value the counter held at the top of the step, which is the scale the scan wrote against:
+
+```
+[0]                          absorbed
+[1, t)                       alive, unseen this step
+[t, t + mcw]                 the scan's clique values; the offset is a magnitude
+[t + mcw + 1, tagAmd - 1]    detection's stamps; identity only
+```
+
+Line 363, `tagAmd += maxCliqueWeight + 1`, enforces the boundary between the last two. A stamp at or
+below a scan value would make that clique read as marked, and two vertices that are not duplicates
+would compare equal.
+
+**AND `t` IS NOT A VARIABLE.** It is the counter's value before the raise, and nothing needs it
+after, so naming it would put a second name on one walking value, which is the arrangement this
+section used to describe and the one that produced the defect.
 
 **THE PROPERTY THE CODE DEPENDS ON IS STRONGER THAN DISJOINT RANGES: THE TWO NEVER SHARE A VALUE.**
 Not merely that clique values and stamps fall in different intervals, but that no integer is ever
@@ -9738,26 +9759,26 @@ across the range, at one instant   partitioned; disjoint, and never sharing a va
 across steps, over time            interleaved blocks, retired as the boundary slides past them
 ```
 
-**ACROSS STEPS THEY DO NOT PARTITION, THEY SLIDE.** Line 485 sets the next step's `tagAmd` to
-`stampAmd`, already one past the last stamp, so the range that was STAMPS falls below the new tag
+**ACROSS STEPS THEY DO NOT PARTITION, THEY SLIDE.** The last post-increment leaves the counter one
+past the last stamp, and that IS the next step's tag, so the range that was STAMPS falls below it
 and becomes ALIVE AND UNSEEN.
 The same integers change meaning as the tag moves past them. That is the whole trick: nothing is
 cleared because the BOUNDARY MOVES INSTEAD OF THE DATA.
 
-So the honest picture is a MOVING WINDOW. At any instant `[tagAmd, stampAmd)` is this step's window,
-split into a magnitude part and an identity part, and everything below it is stale and therefore
-alive. The window advances monotonically, which is exactly why it reaches the ceiling and needs the
-sweep to bring it back to the bottom.
+So the honest picture is a MOVING WINDOW. At any instant `[t, tagAmd)` is this step's window, split
+into a magnitude part and an identity part, and everything below it is stale and therefore alive.
+The window advances monotonically, which is exactly why it reaches the ceiling and needs the sweep
+to bring it back to the bottom.
 
-AND THE TWO COUNTERS ARE THE WINDOW'S TWO EDGES. `tagAmd` is where it starts and `stampAmd` is how
-far it has grown. Both raises push the far edge up, which is why the guard has to be checked before
-each of them. `AMD_2` does the same arithmetic with ONE variable, `wflg`, advanced by `lemax` and
-then incremented per candidate; the two names here split the roles without changing the scheme.
+AND THE COUNTER IS THE WINDOW'S FAR EDGE. It is how far the window has grown, and the near edge is
+wherever it stood when the step began. Both raises push the far edge up, which is why the guard has
+to be checked before each of them. `AMD_2` does exactly this with `wflg`, advanced by `lemax` and
+then incremented per candidate, and ours reads the same way as of 2026-08-30.
 
 ### The accounting is EXACT, and that is what the post-increment buys
 
-`stampAmd` names the NEXT STAMP TO HAND OUT, not the last one handed out. Line 376 sets it one past
-the top of the clique block and line 404 is a post-increment, so:
+After the raise the counter names the NEXT STAMP TO HAND OUT, not the last one handed out. Line 363
+sets it one past the top of the clique block and line 391 is a post-increment, so:
 
 ```
 [t(i), t(i) + mcw]            the scan's block, mcw + 1 values, mcw <= n - 1
@@ -9770,10 +9791,10 @@ None is skipped. The form before 2026-08-30 set the base to `t(i) + mcw` and pre
 consumed one more per step and forced `t(i+1) = last stamp + 1`, an asymmetry that made the two
 guards want different comparisons.
 
-**WHICH IS WHY BOTH GUARDS ARE `>` AND NOT `>=`.** Each raise adds at most n to whatever the guard
-before it left: `mcw + 1 <= n` because a clique excludes its own pivot, and at most n stamps follow.
-So a value AT the ceiling is admissible, `ceiling + n == INT32_MAX`, and the two tests are the same
-test on the same margin.
+**WHICH IS WHY THE TEST IS `>` AND NOT `>=`.** Each raise adds at most n to whatever the call before
+it left: `mcw + 1 <= n` because a clique excludes its own pivot, and at most n stamps follow. So a
+value AT the ceiling is admissible, `ceiling + n == INT32_MAX`. With one counter this is one test on
+one margin, where the two-counter form had to be argued twice.
 
 **AND `AMD_2`'s `wflg < 2` HAS NO COUNTERPART HERE.** That test is its INITIALIZATION: it calls
 `clear_flag(0, ...)` once at `Amd.cpp:1350` to put `W` at 1 and `wflg` at 2. We do that in the
@@ -9783,10 +9804,23 @@ dead code.
 ### The method note, because it is the transferable part
 
 This region defeated two rounds of reading in one session. What settled it every time was FORCING:
-start the tag one below the ceiling AND make the sweep reset there, so both guards fire on every
-step, then compare permutations against the reference. A wrong placement shows as EVERY permutation
-changing, which is how the first attempt at GUARD 2 was caught. A guard that never fires is untested
-by every ordinary run, exactly as the compactor is until the pool is shrunk.
+pin `tagCeilingAmd` low so both call sites fire on every step, then compare permutations against the
+reference. A wrong placement shows as EVERY permutation changing, which is how the first attempt at
+the second call was caught. A guard that never fires is untested by every ordinary run, exactly as
+the compactor is until the pool is shrunk.
+
+**AND A FORCING PROBE CAN BE ARRANGED SO THE GUARD NEVER FIRES, WHICH LOOKS EXACTLY LIKE A PASS.**
+Found 2026-08-30 while building the negative control for the merged counter: a deliberately
+misplaced sweep was inserted right after the eliminator and the digest reported no movement, which
+read as the control failing to work. The cause was the pin. At that point in the step the counter is
+exactly 2, and the ceiling had been pinned at 2, so `tagAmd > tagCeilingAmd` was false and the
+misplaced call did nothing. Pinned at 1 instead it fires and the digest says `PERMUTATIONS MOVED` on
+both amd drivers.
+
+So a forcing run needs its own witness. Two that cost nothing: count the sweeps and print the count,
+which reads 10874 on n = 8000 and 63526 across the 38 alignment cases at a ceiling of 1; and run the
+negative control, since a probe that cannot produce a failure has not shown it can produce a pass
+either.
 
 ## Related
 

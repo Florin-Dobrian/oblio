@@ -144,6 +144,18 @@ void MmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
                 if (!qg.eliminatedMmd(refreshedClique[uk]))
                     refreshedCliqueMembers.push_back(refreshedClique[uk]);
 
+            // THE TAG GUARD, and this is the ONLY place a sweep may land. `cliqueTag` is stamped
+            // over the members below and read all the way to the end of this clique's refresh,
+            // where it decides both the merge and the outmatch, with `vertexTag` fresh per vertex
+            // nested inside it. Two levels are live at once, so a sweep anywhere inside a clique
+            // erases marks about to be read. Between two cliques nothing is live but GONE, which
+            // the sweep preserves.
+            //
+            // THE PLACEMENT IS PER CLIQUE, not once per batch, because that is what bounds the
+            // climb between two checks by one clique. The elimination path needs no call of its
+            // own: it marks membership by negating a weight and draws no tag at all.
+            qg.resetMarkAndTagMmd();
+
             const std::int32_t cliqueTag = qg.advanceTagMmd();   // marked once for the clique
             for (std::int32_t u : refreshedCliqueMembers) qg.setMarkMmd(u, cliqueTag);
             std::uint32_t refreshedCliqueWeight = 0;
@@ -244,6 +256,7 @@ void MmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
     eo.mNumPeakCliqueMembers = qg.numPeakCliqueMembers();
     eo.mNumBornCliqueMembers = qg.numBornCliqueMembers();
     eo.mNumCompactions       = numCompactionsOf(qg);
+    eo.mNumTagResets         = qg.numTagResets();
 }
 
 

@@ -108,6 +108,13 @@ public:
     // ALLOCATED ON DEMAND, and the amd branch never calls this. Call once, before any elimination.
     void enableMarks();
 
+    // THE TAG GUARD. Sweeps the mark array and the tag back to the state `enableMarks` leaves,
+    // PRESERVING GONE, when the tag can no longer be advanced safely. Tests the ceiling itself, so
+    // a caller states only WHERE a sweep is allowed to land: before a tag is drawn, and never
+    // between drawing one and the last read of it.
+    void resetMarkAndTagMmd();
+    std::size_t numTagResets() const { return mNumTagResets; }
+
     // AND A TAG ON THE MMD BRANCH, because a zero weight is not available to it: `number` leaves
     // a prepass vertex live at weight one so that its neighbors' degrees still count it.
     bool eliminatedMmd(std::int32_t u) const { return mMarkMmd[u] == GONE; }
@@ -454,8 +461,17 @@ private:
 
     bool mHasNumbered = false;
 
+    // THE TAG ADVANCES ONLY IN THE DEGREE REFRESH, never during an elimination: membership in
+    // C[pivot] is carried by the sign of the weight, which the prune reads back, and what a tag
+    // buys is DISTINCTNESS, an exact degree counting each reached vertex once where u reaches the
+    // same v through two cliques. Elimination writes this array only with GONE, through markGone.
+    //
+    // BOTH HALVES ARE WHY `resetMarkAndTagMmd` MAY SIT BETWEEN TWO CLIQUES AND NOWHERE ELSE: the
+    // sweep preserves GONE, and nothing it could destroy is written before the next tag is drawn.
+    // A stamp added on the elimination path invalidates that placement and needs a call before it.
     std::vector<std::int32_t> mMarkMmd;     // membership scratch, read against mTagMmd
     std::int32_t              mTagMmd = 0;
+    std::size_t               mNumTagResets = 0;   // how often the guard above actually fires
 };
 
 // ------------------------------------------------------------------------------------------------
@@ -477,6 +493,28 @@ private:
 // seen v this step" against `mTagMmd`, which starts there.
 inline void QuotientGraphFlat::enableMarks() {
     mMarkMmd.assign(mSize, NIL);
+}
+
+// THE SWEEP IS SELECTIVE WHERE THE AMD BRANCH'S IS NOT, and the difference is where each branch
+// keeps its permanent state. Amd's dead value is 0, BELOW every tag, so its sweep may write over
+// everything above it; GONE is INT32_MAX, ABOVE every tag, so a blind sweep here would revive every
+// eliminated vertex, so a dead value must be skipped rather than overwritten.
+//
+// IT RESTORES EXACTLY WHAT `enableMarks` LEAVES, so the invariant after a sweep is the one at
+// startup and no walk needs a second case.
+//
+// ONE n IS THE MARGIN. Between two calls the tag rises once for the clique being refreshed and
+// once per member refreshed off it, and a clique excludes its own pivot, so the region adds at most
+// n. A value AT the ceiling is therefore admissible, `ceiling + n == GONE - 1`, which is why the
+// test is `>` and not `>=`, and why the tag can never reach GONE and be mistaken for a death.
+inline void QuotientGraphFlat::resetMarkAndTagMmd() {
+    const std::int32_t tagCeilingMmd = GONE - static_cast<std::int32_t>(mSize) - 1;
+    if (mTagMmd > tagCeilingMmd) {
+        for (std::int32_t& mark : mMarkMmd)
+            if (mark != GONE) mark = NIL;
+        mTagMmd = 0;
+        ++mNumTagResets;
+    }
 }
 
 inline QuotientGraphFlat::QuotientGraphFlat(const std::vector<std::size_t>&  colPtr,
@@ -525,20 +563,22 @@ inline void QuotientGraphFlat::formReachableSetMmd(std::int32_t u,
                                                std::vector<std::int32_t>& reachableSet) {
     // reach(u) = ( A[u] | C[c] for c in I[u] ) - {u}
     //
-    // The mark array is the set: `mMarkMmd[v] == mTagMmd` is the membership test and `mMarkMmd[v] =
-    // mTagMmd` the insertion, so the union costs one pass per source and comes out in walk order.
+    // THE SIGN OF THE WEIGHT IS THE SET, and no tag is drawn here. Negating `mWeight[v]` is the
+    // insertion and a positive weight the membership test, so the union costs one pass per source
+    // and comes out in walk order; the prune restores the signs, being the last reader of them.
     // The buffer is the caller's, so a caller in a loop can keep one.
     //
     // ELIMINATED VERTICES ARE SKIPPED RATHER THAN PURGED, since a live merge leaves the vertex it
-    // folds away where it lies and every clique that named it still does. `mMarkMmd[v] < mTagMmd`
-    // answers liveness and membership from one load, which is why GONE must sort above every tag,
-    // and GONE is WRITTEN at every death site rather than inferred from a value.
+    // folds away where it lies and every clique that named it still does. GONE is WRITTEN at every
+    // death site rather than inferred from a value, and it sorts above every tag so that
+    // `reachableSetWeight`, which does stamp, answers liveness and membership from one load.
     //
-    // THE ADJACENCY LOOPS ASK mMarkMmd AND THE CLIQUE LOOPS DO NOT, and the asymmetry is exact.
+    // THE ADJACENCY LOOP ASKS mMarkMmd AND THE CLIQUE LOOPS DO NOT, and the asymmetry is exact.
     // `number()` leaves a prepass vertex at weight one and in the adjacency of every neighbor, so
     // a positive weight does not mean live there. It cannot appear in a CLIQUE: the prepass
     // completes before the first elimination and every clique since is built from a reach that
-    // skipped it.
+    // skipped it. That one read is against the CONSTANT GONE, never against the tag, which is why
+    // this walk raises nothing.
     mWeight[u] = -mWeight[u];              // never its own neighbor
     // The bounds are hoisted, all of them. Each is a load from a member vector, and the bodies
     // below store through mWeight, which the compiler cannot prove does not alias the sizes, so a
@@ -584,20 +624,14 @@ inline void QuotientGraphFlat::formReachableSetAmd(std::int32_t u,
                                                std::vector<std::int32_t>& reachableSet) {
     // reach(u) = ( A[u] | C[c] for c in I[u] ) - {u}
     //
-    // The mark array is the set: `mMarkMmd[v] == mTagMmd` is the membership test and `mMarkMmd[v] =
-    // mTagMmd` the insertion, so the union costs one pass per source and comes out in walk order.
+    // THE SIGN OF THE WEIGHT IS THE SET, and no tag is drawn here. Negating `mWeight[v]` is the
+    // insertion and a positive weight the membership test, so the union costs one pass per source
+    // and comes out in walk order; the prune restores the signs, being the last reader of them.
     // The buffer is the caller's, so a caller in a loop can keep one.
     //
-    // ELIMINATED VERTICES ARE SKIPPED RATHER THAN PURGED, since a live merge leaves the vertex it
-    // folds away where it lies and every clique that named it still does. `mMarkMmd[v] < mTagMmd`
-    // answers liveness and membership from one load, which is why GONE must sort above every tag,
-    // and GONE is WRITTEN at every death site rather than inferred from a value.
-    //
-    // THE ADJACENCY LOOPS ASK mMarkMmd AND THE CLIQUE LOOPS DO NOT, and the asymmetry is exact.
-    // `number()` leaves a prepass vertex at weight one and in the adjacency of every neighbor, so
-    // a positive weight does not mean live there. It cannot appear in a CLIQUE: the prepass
-    // completes before the first elimination and every clique since is built from a reach that
-    // skipped it.
+    // AND THIS WALK NEVER MENTIONS mMarkMmd, where its mmd twin asks it once per adjacency entry.
+    // That test guards against a vertex `number()` retired, which is the mmd prepass alone, so the
+    // amd branch allocates no mark array and must not read one.
     mWeight[u] = -mWeight[u];              // never its own neighbor
     // The bounds are hoisted, all of them. Each is a load from a member vector, and the bodies
     // below store through mWeight, which the compiler cannot prove does not alias the sizes, so a

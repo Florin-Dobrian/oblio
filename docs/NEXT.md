@@ -1,5 +1,67 @@
 # NEXT: the mmd and amd branches are being aligned against each other; one regression is open
 
+## DONE 2026-08-30: the two amd tag counters are ONE, and the second name is what caused the defect
+
+`stampAmd` is gone. `AmdEngine.cpp` has one counter, `tagAmd`, advanced by `maxCliqueWeight + 1`
+before detection and then post-incremented per candidate, which is `AMD_2`'s `wflg` exactly. The two
+guards had identical bodies and differed only in which counter they tested, so they collapsed into
+one lambda, `resetMarkAndTag`, called at both raises.
+
+```
+136   tagAmd = 2                       the tag, and detection's stamps above it
+184   resetMarkAndTag()                before RAISE 1
+363   tagAmd += maxCliqueWeight + 1    RAISE 1
+364   resetMarkAndTag()                before RAISE 2
+391   other = tagAmd++                 RAISE 2, once per candidate
+```
+
+**THE SECOND NAME WAS NEVER A SECOND VALUE, AND THE COMPILER COULD HAVE SAID SO.**
+`stampAmd = std::max(stampAmd, tagAmd + maxCliqueWeight + 1)` was already DEAD in its first
+argument: the previous step ended with `tagAmd = stampAmd`, both resets set both to 2, and nothing
+between writes either, so `stampAmd == tagAmd` holds at that line always, and `maxCliqueWeight >= 0`
+makes the max select its second argument every time. A defensive form guarding against a divergence
+the code could not produce.
+
+**AND THE OBSTACLE THE HANDOVER NAMED DOES NOT EXIST.** `TaggedScan` captures `tagAmd` by value at
+186, and that was expected to force a step-local `const`. It does not: both reads of the scan's
+scale, at 224 and 302, sit ABOVE the raise at 363, so the counter has not moved when they run. No
+local was added, which also avoids putting a second name back on one walking value.
+
+**WHAT WENT WITH IT.** `tagAmd = stampAmd` at the end of the step, deleted: the post-increment
+already leaves the counter on the first unused value, which is what the next tag must be. Nothing
+closes a step now.
+
+### The cost of the second name, which is on the record at line 1075 of this file
+
+The stamp base was raised at the END of the step rather than between the scan and detection, so this
+step's stamps started where this step's scan values were still live. On `Grund/meg4` two vertices
+differing in six of sixteen entries were merged at pivot 5080, moving 109 positions and costing 297
+entries of fill. With one counter the raise has one place it can go, and `AMD_2` never had the
+question to answer.
+
+### The gate, and the negative control that nearly lied
+
+```
+make test               265/265, and 237/237 in the public build
+make digest             365 identical over 5 drivers
+make amdorder           38 cases, 0 failed
+make mmdorder           38 cases, 0 failed
+```
+
+The baseline was recorded from a clean clone of `ab7191e`, not from the changed tree.
+
+Forced with `tagCeilingAmd` pinned at 1 so both call sites fire every step: 10874 sweeps at
+n = 8000, 63526 across the 38 alignment cases, every permutation identical, 365 digests identical,
+clean under ASan and UBSan with assertions live.
+
+**A FORCING PROBE CAN BE ARRANGED SO THE GUARD NEVER FIRES, AND IT LOOKS EXACTLY LIKE A PASS.** The
+negative control was a sweep deliberately misplaced just after the eliminator, which should wreck
+every bound. At a pinned ceiling of 2 the digest reported NO movement, because at that point in the
+step the counter is exactly 2 and `tagAmd > tagCeilingAmd` is false, so the misplaced call did
+nothing. Pinned at 1 it fires and the digest says `PERMUTATIONS MOVED` on both amd drivers. So a
+forcing run needs a witness of its own: count the sweeps, and run the negative control, because a
+probe that cannot produce a failure has not shown it can produce a pass.
+
 ## DONE 2026-08-30: the amd tag ceiling reserved half the room it needed
 
 **FIXED THE SAME DAY, by adding `AMD_2`'s SECOND `clear_flag` call and moving one value out of the
@@ -13,6 +75,11 @@ resetAtStamp()                               the second guard, AMD_2:1949
 ```
 
 plus `wbig` taking this tree's name, `tagCeilingAmd`.
+
+**THE NAMES IN THIS ENTRY ARE SUPERSEDED**, later the same day: `stampAmd` was merged into `tagAmd`
+and the two guards became one lambda, `resetMarkAndTag`, at two call sites. The entry above has it.
+What is described below is the arithmetic, which is unchanged, spelled in the two-counter form the
+code carried at the time.
 
 **IT COST NO BOUNDARY, which the analysis below gets wrong.** That analysis says moving the stash
 means `TaggedScan::degree` losing its `const`, and it does not: the prune's write to `markAmd[u]` is
@@ -122,9 +189,10 @@ permutation changing, which is how option 1's naive form was caught.
 
 ### The range, because it bounds how much any of this buys
 
-`MAX_IDX` is `INT32_MAX`, so n reaches `2^31 - 1` and at that n the margin is zero: `resetAtTag`
-fires before every one of n eliminations and sweeps n entries, an O(n^2) ordering that is correct
-and never finishes. `INT32_MAX - 2n` is negative there and the subtraction itself overflows.
+`MAX_IDX` is `INT32_MAX`, so n reaches `2^31 - 1` and at that n the margin is zero:
+`resetMarkAndTag` fires before every one of n eliminations and sweeps n entries, an O(n^2) ordering
+that is correct and never finishes. `INT32_MAX - 2n` is negative there and the subtraction itself
+overflows.
 
 ```
 n up to ~1e8      the tag never approaches the ceiling; today
@@ -1090,6 +1158,12 @@ The fix is one statement moved: `stamp = std::max(stamp, wflg + lemax)` before t
 rather than after it, in both drivers. It has presumably been wrong for as long as detection has
 stamped into `w`, which is since the fifth fold, and NOTHING WE RUN COULD HAVE SEEN IT: it needs a
 clique degree that lands on exactly the right value and it fired on one matrix in 246.
+
+**AND THE CAUSE WAS REMOVED ON 2026-08-30, not merely the instance.** The two counters became one,
+so "where does the base get raised" has one answer instead of two ends to choose between, which is
+why `AMD_2` never had this defect to have: with a single `wflg` the raise lands where the guard
+already needs to be. The entry at the head of this file has it. Read this section as the record of
+what the second name cost while it existed.
 
 ### How they were found, because the method is the transferable part
 
@@ -2491,8 +2565,8 @@ list. `make test` catches it, but check `mmd2` specifically and early.
 arena use-after-free, and a change that moves what a mark array means is exactly the shape that
 would introduce another.
 
-Also needed: an overflow guard on `mTagMmd`, as the amd engine's `markAmd` has with `resetAtTag`,
-since
+Also needed: an overflow guard on `mTagMmd`, as the amd engine's `markAmd` has with
+`resetMarkAndTag`, since
 `mTagMmd` only ever increments and `GONE` must stay above it.
 
 ## If it does not pay

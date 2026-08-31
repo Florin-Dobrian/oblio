@@ -119,64 +119,49 @@ void AmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
     //     0 < markAmd[c] < tagAmd     alive, not seen this step; the value is stale
     //     markAmd[c] >= tagAmd        seen this step, and markAmd[c] - tagAmd is |C[c] - C[p]|
     //
-    // The tag advances by `maxCliqueWeight` at the end of each step, and that is what makes the
-    // stale range safe with no clearing pass: after the scan no entry exceeds
-    // `tagAmd + maxCliqueWeight`, so one addition invalidates the whole array.
+    // ONE COUNTER SERVES TWO SCALES, the scan's and supervariable detection's, and the raise in
+    // the middle of the step is what keeps them apart. The scan writes into
+    // `[tagAmd, tagAmd + maxCliqueWeight]` INCLUSIVE; the tag then moves one past that block and
+    // detection hands out the values above it, one per candidate. So every integer from one step's
+    // tag to the next is either a scan value or a stamp, and none is skipped.
+    //
+    // THAT IS ALSO WHY THERE IS NO CLEARING PASS: a spent step's whole range lies below the next
+    // tag, which is the alive-and-unseen state. The zeros survive, only entries of a live vertex's
+    // list being stamped.
     //
     // SIGNED, and `std::int32_t` for it. `tagAmd - weight(u)` is negative whenever the tag is
     // still small and the weight is not, and the arithmetic only comes right again at `markAmd[c] -
     // tagAmd`; an unsigned type wraps there and the bound comes out enormous.
     std::vector<std::int32_t> markAmd(size, 1);   // every clique alive and unseen
-    std::int32_t tagAmd = 2;                      // the tag
-    // SUPERVARIABLE DETECTION STAMPS INTO `markAmd` TOO, so the two scales must interleave rather
-    // than collide. `stampAmd` starts above the values this step's scan wrote, `tagAmd +
-    // maxCliqueWeight`, and rises by one per candidate; `tagAmd` is then set past all of them at
-    // the end of the step, so next step every stamped entry reads BELOW `tagAmd`, which is the
-    // alive-and-unseen state. The zeros survive, only entries of a live vertex's list being
-    // stamped.
-    std::int32_t stampAmd = 2;                    // detection's marks, above tagAmd
+    std::int32_t tagAmd = 2;                      // the tag, and detection's stamps above it
     std::int32_t maxCliqueWeight = 0;
-    // ONE n IS THE EXACT MARGIN, and the two guards below are what make it exact. Each raise adds
-    // at most n to the value the guard before it left: `tagAmd + maxCliqueWeight + 1 <= tagAmd + n`
-    // since a clique excludes its own pivot, and at most n stamps follow. So a value AT the ceiling
-    // is admissible, `ceiling + n == INT32_MAX`, which is why both tests are `>` and not `>=`.
+    // ONE n IS THE EXACT MARGIN, and the two call sites below are what make it exact. Each raise
+    // adds at most n to the value the guard before it left: `maxCliqueWeight + 1 <= n` since a
+    // clique excludes its own pivot, and at most n stamps follow. So a value AT the ceiling is
+    // admissible, `ceiling + n == INT32_MAX`, which is why the test is `>` and not `>=`.
     const std::int32_t tagCeilingAmd =
         std::numeric_limits<std::int32_t>::max() - static_cast<std::int32_t>(size);
     std::size_t numTagResets = 0;               // how often the guard below actually fires
 
-    // THE TAG GUARD, run first in every step. `AMD_2`'s `clear_flag` at Amd.cpp:1694. It resets the
-    // array and the tag when the tag can no longer be advanced safely: every live clique goes back
-    // to 1, the alive-and-unseen state, and the dead ones stay 0.
+    // THE TAG GUARD. It resets the array and the tag when the tag can no longer be advanced
+    // safely: every live clique goes back to 1, the alive-and-unseen state, and the dead ones
+    // stay 0.
+    //
+    // CALLED IMMEDIATELY BEFORE EACH OF THE TWO RAISES, AND ONE CALL CANNOT COVER BOTH. The first
+    // raise is bounded by `maxCliqueWeight` and the second by the candidate count, each reaching n,
+    // and they belong to DIFFERENT cliques, `maxCliqueWeight` being a maximum over all previous
+    // steps, so their sum is not bounded by n. A single check before both leaves the `tagAmd++` in
+    // detection able to overflow a tag that entered the step at the ceiling. See docs/NEXT.md.
     //
     // `AMD_2` ALSO TESTS `wflg < 2` HERE AND WE DO NOT, because that test is its INITIALIZATION.
     // It calls `clear_flag(0, ...)` once at Amd.cpp:1350 to put `W` at 1 and `wflg` at 2, so the
     // low test is what performs the setup. We do that setup in the declarations above, and the tag
     // only ever climbs, so a value below 2 is unreachable and a test for one would be dead.
-    const auto resetAtTag = [&]() {
+    const auto resetMarkAndTag = [&]() {
         if (tagAmd > tagCeilingAmd) {
             for (std::int32_t k = 0; k < static_cast<std::int32_t>(size); ++k)
                 if (markAmd[k] != 0) markAmd[k] = 1;
-            tagAmd   = 2;
-            stampAmd = 2;         // same array, same scale
-            ++numTagResets;
-        }
-    };
-
-    // THE STAMP GUARD, run in the middle of the step. `AMD_2`'s second `clear_flag`, at
-    // Amd.cpp:1949. ONE CHECK CANNOT COVER BOTH RAISES: the first is bounded by `maxCliqueWeight`
-    // and the second by the candidate count, each reaching n, and they belong to DIFFERENT cliques,
-    // `maxCliqueWeight` being a maximum over all previous steps, so their sum is not bounded by n.
-    // Measured worst climb is 1.21n, and with one guard the `stampAmd++` below overflows a tag that
-    // entered the step at the ceiling. See docs/NEXT.md.
-    //
-    // It sweeps on the RAISED STAMP rather than on the tag, that being the value about to be
-    // incremented.
-    const auto resetAtStamp = [&]() {
-        if (stampAmd > tagCeilingAmd) {
-            for (std::int32_t k = 0; k < static_cast<std::int32_t>(size); ++k)
-                if (markAmd[k] != 0) markAmd[k] = 1;
-            tagAmd   = 2;
-            stampAmd = 2;
+            tagAmd = 2;
             ++numTagResets;
         }
     };
@@ -196,7 +181,7 @@ void AmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
         //
         // THE TAG GUARD RUNS FIRST because that scan is inside the eliminator, so the tag has to be
         // valid before it. `maxCliqueWeight` still advances after, needing the clique weight.
-        resetAtTag();
+        resetMarkAndTag();
         touchedCliques.clear();
         TaggedScan scan{&buckets, markAmd, degrees, touchedCliques, tagAmd,
                         static_cast<std::int32_t>(size + 1)};
@@ -366,15 +351,17 @@ void AmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
         // filled is reached: only a principal member of C[pivot] is filed, and the survivor of a
         // merge is one too.
         //
-        // THE STAMP BASE IS RAISED FIRST, and this is CORRECTNESS. `markAmd` holds the scan's
-        // values, which occupy `[tagAmd, tagAmd + maxCliqueWeight]` INCLUSIVE, and detection's
-        // stamps. A stamp at or below a scan value makes that clique read as marked, so two
-        // vertices that are not duplicates compare equal. The base is therefore ONE PAST the top of
-        // that block, and it is the FIRST STAMP rather than the value below it: `stampAmd` names
-        // the next stamp to hand out, so every value from `tagAmd` to the next tag is either
-        // written by the scan or handed out as a stamp, and none is skipped.
-        stampAmd = std::max(stampAmd, tagAmd + maxCliqueWeight + 1);
-        resetAtStamp();
+        // THE TAG IS RAISED FIRST, and this is CORRECTNESS. `markAmd` holds the scan's values,
+        // which occupy `[tagAmd, tagAmd + maxCliqueWeight]` INCLUSIVE, and detection's stamps. A
+        // stamp at or below a scan value makes that clique read as marked, so two vertices that are
+        // not duplicates compare equal. The tag therefore moves ONE PAST the top of that block, and
+        // it names the FIRST STAMP rather than the value below it, so every value from the step's
+        // own tag to the next one is either written by the scan or handed out as a stamp.
+        //
+        // NOTHING READS THE SCAN'S SCALE PAST THIS LINE, which is what lets one counter carry both:
+        // absorption and the bound pass are above it, and the passes below read no tag at all.
+        tagAmd += maxCliqueWeight + 1;
+        resetMarkAndTag();
 
         for (std::uint32_t uk = 0; uk < newCliqueSize; ++uk) {
             const std::int32_t seed = newClique[uk];
@@ -401,7 +388,7 @@ void AmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
                 // span, and the prune's rotation puts the new clique at index 0. That entry is
                 // shared by every member of C[pivot], so it can never discriminate and is skipped
                 // by starting at 1.
-                const std::int32_t  other          = stampAmd++;
+                const std::int32_t  other          = tagAmd++;
                 const std::uint32_t uAdjacencySize = qg.adjacencySize(u);
                 const std::uint32_t uIncidenceSize = qg.incidenceSize(u);
                 const std::int32_t* uSegment       = qg.incidenceAmd(u);   // the segment's start
@@ -416,7 +403,7 @@ void AmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
                     if (qg.incidenceSize(v) != uIncidenceSize) continue;
 
                     // The exact test the hash only filters for, A[u] == A[v] and I[u] == I[v],
-                    // read against u's stampAmd and short-circuiting on the first mismatch.
+                    // read against u's stamp and short-circuiting on the first mismatch.
                     bool                same     = true;
                     const std::int32_t* vSegment = qg.incidenceAmd(v);
                     for (std::uint32_t a = 1; a < uSegmentSize && same; ++a)
@@ -476,13 +463,11 @@ void AmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
         }
         qg.trimClique(pivot, kept);
 
-        // The whole array is invalidated in ONE ASSIGNMENT rather than by walking the touched list
-        // and zeroing each entry. `stampAmd` is already one past the last stamp handed out, and
-        // every stamp was above every scan value, so taking it as the next tag puts the whole of
-        // this step's range into the stale-and-therefore-alive band. NO `+ 1` IS NEEDED: the
-        // post-increment left `stampAmd` on the first UNUSED value, which is exactly what a tag
-        // must be.
-        tagAmd = stampAmd;                     // one past the last stamp this step laid down
+        // NOTHING CLOSES THE STEP. Detection's post-increment left the tag on the first UNUSED
+        // value, above every stamp and so above every scan value, which is exactly what the next
+        // step's tag must be; the whole of this step's range is stale-and-therefore-alive from
+        // here. A step that made no comparison leaves the tag where the raise above put it, which
+        // is one past the scan's block and equally safe.
     }
 
     // THE COUNTER CROSS-CHECKED AGAINST A RECOMPUTATION, which the driver can do exactly because it

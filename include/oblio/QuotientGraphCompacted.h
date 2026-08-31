@@ -158,6 +158,13 @@ public:
     // than n int32. Call once, before any elimination.
     void enableMarks();
 
+    // THE TAG GUARD. Sweeps the mark array and the tag back to the state `enableMarks` leaves,
+    // PRESERVING GONE, when the tag can no longer be advanced safely. Tests the ceiling itself, so
+    // a caller states only WHERE a sweep is allowed to land: before a tag is drawn, and never
+    // between drawing one and the last read of it.
+    void resetMarkAndTagMmd();
+    std::size_t numTagResets() const { return mNumTagResets; }
+
     std::int32_t advanceTagMmd()                        { return ++mTagMmd; }
     std::int32_t markMmd(std::int32_t u) const          { return mMarkMmd[u]; }
     void setMarkMmd(std::int32_t u, std::int32_t tag)   { mMarkMmd[u] = tag; }
@@ -388,8 +395,17 @@ private:
     // than an optimization: it is the short circuit that keeps an empty `mMarkMmd` safe in the
     // shared bodies carrying the `mHasNumbered && mMarkMmd[v] == GONE` guard.
     bool                      mHasNumbered = false;
+    // THE TAG ADVANCES ONLY IN THE DEGREE REFRESH, never during an elimination: membership in
+    // C[pivot] is carried by the sign of the weight, which the prune reads back, and what a tag
+    // buys is DISTINCTNESS, an exact degree counting each reached vertex once where u reaches the
+    // same v through two cliques. Elimination writes this array only with GONE, through markGone.
+    //
+    // BOTH HALVES ARE WHY `resetMarkAndTagMmd` MAY SIT BETWEEN TWO CLIQUES AND NOWHERE ELSE: the
+    // sweep preserves GONE, and nothing it could destroy is written before the next tag is drawn.
+    // A stamp added on the elimination path invalidates that placement and needs a call before it.
     std::vector<std::int32_t> mMarkMmd;
     std::int32_t              mTagMmd = 0;
+    std::size_t               mNumTagResets = 0;   // how often the guard above actually fires
 };
 
 // ------------------------------------------------------------------------------------------------
@@ -483,7 +499,10 @@ inline QuotientGraphCompacted::QuotientGraphCompacted(const std::vector<std::siz
 // cursors below are what make resuming possible. The reach lands exactly where the clique is to
 // live, so there is no copy from a scratch into place.
 inline std::uint32_t QuotientGraphCompacted::formReachableSetMmd(std::int32_t u) {
-    ++mTagMmd;
+    // THE SIGN OF THE WEIGHT IS THE SET, and no tag is drawn here: negating is the insertion and a
+    // positive weight the membership test, exactly as in the other two classes. The one read of
+    // `mMarkMmd` below is against the CONSTANT GONE, never against the tag.
+    //
     // THE PIVOT IS ALREADY NEGATED, by `beginEliminationMmd`, which is where the amd branch has
     // always done it and where the merge moved this branch's. It was here and in the in-place walk
     // before, and leaving it in both places negates twice, which reads as a positive weight and so
@@ -811,6 +830,29 @@ inline void QuotientGraphCompacted::killClique(std::int32_t c) {
 inline void QuotientGraphCompacted::enableMarks() {
     detail::padded(mMarkMmd, mSize, 4);
     std::fill(mMarkMmd.begin(), mMarkMmd.end(), NIL);
+}
+
+// THE SWEEP IS SELECTIVE WHERE THE AMD BRANCH'S IS NOT, and the difference is where each branch
+// keeps its permanent state. Amd's dead value is 0, BELOW every tag, so its sweep may write over
+// everything above it; GONE is INT32_MAX, ABOVE every tag, so a blind sweep here would revive every
+// eliminated vertex, so a dead value must be skipped rather than overwritten.
+//
+// IT RESTORES EXACTLY WHAT `enableMarks` LEAVES, so the invariant after a sweep is the one at
+// startup and no walk needs a second case. The padding is swept with the rest, as `enableMarks`
+// fills it, and holds nothing either way.
+//
+// ONE n IS THE MARGIN. Between two calls the tag rises once for the clique being refreshed and
+// once per member refreshed off it, and a clique excludes its own pivot, so the region adds at most
+// n. A value AT the ceiling is therefore admissible, `ceiling + n == GONE - 1`, which is why the
+// test is `>` and not `>=`, and why the tag can never reach GONE and be mistaken for a death.
+inline void QuotientGraphCompacted::resetMarkAndTagMmd() {
+    const std::int32_t tagCeilingMmd = GONE - static_cast<std::int32_t>(mSize) - 1;
+    if (mTagMmd > tagCeilingMmd) {
+        for (std::int32_t& mark : mMarkMmd)
+            if (mark != GONE) mark = NIL;
+        mTagMmd = 0;
+        ++mNumTagResets;
+    }
 }
 
 inline void QuotientGraphCompacted::number(std::int32_t u) {

@@ -1,5 +1,119 @@
 # NEXT: the mmd and amd branches are being aligned against each other; one regression is open
 
+## DONE 2026-08-30: the mmd tag has a guard, and two dead raises are gone from the elimination path
+
+`resetMarkAndTagMmd` is a method on `QuotientGraphFlat` and `QuotientGraphCompacted`, called from
+`MmdEngine` at the top of each clique's refresh, immediately before the clique tag is drawn. ONE
+CALL SITE, where amd needs two.
+
+```
+MmdEngine.cpp:158   qg.resetMarkAndTagMmd()      the guard
+MmdEngine.cpp:160   cliqueTag = advanceTagMmd()  once per refreshed clique
+MmdEngine.cpp:182   vertexTag = advanceTagMmd()  once per two-source vertex
+MmdEngine.cpp:243   reachableSetWeight(u)        ++mTagMmd inside, per many-source vertex
+```
+
+**IT IS A METHOD, NOT A LAMBDA, AND THAT INVERTS THE AMD ARRANGEMENT.** `markAmd` is a local in the
+amd driver, so its guard is a lambda there; `mMarkMmd` and `mTagMmd` are private members of the
+graph classes, so the sweep and the ceiling belong to the class and the engine states only WHERE a
+sweep may land.
+
+**THE SWEEP IS SELECTIVE WHERE AMD'S IS NOT.** Amd's dead value is 0, BELOW every tag, so it may
+write over everything above it. `GONE` is `INT32_MAX`, ABOVE every tag, so a blind sweep here would
+revive every eliminated vertex. It restores exactly what `enableMarks` leaves, `NIL` and a tag of
+zero, so the state after a sweep is the state at startup and no walk needs a second case.
+
+### One site is enough because the elimination path draws no tag, and that is now written down
+
+Membership in `C[pivot]` is carried by the SIGN OF THE WEIGHT, which the prune reads back. What a
+tag buys is DISTINCTNESS, an exact degree counting each reached vertex once where `u` reaches the
+same `v` through two cliques, and only the refresh needs that. Elimination writes the mark array
+only with `GONE`, through `markGone`, at four sites: `setAside`, `beginEliminationMmd`,
+`massEliminate` and `merge`.
+
+Both halves are why a sweep may sit between two cliques and nowhere else: `GONE` survives it, and
+nothing it could destroy is written before the next tag is drawn. The invariant is stated at the
+`mMarkMmd` declaration in both classes rather than at the call site, because every function that
+could break it by adding a stamp lives in that header and none of them is in `MmdEngine.cpp`.
+
+**Verified by running, not by reading**: a snapshot of the tag before the batch loop, asserted equal
+when the batch ends, holds over the digest's 73 grids on both stores. Flipping the assertion to
+`+ 1` aborts immediately, so it was live.
+
+### TWO DEAD `++mTagMmd` RAISES REMOVED, and this is why the reasoning above was hard to see
+
+`QuotientGraphCompacted::formReachableSetMmd` and `QuotientGraphChained::beginElimination` each
+opened with a raise no one read. Both walks touch `mMarkMmd` once, against the CONSTANT `GONE`, and
+write it never. They are the shape of an elimination that stamps, left behind when membership moved
+to the weight's sign; the same sweep on 2026-08-24 reached the flat class only.
+
+A dead increment cannot move a permutation, so the digest agreeing proves nothing. Printing the
+final `mTagMmd` per ordering, before and after, over the digest's 73 grids:
+
+```
+             orderings   final tag changed
+Flat                73             0        never had the bump
+Compacted           73            73
+Chained             73            73
+
+flat and compacted agree on the final tag:   0 of 73 before,  73 of 73 after
+```
+
+The last line is the alignment: two layouts of one algorithm now consume tags at the same rate, and
+nothing in the tree was checking that.
+
+### The chained class keeps a second raise, and it is storage
+
+`beginElimination` stamps absorbed cliques into the upper half of a 2n mark array and reads them
+back in `eliminateMmd`. The other two carry a clique length they can zero through `killClique`; the
+chained store ends a list at a terminator and has none. So the invariant above is FALSE there, and a
+chained guard cannot use this placement.
+
+### Our tag climbs 2.33 times slower than the oracle's, and the reason is two separate things
+
+Instrumented over the 38 alignment shapes, splitting the oracle's climb by source:
+
+```
+              n     ours   oracle   from elimination   from refresh
+            100      290      552                 81            470
+           1024     2435     6461                781           5679
+          19600    39048   136071              14740         121330
+```
+
+The ratio grows with n: 1.90 at 100, 2.65 at 1024, 3.48 at 19600, and 2.12 to 3.74 across the cubes.
+
+The elimination column is the oracle raising once per elimination because ITS elimination stamps
+where ours negates a weight. Real, and about 11 per cent of its climb at the top of that range.
+
+The larger part is the refresh, and it is the tag scheme already open in this file seen from the
+other side. The oracle reserves a BLOCK per element so the element tag sits above the per-vertex
+tags, spent or not; we draw the clique tag first and consume exactly one per clique plus one per
+member refreshed. That entry frames the difference as a cost to us, an explicit `vMark == cliqueTag`
+test per entry where the oracle gets the answer from its ordering. This is the price on the other
+side of that trade, which nothing had put a number on.
+
+Caveats: 38 grid and random shapes, not the 246 real matrices, and the ratio is still moving at the
+top of the range, so 2.33 is a total over this set and not a constant. It counts tag values
+consumed, which bears on the ceiling and says nothing about time.
+
+### The gate
+
+```
+make test               265/265, and 237/237 in the public build
+make digest             365 identical over 5 drivers
+make amdorder           38 cases, 0 failed
+make mmdorder           38 cases, 0 failed
+```
+
+Baseline recorded from a clean clone of `ab7191e`. Forced with `tagCeilingMmd` pinned to zero so the
+guard fires at every clique refresh: 146298 sweeps across the digest's 146 mmd orderings, 365
+digests identical, `make mmdorder` still 38 of 38, clean under ASan and UBSan with assertions live.
+
+The negative control, the call moved inside the clique where `cliqueTag` is still live, SEGFAULTS
+rather than reporting moved permutations. It does show a wrong placement is caught, but by crashing,
+which is weaker than the amd control the same day, where the same binary printed `PERMUTATIONS
+MOVED`.
+
 ## DONE 2026-08-30: the two amd tag counters are ONE, and the second name is what caused the defect
 
 `stampAmd` is gone. `AmdEngine.cpp` has one counter, `tagAmd`, advanced by `maxCliqueWeight + 1`
@@ -204,14 +318,19 @@ n above ~1e9      the margin arithmetic breaks and the ordering is unusable rega
 margin should be computed in `std::size_t` and a size that leaves no positive ceiling REJECTED, as
 `checkIndexRange` rejects an out-of-range size, rather than silently sweeping every step.
 
-### And mmd has no guard at all
+### And mmd had no guard at all, DONE for two classes on 2026-08-30
 
+Kept because the reasoning is what the fix was built on, and one third of it is still open. It read:
 `advanceTagMmd()` is `return ++mTagMmd;`, with nothing watching the ceiling and nothing counting. It
 rises by one per clique and once per refreshed vertex, far more slowly than amd's, but there is no
 backstop. `GONE` is `INT32_MAX` and lives in the same array, so a collision would revive dead
 members rather than merely misreading a bound. THE SWEEP HAS TO BE A METHOD ON THE THREE GRAPH
 CLASSES, the state being theirs, and it must preserve `GONE` from the top of the range where amd's
 preserves 0 at the bottom.
+
+All of that held. `resetMarkAndTagMmd` is a method on the flat and compacted classes, selective, and
+"far more slowly than amd's" now has a number: 2.33 times slower than the mmd oracle's tag over the
+38 alignment shapes, rising with n. The chained class still has none.
 
 ## OPEN, FOUND 2026-08-30: the amd time ratio dips and comes back, where the mmd one only falls
 
@@ -2565,9 +2684,10 @@ list. `make test` catches it, but check `mmd2` specifically and early.
 arena use-after-free, and a change that moves what a mark array means is exactly the shape that
 would introduce another.
 
-Also needed: an overflow guard on `mTagMmd`, as the amd engine's `markAmd` has with
-`resetMarkAndTag`, since
-`mTagMmd` only ever increments and `GONE` must stay above it.
+The overflow guard on `mTagMmd` this item once called for is DONE for the flat and compacted
+classes as of 2026-08-30, as `resetMarkAndTagMmd`; the entry at the head of this file has it. It
+remains open for `QuotientGraphChained`, whose elimination genuinely draws a tag and so cannot use
+the same placement.
 
 ## If it does not pay
 

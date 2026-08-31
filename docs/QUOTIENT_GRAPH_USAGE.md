@@ -65,6 +65,8 @@ as long as both classes agree about it, which is the usual case and the expected
 | **marks** | | | | |
 | `enableMarks` | x |  | done | 2026-08-21 |
 | `advanceTagMmd` | x |  | aligned |  |
+| `resetMarkAndTagMmd` | x |  | aligned | 2026-08-30 |
+| `numTagResets` | x |  | aligned | 2026-08-30 |
 | `markMmd`, `setMarkMmd` | x |  | aligned |  |
 | `number` | x |  | aligned |  |
 | `eliminatedMmd` / `eliminatedAmd` | x | x | done | 2026-08-21 |
@@ -87,7 +89,8 @@ as long as both classes agree about it, which is the usual case and the expected
 | `numPeakCliqueMembers` | x | x | aligned |  |
 | `cliqueCountBalances` | x | x | aligned |  |
 
-Fourteen entry points are called by both, six by `MmdFlat` alone and eight by `AmdFlat` alone.
+Counting ROWS rather than names, since a suffixed pair is one row and two entry points: thirteen are
+called by both, nine by `MmdFlat` alone and eight by `AmdFlat` alone.
 
 ## The compacted class: `QuotientGraphCompacted`
 
@@ -113,6 +116,8 @@ where the vendored routines disagree.
 | **marks** | | | | |
 | `enableMarks` | x |  | done | 2026-08-21 |
 | `advanceTagMmd` | x |  | aligned |  |
+| `resetMarkAndTagMmd` | x |  | aligned | 2026-08-30 |
+| `numTagResets` | x |  | aligned | 2026-08-30 |
 | `markMmd`, `setMarkMmd` | x |  | aligned |  |
 | `number` | x |  | aligned |  |
 | `eliminatedMmd` / `eliminatedAmd` | x | x | done | 2026-08-21 |
@@ -165,6 +170,8 @@ Both shapes are kept deliberately, to see which is the more useful to work from.
 | **marks** | | | | | | | |
 | mark array on demand | x |  | x |  | done | 2026-08-21 | amd allocates none |
 | advanceTagMmd | x |  | x |  | aligned |  |  |
+| tag guard | x |  | x |  | aligned | 2026-08-30 | the amd guard is the driver's, not the class's |
+| tag reset count | x |  | x |  | aligned | 2026-08-30 | published on the same `ElmOrder` field |
 | mark, setMarkMmd | x |  | x |  | aligned |  |  |
 | number | x |  | x |  | aligned |  |  |
 | eliminated | x | x | x | x | done | 2026-08-21 | a zero weight on amd, a tag on mmd |

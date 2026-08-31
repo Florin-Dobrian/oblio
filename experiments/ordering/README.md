@@ -9822,6 +9822,176 @@ which reads 10874 on n = 8000 and 63526 across the 38 alignment cases at a ceili
 negative control, since a probe that cannot produce a failure has not shown it can produce a pass
 either.
 
+## The mmd mark and tag, end to end, 2026-08-30
+
+The same array in the same three classes, and it behaves differently enough from the amd side to be
+worth its own section rather than a paragraph of exceptions. `src/MmdEngine.cpp` and
+`include/oblio/QuotientGraphFlat.h` line numbers.
+
+### One step of the refresh
+
+```
+MmdEngine 158   resetMarkAndTagMmd()            THE GUARD, and the only place a sweep may land
+          160   cliqueTag = advanceTagMmd()     +1, once for the clique being refreshed
+          161   setMarkMmd(u, cliqueTag)        stamped over its live members
+          182   vertexTag = advanceTagMmd()     +1, per two-source vertex
+          190   vMark == cliqueTag              membership in the clique, per entry
+          204   vMark >= vertexTag              already seen on this vertex's walk
+          243   reachableSetWeight(u)           +1 inside, per many-source vertex
+```
+
+Two levels are live at once inside a clique: `cliqueTag` is read all the way to the end of that
+clique's refresh, with a fresh `vertexTag` nested under it. That is what confines the sweep to the
+gap BETWEEN two cliques.
+
+### Four differences from the amd guard, and each has a cause
+
+```
+                     amd                          mmd
+where it lives       lambda in the driver         method on the graph class
+call sites           two, one per raise           one, per clique refresh
+the sweep            blind above the dead value   selective, skipping GONE
+raise per event      up to n, then 1 per          always exactly 1
+                     candidate
+```
+
+**It is a METHOD** because `mMarkMmd` and `mTagMmd` are the class's private state, where `markAmd`
+is a local in the amd driver. So the class owns the ceiling too and the engine states only where a
+sweep is allowed, not when.
+
+**One call site** because the tag advances only in the degree refresh. The elimination path draws no
+tag at all: membership in `C[pivot]` is carried by the sign of the weight, which the prune reads
+back, and only the refresh needs distinctness, an exact degree counting each reached vertex once
+where `u` reaches the same `v` through two cliques.
+
+**The sweep is selective** because the two branches keep their permanent state at opposite ends.
+Amd's absorbed value is 0, below every tag; `GONE` is `INT32_MAX`, above every tag, so a blind sweep
+would revive every eliminated vertex. Elimination WRITES the array while the refresh is not running,
+at four sites through `markGone`, and every one of those writes is `GONE`. Both facts together are
+what make the placement valid, and both are stated at the declaration in the two classes rather than
+at the call site, because everything that could break them lives in that header.
+
+**Every raise is one** where amd's first raise is a whole clique weight. So the margin is one n on
+both sides but reached far more slowly here.
+
+### The tag climbs 2.33 times slower than the oracle's, over the 38 alignment shapes
+
+```
+              n     ours   oracle   from elimination   from refresh
+            100      290      552                 81            470
+           1024     2435     6461                781           5679
+          19600    39048   136071              14740         121330
+```
+
+Two independent causes, and the smaller one is the elimination: the oracle raises once per
+elimination because its eliminator stamps where ours negates a weight, about 11 per cent of its
+climb at n = 19600. The larger is the refresh, where the oracle reserves a block per element so the
+element tag sits above the per-vertex tags whether the block is spent or not, and we consume exactly
+one per clique plus one per member refreshed.
+
+That second one is the tag scheme seen from the other side. Ours costs an explicit `vMark ==
+cliqueTag` test per entry, which the oracle's ordering gets for free; what it buys is a tag that
+climbs a third as fast. Neither number says anything about time.
+
+### The evidence, and where it is weak
+
+Forced with the ceiling pinned to zero so the guard fires at every clique refresh: 146298 sweeps
+across the digest's 146 mmd orderings, 365 digests identical, `make mmdorder` still 38 of 38, clean
+under ASan and UBSan.
+
+The no-tag-during-elimination claim was checked by asserting the tag unchanged across the batch loop
+over 73 grids on both stores, and the assertion was shown able to fire by flipping it to `+ 1`.
+
+The negative control, the call moved inside a clique where `cliqueTag` is live, SEGFAULTS rather
+than reporting moved permutations. A wrong placement is caught, but by crashing, which says less
+about the comparison path than the amd control does.
+
+### Why one site and not two: a reach is formed TWICE, and only one of them needs a tag
+
+The count of guard sites is not a property of the algorithm. It follows from how each reach records
+membership, and we inherited the two branches' answers from two different oracles.
+
+A reach set is built in two places, and both are candidates for a guard:
+
+```
+elimination        C[pivot] = reach(pivot)     formReachableSetMmd
+degree refresh     reach(u), to weigh it       reachableSetWeight
+```
+
+**THE SECOND NEEDS A TAG AND THE FIRST DOES NOT, because they ask different questions.** The
+elimination needs MEMBERSHIP, is v in the set being built, and the sign of `mWeight[v]` answers that
+in a value the walk must load anyway, with the prune restoring it. The refresh needs a COUNTED
+MAGNITUDE, an exact degree counting each reached vertex once where u reaches the same v through two
+cliques, and a sign cannot count. So the tag exists for the refresh alone, and a guard is needed
+only where the tag moves.
+
+**THE MMD ORACLE HAS NO NEGATION MECHANISM AND SO NEEDS BOTH.** Its eliminator takes the tag as a
+parameter, opens by stamping the pivot, and forms the reach by marking as it walks both levels. It
+does use negative values elsewhere, for the ordering it records, for its eliminated flag and for the
+links between lists, but never to say "this vertex is in the set I am building". Two reach
+constructions, two tag advances, two guards, one before each.
+
+**THE NEGATION CAME FROM THE AMD ORACLE**, which flags the pivot element's members by negating their
+weight at three sites and reads the sign back at four more. That oracle carries BOTH mechanisms, and
+for the same reason we now do: negation where membership is the question, a tag array where a
+magnitude is. Our mmd branch takes the elimination half from one oracle and the refresh half from
+the other, which is why its guard count matches neither.
+
+**And this is why the two dead `++mTagMmd` raises were easy to miss.** They were elimination-time
+stamping, correct in the code it came from, surviving in files whose elimination had switched to
+negation. Nothing about the shape looked wrong, because the shape IS right one oracle over.
+
+### The rule that covers all four, and it is not about membership at all
+
+A GUARD IS NEEDED BEFORE EVERY REGION THAT WRITES TAG-SCALED VALUES INTO THE ARRAY, and the number
+of sites is the number of such regions. Nothing else about the algorithm decides it.
+
+```
+                 where the degree number comes from     tag-scaled regions        sites
+mmd (ours)       a pass of its own                      refresh                     1
+mmd oracle       a pass of its own                      elimination, refresh        2
+amd (ours)       quantities the ELIMINATION produces    elimination, detection      2
+amd oracle       quantities the ELIMINATION produces    elimination, detection      2
+```
+
+**READ IT AS TWO PAIRS.** The amd pair agrees in every column, its oracle guarding at the same two
+moments for the same reasons, one before the block that computes the clique differences and one
+after the raise and before detection. The mmd pair does not agree, and OURS IS THE ONLY ROW OF THE
+FOUR THAT DIFFERS FROM ITS OWN ORACLE. The whole of that difference is the negation mechanism, taken
+from the amd side and applied to our mmd elimination, which turns a tag-scaled region into one that
+is not.
+
+Which is also the two dead `++mTagMmd` raises in one line: they were row two surviving in row one's
+code.
+
+**Amd needs a site at the elimination BECAUSE it works with a bound rather than an exact degree.**
+The bound is `|C[c]| - |C[c] & C[p]|`, obtained by SUBTRACTION from quantities only the elimination
+walk is positioned to compute, so the eliminator parks them tag-scaled and a guard must precede it.
+Mmd weighs an exact reach in a pass of its own, so its elimination computes no magnitude, writes
+nothing tag-scaled, and needs nothing before it. Those are not two facts. Not calling
+`reachableSetWeight` on the amd side and needing a second site there are the same fact twice.
+
+**The amd elimination does not ADVANCE the tag, it WRITES ABOVE IT**, which is the distinction that
+makes the count come out right. The eliminator lays down values up to `tagAmd + maxCliqueWeight`;
+the advance accounting for that block comes later, at the raise before detection. So the first site
+protects WRITES and the second protects a raise, and a guard is owed to both.
+
+**MEMBERSHIP MARKING DECIDES NOTHING HERE**, which the fourth row is the proof of: the amd oracle
+negates for membership and still needs two sites. What the absence of negation costs the mmd oracle
+is not a guard as such. It is that membership marking makes its elimination a tag-scaled region,
+which then needs one.
+
+**Detection lands on different sides of the line in the two branches, and that is not an accident
+either.** In mmd it is FUSED INTO THE REFRESH: the two-source walk computes the degree, and merges a
+vertex or outmatches it, in one pass off `cliqueTag` and `vertexTag` together. One region, one site.
+In amd it is a PASS OF ITS OWN, after the bound, with its own raise, so it is a second region. The
+refresh mmd has, amd does not; the detection pass amd has, mmd folds away.
+
+**One placement detail the count does not capture.** The amd eliminator also writes `markAmd[u]`,
+the adjacency weight, which is NOT tag-scaled and is read later to build the two-term bound. The
+second site sits after that read. Put it before, and a sweep erases a stash that no reasoning about
+ceilings would have flagged.
+
 ## Related
 
 - `archive/sparse_factorization.md` section 5, the prose, pseudocode and worked examples.

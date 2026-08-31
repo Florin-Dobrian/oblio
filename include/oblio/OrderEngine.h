@@ -3,17 +3,17 @@
 // OrderEngine.h, computes a fill-reducing permutation of a SparseMatrix.
 //
 //   Natural,       identity (no reordering)
-//   MmdVendored,   Multiple Minimum Degree (Liu/Sparspak, via 0.9), FROZEN as the reference
-//   MmdCorrected,  the same code with genmmd's degree scale repaired    (private/MmdCorrected.cpp)
+//   MmdVendored,   Multiple Minimum Degree (Liu/Sparspak)
+//   MmdCorrected,  the same code with its degree scale repaired         (private/MmdCorrected.cpp)
 //   MmdFlat,       ours, matching MmdCorrected's permutation      (src/MmdFlat.cpp)
-//   MmdChained,    the same, on genmmd's chained store           (src/MmdChained.cpp)
-//   MmdCompacted,  the same, on AMD_2's compacted store          (src/MmdCompacted.cpp)
+//   MmdChained,    the same, on the mmd oracle's chained store   (src/MmdChained.cpp)
+//   MmdCompacted,  the same, on the amd oracle's store           (src/MmdCompacted.cpp)
 //   AmdVendored,   Approximate Minimum Degree (SuiteSparse 3.3.4, BSD-3)
 //   AmdFlat,       ours, matching AmdVendored's permutation      (src/AmdFlat.cpp)
-//   AmdCompacted,  the same, on AMD_2's compacted store          (src/AmdCompacted.cpp)  DEFAULT
+//   AmdCompacted,  the same, on the amd oracle's store           (src/AmdCompacted.cpp)  DEFAULT
 //
 // NINE ENUMERATORS, SIX OF THEM OURS, and TWO AXES rather than one. The BRANCH decides the
-// permutation: every mmd enumerator returns `MmdCorrected`'s and every amd one returns `AMD_2`'s,
+// permutation: every mmd enumerator returns `MmdCorrected`'s and every amd one `AmdVendored`'s,
 // exactly, on every matrix the benchmarks cover. The STORE decides only what the computation costs.
 // So a caller choosing among the three mmd enumerators, or between the two amd ones, is choosing an
 // implementation and not an ordering, and the fill is identical by construction.
@@ -31,8 +31,9 @@
 // kind of choice, one ordering computed two ways, and it has been offered from the start. What
 // the store changes is cost, which is exactly the sort of thing a caller may want to choose.
 //
-// EACH IS ITS ORIGINAL ON A DIFFERENT CLIQUE STORE, the chained one genmmd uses and the compacted
-// one `AMD_2` uses, both of which hold the ordering inside `O(n + m)` where our flat arena does
+// EACH IS ITS ORIGINAL ON A DIFFERENT CLIQUE STORE, the chained one the mmd oracle uses and the
+// compacted one the amd oracle uses, both of which hold the ordering inside `O(n + m)` where our
+// flat arena does
 // not. Each must return exactly its branch's permutation, and a difference is a defect in one of
 // them rather than a variation. That obligation is what makes them useful as instruments, and it
 // is also what makes them safe to offer.
@@ -46,9 +47,9 @@
 //
 // Two lineages sit behind these names. `MmdVendored`, `MmdCorrected` and `AmdVendored` operate on
 // raw int CSC arrays and live in private/. The first and third are vendored and untouched; the
-// second is `MmdVendored` with genmmd's degree scale repaired, so it is inherited code we have
+// second is `MmdVendored` with its degree scale repaired, so it is inherited code we have
 // modified rather than code we wrote, and it is what our three mmd drivers are checked against.
-// genmmd files at the degree in `mmdint` and at the degree PLUS ONE in `mmdupd`, two scales in one
+// It files at the degree in its setup and at the degree PLUS ONE in its refresh, two scales in one
 // bucket array, so a refreshed vertex is penalised by one against one no pivot has reached and the
 // minimum is not always the minimum; see private/MmdCorrected.cpp. The other six are ours, built
 // over the quotient graph classes in include/oblio/. Either way this engine is the seam that reads
@@ -95,9 +96,10 @@ private:
     // Ours, not a vendored one, because the vendored orderings are optional: a default has to be an
     // ordering that is always there. That constraint has held since 2026-08-07 and still does.
     //
-    // `AmdCompacted` since 2026-08-21, replacing `MmdFlat`. The old entry's argument was that a
+    // `AmdCompacted`, replacing `MmdFlat`. The old entry's argument was that a
     // default is a bet on the cases nobody has run, so reproducing a reference beats a tie-break
-    // of our own. That argument is unchanged and `AmdCompacted` satisfies it: it returns `AMD_2`'s
+    // of our own. That argument is unchanged and `AmdCompacted` satisfies it: it returns the amd
+    // oracle's
     // permutation EXACTLY on every example, every square grid, and all 246 matrices in
     // benchmarks/matrices, compaction for compaction. What changed is that the amd branch now has
     // a layer that meets the bar, where in 2026-08-07 only the mmd one did.

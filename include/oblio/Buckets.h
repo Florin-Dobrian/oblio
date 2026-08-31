@@ -18,8 +18,8 @@
 namespace Oblio {
 
 // The degree buckets: one doubly linked list per degree, threaded through arrays of size n, so
-// that filing, unfiling and taking the head are all O(1). MMD spells these fwd/bwd and AMD
-// Next/Last. An ordered container cannot give O(1) removal from the middle, which is what a
+// that filing, unfiling and taking the head are all O(1). An ordered container cannot give O(1)
+// removal from the middle, which is what a
 // degree change needs and what happens far more often than a pick.
 //
 // The bodies are inline because they are single-statement pointer splices on the hot path, the

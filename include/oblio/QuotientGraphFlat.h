@@ -121,10 +121,10 @@ public:
 
     bool eliminatedAmd(std::int32_t u) const { return mWeight[u] == 0; }
 
-    // A driver may stampAmd into this same array rather than allocating one of its own, which is
-    // one array at two levels: the eliminator stamps at level `tag` and the refresh at level
-    // `mt = tag + md0`, one array and one counter serving both. One counter is what makes it
-    // safe, since two tags drawn from it can never be equal.
+    // A driver may stamp into this same array rather than allocating one of its own, which is one
+    // array at two levels: the eliminator stamps at the tag and supervariable detection above it,
+    // one array and one counter serving both. One counter is what makes it safe, since two values
+    // drawn from it can never be equal.
 
     std::int32_t advanceTagMmd()                        { return ++mTagMmd; }
     std::int32_t markMmd(std::int32_t u) const          { return mMarkMmd[u]; }
@@ -819,10 +819,11 @@ inline void QuotientGraphFlat::beginEliminationAmd(std::int32_t pivot, TaggedSca
     // (the prune rewrites the runs of C[pivot]'s members, and the pivot is not one of them), so no
     // copy and no scratch is needed to keep them alive across the passes that follow.
     //
-    // A CLIQUE DIES TWO WAYS AND THE TAGGED W MUST LEARN ABOUT BOTH. Aggressive absorption zeroes
-    // `markAmd[c]` in the driver; elimination-time absorption is this list. The amd branch writes
-    // both deaths into W, `Pe[e] = FLIP(me)` with `W[e] = 0`, and its scan then tests `we != 0` off
-    // the load it already needs for the value. The store rides on the walk that kills the clique,
+    // A CLIQUE DIES TWO WAYS AND THE TAGGED MARK ARRAY MUST LEARN ABOUT BOTH. Aggressive
+    // absorption zeroes `markAmd[c]` in the driver; elimination-time absorption is this list. The
+    // amd oracle writes both deaths into its mark array, flipping the owner and zeroing the value,
+    // and its scan then tests the value off the load it already needs. The store rides on the walk
+    // that kills the clique,
     // so one read of the entry records both facts.
     const std::int32_t* pivotIncidence     = mAdjIncSrc.data() + mSegment[pivot].srcPtr;
     const std::uint32_t pivotIncidenceSize = mSegment[pivot].incidenceSize;

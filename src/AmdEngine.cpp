@@ -153,10 +153,10 @@ void AmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
     // steps, so their sum is not bounded by n. A single check before both leaves the `tagAmd++` in
     // detection able to overflow a tag that entered the step at the ceiling. See docs/NEXT.md.
     //
-    // `AMD_2` ALSO TESTS `wflg < 2` HERE AND WE DO NOT, because that test is its INITIALIZATION.
-    // It calls `clear_flag(0, ...)` once at Amd.cpp:1350 to put `W` at 1 and `wflg` at 2, so the
-    // low test is what performs the setup. We do that setup in the declarations above, and the tag
-    // only ever climbs, so a value below 2 is unreachable and a test for one would be dead.
+    // A LOW TEST WOULD BE DEAD HERE, though the amd oracle has one. That test is its
+    // INITIALIZATION: it calls this same sweep once at startup to put the array at 1 and the tag
+    // at 2, so the low test is what performs the setup. We do that setup in the declarations
+    // above, and the tag only ever climbs, so a value below 2 is unreachable.
     const auto resetMarkAndTag = [&]() {
         if (tagAmd > tagCeilingAmd) {
             for (std::int32_t k = 0; k < static_cast<std::int32_t>(size); ++k)
@@ -307,9 +307,8 @@ void AmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
             // `degrees[u]` taking the sum of both back out. The adjacency half is SPENT at this
             // line, which is what leaves the tag array holding nothing but tags from here on.
             //
-            // THE PARTIAL BOUND GOES INTO `degrees` AND NOT BACK INTO `markAmd`, which is `AMD_2`'s
-            // arrangement: `Degree[i] = MIN(Degree[i], deg)` there, read back after detection as
-            // `Degree[i] + degme - nvi`. It is not a preference. A sweep of the tag array has to be
+            // THE PARTIAL BOUND GOES INTO `degrees` AND NOT BACK INTO `markAmd`, which is the amd
+            // oracle's arrangement too. It is not a preference. A sweep of the tag array has to be
             // possible between the two terms that raise the tag, and a live vertex's bound sitting
             // in that array is exactly what a sweep would destroy. See the entry in docs/NEXT.md.
             //

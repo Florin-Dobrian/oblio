@@ -78,7 +78,7 @@ template<class Val> static void checkOrderFn(const SparseMatrix<Val>& A, OrderFn
 //
 // ZERO MEANS NOT TRACKED, and then that figure alone is skipped. `MmdChained` tracks neither:
 // chained storage ends a clique at a terminator and keeps no size, so subtracting a length on death would
-// need a per-vertex array in the one file whose purpose is genmmd's array economy.
+// need a per-vertex array in the one file whose purpose is the mmd oracle's array economy.
 template<class Val> static void checkSameOrderFn(const SparseMatrix<Val>& A, Ordering m,
                                                  OrderFn ref, OrderFn f, const std::string& lbl){
     OrderEngine a(m); Permutation pa;
@@ -94,8 +94,8 @@ template<class Val> static void checkSameOrderFn(const SparseMatrix<Val>& A, Ord
         same = (r.numBornCliqueMembers() == s.numBornCliqueMembers());
     ck(same, lbl); }
 // TWO ENUMERATORS, ONE PERMUTATION. The mmd branch's oracle: our drivers must return exactly what
-// `MmdCorrected` returns, which is genmmd with its degree scale repaired. `MmdVendored` keeps the
-// original and is reference only, so nothing here compares against it.
+// `MmdCorrected` returns, which is `MmdVendored` with its degree scale repaired. `MmdVendored`
+// keeps the original and is reference only, so nothing here compares against it.
 template<class Val> static void checkSameOrder(const SparseMatrix<Val>& A, Ordering m, Ordering r,
                                                const std::string& lbl){
     OrderEngine em(m); Permutation pm;
@@ -141,10 +141,10 @@ int main(){
       checkOrder(A,Ordering::AmdFlat,"arrow 6x6      : AmdFlat valid");
       // THE THREE NON-ENUM LAYERS, each of which must reproduce its original entry for entry,
       // which is the whole of what makes it a measurement rather than a second ordering. MmdChained
-      // is MmdFlat on genmmd's clique storage and AmdCompacted is AmdFlat on AMD_2's, both
-      // permanent; MmdCompacted is MmdFlat on the production layout and is transitional,
-      // carrying the amd folds onto
-      // the mmd side. The two AMD B layers that used to be checked here were retired on 2026-08-16 when
+      // is MmdFlat on the mmd oracle's clique storage and AmdCompacted is AmdFlat on the amd
+      // oracle's, both permanent; MmdCompacted is MmdFlat on the production layout and is
+      // transitional, carrying the amd folds onto the mmd side. The two AMD B layers that used to
+      // be checked here were retired on 2026-08-16 when
       // their schedule moved into their originals.
       //
       // Validity is asserted once per layer, here, and sameness on every matrix below. Sameness

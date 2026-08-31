@@ -1,5 +1,28 @@
 # NEXT: the mmd and amd branches are being aligned against each other; one regression is open
 
+## DONE 2026-08-31: ordering caps its size at `2^31 - 3`, and the failure it prevents was misread
+
+`MAX_ORD_SIZE` in `Types.h`, checked as the FIRST line of `orderMmdFlat`, `orderMmdCompacted`,
+`orderAmdFlat` and `orderAmdCompacted` in `OrderEngine`, returning `false` before the two
+permutation maps are sized. Six code lines.
+
+The number is the top of the int32 range less the two values the amd mark array reserves below the
+tag, which put its floor at 2. At the cap the amd ceiling is exactly 2 and the mmd ceiling is 1, one
+above its floor of 0, so amd binds and one constant serves both.
+
+**AND THE FAILURE AT `n = 2^31 - 1` IS NOT WHAT THIS FILE SAID IT WAS.** It was recorded as an
+ordering that is correct and never finishes. It is undefined behavior on the first step: the ceiling
+is 0, the sweep restores the tag to 2, and 2 is above the ceiling the test just rejected, so the
+guard returns a state it has already refused and the next raise overflows. A guard that cannot
+establish its own postcondition does not degrade, it breaks. The corrected derivation is in the
+2026-08-30 amd tag ceiling entry below.
+
+**WHAT IS NOT COVERED, and it is open work rather than oversight.** A DIRECT CALL to the free
+functions, `Oblio::orderMmdFlat(colPtr, rowIdx).order()` and its siblings, bypasses `OrderEngine`
+and is unguarded; five harnesses and `test_order.cpp` call that way. `orderMmdChained` is left out
+because that class has no tag guard at all and a cap there would imply protection it does not have.
+The oracles and `orderNatural` are out by design.
+
 ## DONE 2026-08-30: the mmd tag has a guard, and two dead raises are gone from the elimination path
 
 `resetMarkAndTagMmd` is a method on `QuotientGraphFlat` and `QuotientGraphCompacted`, called from
@@ -209,9 +232,10 @@ on the previous code gave six runtime errors including the `++stampAmd` overflow
 read 0 everywhere, all 270 counter rows are identical, and `make scale2d` and `make scale3d` sit
 inside the harness floor with every `nnzL` column unchanged.
 
-**WHAT IS STILL OPEN FROM THIS ENTRY:** the range analysis below, which recommends computing the
-margin in `std::size_t` and REJECTING a size that leaves no positive ceiling; and mmd, which has no
-guard at all. Neither was touched.
+**WHAT WAS STILL OPEN FROM THIS ENTRY IS NOW CLOSED, both on 2026-08-30 and 2026-08-31.** The range
+analysis below is corrected and answered by `MAX_ORD_SIZE` rather than by a wider type, and mmd has
+a guard for two of the three classes. `QuotientGraphChained` still has none, and the cap does not
+reach a direct call to the free driver functions; both are named in the entries at the head.
 
 The finding as it read before the fix follows, because the derivation and the measurements are the
 part worth keeping.
@@ -301,22 +325,57 @@ The probe is: force the tag to start at the ceiling and the sweep to reset there
 ladder, and compare permutations against the reference. A wrong placement shows as every
 permutation changing, which is how option 1's naive form was caught.
 
-### The range, because it bounds how much any of this buys
+### The range, because it bounds how much any of this buys, CORRECTED and DONE 2026-08-31
 
-`MAX_IDX` is `INT32_MAX`, so n reaches `2^31 - 1` and at that n the margin is zero:
-`resetMarkAndTag` fires before every one of n eliminations and sweeps n entries, an O(n^2) ordering
-that is correct and never finishes. `INT32_MAX - 2n` is negative there and the subtraction itself
-overflows.
+**THE FAILURE MODE STATED HERE WAS WRONG.** It read: at `n = 2^31 - 1` the margin is zero, so the
+guard fires before every one of n eliminations and sweeps n entries, "an O(n^2) ordering that is
+correct and never finishes". It is neither correct nor slow. THE GUARD CANNOT ESTABLISH ITS OWN
+POSTCONDITION at that n: the ceiling is 0, the sweep restores the tag to its FLOOR of 2, and 2 is
+above the ceiling the test has just rejected. So the guard returns and the next raise overflows on
+the FIRST step, with the scan's `tagAmd + |C[c] - C[p]|` able to overflow before that. Undefined
+behavior immediately, not a slow ordering, and nothing about it would ever be observed as a hang.
+
+The three-band picture below survives the correction and is why the fix is a cap rather than
+arithmetic.
 
 ```
 n up to ~1e8      the tag never approaches the ceiling; today
 n ~1e8 to ~1e9    the sweep genuinely fires; the band where the margin has to be right
-n above ~1e9      the margin arithmetic breaks and the ordering is unusable regardless
+n above ~1e9      the margin collapses toward the floor and the ordering is unusable regardless
 ```
 
-`AMD_2` has the same three bands and the same collapse. It buys the middle one and no more. So the
-margin should be computed in `std::size_t` and a size that leaves no positive ceiling REJECTED, as
-`checkIndexRange` rejects an out-of-range size, rather than silently sweeping every step.
+**THE FIX IS A SIZE CAP, `MAX_ORD_SIZE` IN `Types.h`, at `2^31 - 1 - 2`.** Not a wider type. The
+margin arithmetic is already exact in `std::int32_t` for every n at or below the cap, so computing
+it in `std::size_t` would buy nothing that the cap does not.
+
+```
+2^31 - 1     the top of the int32 range
+     - 2     the two values the amd mark array reserves BELOW the tag, 0 absorbed and 1 live-unseen,
+             which put its floor at 2
+```
+
+AMD IS WHAT BINDS. At the cap the amd ceiling is exactly 2, sitting on its floor, and the mmd
+ceiling is 1, one above its floor of 0. Mmd would tolerate one size more, spending its two reserved
+values as `NIL` below zero and `GONE` at the top rather than both at the bottom; one constant at the
+tighter value serves both.
+
+Checked in the four production entry points in `OrderEngine`, returning `false`, as the FIRST line
+of each so the two permutation maps are never sized. At the cap each `assign` is 8 GB, and a caller
+that gets `false` never reads them.
+
+**WHAT IT DOES NOT COVER, all deliberate.**
+
+- `orderMmdChained`, since that class has no tag guard at all; its limit is lower and unmeasured.
+- The three oracle entry points, whose limits are their own and not derived from our floors.
+- `orderNatural`, which has no tag array.
+- ANY DIRECT CALL to the free functions, `Oblio::orderMmdFlat(colPtr, rowIdx).order()` and its four
+  siblings, which bypass `OrderEngine` entirely. `production.cpp`, `order_profile.cpp`,
+  `order_timing.cpp`, `sweep.cpp` and `test_order.cpp` all call that way. So the cap protects the
+  SOLVER PATH and not the algorithm, and closing that is open work.
+
+**Forced, since nothing reaches the cap.** With `MAX_ORD_SIZE` pinned to 100 on a throwaway copy, a
+path graph at n = 100 orders under all six orderings and at n = 101 exactly the four refuse, with
+`MmdChained` and `Natural` unaffected and the permutation left unsized on the refusals.
 
 ### And mmd had no guard at all, DONE for two classes on 2026-08-30
 

@@ -3,8 +3,8 @@
 // AmdEngine.h - approximate minimum degree, over any of our clique stores.
 //
 // ONE ENGINE, TWO STORES. Instantiated on `QuotientGraphFlat` it runs over the append-only arena,
-// and on `QuotientGraphCompacted` over `AMD_2`'s pooled workspace with its free cursor and its
-// compaction. They are the same algorithm and MUST return the same permutation, entry for entry,
+// and on `QuotientGraphCompacted` over a pooled workspace with a free cursor and a compaction.
+// They are the same algorithm and MUST return the same permutation, entry for entry,
 // which is what makes the pair worth having: neither can be checked against the other unless both
 // are reachable at once.
 //

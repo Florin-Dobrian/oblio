@@ -17,7 +17,7 @@
 // The store is what the name selects. This one is the unbounded member of the pair, and it is what
 // makes the bounded one checkable: `AmdCompacted` runs the same engine over a pooled workspace and
 // must return this file's permutation entry for entry. It is also the amd branch's reference
-// against the vendored `AMD_2`, which `make amdorder` asserts over 38 cases.
+// against the amd oracle, which `make amdorder` asserts over 38 cases.
 
 namespace Oblio {
 

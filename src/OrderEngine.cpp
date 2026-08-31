@@ -4,6 +4,7 @@
 #include "oblio/MmdChained.h"
 #include "oblio/MmdCompacted.h"
 #include "oblio/AmdCompacted.h"
+#include "oblio/Types.h"   // MAX_ORD_SIZE, the ordering size cap
 
 #include <vector>
 
@@ -153,6 +154,10 @@ bool OrderEngine::orderMmdFlat(std::size_t size,
                             const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,
                             Permutation& P) const {
+    // FIRST, BEFORE THE TWO MAPS ARE SIZED. At the cap each `assign` is 8 GB, and a caller that
+    // gets `false` never reads P, so there is nothing to be gained by building it. See Types.h.
+    if (size > MAX_ORD_SIZE) return false;   // the tag guard would have no room
+
     P.mOldToNew.assign(size, 0);
     P.mNewToOld.assign(size, 0);
     if (size == 0) return true;
@@ -202,6 +207,10 @@ bool OrderEngine::orderAmdFlat(std::size_t size,
                             const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,
                             Permutation& P) const {
+    // FIRST, BEFORE THE TWO MAPS ARE SIZED. At the cap each `assign` is 8 GB, and a caller that
+    // gets `false` never reads P, so there is nothing to be gained by building it. See Types.h.
+    if (size > MAX_ORD_SIZE) return false;   // the tag guard would have no room
+
     P.mOldToNew.assign(size, 0);
     P.mNewToOld.assign(size, 0);
     if (size == 0) return true;
@@ -243,6 +252,10 @@ bool OrderEngine::orderMmdCompacted(std::size_t size,
                             const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,
                             Permutation& P) const {
+    // FIRST, BEFORE THE TWO MAPS ARE SIZED. At the cap each `assign` is 8 GB, and a caller that
+    // gets `false` never reads P, so there is nothing to be gained by building it. See Types.h.
+    if (size > MAX_ORD_SIZE) return false;   // the tag guard would have no room
+
     P.mOldToNew.assign(size, 0);
     P.mNewToOld.assign(size, 0);
     if (size == 0) return true;
@@ -261,6 +274,10 @@ bool OrderEngine::orderAmdCompacted(std::size_t size,
                             const std::vector<std::size_t>&  colPtr,
                             const std::vector<std::int32_t>& rowIdx,
                             Permutation& P) const {
+    // FIRST, BEFORE THE TWO MAPS ARE SIZED. At the cap each `assign` is 8 GB, and a caller that
+    // gets `false` never reads P, so there is nothing to be gained by building it. See Types.h.
+    if (size > MAX_ORD_SIZE) return false;   // the tag guard would have no room
+
     P.mOldToNew.assign(size, 0);
     P.mNewToOld.assign(size, 0);
     if (size == 0) return true;

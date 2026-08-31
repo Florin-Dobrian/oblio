@@ -32,6 +32,26 @@ inline constexpr std::int32_t NIL = -1;
 inline constexpr std::size_t MAX_IDX =
     static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max());
 
+// THE ORDERING SUBSYSTEM CAPS SIZE LOWER THAN MAX_IDX, by two, because its mark arrays reserve
+// values around the tag and the guard that keeps the tag in range needs somewhere to land.
+//
+//     2^31 - 1     the top of the std::int32_t range
+//          - 2     the two values the amd mark array reserves BELOW the tag, 0 for an absorbed
+//                  clique and 1 for a live unseen one, which put the tag's floor at 2
+//
+// The amd tag ceiling is `INT32_MAX - n`, since a step can raise the tag by n. AT n = MAX_IDX THAT
+// CEILING IS ZERO, BELOW THE FLOOR, so the sweep hands back a tag of 2 that the test has already
+// rejected, and the raise that follows overflows on the first step. Not a slow ordering: undefined
+// behavior immediately.
+//
+// AMD IS WHAT BINDS. The mmd array spends its two reserved values differently, NIL below zero and
+// GONE at the top, so its tag rests at 0 and it would tolerate one size more. One constant at the
+// tighter value serves both.
+//
+// `QuotientGraphChained` is NOT covered by this number. It has no tag guard at all, so its true
+// limit is lower and unmeasured; the cap is necessary there and not sufficient.
+inline constexpr std::size_t MAX_ORD_SIZE = (std::size_t{1} << 31) - 1 - 2;
+
 // Guard a size or count against the index range. Throws std::length_error if `size` exceeds
 // MAX_IDX, naming `what` (e.g. "Vector size", "SparseMatrix nnz") in the message; otherwise returns
 // `size` unchanged, so it can guard an init-list member directly:

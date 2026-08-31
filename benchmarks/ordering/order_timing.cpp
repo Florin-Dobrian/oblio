@@ -228,7 +228,7 @@ static constexpr double targetMs = 300.0;
 // permutation by construction, so its fill column carries nothing and its TIME column is the price.
 // It is not in `Ordering`, not in the library's source list and not in the examples: it is reached
 // here as a free function, so nothing outside this directory builds it. See src/MmdChained.cpp,
-// docs/DESIGN_DECISIONS.md (2026-08-16), and the section "The
+// notes/DESIGN_DECISIONS.md (2026-08-16), and the section "The
 // vendored storage scheme, and what it is worth" in experiments/ordering/README.md for what is
 // being measured.
 using OrderFn = ElmOrder(*)(const std::vector<std::size_t>&,
@@ -237,7 +237,7 @@ using OrderFn = ElmOrder(*)(const std::vector<std::size_t>&,
 struct Method {
     std::string name;
     // THE THREE-LETTER TAG THE SCALE TABLES PRINT. `Cor`, `Vnd`, `Flt`, `Chn`, `Com`, `Raw`, per
-    // the 2026-08-21 naming entry in docs/DESIGN_DECISIONS.md. The full name is what prose and the
+    // the 2026-08-21 naming entry in notes/DESIGN_DECISIONS.md. The full name is what prose and the
     // aggregate tables use; a per-size table is a legend-driven table, as `nnzL` and `n` already
     // are, and a header of `MmdCompacted nnzL` in every column is unreadable. The BRANCH is not in
     // the tag because it is not in the table either: a run is mmd or amd, never both, and the
@@ -255,7 +255,7 @@ struct Method {
     // eliminator schedule, and the schedule won: permutation-identical and faster on both families
     // once the tagged W removed the array crossing that had been paying for it, so it moved into
     // AMD1 and AMD2 and the files went. AmdCompacted, which carried the array folds, went with
-    // them, AmdFlat now being identical to it. See docs/DESIGN_DECISIONS.md (2026-08-16).
+    // them, AmdFlat now being identical to it. See notes/DESIGN_DECISIONS.md (2026-08-16).
     bool        mmd3b = false;
     OrderFn     fn = nullptr;    // a B layer reached directly; see below
 };
@@ -541,7 +541,7 @@ int main(int argc, char** argv) {
     // tracking the same growth, so if both series show a trend it is the code, and if only one
     // does it is the addressing. That distinction is what this ladder exists to support, the amd
     // branch's growth having turned out to be a memory-behaviour question; see
-    // docs/DESIGN_DECISIONS.md (2026-08-16).
+    // notes/DESIGN_DECISIONS.md (2026-08-16).
     //
     // 1025 AND 1601 EXTEND BOTH SERIES BY ONE, 2026-08-16, and they were added for a specific
     // reason rather than for range: at 801 a side our working set crosses the last level and the

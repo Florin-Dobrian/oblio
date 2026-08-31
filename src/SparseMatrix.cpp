@@ -23,7 +23,7 @@ SparseMatrix<Val>::SparseMatrix(std::size_t size,
     //
     // Note mRowIdx above, the MEMBER: the parameter it was moved from is empty by this point, so an
     // initializer that read `rowIdx` would sum an empty vector and set mNnz to zero, silently. See
-    // the 2026-08-13 entry in docs/DESIGN_DECISIONS.md.
+    // the 2026-08-13 entry in notes/DESIGN_DECISIONS.md.
     checkIndexRange(mSize, "SparseMatrix size");
     checkIndexRange(mNnz, "SparseMatrix nnz");
 }

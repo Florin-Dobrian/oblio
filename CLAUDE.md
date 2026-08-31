@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 Operating contract for the Oblio refactoring effort. Auto-loaded by Claude Code
-each session, keep it lean. Rationale lives in docs/DESIGN_DECISIONS.md, not here.
+each session, keep it lean. Rationale lives in notes/DESIGN_DECISIONS.md, not here.
 
 ## What this is
 
@@ -71,15 +71,15 @@ either a reference or a target.
 ## Invariants (breaking one is a bug)
 
 These live here, not behind a link, because only this file loads every session.
-Conventions (style preferences) are imported below from docs/CODING_RULES.md
-(code) and docs/WRITING_RULES.md (prose).
+Conventions (style preferences) are imported below from CODING_RULES.md
+(code) and WRITING_RULES.md (prose).
 
 - **Port, don't rewrite.** Carry 0.9's algorithm over unchanged. Changing *what*
   is computed is a rewrite, a separate opt-in track, not part of a port. Every PoC
   bug came from reimplementing a 0.9 algorithm instead of porting it. Following
   10.12's *design* is not a rewrite: shape and decomposition may track 10.12, but
   *what* is computed still matches 0.9.
-- **The test suite and docs/TESTING_SPECIFICATION.md move together.** Adding, removing or
+- **The test suite and notes/TESTING_SPECIFICATION.md move together.** Adding, removing or
   changing what a test asserts is a change to both, in the same step. The specification is the
   description of the suite, so a test it does not describe is a test nobody can find, and a
   description with no test behind it is a claim we are not making good on. This is an invariant
@@ -112,7 +112,7 @@ Conventions (style preferences) are imported below from docs/CODING_RULES.md
 
 ## Active design constraints
 
-Decisions that shape code written now. Full rationale and history in docs/DESIGN_DECISIONS.md;
+Decisions that shape code written now. Full rationale and history in notes/DESIGN_DECISIONS.md;
 these are the always-on summary.
 
 - **One `Val` template** for scalar type, `double` and `std::complex<double>`.
@@ -126,19 +126,19 @@ these are the always-on summary.
 ## Coding rules (imported)
 
 Loaded every session via import so conventions stay consistent. Edit the file, not
-this line. (Path is relative to this file; CODING_RULES.md now lives in docs/, so
-the import is `@docs/CODING_RULES.md`, a wrong path imports nothing, silently.)
+this line. (Path is relative to this file; CODING_RULES.md sits beside it at the top
+level, so the import is `@CODING_RULES.md`, and a wrong path imports nothing, silently.)
 
-@docs/CODING_RULES.md
+@CODING_RULES.md
 
 ## Writing rules (imported)
 
 Loaded every session via import so prose conventions stay consistent across the
-documentation. Edit the file, not this line. (Path is relative to this file;
-WRITING_RULES.md lives in docs/, so the import is `@docs/WRITING_RULES.md`; a wrong
-path imports nothing, silently.)
+notes. Edit the file, not this line. (Path is relative to this file; WRITING_RULES.md
+sits beside it at the top level, so the import is `@WRITING_RULES.md`, and a wrong path
+imports nothing, silently.)
 
-@docs/WRITING_RULES.md
+@WRITING_RULES.md
 
 ## Build
 
@@ -234,7 +234,7 @@ the public count before the 2026-08-21 retirement and was left behind by it, and
 count until `MmdCorrected` landed. Neither is a transcription slip, and read together they said the
 public build has MORE assertions than the private one, which is impossible and went unremarked.
 Nothing detects that: every figure was internally
-consistent and the suite passes whatever a document claims. `docs/TESTING_SPECIFICATION.md` carries
+consistent and the suite passes whatever a document claims. `notes/TESTING_SPECIFICATION.md` carries
 the full account. **The check is to run the suites and count, which is one command**, and it is
 worth doing whenever these numbers are quoted rather than trusting them.
 
@@ -346,7 +346,7 @@ CLion. One rule governs the pair: **one IDE per project root, and never two at t
 CLion's root is the repo root and PyCharm's is `experiments/ordering/`, so the two `.idea/`
 directories never meet, and CLion already lists that folder under `excludeRoots`. Do not open the
 repo root in PyCharm; it is CLion's. The reasoning, and what to do if Python spreads to other
-experiments, is the 2026-07-31 entry in docs/DESIGN_DECISIONS.md.
+experiments, is the 2026-07-31 entry in notes/DESIGN_DECISIONS.md.
 
 Setup, confirmed on alpamayo:
 
@@ -367,22 +367,22 @@ it would drop a `.venv/` that this tree's `.gitignore` does not cover.
 Moving the root later is two steps, open the new folder and delete the old `.idea/`, and no source
 file, Makefile rule or README reference is affected by it.
 
-## Docs
+## Notes and rules
 
-- **CLAUDE.md** (this file), operating contract + doc index.
-- **docs/PORTING_LEDGER.md**, per-unit porting status. Read first after a context gap.
-- **docs/TODO.md**, work we intend to do that is not a porting question. The ledger asks whether a
+- **CLAUDE.md** (this file), operating contract + index.
+- **notes/PORTING_LEDGER.md**, per-unit porting status. Read first after a context gap.
+- **notes/TODO.md**, work we intend to do that is not a porting question. The ledger asks whether a
   0.9 unit is carried over, which is a question with an end; TODO holds what outlives it, including
   things neither reference does. Straddling items live in TODO and the ledger points at them.
-- **docs/TESTING_SPECIFICATION.md**, what the suite covers, stated independently of the test
+- **notes/TESTING_SPECIFICATION.md**, what the suite covers, stated independently of the test
   sources. Tests are written from it, not recovered from it, so an unsupported combination is a
   stated expectation rather than a missing test. Currently a catalog of the suite as it stands.
-- **docs/CODING_RULES.md**, conventions a linter can't enforce. Imported above, so
+- **CODING_RULES.md**, conventions a linter can't enforce. Imported above, so
   always loaded. Language-general.
-- **docs/WRITING_RULES.md**, prose and documentation conventions (no em-dashes,
+- **WRITING_RULES.md**, prose and documentation conventions (no em-dashes,
   ASCII only, American spelling, minimal formatting). Imported above, so always
   loaded. The prose counterpart to CODING_RULES.md.
-- **docs/DESIGN_DECISIONS.md**, full rationale, history, dates, open questions. Read on
+- **notes/DESIGN_DECISIONS.md**, full rationale, history, dates, open questions. Read on
   demand; the code-shaping subset is summarized above under Active design
   constraints. When adding an entry, date it with **today's actual date read from
   context** (never copied from the entry above); the git commit date is the
@@ -392,7 +392,7 @@ file, Makefile rule or README reference is affected by it.
 - **CONTRIBUTING.md / CHANGELOG.md**, stubs, ahead of need. Fill CONTRIBUTING on
   going public; start CHANGELOG at the first tagged release.
 - **README.md**, public-facing overview.
-- **archive/sparse_factorization.md**, the algorithm notes: elimination forest,
+- **notes/SPARSE_FACTORIZATION.md**, the algorithm notes: elimination forest,
   symbolic factorization, supernodes and amalgamation, with worked examples. **Current
   guidance, despite the folder.** Actively maintained, and the code cross-references it
   by section number (`SymFactorEngine.h` cites 4.6). Its home is under review.
@@ -407,6 +407,6 @@ file, Makefile rule or README reference is affected by it.
   own README is the durable record and holds both alignment ledgers. Beside it, `MmdFlat.md` and
   `AmdFlat.md` record the two alignments ITERATION BY ITERATION: what each step established,
   discovered and decided, the wrong turns at full length, and the defects each found in the layer
-  below. Narrative, read once. They live here rather than under docs/ because they are the record
+  below. Narrative, read once. They live here rather than under notes/ because they are the record
   of experiment work, not guidance for a reader of the library. The README's method section is where the
   alignment procedure itself is written down, `REPORT.md` the measurements.

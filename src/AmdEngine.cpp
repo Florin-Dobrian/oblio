@@ -151,7 +151,7 @@ void AmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
     // raise is bounded by `maxCliqueWeight` and the second by the candidate count, each reaching n,
     // and they belong to DIFFERENT cliques, `maxCliqueWeight` being a maximum over all previous
     // steps, so their sum is not bounded by n. A single check before both leaves the `tagAmd++` in
-    // detection able to overflow a tag that entered the step at the ceiling. See docs/NEXT.md.
+    // detection able to overflow a tag that entered the step at the ceiling. See notes/NEXT.md.
     //
     // A LOW TEST WOULD BE DEAD HERE, though the amd oracle has one. That test is its
     // INITIALIZATION: it calls this same sweep once at startup to put the array at 1 and the tag
@@ -310,7 +310,7 @@ void AmdEngine<QuotientGraph>::compute(const std::vector<std::size_t>&  colPtr,
             // THE PARTIAL BOUND GOES INTO `degrees` AND NOT BACK INTO `markAmd`, which is the amd
             // oracle's arrangement too. It is not a preference. A sweep of the tag array has to be
             // possible between the two terms that raise the tag, and a live vertex's bound sitting
-            // in that array is exactly what a sweep would destroy. See the entry in docs/NEXT.md.
+            // in that array is exactly what a sweep would destroy. See the entry in notes/NEXT.md.
             //
             // AND IT IS THE ONE PLACE THE WIDE ACCUMULATOR MEETS A NARROW DEGREE. The stored degree
             // is a full one from an earlier step and this is two terms of three, so the two are

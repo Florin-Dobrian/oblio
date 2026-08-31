@@ -16,7 +16,7 @@
 //
 // **Three preconditions the solver requires and does not check**, which is what the conversion
 // below has to satisfy and the reason it is worth reading. They are stated in SparseMatrix.h and
-// tracked in docs/TODO.md under "Validate the input matrix":
+// tracked in notes/TODO.md under "Validate the input matrix":
 //
 //   FULL STORAGE. Both triangles, not one. A symmetric matrix stored as its lower triangle alone
 //   is a different matrix as far as the structural phases are concerned, and they read the pattern

@@ -3,7 +3,7 @@
 > **SUPERSEDED IN PART, 2026-08-15.** Every ordering TIME and every ratio against a vendored
 > routine in this document predates the encoding work of that date and understates our orderings
 > by roughly 20 to 30 percent. **Fill figures are unaffected**, every permutation and every nnz(L)
-> being identical. `docs/DESIGN_DECISIONS.md` (2026-08-15) has the account.
+> being identical. `notes/DESIGN_DECISIONS.md` (2026-08-15) has the account.
 
 `OrderEngine` calls a vendored AMD and a vendored MMD, and until now nothing in the port had
 looked inside either. Both are hard to read: MMD is translated Fortran with `goto` labels and
@@ -18,7 +18,7 @@ the one to read and the C++ is the one to trust; `make test` checks they have no
 ## The layers
 
 Each adds exactly one mechanism to the one before. The right column cites
-`archive/sparse_factorization.md`, where the prose lives.
+`notes/SPARSE_FACTORIZATION.md`, where the prose lives.
 
 | layer | adds | sections |
 |---|---|---|
@@ -59,7 +59,7 @@ throughout this file wherever the prose is walking through their code: their `eh
 `Elen` array, `mmdupd`'s per-clique loop. Element is their name for our clique, and it stands only
 inside those quotations, so that an explanation still matches the source it explains. Everywhere
 else, including our own comments and identifiers, it is clique. The rule is in
-`docs/WRITING_RULES.md`.
+`WRITING_RULES.md`.
 
 Our own identifiers all follow it as of 2026-08-20, when `element_tag`, `elementTag`,
 `element_members`, `elementMembers`, `is_element` and `isElement` were renamed in the mmd2, mmd3
@@ -743,7 +743,7 @@ move; the `- weight(u)` term inside the bound does, and it is the term that deci
 `amd2`, `Amd2` and `Amd2B` carried exactly this defect, subtracting the weight before the hash
 merge that grows it, and it was costing 3 to 9 percent of fill on grids. Found by aligning `amd3`
 against the vendored routine, where it is ledger entry 4, and fixed the same day;
-`docs/DESIGN_DECISIONS.md` (2026-08-08) carries the account. `amd1` and `Amd1B` genuinely cannot
+`notes/DESIGN_DECISIONS.md` (2026-08-08) carries the account. `amd1` and `Amd1B` genuinely cannot
 have it, having no live merges at all.
 
 Worth keeping as a lesson about this ledger rather than only as a correction. The sentence was
@@ -825,7 +825,7 @@ size and a cheaper subject for the nested-dissection argument.
 **Where the matrices come from, and what crosses the boundary.** They are not in the repository and
 they are not named in any rule here: the driver takes them as ARGUMENTS, exactly as
 `matrix_accuracy_cpp` does, because a Makefile naming another directory's data files is the case
-`docs/WRITING_RULES.md` warns about, nothing binding them and the path dying silently. With `data/`
+`WRITING_RULES.md` warns about, nothing binding them and the path dying silently. With `data/`
 empty, which is the ordinary state, it says so and exits clean. The one thing that does cross is an
 `#include` of the benchmark's reader, which is a compile-time dependency: if that header moves this
 stops building, loudly.
@@ -839,7 +839,7 @@ still what the vendored routine computes" and passes on any machine; a target wh
 on what somebody has downloaded into a gitignored directory would make it mean something else.
 
 **The amd side is the one to build next**, and unlike this one it should be expected to find
-something: `docs/NEXT.md` item 6 records `Amd3` and the vendored AMD differing on fill on a minority
+something: `notes/NEXT.md` item 6 records `Amd3` and the vendored AMD differing on fill on a minority
 of the 107-matrix performance set, once by 4 percent on `HB/bcsstk08`, and calls it a divergence the
 acceptance tests cannot see. `HB/bcsstk08` is in this run and matches on the mmd side.
 
@@ -1113,7 +1113,7 @@ only when it changes the head of the minimum bucket, which no 2D grid does at an
 side, and a 3D grid at 16 does.
 
 **Entry 4's nature read `convention` in the prototype headers until 2026-08-09**, where this
-ledger, `AMD3.md` and `docs/DESIGN_DECISIONS.md` have all said DEFECT since the day it closed.
+ledger, `AMD3.md` and `notes/DESIGN_DECISIONS.md` have all said DEFECT since the day it closed.
 The column is corrected there and the correction is dated rather than made silently: append-only
 protects the record from being rewritten as a tidy summary afterwards, not from being wrong about
 itself. Worth knowing that the copy called authoritative had drifted from its mirrors in the one
@@ -1147,7 +1147,7 @@ purpose, the hash being a filter and never the decision.
 **It changes no output, which is why nothing here could see it.** Twins collide under any function
 of the pattern, so the merges were the vendored routine's throughout. The prototypes carry the
 identical key in both twins, so the twin check compared two files wrong the same way and the
-prototype-against-production check inherited it. `docs/DESIGN_DECISIONS.md` (2026-08-09) carries
+prototype-against-production check inherited it. `notes/DESIGN_DECISIONS.md` (2026-08-09) carries
 the full account of why five separate oracles were blind, and it is the more general form of what
 entry 7 showed.
 
@@ -1254,7 +1254,7 @@ in production `Amd2` and `Amd2B` as well, where it had been costing fill since t
 **SUPERSEDED A SECOND TIME, 2026-08-09.** The corrected AMD2 column below is itself now out of
 date: ledger entry 8 fixed the hash key, which moves `Amd2`'s tie-break and therefore its fill,
 to 11900, 199591 and 450190 at 32, 100 and 140 a side. `Amd3` is unaffected, its permutation
-being unchanged. See `docs/DESIGN_DECISIONS.md` (2026-08-09).
+being unchanged. See `notes/DESIGN_DECISIONS.md` (2026-08-09).
 
 ```
 grid        AMD (vendored)    AMD1      AMD2 before    AMD2 after
@@ -2403,7 +2403,7 @@ so our arena has never been compared against that.
 That distinction mattered on 2026-08-16, when the vendored AMD turned out to cost more per vertex at
 power-of-two grid sides while genmmd, `MMD3` and `AMD3` did not. Storage was the first suspect and
 this section was cited in support of an explanation it cannot support. See
-`docs/DESIGN_DECISIONS.md` (2026-08-16, later).
+`notes/DESIGN_DECISIONS.md` (2026-08-16, later).
 
 
 > **ANSWERED 2026-08-15, AND THE ANSWER IS NO.** This section was written while the measurements
@@ -2423,7 +2423,7 @@ this section was cited in support of an explanation it cannot support. See
 > `Mmd3B` therefore stays, as the standing equal-encoding comparison against the vendored storage.
 > Everything below about the MECHANISM stands and is worth reading: the chaining, the worked 5x5
 > example, the entry counts, the peak-live table and the two failed experiments. Only the
-> attribution of time to placement is withdrawn. `docs/DESIGN_DECISIONS.md` (2026-08-15).
+> attribution of time to placement is withdrawn. `notes/DESIGN_DECISIONS.md` (2026-08-15).
 
 Both vendored routines keep their whole quotient graph in ONE array the size of the input pattern,
 and neither allocates anything for cliques. We keep two arenas and allocate a second pattern's
@@ -4873,7 +4873,7 @@ amd1 at every grid size by 1 to 3 percent rather than losing to it: 11900 agains
 side, 199386 against 201856 at 100, 444191 against 455472 at 140. So the two extras are a net
 gain on fill and the coarser-supervariable cost this section describes was the filing, not the
 supervariables. Found by aligning `amd3` against the vendored routine, where the same timing is
-ledger entry 4; `docs/DESIGN_DECISIONS.md` (2026-08-08) carries it. The table below is kept as
+ledger entry 4; `notes/DESIGN_DECISIONS.md` (2026-08-08) carries it. The table below is kept as
 the record of the run that produced it.
 
 **And superseded a second time, 2026-08-09**, by ledger entry 8: the hash key fix moves
@@ -5846,7 +5846,7 @@ matter, and the answer turned out not to be an allocator. `A[u]` and `I[u]` are 
 source of `reach(u)`, an elimination destroys one for each it creates, and so their sum never
 exceeds `u`'s original degree: the pair fits in one block sized once from the pattern, and there is
 nothing left to allocate per list or to put on an arena. Section 5.3 of
-`archive/sparse_factorization.md` carries the argument and 5.15 records that both vendored codes
+`notes/SPARSE_FACTORIZATION.md` carries the argument and 5.15 records that both vendored codes
 rely on it. The rest of this section stands: the compaction really is an artifact of a fixed
 caller-supplied workspace, and it really should not be ported. What was wrong was reading the whole
 of `Iw` that way, when only the pool around a vertex's block is archaeology.
@@ -6274,7 +6274,7 @@ and the bounded side costs
 
 So the ratio between them is the average clique size, which grows with fill. The approximation is
 cheapest to skip on a sparse graph with tiny cliques and pays most on exactly the matrices where the
-ordering is expensive. Section 5.13 of `archive/sparse_factorization.md` makes the same point from
+ordering is expensive. Section 5.13 of `notes/SPARSE_FACTORIZATION.md` makes the same point from
 the reuse side: `|C[c] - C[pivot]|` depends on the clique and not on the vertex, so one number
 serves every vertex naming it, where a union cannot be decomposed that way at all.
 
@@ -6510,7 +6510,7 @@ rather than describing each line on its own: the modulus must not divide the str
 stride is the cheapest way to hold it. What it was costing, on the same graphs and for the same
 merges, was 19.0 pairs tested per pivot at 140 a side against the vendored routine's 0.333 and
 155.3 at 26 cubed against its 0.484; the amd section's entry 8 has the account and
-`docs/DESIGN_DECISIONS.md` (2026-08-09) has why nothing here could see it.
+`notes/DESIGN_DECISIONS.md` (2026-08-09) has why nothing here could see it.
 
 **And the property that licenses all of it is one-directional:**
 
@@ -6635,7 +6635,7 @@ passes is therefore bound-then-hash and never the reverse.
 **What it costs.** A key is `|A[u]| + |I[u]|` per member of `C[p]`. A comparison is the same again
 per pair tested. The bucket loop is quadratic in bucket size, which is what the key's construction
 works to avoid, and it is also why AMD2's tag counter has no clean quadratic bound (see item 4 of
-the ordering questions in `docs/TODO.md`).
+the ordering questions in `notes/TODO.md`).
 
 **And it is opportunistic rather than exhaustive.** The pass runs over the reached set at each
 iteration, so it finds pairs that are indistinguishable AT THAT MOMENT and both present. A pair that
@@ -6699,7 +6699,7 @@ against aggressive absorption's 1, and still fills 7 percent worse and orders 65
 than our AMD1, which has neither. Every matrix behind those numbers is a grid, which is where a
 tie-break decides almost every pick.
 
-Section 5.5 of `archive/sparse_factorization.md` states the same fork in one place, since a reader
+Section 5.5 of `notes/SPARSE_FACTORIZATION.md` states the same fork in one place, since a reader
 meeting supervariables there would otherwise take hashing to be the definition rather than one of
 two routes.
 
@@ -6841,7 +6841,7 @@ the restore, against a gain of one fewer array touched in the clique walk. The s
 out about even and lands on one array instead of two, which is the reason to expect anything at all.
 Whether it nets out is a measurement, and this is precisely the shape the tree has misjudged three
 times: a schedule change that saves visits and adds a pass. See the footprint trade in
-`docs/DESIGN_DECISIONS.md` (2026-08-16).
+`notes/DESIGN_DECISIONS.md` (2026-08-16).
 
 ### What this decides about the five folds
 
@@ -7325,7 +7325,7 @@ INCONCLUSIVE, not negative**, and the way to tell them apart is to know what gra
 allocator works at before choosing the amount. Two rounds went on other hypotheses first.
 
 It also refutes this section's own conclusion that our separate allocations buy immunity: they do
-not, being page aligned and page rounded once large. See `docs/DESIGN_DECISIONS.md` (2026-08-17).
+not, being page aligned and page rounded once large. See `notes/DESIGN_DECISIONS.md` (2026-08-17).
 
 **And cachegrind now runs in the sandbox**, installed 2026-08-16. Instruction counts and data
 references are exact and machine-independent, so this whole class of question no longer needs
@@ -7376,7 +7376,7 @@ where the whole working set fits in L2.
 
 What it left was cost per visit, and the answer turned out to be two random probes per clique
 visit, `mCliquePtr[c]` and `mCliqueSize[c]`, which `AMD_2` does not make at all: an element takes
-over the `Pe` and `Len` of the variable that formed it. See `docs/DESIGN_DECISIONS.md` (2026-08-16).
+over the `Pe` and `Len` of the variable that formed it. See `notes/DESIGN_DECISIONS.md` (2026-08-16).
 
 ### The lesson about the instrument, not the result
 
@@ -7508,7 +7508,7 @@ That is only true because every branch now files at the TRUE DEGREE. While the m
 the degree plus one the bucket index reached `n`, the head range was one value too long, and no
 arrangement of the two sentinels covered it: putting `OUTMATCHED` at the bottom made it collide
 there instead of overflow. See `private/MmdCorrected.cpp` and the 2026-08-23 entry in
-`docs/DESIGN_DECISIONS.md`.
+`notes/DESIGN_DECISIONS.md`.
 
 ### The two sentinels are equality-only, and that is what let them move
 
@@ -7647,7 +7647,7 @@ which is the same discipline written as an operation.
 **ONE FALSE FRIEND.** `FLIP` appears in both codes and in three unrelated places: `AMD_2` uses it
 for the hash head above and for its own pool compaction, and our `QuotientGraphCompacted::FLIPPED`
 uses it for pool compaction only. Same `-x - 2` arithmetic, three separate jobs, no shared
-invariant. `docs/DESIGN_DECISIONS.md` calls it an anti-model for that reason.
+invariant. `notes/DESIGN_DECISIONS.md` calls it an anti-model for that reason.
 
 ### Why the arrays are `n` and not `n + 1`
 
@@ -7721,7 +7721,7 @@ whole bucket is an mmd-only shape.
 the five sources reports `refile` as an `AmdFlat` call, and `refile` was deleted on 2026-08-24 and
 has no caller anywhere. It is a comment at `src/AmdFlat.cpp` naming the method to explain why the
 driver does NOT use it. Comments have to be stripped before the match, which is the identical trap
-`docs/QUOTIENT_GRAPH_USAGE.md` records against itself: it published call-difference counts of three
+`notes/QUOTIENT_GRAPH_USAGE.md` records against itself: it published call-difference counts of three
 and nine that were really zero and two, from prose naming a method.
 
 ### The surface each class actually has, 2026-08-24
@@ -8466,7 +8466,7 @@ degree-ZERO vertex is in nobody's adjacency, so no walk can reach it and nothing
 a degree-ONE vertex is still named by its neighbor, so numbering it requires a mark and that is what
 `number` writes. Everything mmd pays for `mMarkMmd` on this path follows from taking bucket 1.
 
-**WHICH IS THE TOP OF THE CHAIN RECORDED IN `docs/NEXT.md`**, seen from the other end. That chain
+**WHICH IS THE TOP OF THE CHAIN RECORDED IN `notes/NEXT.md`**, seen from the other end. That chain
 runs `orderAscending` reads `mWeight[pivot]` -> a numbered vertex must keep weight one -> the weight
 cannot say dead -> `mMarkMmd` must carry GONE -> `mHasNumbered` guards the load. The prepass is
 where the numbered vertex comes from, so a variation taking only bucket 0 would remove the case the
@@ -8798,7 +8798,7 @@ genmmd calls the same number `dg` and files `dg - qsize[en]`.
 **AND IT IS BOUNDED BY n, WHICH IS WHY THE TYPE IS NARROW.** It sums weights over distinct
 supervariables, and weights partition the original vertices, so the sets being summed are disjoint
 and the total cannot exceed n however many terms it has. That is the exception in
-`docs/CODING_RULES.md`: a sum of weights over disjoint sets stays one dimensional, where the amd
+`CODING_RULES.md`: a sum of weights over disjoint sets stays one dimensional, where the amd
 branch's `bound += outside[c]` sums over sets that can overlap and goes wide. So
 `std::uint32_t` throughout, with no cast in the accumulation.
 
@@ -8921,7 +8921,7 @@ nothing left to compare but the sets.
 
 **AND IT SAYS WHERE THE BRANCHES REALLY PART.** Both branches take rung 0. mmd takes rung 1 and
 stops; amd skips rung 1 and takes rung 2, which subsumes it. Neither takes all three, and nothing in
-either algorithm forbids it; see the detector axis in `docs/NEXT.md`.
+either algorithm forbids it; see the detector axis in `notes/NEXT.md`.
 
 **ONE CANDIDATE, UNVERIFIED, and it is recorded here as a question rather than a finding.** A merge
 partner `v` has to lie in `C & S_u`. In the first shape above `S_u = {w}` with `w` in `A[u]`, and
@@ -9192,7 +9192,7 @@ worth weighing rather than assuming.
 **THE LIVE-VERTEX HALF LEFT THE ARRAY ON 2026-08-30, and that changes the answer here.** The partial
 bound moved to `degrees[u]`, where `AMD_2` has always kept it, so a sweep of the tag array between
 the two terms that raise the tag is safe and the second `clear_flag` could be ported. See the entry
-in `docs/NEXT.md`. What follows was written when the bound still sat in `markAmd[u]`; the objection
+in `notes/NEXT.md`. What follows was written when the bound still sat in `markAmd[u]`; the objection
 it raises is now weaker, THREE of the array's uses being the class's and none the driver's:
 
 ```
@@ -9312,7 +9312,7 @@ Both amd drivers, which differ in one line of it and are otherwise identical.
 # out    merges, and markAmd[] stamped above those values
 
 tagAmd += maxCliqueWeight + 1                        # a stamp must clear every scan value
-resetMarkAndTag()                                    # the guard's SECOND call; see docs/NEXT.md
+resetMarkAndTag()                                    # the guard's SECOND call; see notes/NEXT.md
 
 for seed in C[p]:                                    # driven by the clique, not by the buckets
     if dead(seed): continue
@@ -9564,7 +9564,7 @@ and one counter, and it is easy to describe wrongly, so this is the whole of it 
 
 **IT WAS TWO COUNTERS UNTIL 2026-08-30**, `tagAmd` and a `stampAmd` above it, and the second name is
 what made "where does the base get raised" a question that could be answered wrongly. It was, and it
-cost a false merge; see `docs/NEXT.md`. `AMD_2` has always had one, `wflg`, advanced by `lemax` and
+cost a false merge; see `notes/NEXT.md`. `AMD_2` has always had one, `wflg`, advanced by `lemax` and
 then incremented per candidate, and that is the shape below.
 
 ### Setup, once per ordering
@@ -9636,7 +9636,7 @@ this step's. So their sum is not bounded by n, and a ceiling reserving one n cov
 `AMD_2` puts a `clear_flag` before each, at its lines 1694 and 1949, which is why `Int_MAX_VAL - n`
 is the right margin there. We had only the first until 2026-08-30. Measured worst climb over 7200
 graphs is 1.21n, and with one call the `tagAmd++` at 391 overflows a tag that entered the step just
-under the ceiling; UBSan says so when the state is forced. See `docs/NEXT.md`.
+under the ceiling; UBSan says so when the state is forced. See `notes/NEXT.md`.
 
 **IT IS ONE FUNCTION AT TWO CALL SITES**, `resetMarkAndTag`, which is what the merge bought beyond
 the deleted variable: the two guards had identical bodies and differed only in which counter they
@@ -9994,6 +9994,6 @@ ceilings would have flagged.
 
 ## Related
 
-- `archive/sparse_factorization.md` section 5, the prose, pseudocode and worked examples.
+- `notes/SPARSE_FACTORIZATION.md` section 5, the prose, pseudocode and worked examples.
 - `private/Mmd.cpp` and `private/Amd.cpp`, the vendored routines these are read against.
 - `src/OrderEngine.cpp`, the glue that calls them.

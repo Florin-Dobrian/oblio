@@ -12,7 +12,7 @@
 // side by side buy over the same two run back to back? That is task parallelism, whole
 // independent units rather than slices of one, and in the sparse-direct vocabulary it is
 // tree-level parallelism: what factoring two disjoint forest branches looks like. See the parallelism section of
-// docs/ARCHITECTURE.md and docs/DESIGN_DECISIONS.md (2026-07-22).
+// notes/ARCHITECTURE.md and notes/DESIGN_DECISIONS.md (2026-07-22).
 //
 // Two kernels throughout, because a speedup alone cannot be read. The hand loop uses
 // only per-core resources, so if two of them do not scale, OpenMP never gave us two

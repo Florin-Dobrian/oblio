@@ -85,7 +85,7 @@ counterexample in iteration 17 is what that costs when a convention crosses the 
 not algorithmic: the counts are equal: same eliminations, same reachable-set elements, same prune
 elements, same pairs tested, same fill. It is also not the one-fact-per-array-against-three pattern,
 which was the leading explanation for most of a day and was measured false: we touch 1.09x as many
-arrays per element as `AMD_2` and take 2.32x as long. `docs/DESIGN_DECISIONS.md` (2026-08-08) has
+arrays per element as `AMD_2` and take 2.32x as long. `notes/DESIGN_DECISIONS.md` (2026-08-08) has
 the table and the reason the wrong conclusion was comfortable. What is left is per-TOUCH cost, which
 is a locality hypothesis and is untested.
 
@@ -290,7 +290,7 @@ regression can be the measurement that locates the layer beneath.
 
 **Worth noting where the two branches differ here.** genmmd puts variables first and elements last,
 which is why the md ladder is laid out that way; AMD is the other way round. This is an amd
-convention rather than a correction to the ladder, and `docs/DESIGN_DECISIONS.md` had already
+convention rather than a correction to the ladder, and `notes/DESIGN_DECISIONS.md` had already
 recorded the layout difference from the other side without anyone noticing it mattered to an order.
 
 ---
@@ -382,7 +382,7 @@ found there. That paragraph is now corrected.
 
 **It was NOT fixed at this point.** The mmd work fixed `Mmd2` and production only after `mmd3` was
 fully aligned, and the same order was kept: a divergence found mid-alignment is evidence about the
-ledger, not yet a verdict about the layer below. It was parked in `docs/TODO.md` and taken up in
+ledger, not yet a verdict about the layer below. It was parked in `notes/TODO.md` and taken up in
 iteration 8.
 
 ---
@@ -1180,7 +1180,7 @@ happened to be about, one line later than the one that mattered.
 The repair is to make the arena unable to move rather than to re-fetch per element, which would put
 a load in the innermost loop of the whole ordering for a hazard that occurs at most once per
 elimination. A reach is at most `n` entries, so guaranteeing room for one before the walk
-guarantees it for the walk. `docs/DESIGN_DECISIONS.md` (2026-08-09) carries the entry, since it
+guarantees it for the walk. `notes/DESIGN_DECISIONS.md` (2026-08-09) carries the entry, since it
 belongs to the shared class rather than to the alignment.
 
 **Three method notes, and the third is the one that generalizes.** An acceptance test is worth
@@ -1632,7 +1632,7 @@ block first if a permutation-level check is ever wanted.
 The ladder in this file ends with `Amd3` aligned to `AMD_2` and about 1.8x its speed on a 400
 square, rising with n. That rise is now gone. The work was done in `src/Amd3B.cpp`, a private copy
 carried for the purpose and since folded into `Amd3`, and the full account is in
-`docs/DESIGN_DECISIONS.md` (2026-08-16). What belongs here is what the ladder's own method
+`notes/DESIGN_DECISIONS.md` (2026-08-16). What belongs here is what the ladder's own method
 contributed and where it misled.
 
 **The method held.** Every fold was landed against a control, `AMD3f`, which is `Amd3` reached down

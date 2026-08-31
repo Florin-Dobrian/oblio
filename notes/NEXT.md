@@ -426,7 +426,7 @@ five drivers over grids 1 to 40 plus six edge cases.
 ### What changed in the code
 
 - `order` is `orderAsMerged`, and `QuotientGraphChained::order` is gone, declared and never defined.
-  See `docs/DESIGN_DECISIONS.md` for why not `orderAmd`.
+  See `notes/DESIGN_DECISIONS.md` for why not `orderAmd`.
 - `mSize` is a stored field in all three classes, and the clique arena's guard is a plain doubling
   on the invariant `capacity() >= mSize`. Same file.
 - `orderAscending` lost its temporary: the decode is `-(cursor[u] + 1)`, which is the encode written
@@ -436,7 +436,7 @@ five drivers over grids 1 to 40 plus six edge cases.
   `massEliminate` calls `trimClique` where it had an eleven-line copy of that method's body.
 - `formReachableSet*` and `reachableSetWeight` are the names in all three classes now, and the
   compacted class's five definitions moved to follow its constructor.
-- Locals take the entity prefix and cliques take their role. See `docs/CODING_RULES.md`.
+- Locals take the entity prefix and cliques take their role. See `CODING_RULES.md`.
 
 ### Three stale comments, and none of them was findable by reading
 
@@ -743,13 +743,13 @@ the same one every ladder rung has used: quality on the real set, and not slower
 ## DONE 2026-08-24: the branch alignment starts, and the documentation was corrected first
 
 **THE FRONT IS NOW mmd AGAINST amd**, which is a different axis from the flat-against-compacted work
-`docs/QUOTIENT_GRAPH_USAGE.md` records. That one asks whether two STORES do the same thing the same
+`notes/QUOTIENT_GRAPH_USAGE.md` records. That one asks whether two STORES do the same thing the same
 way; this one asks whether the two BRANCHES do, wherever nothing about minimum degree against
 approximate minimum degree forces them apart. The test is the same and it is worth stating once: a
 difference should be traceable to a vendored routine or to the algorithm, and where it is not, it is
 an accident of how the two files were written.
 
-**THREE ITEMS CLOSED, none of which moves a permutation.** `docs/DESIGN_DECISIONS.md` (2026-08-24)
+**THREE ITEMS CLOSED, none of which moves a permutation.** `notes/DESIGN_DECISIONS.md` (2026-08-24)
 has the account.
 - **The minimum-degree seed.** `AmdFlat` and `AmdCompacted` computed it with a `min_element` pass of
   their own, which is neither `AMD_2`'s `mindeg = 0` nor the mmd branch's minimum-at-filing, and
@@ -918,7 +918,7 @@ finished and only the load-skipping remains.
 **AND THE DOCUMENTATION WAS CORRECTED BEFORE ANY OF IT**, six files, all uncommitted with the three
 above. Two were stale, four were wrong.
 
-- `docs/QUOTIENT_GRAPH_USAGE.md` was entirely in the pre-2026-08-21 driver names, `Mmd3`, `Amd3`,
+- `notes/QUOTIENT_GRAPH_USAGE.md` was entirely in the pre-2026-08-21 driver names, `Mmd3`, `Amd3`,
   `Mmd3C`, `Amd3B`, in all three tables and the ledger.
 - `README.md` carried the enum count, the assertion counts, the vendored files under `src/` rather
   than `private/`, `MmdCorrected.cpp` nowhere, the alternative-store drivers described as free
@@ -928,7 +928,7 @@ above. Two were stale, four were wrong.
   `OrderEngine.cpp` calls all three entry points under one macro, so every executable failed to link
   on any tree with `private/` present. Reproduced and then fixed and verified both ways. The
   Makefile's list was correct and its comment still said two files.
-- **THE ASSERTION COUNTS WERE WRONG IN CLAUDE.md AND IN `docs/TESTING_SPECIFICATION.md`**, and they
+- **THE ASSERTION COUNTS WERE WRONG IN CLAUDE.md AND IN `notes/TESTING_SPECIFICATION.md`**, and they
   are now MEASURED: 265 with `private/` and 237 without, `test_order` at 73 or 45. `CLAUDE.md` said
   251 and 265, which read as the public build having more assertions than the private one. The two
   halves went stale two days apart rather than being swapped, and the impossible pairing went
@@ -949,7 +949,7 @@ and UBSan.
 
 - **THE COMMENT TRIM.** 1307 comment lines removed across the three quotient graph headers, and NO
   CODE CHANGED, checked by comparing every non-comment line. What went is the four kinds
-  `docs/WRITING_RULES.md` names: measurements, dated history, alternatives tried, and justification
+  `WRITING_RULES.md` names: measurements, dated history, alternatives tried, and justification
   for the arrangement. What stayed is the invariants a reader can break. 224 of those lines were
   literal duplication between the amd and mmd twins.
 
@@ -1005,7 +1005,7 @@ vertex under its degree in `mmdint` and under its degree PLUS ONE in `mmdupd`, t
 one bucket array, so a refreshed vertex is penalised by one against a vertex no pivot has reached
 and the minimum selected is not always the minimum. `private/MmdCorrected.cpp` is genmmd with that
 repaired and is the branch's oracle from here; `private/MmdVendored.cpp` is frozen beside it and
-nothing compares against it. `docs/DESIGN_DECISIONS.md` (2026-08-23) has the account, the 4 by 4
+nothing compares against it. `notes/DESIGN_DECISIONS.md` (2026-08-23) has the account, the 4 by 4
 evidence and the five changes in the corrected copy.
 
 **MEASURED ON REAL STRUCTURE THE SAME DAY, AND IT IS A WASH.** `ORDERING.md` and `ACCURACY.md` have
@@ -1081,7 +1081,7 @@ onto the compacted store without re-measuring anything.
 **WHAT WOULD SETTLE THE MECHANISM.** Whether the cascade is amd-specific or a threshold effect mmd
 happens to sit under: run the amd pass with a raised memory ceiling and read the delay count
 against mmd's, now 6.25 million. If amd merely delays somewhat more, this is a tuning question and
-`docs/TODO.md`'s dynamic-pivoting entries are where it belongs. If it delays an order of magnitude
+`notes/TODO.md`'s dynamic-pivoting entries are where it belongs. If it delays an order of magnitude
 more, the interaction between an approximate-degree ordering and delayed pivots is a real finding
 and nobody here has looked at it. `matrix_accuracy_cpp --max-fill=2e8` is the flag.
 
@@ -1096,7 +1096,7 @@ store it runs on: `MmdVendored` `MmdFlat` `MmdChained` `MmdCompacted` and `AmdVe
 `AmdCompacted`, eight enumerators with `Natural`. The three alternative-store drivers joined the
 enum, having been free functions. `AmdCompacted` is the default and `MmdCompacted` is the mmd
 driver to use; the flat pair stay as the unbounded reference the bounded ones must equal, and
-`MmdChained` stays as the measured alternative. See `docs/DESIGN_DECISIONS.md` (2026-08-21), twice.
+`MmdChained` stays as the measured alternative. See `notes/DESIGN_DECISIONS.md` (2026-08-21), twice.
 
 **THE REASON FOR THE COMPACTED PAIR IS THE BOUND, NOT THE CLOCK.** A fresh run of all 246 put the
 compacted store within 1.4 per cent of the arena on both branches, winning 188 of 235 on amd and a
@@ -1105,7 +1105,7 @@ coin flip on mmd. The store is bounded from the input and our arena is not. See
 
 **THE ORDERING SUBSYSTEM IS OTHERWISE SETTLED.** Eight enumerators, each of ours reproducing its
 branch's reference exactly; two quotient graph classes whose driver call sequences are IDENTICAL on
-the mmd side and differ in two calls on the amd side, `docs/QUOTIENT_GRAPH_USAGE.md` having the
+the mmd side and differ in two calls on the amd side, `notes/QUOTIENT_GRAPH_USAGE.md` having the
 ledger. What is open is below and, apart from `LFAT5000`, none of it is cleanup.
 
 **THE FIGURES IN THAT SENTENCE WERE THREE AND NINE UNTIL 2026-08-21.** They came from an extraction
@@ -1113,7 +1113,7 @@ that read `qg.<method>` out of the drivers without stripping comments, so a meth
 counted as a call. All three mmd differences were comment text and one of the nine amd ones was.
 What actually remains on the amd side is two `adjacencyAmd` calls in `AmdFlat`'s hash-detection
 block, which is the run order and not an accident; `compactions` against `arenaEntries` is excluded
-throughout, being layout. Corrected in `docs/QUOTIENT_GRAPH_USAGE.md` and in the 2026-08-21
+throughout, being layout. Corrected in `notes/QUOTIENT_GRAPH_USAGE.md` and in the 2026-08-21
 `DESIGN_DECISIONS.md` entry.
 
 **WHERE TO START: "The inlining bias" below.** It is short and it invalidates figures quoted
@@ -1499,7 +1499,7 @@ MmdChained    QuotientGraphB  BucketsB  TaggedScanB  ApproximateScanB ->  ...Cha
 ```
 
 All three are in anonymous namespaces, so two files declaring `QuotientGraphCompacted` is legal.
-The terminology and the four-class scheme behind these names are in docs/DESIGN_DECISIONS.md
+The terminology and the four-class scheme behind these names are in notes/DESIGN_DECISIONS.md
 (2026-08-18): a SEGMENT is the logical unit, FLAT and CHUNKED name the allocation, and the eventual
 set is `QuotientGraphFlat`, `QuotientGraphChunked`, `QuotientGraphCompacted` and
 `QuotientGraphChained`.
@@ -1513,7 +1513,7 @@ sandbox paths from a previous session. Fix both before running them.
 `QuotientGraphCompacted` lives in `include/oblio/QuotientGraphCompacted.h`, header-only, and
 serves `AmdCompacted` and `MmdCompacted`. Eight suffixed pairs, `eliminate`
 gone, `merge` shared through `markGone`, the mark array on demand. See
-docs/DESIGN_DECISIONS.md (2026-08-19) for the inventory and the reasoning; the six-way split this
+notes/DESIGN_DECISIONS.md (2026-08-19) for the inventory and the reasoning; the six-way split this
 section used to describe was derived from copies that had drifted and is superseded.
 
 **The bucket question that blocked `QuotientGraphChained` is answered and it needed no decision.**
@@ -1537,14 +1537,14 @@ predicted there never appeared.
 
 **AND ONE UNEXPLAINED RESULT, worth knowing before trusting any of this.** `MmdChained` did not
 change translation unit at all, only where its class's source sits, and it slowed by 4 to 7 per
-cent. See docs/DESIGN_DECISIONS.md (2026-08-19).
+cent. See notes/DESIGN_DECISIONS.md (2026-08-19).
 
 ## The inlining bias, and the numbers that need re-measuring, 2026-08-19
 
 A class in an anonymous namespace inside its driver's file is inlined into the pivot loop; a class
 in its own `.cpp` is not, and on alpamayo that is worth about 5 per cent. Every ratio published
 before today between a private layer and a production one was taken in that mixed arrangement.
-Full account and the three-row table in docs/DESIGN_DECISIONS.md (2026-08-19).
+Full account and the three-row table in notes/DESIGN_DECISIONS.md (2026-08-19).
 
 **WHAT THIS MEANS FOR THE NUMBERS ON RECORD:**
 
@@ -1681,7 +1681,7 @@ abandoned.
 Everything in it that outlives the task is already somewhere durable and this file only points at
 those places:
 
-- `docs/DESIGN_DECISIONS.md`, three 2026-08-10 entries: "a null result measures an implementation",
+- `notes/DESIGN_DECISIONS.md`, three 2026-08-10 entries: "a null result measures an implementation",
   "the algorithm was the smaller half", and the earlier "what the vendored AMD's speed is made of".
 - `experiments/ordering/AmdFlat.md`, iterations 25 and 26, the two fusions and how they were found.
 - `experiments/ordering/REPORT.md`, "The one gap we can explain", now closed, and the new vendored
@@ -1723,7 +1723,7 @@ the number of passes, and not the algorithm. genmmd indexes five arrays by a ver
 eleven, because each of its arrays answers several questions at once, told apart by sign or by a
 reserved value. Four folds and one packing closed it, each of them genmmd's own encoding. The full
 account, the pass-by-pass differential that located it, and the three lessons are in
-`docs/DESIGN_DECISIONS.md` (2026-08-15). **Read that entry rather than the section this replaced.**
+`notes/DESIGN_DECISIONS.md` (2026-08-15). **Read that entry rather than the section this replaced.**
 
 **Two things this file said are now known wrong, and both misdirected the search.** It opened with
 "we touch 30 per cent fewer arena entries and take about 50 per cent longer", concluding "so it is
@@ -1784,7 +1784,7 @@ survived one that day.
 **EVERY TIMING FIGURE IN THIS TREE PREDATES 2026-08-15 AND UNDERSTATES US BY 20 TO 30 PERCENT.**
 `benchmarks/ordering/README.md`, `benchmarks/pipeline/README.md`,
 `experiments/ordering/README.md`, `experiments/ordering/REPORT.md`, `AmdFlat.md`, `MmdFlat.md` and
-`docs/TODO.md` all carry ratios measured before it. Fill figures are unaffected, nothing having
+`notes/TODO.md` all carry ratios measured before it. Fill figures are unaffected, nothing having
 moved. Each file carries a dated superseding note rather than being rewritten, since a dated
 measurement is a record of a run.
 
@@ -1800,7 +1800,7 @@ excluded, modulus `n` rather than `n + 1`, and a `uint32` accumulator that WRAPS
 Amd.cpp's `UInt hval` does, one reduction at the end rather than one per term. It changed no
 permutation, checked over 730 across ten drivers, and it corrected the grouping: our `pair` and
 `stamp` counts now equal `AMD_2`'s digit for digit, where before we were UNDER-grouping on cubes.
-Worth about 4 percent. See `docs/DESIGN_DECISIONS.md` (2026-08-16).
+Worth about 4 percent. See `notes/DESIGN_DECISIONS.md` (2026-08-16).
 
 **What was done, 2026-08-08 to 08-10**, three commits: the hash key defect (ledger entry 8, worth a
 factor of two to three on cubes), the key folded into the bound pass, and the first scan folded into
@@ -1861,7 +1861,7 @@ said about the orderings, in order of how much it should affect the plan:
    degree 5, removing it by hand takes MMD from 70.7 ms to 0.83 and AmdFlat from 470 to 1.5, while
 the    vendored AMD does not move. **Fill is unaffected**, so this is time only. It belongs in the
    shared quotient graph so all six drivers gain it at once.
-4. **The descriptor struct**, `docs/TODO.md` question 3, if that profile says stalls. Item 2d.
+4. **The descriptor struct**, `notes/TODO.md` question 3, if that profile says stalls. Item 2d.
 5. **Narrow the one-dimensional sizes. THE ORDERING IS COMPLETE, 2026-08-11**; the symbolic and
    numeric phases remain and are the larger half. Item 2e.
 6. **Why `AmdFlat` and the vendored `AMD` disagree on fill on real matrices.** NEW on 2026-08-11,
@@ -1897,7 +1897,7 @@ and
    genmmd does not execute at all.
 
    **THREE ATTACKS ON IT ALL FAILED, each for its own reason**, and they are in
-   `docs/DESIGN_DECISIONS.md` (2026-08-15, later): the stamping fold, an arena cursor in place of
+   `notes/DESIGN_DECISIONS.md` (2026-08-15, later): the stamping fold, an arena cursor in place of
    `push_back`, and raw bases in place of the accessors. The last was also TIMED on alpamayo and
    came out flat while costing 371403 instructions, which is what makes the question worth asking
    properly rather than probing at again.
@@ -1943,7 +1943,7 @@ and
 
 ## The MmdFlat storage investigation, 2026-08-15: CLOSED
 
-Everything this section held is superseded by `docs/DESIGN_DECISIONS.md` (2026-08-15), which
+Everything this section held is superseded by `notes/DESIGN_DECISIONS.md` (2026-08-15), which
 carries the result, the differential that found it, and the five hypotheses that failed on the way.
 Two facts from it are worth having here because they are what a later reader would otherwise
 re-derive:
@@ -2066,7 +2066,7 @@ not say DONE, CLOSED, DEFERRED or PARKED.
 brought in for: the claim that our tie-break beats AMD's was a square-grid artifact, `Amd2` reading
 `-5.5, +2.5, -2.6, +2.5, -4.6` percent on cubes against a monotone `-1.7` to `-6.5` on squares. But
 two families of structured grid is two points on one axis, and nothing in this tree has yet been
-ordered that came from a real problem. That is the oldest open item on `docs/TODO.md` and it is now
+ordered that came from a real problem. That is the oldest open item on `notes/TODO.md` and it is now
 the top of this list. `benchmarks/pipeline` is still square grids alone, so every break-even figure
 it carries is one family's.
 
@@ -2074,7 +2074,7 @@ it carries is one family's.
 inventory named here is built, both halves, and it produced the first change in five attempts to
 move this gap. Everything durable from it is in `benchmarks/ordering/README.md` under "The per-pass
 inventory" and "What the inventory was worth", in `AmdFlat.md` iteration 25, and in
-`docs/DESIGN_DECISIONS.md` (2026-08-10). The short version:
+`notes/DESIGN_DECISIONS.md` (2026-08-10). The short version:
 
 - We make **2.12x** `AMD_2`'s element visits on both families against 1.56x and 1.61x its useful
   cycles, so we execute about 0.74x its work per visit. Nine sweeps over `C[p]` per pivot against
@@ -2105,7 +2105,7 @@ prune, so `I[u]` is walked twice per pivot and `A[u]` once, which is `AMD_2`'s c
 Over eight runs `AmdFlat` reads 0.83 to 0.89 ms at 16 cubed where `AMD` reads 0.74 to 0.86, so the
 two
 overlap there, and it is about 1.2x at 32 a side; 2D improved 0 to 8 percent as well. `AmdFlat.md`
-iteration 26 and `docs/DESIGN_DECISIONS.md` (2026-08-10, "the algorithm was the smaller half")
+iteration 26 and `notes/DESIGN_DECISIONS.md` (2026-08-10, "the algorithm was the smaller half")
 carry it, with the corrections below.
 
 **What is open, in the order we would take it.**
@@ -2164,7 +2164,7 @@ then reduced modulo the same number, which annihilates it exactly, so the bucket
 the adjacency alone. Two lines in nine files. On alpamayo `AmdFlat` on cubes goes from about 3.0x
 the
 vendored routine to 1.44x and `AMD2` from 2.85x to 1.40x, with both controls unmoved. It is ledger
-entry 8, `AmdFlat.md` iterations 21 to 24 are the narrative, and `docs/DESIGN_DECISIONS.md`
+entry 8, `AmdFlat.md` iterations 21 to 24 are the narrative, and `notes/DESIGN_DECISIONS.md`
 (2026-08-09) carries why five separate oracles were blind to it.
 
 **What that leaves of item 4 below, which is a re-pricing rather than a deletion.** The parked
@@ -2281,7 +2281,7 @@ per survivor per elimination.
 **A lead rather than a plan, and it has a reason it may be declined.** Production already takes
 half of `Amd.cpp`'s trick, the running key riding in `hashNext` rather than a third array of its
 own. The other half, overlaying the hash heads on the degree heads, is the `FLIP` encoding that
-`docs/DESIGN_DECISIONS.md` calls an anti-model. What would settle it is a measurement rather than
+`notes/DESIGN_DECISIONS.md` calls an anti-model. What would settle it is a measurement rather than
 an argument: the 2026-08-08 note records two extra arrays of size n costing 12 percent in 2D at
 400 a side across the phase boundary, which is the same order of footprint in a different place.
 
@@ -2372,7 +2372,7 @@ two private methods; the ordering switch and the sweep list in three files under
 is the site item 2c warns about; `test_pipeline`'s sweep, from nine orderings to seven, with its
 written-out expectation corrected; `benchmarks/ordering/order_timing.cpp`, which grew a general
 free-function column beside the `mmd3b` one; `benchmarks/pipeline/pipeline_timing.cpp`;
-`README.md`'s Structure block and ordering paragraph; and `docs/TESTING_SPECIFICATION.md`, which
+`README.md`'s Structure block and ordering paragraph; and `notes/TESTING_SPECIFICATION.md`, which
 moves with the suite by invariant.
 
 **And `test_order` keeps all fourteen B assertions**, calling the free functions instead. That was
@@ -2401,7 +2401,7 @@ already uses on the stated grounds that an enumerator "would put a benchmark's o
 library's public enum and into every switch over it". Two new files, two build entries, one column
 in each benchmark driver calling `orderAmd3B` directly, and a local identity check against
 `orderAmd3`. No enumerator, so no dispatch, no adapter, no `examples/` arm, no `test_order`
-assertions, no `test_pipeline` sweep entry, and no move in `docs/TESTING_SPECIFICATION.md`.
+assertions, no `test_pipeline` sweep entry, and no move in `notes/TESTING_SPECIFICATION.md`.
 
 **2d. THE NEXT PERFORMANCE PASS, and what of 2026-08-10 the other layers never got.** The walk
 axis is FINISHED on `AmdFlat`: after the fold it walks `I[u]` twice per pivot and `A[u]` once, which
@@ -2415,7 +2415,7 @@ constant factor is nearly spent; what remains grows with n and has a knee past 2
 says memory. If the growth is stalls, (ii) is aimed at it. If it is instructions, this direction is
 finished and the descriptor struct is the wrong tool.
 
-**(ii) The descriptor struct, `docs/TODO.md` question 3.** `mSourcePtr[u]`, `mAdjacencySize[u]` and
+**(ii) The descriptor struct, `notes/TODO.md` question 3.** `mSourcePtr[u]`, `mAdjacencySize[u]` and
 `mIncidenceSize[u]` are always read together for the same `u` and live in three arrays, so a
 vertex's descriptor touches three cache lines where one struct touches one. Each of the seven
 sweeps opens by reading exactly that, so this attacks all seven at once rather than deleting one,
@@ -2466,8 +2466,8 @@ three random patterns at n = 2000, all identical, and each clean under `-Wall -W
 over them, `Buckets`'s signatures, `degrees` with the scalars that travel with it, the four scan
 arrays with the two structs that bind them, then `usedKeys` and its hash locals, `sizeU` and
 `sizeV`, `reachableSize`, `absorb`'s `vertexCount`, and one entity loop in `AmdFlat` brought back to
-the `int32_t` form. `docs/DESIGN_DECISIONS.md` (2026-08-11) carries the account and
-`docs/CODING_RULES.md` now states the three-way rule.
+the `int32_t` form. `notes/DESIGN_DECISIONS.md` (2026-08-11) carries the account and
+`CODING_RULES.md` now states the three-way rule.
 
 **Three things came out of it that the list below did not anticipate**, all in the design entry:
 disjointness rather than arity is what bounds an accumulation, so nine sites needed no widening; a
@@ -2543,8 +2543,8 @@ bounded by n: `mAdjacencySize`, `mIncidenceSize`, `mCliqueSize`, `mWeight`, and 
 `mCliqueWeight`. **`mWeight` IS NOW WRONG IN THIS LIST, 2026-08-17.** It goes back to
 `std::int32_t` so that `AMD_2`'s `Nv` encoding can ride in its sign, which is the rule deriving
 correctly rather than an exception to it: the unsigned case rests on having nothing to stand in for,
-and that field now has. See `docs/DESIGN_DECISIONS.md` (2026-08-17) and the four conditions in
-`docs/CODING_RULES.md`. The other four are unaffected. The accessors over them move too, `adjacencySize`, `incidenceSize`, `cliqueSize`,
+and that field now has. See `notes/DESIGN_DECISIONS.md` (2026-08-17) and the four conditions in
+`CODING_RULES.md`. The other four are unaffected. The accessors over them move too, `adjacencySize`, `incidenceSize`, `cliqueSize`,
 `weight`, `cliqueWeight`, `reachableSize` and `reachableSetWeight`, which is what takes the casts
 out of the hot loops.
 
@@ -2625,7 +2625,7 @@ before-and-after worth recording rather than an estimate. And it composes with i
 bytes, four to a cache line, which makes the descriptor struct the natural next step rather than a
 separate argument.
 
-**The rule itself is now stated in its derived form**, in `docs/CODING_RULES.md` and in the
+**The rule itself is now stated in its derived form**, in `CODING_RULES.md` and in the
 2026-08-12 design entry: a size is always unsigned, one dimensional in 32 bits and two dimensional
 in 64; an index is signed 32 bits and only because `NIL` has to share a type with the values it
 stands in for. Anything that can exceed n is computed in `std::size_t`, not because 2n overflows,
@@ -2635,17 +2635,17 @@ incrementally**: n itself, the symbolic phase, the numeric phase.
 
 **The durable half has to be written before this item closes, not after.** This file is meant to be
 deleted, so a list worked through here leaves nothing behind unless two other files move with it:
-`docs/CODING_RULES.md`, whose index-type section states a TWO-way split, index against position,
-where this is a THREE-way one; and `docs/DESIGN_DECISIONS.md`, since narrowing reverses half of the
+`CODING_RULES.md`, whose index-type section states a TWO-way split, index against position,
+where this is a THREE-way one; and `notes/DESIGN_DECISIONS.md`, since narrowing reverses half of the
 2026-08-08 integer-model entry, which kept the wide one-dimensional types as a considered trade and
 named the count sweep as the cheap half. Nothing detects drift between the three, there being no
-invariant here of the kind that binds the suite to `docs/TESTING_SPECIFICATION.md`, so the
+invariant here of the kind that binds the suite to `notes/TESTING_SPECIFICATION.md`, so the
 `CODING_RULES` edit belongs in the same step as the last source file rather than as a follow-up.
 
 **3. The same widening is available to `make test`, cheaply.** Its prototype-against-production
 comparison still runs on 2D grids at sides 10 and 20 alone, and `graphs.h` holds the 3D and random
 builders. Worth knowing before relying on that check: the prototypes carry no maintained clique
-degree, so a defect in production's encoding is invisible to it at any size. See `docs/TODO.md`,
+degree, so a defect in production's encoding is invisible to it at any size. See `notes/TODO.md`,
 the first of the five ordering questions.
 
 **4. And only then the performance work below, which is a PARK rather than a queue.** One bounded
@@ -2769,7 +2769,7 @@ routine's. `benchmarks/README.md` records how far an attempt to get them got and
   a walk, which was a correctness matter, and it does nothing about the arena growing toward
   nnz(L) where the live cliques fit in nnz(A). `Amd.cpp` compacts in place and counts it in
   `AMD_NCMPA`, which reads 1 for a whole 140x140 run. Section 5.3 of
-  `archive/sparse_factorization.md` has the conservation argument that makes that possible, and the
+  `notes/SPARSE_FACTORIZATION.md` has the conservation argument that makes that possible, and the
   constructor's own comment already names reclaiming as the real fix.
 - **The counter sweep.** Loop counters against sizes should be `std::int32_t` with the bound cast
   once; the size ARRAYS stay `std::size_t` because they are arithmetic operands and narrowing them

@@ -3,7 +3,7 @@
 #
 # mmd1 has the idea: a batch of independent pivots per degree refresh. What it
 # does not have is the rest of what genmmd does, and this file adds it, one pass
-# at a time. Section 5.11 of archive/sparse_factorization.md, plus the vendored
+# at a time. Section 5.11 of notes/SPARSE_FACTORIZATION.md, plus the vendored
 # routine itself in vendored/vendored_mmd.cpp.
 #
 # The list, against the vendored routine that carries each:

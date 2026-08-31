@@ -24,7 +24,7 @@ genmmd's reversed incidence walk, `Amd3` on `AMD_2`'s cliques-first order. That 
 ours and predates both vendored ones, and its existence blocked aligning the two that matter: the
 class had to select a convention with a flag where the compacted class uses a suffixed pair per
 branch. With these four gone the flat class serves two drivers and two conventions, the same as the
-compacted one, and the two can be brought into line. See `docs/QUOTIENT_GRAPH_USAGE.md`.
+compacted one, and the two can be brought into line. See `notes/QUOTIENT_GRAPH_USAGE.md`.
 
 **THEY WILL NOT COMPILE FOR LONG.** `97f4bc6` is the last commit where they build. They depend on
 `QuotientGraph`'s default convention and on `mVendoredListOrder`, both of which are on their way
@@ -57,7 +57,7 @@ MMD3B -> MmdChained
 A driver is now its branch plus the clique store it runs on, and `Ordering` carries eight
 enumerators with `Natural`, `AmdCompacted` being the default. The four retired here predate that
 scheme: each was the base algorithm without its reference's later refinements, so none of them is
-a store variant of anything and none has a name in it. See `docs/DESIGN_DECISIONS.md`
+a store variant of anything and none has a name in it. See `notes/DESIGN_DECISIONS.md`
 (2026-08-21), the naming entry.
 
 **IF THEY COME BACK.** The question they would answer is what each mechanism costs in isolation,

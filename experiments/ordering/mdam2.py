@@ -46,7 +46,7 @@
 # union the bound exists to avoid, so it is instrumentation and nothing else.
 #
 # See the section "Zooming in on md2" in README.md for the square this file is one
-# corner of, and 5.13 of archive/sparse_factorization.md for the bound itself.
+# corner of, and 5.13 of notes/SPARSE_FACTORIZATION.md for the bound itself.
 #
 # What follows is md2's own description of the quotient graph, unchanged.
 #
@@ -97,7 +97,7 @@
 #
 # So an elimination adds nothing and removes something. Each A[u] only ever
 # shrinks, which is why this representation never needs more room than the
-# original graph. Section 5.3 of archive/sparse_factorization.md.
+# original graph. Section 5.3 of notes/SPARSE_FACTORIZATION.md.
 #
 # A live vertex u is stored as A[u], its remaining explicit vertex neighbors, and
 # I[u], the ids of the cliques that contain u; C[c] holds the members of clique c,

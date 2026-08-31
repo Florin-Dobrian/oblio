@@ -11,7 +11,7 @@
 // Entry points of the oracle ordering codes (raw int CSC arrays), declared only when those
 // sources are being compiled. They live in private/, which is not part of the published tree, so
 // the two orderings they implement are optional; see the Makefile and CMakeLists.txt for the
-// detection, and docs/DESIGN_DECISIONS.md for why.
+// detection, and notes/DESIGN_DECISIONS.md for why.
 #ifdef OBLIO_VENDORED_ORDERINGS
 extern void mmd_order(int n, const int colPtr[], const int rowIdx[],
                       int perm[], int invp[]);            // private/MmdVendored.cpp

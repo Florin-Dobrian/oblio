@@ -112,7 +112,7 @@ benchmarks cover, `AmdCompacted` is the default, and the earlier ladder layers t
 discusses,
 `MMD1`, `MMD2`, `AMD1` and `AMD2`, were retired to `retired/`. The steps below are kept because
 each names a mechanism and says what it was for; read them as history. What remains open is in
-`docs/NEXT.md`.
+`notes/NEXT.md`.
 
 `OrderEngine` offers two lineages. MMD and AMD are vendored; MMD1, AMD1 and AMD2 were ours, built
 from the matching prototypes over the shared `QuotientGraphFlat`. The intent was to keep both
@@ -186,7 +186,7 @@ are the two kinds of source of `reach(u)`, an elimination destroys one for each 
 the pair fits in one block sized once from the pattern and never grown. Allocations at 140x140 went
 from 31915 to 2457 for MMD1 and 32256 to 2760 for AMD1, time fell 6 to 18 percent across the four,
 and the fill is unchanged everywhere. `benchmarks/ordering/README.md` has the numbers, section 5.3
-of `archive/sparse_factorization.md` the argument. Nothing is left to put on an arena, so `pmr` is
+of `notes/SPARSE_FACTORIZATION.md` the argument. Nothing is left to put on an arena, so `pmr` is
 retired without having been written.
 
 **Nothing measured remains outstanding.** The driver restructuring, which was the last item, was
@@ -248,7 +248,7 @@ ordering to beat**. Break-even against the vendored AMD at 140x140 is about thre
 for AMD1 and AMD1B, five for MMD2, and twenty-seven and seventy for AMD2 and AMD2B.
 
 Two items for other parts of the tree fell out of it. **Multifrontal measures about twice as fast
-as left-looking** on every ordering and every size here, which `docs/ARCHITECTURE.md` describes as
+as left-looking** on every ordering and every size here, which `notes/ARCHITECTURE.md` describes as
 an unmeasured trade; it is measured now for Cholesky on grids, where fronts are fat by
 construction, and the thin-front case it predicts to go the other way is still untested. And
 **right-looking is anomalously slow on the vendored AMD specifically**, 8.85 ms against
@@ -1275,7 +1275,7 @@ the twin check compared two files wrong the same way and the prototype-against-p
 inherited it. Where entry 7 was invisible because a prototype does not carry an optimization, this
 was invisible because it does carry the defect, and the useful statement covering both is that a
 check between two things derived from each other cannot see what they share. The vendored routine
-is the only oracle either had. `docs/DESIGN_DECISIONS.md` (2026-08-09) carries the account, and it
+is the only oracle either had. `notes/DESIGN_DECISIONS.md` (2026-08-09) carries the account, and it
 adds a rule this file should hold anyone to: **when a work count and a measured time disagree by
 more than a factor, suspect the coverage of the count before its interpretation.** The 2026-08-08
 entry had 1.09x against 2.32x and read the gap as a fact about the machine; the pair loop was not
@@ -1354,7 +1354,7 @@ the whole direction at "roughly 7 percent of a one-shot solve" on the basis that
 1.46x was all there was. What the day found is that the array COUNT, not the layout, was most of
 the gap: genmmd indexes five arrays by a vertex where we indexed eleven, each of its arrays
 answering several questions at once. Four folds on that basis took `MmdFlat` from 1.35 to 1.48x
-genmmd in 2D to 1.02 to 1.19x, and to 0.81 at 32 cubed. `docs/DESIGN_DECISIONS.md` (2026-08-15)
+genmmd in 2D to 1.02 to 1.19x, and to 0.81 at 32 cubed. `notes/DESIGN_DECISIONS.md` (2026-08-15)
 carries the account.
 
 **What remains of this item is the amd branch**, which has had none of it: `degrees`, `outside`,
@@ -1651,7 +1651,7 @@ dropping by exactly `weight(v)`.
 **SUPERSEDED A SECOND TIME, 2026-08-09.** The corrected AMD2 column below is itself now out of
 date: ledger entry 8 fixed the hash key, which moves `Amd2`'s tie-break and therefore its fill,
 to 11900, 199591 and 450190 at 32, 100 and 140 a side. `Amd3` is unaffected, its permutation
-being unchanged. See `docs/DESIGN_DECISIONS.md` (2026-08-09).
+being unchanged. See `notes/DESIGN_DECISIONS.md` (2026-08-09).
 
 ```
 grid        AMD (vendored)    AMD1      AMD2 before    AMD2 after
@@ -1716,7 +1716,7 @@ three things, and only one of them was an ordering defect.
   behavior and a 3D grid builder emitting unsorted columns. Both are written up where they were
   found.
 
-`docs/DESIGN_DECISIONS.md` (2026-08-09) carries all three and the method notes.
+`notes/DESIGN_DECISIONS.md` (2026-08-09) carries all three and the method notes.
 
 **And the mmd branch gained the acceptance test it never had, 2026-08-09.** `make mmdorder`
 compares production `Mmd3` against genmmd's elimination order on the same four shapes, 38 cases,
@@ -1825,7 +1825,7 @@ pure reorder: assembling A before the expand means the expand can no longer disc
 must become `expandVal` (preserve and shift), exactly right-looking's verb. The cost is real if
 small: left-looking would assemble A into the unexpanded front and then shift those values
 during the expand, rather than placing them once at the final offset. It also erases a distinction
-the code and `docs/ARCHITECTURE.md` currently draw deliberately: left-looking fills a front from
+the code and `notes/ARCHITECTURE.md` currently draw deliberately: left-looking fills a front from
 scratch each turn (`resetVal`), right-looking carries a front's accumulated state through expansions
 (`expandVal`). Note this does not remove the prepass asymmetry: left-looking would still have no
 prepass, since a front's shape still is not known until its descendants are factored. It removes
@@ -1908,7 +1908,7 @@ driver explaining why the hoisted `kkVal` stayed valid across its loop.
 
 The two traversals compute the same factor by the same kernels and differ only in bookkeeping, so
 the comparison is clean, and neither side is obviously cheaper. **The reasoning lives in "The life of
-an update" in docs/ARCHITECTURE.md**, what the per-pair costs are, why the unit is pairs rather than
+an update" in notes/ARCHITECTURE.md**, what the per-pair costs are, why the unit is pairs rather than
 supernodes, and what could be done about left-looking's queues if it loses. That belongs there
 rather than here: it describes how the thing works, and stays true whether or not this item is ever
 picked up.
@@ -1926,7 +1926,7 @@ traversal is chosen as a default for anything.
 `compressThreshold` in ElmForestEngine breaks a fill tie between two children by taking the one with
 the larger front, and only then by list position. The larger-front rule is a greedy heuristic,
 "absorb the wide children before the parent's front grows and prices them out", and section 4.5 of
-docs/sparse_factorization.md explains it. It is locally tempting but has no global guarantee: each
+notes/sparse_factorization.md explains it. It is locally tempting but has no global guarantee: each
 absorption widens the shared front, so a locally good pick changes the state every later pick is
 priced against and can foreclose a better sequence. The objective it optimizes, block quality, is
 itself machine-dependent and fuzzy, so there is no clean optimum being approximated.
@@ -1951,13 +1951,13 @@ the main code until the conclusion is drawn.
 
 Four items, found in a pass on 2026-08-04 and left undone deliberately: each is a structural
 decision about what the README is for, and the file currently answers that question as "a record of
-what we decided", which is the right answer for `docs/` and the wrong one for the front page.
+what we decided", which is the right answer for `notes/` and the wrong one for the front page.
 
 **The build discussion sits in a reader's path.** Makefile versus CMake, which to use when, and the
 CLion arrangement together run about a third of the file, between the Quick Start and everything
 describing what the library does. All of it is worth keeping and none of it is what someone
 evaluating the solver needs first. Probably a `Building` section that answers "how do I compile
-this" in ten lines, with the comparison moved to `CONTRIBUTING.md` or a `docs/` file.
+this" in ten lines, with the comparison moved to `CONTRIBUTING.md` or a `notes/` file.
 
 **There is no license statement.** `CONTRIBUTING.md` carries this as a going-public item and the
 intent is settled, PolyForm Noncommercial 1.0.0 with a commercial license on request. It is the

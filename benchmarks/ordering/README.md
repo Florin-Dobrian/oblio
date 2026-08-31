@@ -6,7 +6,7 @@
 > grids to 1.02 to 1.19x, and to 0.81 at 32 cubed; `MMD2`, `AMD2` and `AmdFlat` all moved with it.
 > **Fill figures are unaffected**, nothing about what is computed having changed: every
 > permutation and every nnz(L) is identical. The tables are left as they stand because a dated
-> measurement is a record of a run. `docs/DESIGN_DECISIONS.md` (2026-08-15) has the account.
+> measurement is a record of a run. `notes/DESIGN_DECISIONS.md` (2026-08-15) has the account.
 
 > **AND THE COLUMNS CHANGED ON 2026-08-21.** `MMD1`, `MMD2`, `AMD1` and `AMD2` were retired to
 > `retired/`, so their columns are gone from the tables this document describes and their rows here
@@ -30,7 +30,7 @@ that work.**
 > They were expected to improve by about three points and did not move, so translation units are
 > not what the vendored gap is made of. Those routines differ from ours in ways nobody has
 > enumerated, and a ratio against a reference is a figure to watch rather than one to reason from.
-> `docs/DESIGN_DECISIONS.md` (2026-08-19) has the three-row table and the one result the account
+> `notes/DESIGN_DECISIONS.md` (2026-08-19) has the three-row table and the one result the account
 > fails to explain.
 >
 > **To take a comparison with neither side favored**, compile each class into its driver's file.
@@ -203,7 +203,7 @@ bound subtracts the vertex's own weight before the merge that grows it, where `A
 it after supervariable detection. Corrected, AMD2's fill is 11900 at 32 a side, 199386 at 100 and
 444191 at 140, against the 12364, 212496 and 487111 recorded here, so it now beats AMD1 at every
 size and the vendored AMD at the two larger ones. The figures below are kept as the record of the
-run that produced them. `docs/DESIGN_DECISIONS.md` (2026-08-08) and `docs/TODO.md` carry the
+run that produced them. `notes/DESIGN_DECISIONS.md` (2026-08-08) and `notes/TODO.md` carry the
 finding; nothing about MMD, AMD or AMD1 moved.
 
 AMD1 plus aggressive absorption and hash supervariable detection. Measured on the Linux sandbox at
@@ -307,7 +307,7 @@ was reached through `A[pivot]`, the prune drops `pivot` from `A[u]`; where it wa
 clique, that clique is absorbed and leaves `I[u]`. So `|A[u]| + |I[u]|` never exceeds `u`'s
 original degree, the two lists share one block sized once from the pattern, and the incidence is
 written into the room the adjacency has just given up. Both vendored routines do this and neither
-says why. Section 5.3 of `archive/sparse_factorization.md` carries the argument, 5.15 the reading
+says why. Section 5.3 of `notes/SPARSE_FACTORIZATION.md` carries the argument, 5.15 the reading
 of the two codes.
 
 **alpamayo (Apple Silicon), macOS, Apple Clang, Accelerate, 2026-08-01.** Ordering time in
@@ -797,7 +797,7 @@ aggressive absorption and hash supervariable detection, which take the branch fr
 3D against 1.5x to 2.4x in 2D.
 
 **That is a hint about where the remaining gap is, and it points away from where we have been
-looking.** The parked proposal in `docs/DESIGN_DECISIONS.md`, giving cliques their own mark space
+looking.** The parked proposal in `notes/DESIGN_DECISIONS.md`, giving cliques their own mark space
 so that liveness folds into the vertex marks, is a change to the SHARED QUOTIENT GRAPH. It would
 help `AMD1` exactly as much as `AmdFlat`, and `AMD1` is the half that is already fine on both
 families. The same is true of the locality hypothesis, one `Iw` pool against our two structures:
@@ -917,7 +917,7 @@ four of the six cubic ones. Every AMD2 and AMD2B fill figure recorded above pred
 be read with it. `AmdFlat`'s column is unchanged and still exact, `make amdorder` matching on all 38
 cases.
 
-`docs/DESIGN_DECISIONS.md` (2026-08-09) carries the defect and the account of why five separate
+`notes/DESIGN_DECISIONS.md` (2026-08-09) carries the defect and the account of why five separate
 oracles were blind to it; `experiments/ordering/AmdFlat.md` iterations 21 to 24 are the narrative
 and the ledger's entry 8 the record.
 
@@ -989,7 +989,7 @@ beats `AMD_2`.
 
 - **2D wants memory work**, and there are two candidates, both already written down and neither
   yet tried. `mEliminated` deleted by giving cliques their own mark space removes one dependent
-  byte load per element from the hottest walk in the ordering; `docs/TODO.md` carries it and
+  byte load per element from the hottest walk in the ordering; `notes/TODO.md` carries it and
   `experiments/ordering/REPORT.md` parked it. And the width question is the other: `REPORT.md`
   measured `std::size_t` counts at 17 to 26 percent against int32, deliberately kept, and 26
   percent is what the efficiency gap here comes to. `AMD_2` runs on 32-bit `Int` throughout and
@@ -1492,7 +1492,7 @@ climbs from 1.60 at 32 a side to 2.89 at 800.
 **On the amd branch `AmdCompacted` is now BELOW the vendored routine on both series.** It reads
 0.93x at
 1024 squared and 0.97x at 1600, the first square sizes where anything of ours has beaten it. See
-`docs/DESIGN_DECISIONS.md` (2026-08-16, later still) for what did it.
+`notes/DESIGN_DECISIONS.md` (2026-08-16, later still) for what did it.
 
 ## The wider ladders, and the one column that zigzags, 2026-08-16
 
@@ -1571,7 +1571,7 @@ each other in the cache. Cachegrind, one `amd_order` per run: instructions and d
 are FLAT across 400, 512 and 800 to a tenth of a percent, while D1 read misses per vertex read 15.3,
 40.3 and 17.0. Padding the six arrays apart by one cache line, which changes addresses and nothing
 else, removes 56 percent of the misses at 512 and none at 400, with byte-identical permutations.
-See `docs/DESIGN_DECISIONS.md` (2026-08-16, later).
+See `notes/DESIGN_DECISIONS.md` (2026-08-16, later).
 
 **The honest baseline for growth is therefore `AmdVendored`'s UNALIGNED series**, and the aligned
 rows should not be read as our columns improving.

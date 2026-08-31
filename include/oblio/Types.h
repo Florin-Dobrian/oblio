@@ -28,7 +28,7 @@ inline constexpr std::int32_t NIL = -1;
 // and an index reaches n - 1; the value MAX_IDX itself is representable and never valid as an
 // index. That is deliberate and the cap binds through the LOOP COUNTER rather than through the
 // index: an ascending entity loop casts the size to std::int32_t, which at 2^31 would be
-// negative and run zero times. See docs/DESIGN_DECISIONS.md (2026-07-15).
+// negative and run zero times. See notes/DESIGN_DECISIONS.md (2026-07-15).
 inline constexpr std::size_t MAX_IDX =
     static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max());
 

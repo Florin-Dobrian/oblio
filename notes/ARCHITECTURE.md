@@ -45,7 +45,7 @@ already holds the pointer.
 
 **The `std::size_t` in four of those rows is DRIFT against the current integer rule, not a
 decision.** `size()`, `snodeSize()`, `frontSize()` and `updateSize()` are one dimensional sizes and
-should be `std::uint32_t`; see `docs/CODING_RULES.md` and the 2026-08-12 design entry. The ordering
+should be `std::uint32_t`; see `CODING_RULES.md` and the 2026-08-12 design entry. The ordering
 was converted on 2026-08-11 and the symbolic and numeric phases have not been, so this table is
 accurate about the code as it stands and will change as that drift closes.
 
@@ -609,7 +609,7 @@ block to the widened shape and zeroes it in one assign, and then assembles A dir
 is the same result as expand-by-preserving an empty front, reached more cheaply. Right-looking cannot take
 this shortcut: by the time it expands, the front already holds A and every update pushed in by an
 already-factored descendant, so it must preserve. This is the only place the two verbs diverge, and whether to
-give the divergence up for a single uniform loop skeleton is left open in `docs/TODO.md`.
+give the divergence up for a single uniform loop skeleton is left open in `notes/TODO.md`.
 
 In pseudocode, the symmetric pair first, both expanding by preserving. Right-looking:
 
@@ -685,7 +685,7 @@ So it is O(1)-with-an-allocation against O(\|Idx\|)-with-good-locality, and whic
 large the index sets are. Fat supernodes should favour left-looking, since \|Idx(kk)\| grows while the
 list node does not; thin ones may favour right-looking, since a malloc can cost more than sweeping
 twenty integers. **That is a prediction and nothing has been measured**; the work item lives in
-docs/TODO.md.
+notes/TODO.md.
 
 **What the relay does not buy is operations.** Enqueueing every ancestor eagerly at `ii`'s factor
 time would perform the same number of enqueues and dequeues, one per pair either way. For `ii`
@@ -937,7 +937,7 @@ dominate, and left-looking is both leaner and faster. The right traversal is pro
 machine-dependent, which is the whole reason the engine exposes the choice rather than picking one:
 left-looking is the frugal default, and multifrontal earns its memory when the fronts are fat or the
 machine is parallel. **None of this is measured here**; as with the left-versus-right cost note
-above, it is the shape of the tradeoff, and the measurement is a work item in docs/TODO.md.
+above, it is the shape of the tradeoff, and the measurement is a work item in notes/TODO.md.
 
 ### The parallel with the matrix, and where it stops
 

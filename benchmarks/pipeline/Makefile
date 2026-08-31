@@ -22,7 +22,7 @@
 #: one of them is a claim about that one.
 #:
 #: Prefix any of these with OBLIO_PUBLIC=1 to build as everyone else does, without the vendored
-#: orderings; see docs/DESIGN_DECISIONS.md. The same word works in the repo root, both benchmarks
+#: orderings; see notes/DESIGN_DECISIONS.md. The same word works in the repo root, both benchmarks
 #: and experiments/ordering.
 #
 # The sibling folder, ordering/, measures one phase against itself. This one measures the phases
@@ -91,7 +91,7 @@ endif
 # Bare `make` prints the target list rather than building. Stated explicitly because the default
 # goal is otherwise the FIRST target in the file, so moving a rule would silently change it and the
 # header above would stop being true with nothing to catch it. Every Makefile in this tree answers
-# `make` the same way; see docs/CODING_RULES.md.
+# `make` the same way; see CODING_RULES.md.
 .DEFAULT_GOAL := help
 
 .PHONY: all run2d run3d scale2d scale3d clean help

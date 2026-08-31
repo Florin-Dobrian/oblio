@@ -31,7 +31,7 @@
 #:   make help     print this list
 #:
 #: Prefix any of these with OBLIO_PUBLIC=1 to build as everyone else does, without the vendored
-#: orderings; see docs/DESIGN_DECISIONS.md. The same word works in the repo root and in both
+#: orderings; see notes/DESIGN_DECISIONS.md. The same word works in the repo root and in both
 #: benchmarks. Here it reaches only `make vendored`, that being the only target that needs them.
 #
 # Each layer exists twice, as <name>.py and <name>.cpp, and the two are written to
@@ -51,7 +51,7 @@
 #   amd   approximate degree: a bound instead of a set union        5.13
 #
 # md1 through md5 all return the SAME ordering; mmd1 and amd do not, deliberately.
-# See archive/sparse_factorization.md section 5 for the sections cited above.
+# See notes/SPARSE_FACTORIZATION.md section 5 for the sections cited above.
 
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O3 -Wall -Wextra
@@ -185,7 +185,7 @@ endif
 # Bare `make` prints the target list rather than building. Stated explicitly because the default
 # goal is otherwise the FIRST target in the file, so moving a rule would silently change it and the
 # header above would stop being true with nothing to catch it. Every Makefile in this tree answers
-# `make` the same way; see docs/CODING_RULES.md.
+# `make` the same way; see CODING_RULES.md.
 .DEFAULT_GOAL := help
 
 # Print the target list from this file's header. Those lines are marked with #: so there is one
@@ -416,7 +416,7 @@ mmdorder: mmdorder_cpp
 # which is an #include and so a compile-time dependency: if that header moves this stops building,
 # loudly, which is what makes the reference safe. The MATRICES are not referenced at all here, they
 # arrive as arguments, because a rule naming another directory's data files is the case
-# docs/WRITING_RULES.md warns about, nothing binding them and the path dying silently.
+# WRITING_RULES.md warns about, nothing binding them and the path dying silently.
 #
 # `data/` is gitignored and usually empty, so the wildcard usually expands to nothing and the
 # driver says so and exits clean. That is deliberate: a check that fails because nobody has

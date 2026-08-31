@@ -52,7 +52,7 @@ compile_commands.json
 .cache/
 
 # The vendored ordering codes (SuiteSparse AMD, Sparspak MMD). Not ours, not published, and
-# optional: both builds detect this directory rather than requiring it. See docs/DESIGN_DECISIONS.md.
+# optional: both builds detect this directory rather than requiring it. See notes/DESIGN_DECISIONS.md.
 private/
 
 # Copies of the vendored codes GENERATED on demand: retyped to int64 for the width study, and

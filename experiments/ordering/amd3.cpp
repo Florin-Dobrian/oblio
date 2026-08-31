@@ -85,11 +85,11 @@
 // tests 0.484. Fixed on alpamayo, `AMD2` at 26 a side falls from 14.88 ms to 5.45
 // and `AmdFlat` from 12.30 to 5.83, with the vendored routine and `AMD1` unmoved.
 // `hash pairs tested` is the standing witness and should stay near one per merge.
-// `docs/DESIGN_DECISIONS.md` (2026-08-09) has why five separate oracles were blind.
+// `notes/DESIGN_DECISIONS.md` (2026-08-09) has why five separate oracles were blind.
 //
 //
 // **Entry 4's nature said `convention` here until 2026-08-09, and it is a DEFECT.**
-// The README, `AMD3.md` and `docs/DESIGN_DECISIONS.md` have all said DEFECT since
+// The README, `AMD3.md` and `notes/DESIGN_DECISIONS.md` have all said DEFECT since
 // the day it was closed, and it is one by this ledger's own definition: it filed
 // every supervariable one bucket too high per vertex a hash merge absorbed, which
 // is wrong on its own terms with no appeal to AMD_2, and it was fixed in `amd2`,
@@ -245,7 +245,7 @@
 // these entries look like defects in amd2 and in production Amd2 and Amd2B rather
 // than conventions, entry 4 above all, which is mmd's entry 5 in a different array.
 // Nothing outside this file has been touched: the mmd work fixed Mmd2 only after
-// mmd3 was fully aligned, and the same order applies. `docs/TODO.md` carries the
+// mmd3 was fully aligned, and the same order applies. `notes/TODO.md` carries the
 // two items and two corrections this work owes the README.
 //
 //
@@ -260,7 +260,7 @@
 // vendored amd_2 carries beyond it, and nothing else. Both ride along with the
 // bound rather than being about the degree at all, and both are cheap only because
 // the bound's work has already been done. Section 5.13 of
-// archive/sparse_factorization.md.
+// notes/SPARSE_FACTORIZATION.md.
 //
 //   1. AGGRESSIVE ABSORPTION, which kills a clique the moment the bound work shows
 //      it lies inside the new one. |C[c] - C[pivot]| has just been computed for
@@ -285,9 +285,9 @@
 // vertices and its core takes no `eliminated` argument; this file's does. That is
 // the prototype's version of what production calls live merges.
 //
-// The other fork from md5. Section 5.13 of archive/sparse_factorization.md.
+// The other fork from md5. Section 5.13 of notes/SPARSE_FACTORIZATION.md.
 //
-// The other fork from md5. Section 5.13 of archive/sparse_factorization.md.
+// The other fork from md5. Section 5.13 of notes/SPARSE_FACTORIZATION.md.
 //
 // md5 has the quotient graph, supervariables, maintained degrees and buckets, and
 // returns exactly md1's ordering. What is left costing anything is the refresh

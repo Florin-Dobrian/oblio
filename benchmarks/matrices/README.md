@@ -675,7 +675,7 @@ supervariable rather than per column, AND its entries are supervariable represen
 `updateSize` counts rows. The measured number needs neither argument.
 
 **Why measure it on real matrices at all.** On grids it is about 2x `tril(A)` in 2D and up to 4.5x
-on cubes, recorded in `docs/DESIGN_DECISIONS.md` (2026-08-16). But the compression is bought
+on cubes, recorded in `notes/DESIGN_DECISIONS.md` (2026-08-16). But the compression is bought
 entirely by mass elimination, so it is a property of the MATRIX, not of the method: where
 supervariables barely form, the arena approaches `nnz(L)`. Grids are a friendly case, and this table
 is where an unfriendly one would show up. That matters because our arena, unlike the two vendored
@@ -1104,7 +1104,7 @@ and 0.2 percent of a grid, and it moved those five rows from 2.5 to 2.8x down to
 all, an `Mmd3` ordering is roughly a third `QuotientGraphFlat` construction and a sixth
 `orderAscending`. Construction allocates and initializes about ten size-n arrays where genmmd
 allocates five plus its 1-based copies, which is the array-count finding of that morning moved into
-the constructor, invisible on a grid because real work amortizes it. `docs/NEXT.md` item 8 carries
+the constructor, invisible on a grid because real work amortizes it. `notes/NEXT.md` item 8 carries
 it as an experiment rather than as an optimization, and the reason is in these numbers: the
 matrices in question order in tenths of a millisecond and need no ordering at all.
 

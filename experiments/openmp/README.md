@@ -3,9 +3,9 @@
 How much parallelism does Oblio already have without asking, and how much is left for
 OpenMP to take? Reference / teaching only, **not** part of the main Oblio build.
 
-`docs/ARCHITECTURE.md` says node parallelism is present and free through Accelerate
+`notes/ARCHITECTURE.md` says node parallelism is present and free through Accelerate
 while tree parallelism is absent and would be Oblio's to build, and
-`docs/DESIGN_DECISIONS.md` (2026-07-22) recommends OpenMP for the second. Both
+`notes/DESIGN_DECISIONS.md` (2026-07-22) recommends OpenMP for the second. Both
 statements are reasoned from documentation, and nothing in the tree has ever run a
 thread. This experiment puts numbers on the first, because until the free part is
 measured the second cannot be priced.
@@ -138,7 +138,7 @@ both, so the sweep now stops at 512 for both.
 
 ## The BLAS cap
 
-`docs/TODO.md` asks that any parallel forest region cap the BLAS to one thread per
+`notes/TODO.md` asks that any parallel forest region cap the BLAS to one thread per
 front, since a self-threading BLAS otherwise oversubscribes the cores. Here that is a
 measurement rather than a warning. The cap is an environment variable set from outside
 the process (`VECLIB_MAXIMUM_THREADS` for Accelerate, `OPENBLAS_NUM_THREADS` for
@@ -445,7 +445,7 @@ where bit-reproducibility is being asserted, as it is in this experiment's own c
 A fourth thing is not a correctness matter but decides everything: a dependency graph is
 not a parallel loop. `parallel for` handles independent iterations. A tree or DAG needs
 the code already expressed as tasks, usually through recursion, which is a restructure
-rather than an annotation. That is why `docs/TODO.md` lists four code changes for
+rather than an annotation. That is why `notes/TODO.md` lists four code changes for
 `factorMultifrontal` rather than a pragma.
 
 ## Correctness
@@ -787,11 +787,11 @@ which nothing links against Homebrew's copy.
 
 ## Related
 
-- `docs/ARCHITECTURE.md`, the traversal-choice section, for node against tree
+- `notes/ARCHITECTURE.md`, the traversal-choice section, for node against tree
   parallelism, the MUMPS node types, and the AMX inversion this measures.
-- `docs/DESIGN_DECISIONS.md` (2026-07-22), for why OpenMP first and what the
+- `notes/DESIGN_DECISIONS.md` (2026-07-22), for why OpenMP first and what the
   alternatives cost.
-- `docs/TODO.md`, "Forest (tree) parallelism on Apple Silicon", the work item this
+- `notes/TODO.md`, "Forest (tree) parallelism on Apple Silicon", the work item this
   experiment is reconnaissance for.
 - `../friend-access/`, for the level-2 BLAS handoff and the numbers reread above.
 - J.-Y. L'Excellent and W. M. Sid-Lakhdar, "A study of shared-memory parallelism in a

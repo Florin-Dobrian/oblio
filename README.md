@@ -236,7 +236,7 @@ The cost is a configure step, a generated `build/` tree, and a second descriptio
 build to keep honest. What it buys beyond detection is the future: install targets and an exported
 config, so that a consumer can write `find_package(Oblio)`, are CMake's to give and not a
 Makefile's. That is why CMake is expected to become the primary build when the library is consumed
-from outside; see the 2026-07-31 entry in `docs/DESIGN_DECISIONS.md`.
+from outside; see the 2026-07-31 entry in `notes/DESIGN_DECISIONS.md`.
 
 ### Compiling one unit by hand
 
@@ -296,7 +296,7 @@ becomes the better choice if the work moves into the IDE, for its debugger and r
 
 PyCharm is opened separately on `experiments/ordering/`, for the Python prototypes there. The
 rule governing both, one IDE per project root and never two at the same directory, is in
-`docs/DESIGN_DECISIONS.md` (2026-07-31); the setup steps for each are in `CLAUDE.md` under Tooling.
+`notes/DESIGN_DECISIONS.md` (2026-07-31); the setup steps for each are in `CLAUDE.md` under Tooling.
 
 ## Structure
 
@@ -341,7 +341,7 @@ private/            , the vendored orderings, unpublished and optional. Both bui
   MmdCorrected.cpp  , the same routine with its degree scale repaired, and the mmd branch's
                       oracle
 tests/              , test suites (265 assertions, 237 without private/; see
-                      docs/TESTING_SPECIFICATION.md)
+                      notes/TESTING_SPECIFICATION.md)
   smoke.cpp                    5,  quick end-to-end sanity
   test_order.cpp              73,  every ordering returns a valid permutation, and each driver
                                    of ours matches its branch's reference entry for entry

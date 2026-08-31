@@ -15,7 +15,7 @@
 // duplicate entries, which our orderings are on record as not tolerating and which the vendored
 // AMD cleans in `amd_preprocess`.
 //
-// SO A DIVERGENCE HERE IS A FINDING, NOT A FAILURE OF THE EXERCISE. `docs/NEXT.md` item 6 records
+// SO A DIVERGENCE HERE IS A FINDING, NOT A FAILURE OF THE EXERCISE. `notes/NEXT.md` item 6 records
 // that AmdFlat and the vendored AMD already differ on fill on a minority of the 107-matrix
 // performance set, once by 4 percent, and calls it "a divergence the acceptance tests cannot see".
 // This is the check that would see it. The mmd branch is done first because it is the aligned one:
@@ -23,13 +23,13 @@
 // new.
 //
 // WHY IT LIVES HERE AND NOT IN benchmarks/matrices, WHERE THE MATRICES ARE. An alignment check is
-// a VERDICT. docs/CODING_RULES.md states that `test` exists exactly where something can fail,
+// a VERDICT. CODING_RULES.md states that `test` exists exactly where something can fail,
 // which is why the three benchmark directories have none: a benchmark prints a table to read. A
 // PASS or FAIL over a hundred matrices is not a table. And this file asserts the same property
 // against the same oracle as mmdorder.cpp, so the two belong where a change to one obliges the
 // other; split across directories, nothing would detect them drifting apart.
 //
-// WHAT CROSSES THE BOUNDARY IS THE DATA, AND IT CROSSES AS AN ARGUMENT. docs/WRITING_RULES.md
+// WHAT CROSSES THE BOUNDARY IS THE DATA, AND IT CROSSES AS AN ARGUMENT. WRITING_RULES.md
 // warns about a Makefile in one directory naming another directory's files: nothing binds them,
 // either may move, and the pointer dies without a sound. So no path is baked into a rule here.
 // The matrices arrive on the command line exactly as they do for matrix_accuracy_cpp, the shell
@@ -193,7 +193,7 @@ Outcome check(const std::string& path, const Options& options) {
     // necessarily, so a second identical column on every row would be noise down the page; what
     // the pair is for is the divergence, where it says whether the disagreement COSTS anything.
     // A minimum degree ordering is a heuristic and two of them may legitimately differ while
-    // filling the same, which is the distinction docs/NEXT.md item 6 turns on for the amd branch,
+    // filling the same, which is the distinction notes/NEXT.md item 6 turns on for the amd branch,
     // where ours fills LESS on the minority of matrices where the two disagree.
     //
     // Both are computed either way, and cheaply: the forest is O(n) and the fill comes off it, so

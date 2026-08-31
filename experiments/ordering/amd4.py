@@ -25,7 +25,7 @@
 # amd1 has the idea: the degree bound, computed once per clique and read once per
 # vertex. What it does not have is the rest of what amd_1 and amd_2 do, and this
 # file adds it, one pass at a time. All seven are in. Section 5.13 of
-# archive/sparse_factorization.md, plus the vendored routine itself in
+# notes/SPARSE_FACTORIZATION.md, plus the vendored routine itself in
 # vendored/vendored_amd.cpp.
 #
 # The list, split by where each item now lives:

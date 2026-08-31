@@ -13,7 +13,7 @@
 #:   make help       print this list
 #
 #: Prefix any of these with OBLIO_PUBLIC=1 to build as everyone else does, without the
-#: vendored orderings; see docs/DESIGN_DECISIONS.md. The same works in benchmarks/*/ and
+#: vendored orderings; see notes/DESIGN_DECISIONS.md. The same works in benchmarks/*/ and
 #: experiments/ordering/.
 #:
 #
@@ -96,7 +96,7 @@ OBLIO_SRCS = \
 # have. Absent, the library still builds and those three enumerators refuse, everything else being
 # unaffected. Nothing
 # is switched by hand and there is no flag to remember; a tree that has the directory behaves one
-# way and a clone behaves the other. See docs/DESIGN_DECISIONS.md.
+# way and a clone behaves the other. See notes/DESIGN_DECISIONS.md.
 # OBLIO_PUBLIC=1 builds as everyone else does, ignoring private/ even when it is there. It is the
 # same word in every Makefile in this repo that links the library, so one habit covers all of them.
 ifdef OBLIO_PUBLIC
@@ -178,7 +178,7 @@ $(VENDOR_OBJS): %.o: %.cpp .build-mode
 # every dynamic cell as unimplemented long after they worked, and nothing caught it because nothing
 # ran it. Running them here catches a crash, a hard refusal and a stale build, and nothing about
 # whether the numbers are right; their output is discarded so it cannot drown the suites. Checking
-# the numbers is the open half, in docs/TODO.md.
+# the numbers is the open half, in notes/TODO.md.
 test: tests examples
 	@pass=0; total=0; suites=0; \
 	for t in $(TEST_BINS); do \

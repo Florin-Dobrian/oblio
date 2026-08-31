@@ -10,7 +10,7 @@
 // different set: every matrix whose pattern can be read, positive definite or not, values or not.
 // 246 files rather than 107.
 //
-// WHY IT IS A BENCHMARK AND `mmdmatrices` IS NOT. docs/CODING_RULES.md draws the line at whether
+// WHY IT IS A BENCHMARK AND `mmdmatrices` IS NOT. CODING_RULES.md draws the line at whether
 // something can FAIL. An alignment check is a verdict and lives in experiments/ordering beside its
 // twin; a timing table is a table to read, and the three benchmark directories deliberately carry
 // no `test` target for exactly that reason. This file prints numbers and returns 0 whatever they
@@ -478,7 +478,7 @@ int main(int argc, char** argv) {
     // and `nnz(L)` includes the diagonal. cC/tril(A) and cC/nnz(L) say whether our arena tracked
     // the input or the factor on this matrix. On grids it is about 2x tril(A) in 2D and up to 4.5x
     // on cubes; the compression is bought by mass elimination and so is a property of the MATRIX,
-    // which is exactly why a real set is worth measuring. See docs/DESIGN_DECISIONS.md
+    // which is exactly why a real set is worth measuring. See notes/DESIGN_DECISIONS.md
     // (2026-08-16).
     //
     // pC/cC IS THE ONE THAT DECIDES ANYTHING: the fraction of the flat arena a CHUNKED clique store
@@ -495,7 +495,7 @@ int main(int argc, char** argv) {
     // are checked against the branch driver's and a mismatch is flagged at the end of the row.
     // THE DRIVER COLUMNS CARRY THE THREE-LETTER TAGS and the legend above says what each is. A run
     // is mmd or amd, never both, so the branch is not in the tag: it is in the line below and in
-    // the title already printed. Tags per the 2026-08-21 naming entry in docs/DESIGN_DECISIONS.md,
+    // the title already printed. Tags per the 2026-08-21 naming entry in notes/DESIGN_DECISIONS.md,
     // `Flt` `Chn` `Com`, plus the reference each branch is checked against, `Cor` for mmd and `Vnd`
     // for amd; `Raw` does not appear here, matrix_ordering having no such column.
     // The full names are what prose and the aggregate tables in ORDERING.md use.

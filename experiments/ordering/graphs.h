@@ -161,7 +161,7 @@ inline Graph grid3dGraph(int side) {
 // unreproducible. `std::mt19937`'s output sequence is fixed by the standard while the
 // distribution templates are implementation defined, so the partner is taken from the raw
 // engine and no `<random>` distribution appears. The same discipline, for the same reason, as
-// the tier-1 matrices in docs/TESTING_SPECIFICATION.md.
+// the tier-1 matrices in notes/TESTING_SPECIFICATION.md.
 inline Graph randomGraph(int n, int degree, unsigned seed) {
     std::mt19937 engine(seed);
     std::vector<std::set<std::int32_t>> neighbors(n);

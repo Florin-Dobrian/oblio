@@ -5,7 +5,7 @@
 # vendored amd_2 carries beyond it, and nothing else. Both ride along with the
 # bound rather than being about the degree at all, and both are cheap only because
 # the bound's work has already been done. Section 5.13 of
-# archive/sparse_factorization.md.
+# notes/SPARSE_FACTORIZATION.md.
 #
 #   1. AGGRESSIVE ABSORPTION, which kills a clique the moment the bound work shows
 #      it lies inside the new one. |C[c] - C[pivot]| has just been computed for
@@ -30,7 +30,7 @@
 # vertices and its core takes no `eliminated` argument; this file's does. That is
 # the prototype's version of what production calls live merges.
 #
-# The other fork from md5. Section 5.13 of archive/sparse_factorization.md.
+# The other fork from md5. Section 5.13 of notes/SPARSE_FACTORIZATION.md.
 #
 # md5 has the quotient graph, supervariables, maintained degrees and buckets, and
 # returns exactly md1's ordering. What is left costing anything is the refresh

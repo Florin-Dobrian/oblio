@@ -126,7 +126,7 @@ MATRICES = ../../data/*/*.mtx
 # Bare `make` prints the target list rather than building. Stated explicitly because the default
 # goal is otherwise the FIRST target in the file, so moving a rule would silently change it and the
 # header above would stop being true with nothing to catch it. Every Makefile in this tree answers
-# `make` the same way; see docs/CODING_RULES.md.
+# `make` the same way; see CODING_RULES.md.
 .DEFAULT_GOAL := help
 
 .PHONY: all read accuracy performance mmdorder amdorder clean help

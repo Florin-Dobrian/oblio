@@ -6,7 +6,7 @@
 > grids to 1.02 to 1.19x, and to 0.81 at 32 cubed; `MMD2`, `AMD2` and `AMD3` all moved with it.
 > **Fill figures are unaffected**, nothing about what is computed having changed: every
 > permutation and every nnz(L) is identical. The tables are left as they stand because a dated
-> measurement is a record of a run. `docs/DESIGN_DECISIONS.md` (2026-08-15) has the account.
+> measurement is a record of a run. `notes/DESIGN_DECISIONS.md` (2026-08-15) has the account.
 
 Written 2026-08-03, at the point where MMD1, MMD2, AMD1 and AMD2 first became stable together:
 each agrees with its prototype on the seven examples and on grids, the prototypes agree with their
@@ -288,7 +288,7 @@ accumulates so it fits an `int32`. A first version of THAT used two fresh vector
 So the standing lesson is the one this section already half-stated: **price a re-schedule by what
 it walks AND by what it makes resident.** The per-pass inventory built on 2026-08-10 counts the
 first and is silent about the second. `AMD3.md` iterations 25 and 26 and
-`docs/DESIGN_DECISIONS.md` (2026-08-10) carry the accounts.
+`notes/DESIGN_DECISIONS.md` (2026-08-10) carry the accounts.
 
 For the time half of AMD2's hash, the cause is visible in one line of each implementation.
 
@@ -361,7 +361,7 @@ Sixteen percent at 140x140 and ten at 400x400, from four member declarations. Th
 agree: genmmd widened is 1.17x of itself, ours narrowed is 1.16x of genmmd. That agreement is the
 check that the mechanism was identified rather than a number being fitted.
 
-**It is not being taken, and that is the design trade.** `docs/CODING_RULES.md` defines a position
+**It is not being taken, and that is the design trade.** `CODING_RULES.md` defines a position
 as an offset into a vector which "measures, so it is never negative, never `NIL`, and free to exceed
 2^31", and a measure is the same kind of quantity. Nothing in `QuotientGraphFlat` violates that
 rule; the finding CONFLICTS with it. Keeping `std::size_t` for sizes and positions is a decision
@@ -395,7 +395,7 @@ The width question is really a storage question, and following it one step furth
 allocated once at `slen = nzaat + nzaat/5 + 7n`, roughly `1.2 * nnz(A + A')`, and never grows.
 When `pfree` reaches `iwlen` it COMPACTS, reclaiming the space of absorbed elements and counting
 the compactions in `ncmpa`. That is sound because of the conservation bound in section 5.3 of
-`archive/sparse_factorization.md`: `|A_i| + |C_i| <= deg(i)`, since every elimination that reaches
+`notes/SPARSE_FACTORIZATION.md`: `|A_i| + |C_i| <= deg(i)`, since every elimination that reaches
 `i` replaces at least one source with the new clique and nothing manufactures a source, and every
 later mechanism either destroys sources or empties a list. So the live quotient graph never
 exceeds what the input occupied. The 20 percent elbow room buys fewer compactions, not
@@ -455,7 +455,7 @@ whoever configures the build.
 
 **Oblio holds the first, deliberately, as of 2026-08-07.** Consistency over the measured 17 to 26
 percent. The full reasoning is a statement about Oblio's integer model rather than about the
-ordering, so it lives in `docs/DESIGN_DECISIONS.md`, recorded 2026-08-08: the split is by
+ordering, so it lives in `notes/DESIGN_DECISIONS.md`, recorded 2026-08-08: the split is by
 DIMENSION, one dimensional quantities bounded below 2^31 and two dimensional ones held in 64
 bits, which is why the band between a 26 GB and a 52 GB factor that troubles a 32-bit build
 never arises here. What belongs in this report is the price, and the price is the measurement
@@ -468,7 +468,7 @@ narrow while every position stays `std::size_t`. Measured on its own that config
 of genmmd at 140x140 against 1.373x, so it is most of the width gain for none of the consistency
 cost. It is not being taken now, but it is the cheap half if the question returns.
 
-**And it points at a missing category in the type rules, 2026-08-07.** `docs/CODING_RULES.md` has
+**And it points at a missing category in the type rules, 2026-08-07.** `CODING_RULES.md` has
 two kinds of integer, an index that names an entity and may be `NIL`, and a position that offsets
 into a vector and is "free to exceed 2^31". Everything above falls between them. The distinction
 that actually holds is DIMENSIONAL:
@@ -776,7 +776,7 @@ stale MATCH rather than a collision: silent, data-dependent, and benign-looking.
 layers, with a `tag sweeps` counter as the witness that it stays inert. Production still does not,
 and the ceiling is a pragmatic placeholder rather than a derivation. The experiment README's "The
 tag guard" section carries the rule for where a check may land, which is the part that transfers;
-`docs/TODO.md` item 4 carries what is left.
+`notes/TODO.md` item 4 carries what is left.
 
 **3. The two vendored routines set the ceiling 256 times apart, and only one of them derives it.**
 AMD computes `wbig = Int_MAX_VAL - n`, with the header stating the rule outright: `wflg` may not
@@ -826,8 +826,8 @@ So this lead was correct to be suspicious and the divergence is real.
 maintained clique degree go stale after mass elimination, and the twin check could not have caught
 it at any size, because the prototype has nothing to go stale. A prototype written to read as the
 algorithm does not carry the optimization, so it cannot model a hazard that lives in one. The
-acceptance test found it instead, once widened to 3D grids. `docs/DESIGN_DECISIONS.md`
-(2026-08-09) carries the account, and `docs/TODO.md`'s first ordering question carries what
+acceptance test found it instead, once widened to 3D grids. `notes/DESIGN_DECISIONS.md`
+(2026-08-09) carries the account, and `notes/TODO.md`'s first ordering question carries what
 follows for the twins.
 
 The 3.7x work ratio is unaffected: it compares the two ways of obtaining the quantity, which is
@@ -837,7 +837,7 @@ what pass 3 is about, and both codes still do what that paragraph says they do.
 
 - **Anything but structured grids.** Two families now instead of one, which is progress, but a
   matrix with genuinely irregular structure remains untested. This is the same test-set item that
-  has been open in `docs/TODO.md` throughout.
+  has been open in `notes/TODO.md` throughout.
 - **Whether ours and the vendored routines find the same supervariable population.** The experiment
   README records both firing 2488 merges across the small test set. That was not re-verified here,
   and the opposite-signed fill results argue for re-checking it rather than trusting it.

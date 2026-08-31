@@ -23,7 +23,7 @@ It then runs each example in `examples/` and checks its exit status, printing on
 their output discarded. That is a weaker check than a suite and is not counted among the assertions
 below: it catches an example that crashes, that returns a failure, or that has quietly stopped
 being built, and says nothing about whether the numbers it prints are right. The stronger version,
-checking deterministic output, is open in docs/TODO.md and is awkward while residuals are in the
+checking deterministic output, is open in notes/TODO.md and is awkward while residuals are in the
 output, since those legitimately differ in the last bits across BLAS
 implementations. Totals today: **265 assertions across 8 suites** with the vendored orderings
 present, **237 without**. Measured 2026-08-24 by building and running both modes.
@@ -121,7 +121,7 @@ and the 2D-only version of the amd check was green while production `Amd3` carri
 degree that a 3D grid at 16 a side finds. It also found a use-after-free in the shared
 `QuotientGraphFlat` that every ordering had, which no assertion in this suite could see because the
 program was reading its own freed memory and getting the right answer back. Both are in
-`docs/DESIGN_DECISIONS.md` (2026-08-09).
+`notes/DESIGN_DECISIONS.md` (2026-08-09).
 
 **The mmd check is newer than the mmd alignment**, which is worth knowing when reading dates. The
 alignment was established on 2026-08-07 by a scratch probe that did not survive its session, and

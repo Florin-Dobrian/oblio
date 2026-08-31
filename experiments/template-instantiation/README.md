@@ -81,5 +81,5 @@ Executables carry the `_cpp` language suffix and are gitignored.
 The real tree uses **guarded explicit**: declaration-only headers, bodies + explicit
 instantiation in `.cpp`, `extern template` in headers as an intent annotation. Full
 rationale, the two-axis framing (implicit vs explicit; plain vs guarded) and the
-C++98/C++11 history, is in `../../docs/DESIGN_DECISIONS.md` (the explicit-instantiation
+C++98/C++11 history, is in `../../notes/DESIGN_DECISIONS.md` (the explicit-instantiation
 entry).

@@ -1,7 +1,7 @@
 #pragma once
 
 // Amd1.h - approximate minimum degree, Oblio's own implementation of the idea, over the shared
-// quotient graph. Section 5.13 of archive/sparse_factorization.md, and the amd1 layer of
+// quotient graph. Section 5.13 of notes/SPARSE_FACTORIZATION.md, and the amd1 layer of
 // experiments/ordering, which is the specification this is pulled from.
 //
 // The idea is Amestoy, Davis and Duff's. Refreshing degrees is the expensive step, and where MMD

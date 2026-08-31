@@ -74,5 +74,5 @@ public API everywhere else.
 
 ## Related
 
-`../../docs/DESIGN_DECISIONS.md`, the friend-access decision and the guarded-explicit
+`../../notes/DESIGN_DECISIONS.md`, the friend-access decision and the guarded-explicit
 instantiation rationale.

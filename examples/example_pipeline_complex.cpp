@@ -17,7 +17,7 @@
 // choosing the container and one choosing the input.
 //
 // **Handing a factorization the other group's matrix is not caught, and would not look wrong.**
-// Nothing validates the input's symmetry today (docs/TODO.md, "Validate the input matrix"), and
+// Nothing validates the input's symmetry today (notes/TODO.md, "Validate the input matrix"), and
 // zpotrf reads only the lower triangle and assumes the upper is its conjugate. So complex Cholesky
 // on a complex symmetric matrix runs, succeeds, and returns a plausible wrong answer: it has
 // factored the Hermitian matrix agreeing with the lower triangle, which is a different matrix. The

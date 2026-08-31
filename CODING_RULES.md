@@ -99,7 +99,7 @@ softer layer: conventions for consistency, not correctness.
   payloads there happen to be today. A row and a column really are one object under symmetry; a
   vertex and a clique are not, so no `node` can be invented for the second case. Counts follow the
   same rule, which is why the clique store's is `numBornCliqueMembers`: a clique's contents ARE
-  one kind and do have a word. Reasoning in `docs/DESIGN_DECISIONS.md` (2026-08-23).
+  one kind and do have a word. Reasoning in `notes/DESIGN_DECISIONS.md` (2026-08-23).
 
 - **The quotient graphs are header-only: `QuotientGraphFlat`, `QuotientGraphCompacted` and, when
   it is promoted, `QuotientGraphChained` keep their bodies in their headers.** Two reasons, and
@@ -140,7 +140,7 @@ softer layer: conventions for consistency, not correctness.
   - **`throw` still stays out**, per the rule further down: a throwing body in a widely
     included header degrades codegen of unrelated hot loops in the same unit.
 
-  The measurement behind it is in `docs/DESIGN_DECISIONS.md`.
+  The measurement behind it is in `notes/DESIGN_DECISIONS.md`.
 
 - **Definition order follows declaration order.** The `.cpp` defines functions in the same
   order the header declares them. The header is the table of contents; the source is the
@@ -377,7 +377,7 @@ softer layer: conventions for consistency, not correctness.
   **The counterweight, and it is why this is a convention rather than an invariant.** Separate
   arrays with honest names read better, which is why the tree had them, and a prototype in
   `experiments/ordering` should keep them. The reasoning, the four folds and what each cost are in
-  `docs/DESIGN_DECISIONS.md` (2026-08-15).
+  `notes/DESIGN_DECISIONS.md` (2026-08-15).
 
 - **Modern spellings, pin one per historical variation** (check this list before
   reintroducing an old form):

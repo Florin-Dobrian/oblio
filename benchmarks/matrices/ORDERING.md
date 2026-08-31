@@ -39,7 +39,7 @@ fill to trade against time: one `nnz(L)` column serves both routines in each tab
 only thing that differs.
 
 That check is new and it earned itself. It found FOUR divergences on the amd side, one of them a
-correctness bug in supervariable detection that had been silently costing fill; see `docs/NEXT.md`
+correctness bug in supervariable detection that had been silently costing fill; see `notes/NEXT.md`
 (2026-08-18). The mmd side needed nothing. **In these runs not one marker fired**, on either branch
 or any of the three siblings.
 
@@ -309,7 +309,7 @@ doing different work. Order and fill compare the ANSWER, and a sibling exists to
 while agreeing on the answer, so until this check there was nothing watching the thing it varies. It
 found two defects in `AmdCompacted`'s mid-walk collector within an hour of existing, neither of
 which moved a permutation or a fill figure and neither of which the digest, the vendored acceptance
-checks, `test_order` or the sanitizers could see; see `docs/NEXT.md` (2026-08-19).
+checks, `test_order` or the sanitizers could see; see `notes/NEXT.md` (2026-08-19).
 
 **Every marker was clear across the 246 on both branches**, on all three siblings.
 
@@ -442,7 +442,7 @@ formed.
 **That fourth row is NOT BUILT**, and this report is where the case for it would come from. The
 `pC/cC` column says what it would save, and the section on the arena below reads it: over the amd
 set a chunked store would hold 0.19 of what the flat arena does, and on the mmd side 0.10, with the
-worst rows at 0.01. `docs/DESIGN_DECISIONS.md` (2026-08-18) sets out the two axes all four rows sit
+worst rows at 0.01. `notes/DESIGN_DECISIONS.md` (2026-08-18) sets out the two axes all four rows sit
 on, memory against machinery; `experiments/ordering/README.md` has the mechanism.
 
 **The comparison below is therefore not "is compaction expensive".** It is the whole bargain at
@@ -589,7 +589,7 @@ question this benchmark asks.
 here NOT bounded from the input: the mmd reference chains dead segments and stays inside `O(n + m)`,
 `AmdVendored` compacts a fixed workspace, and we allocate cliques as they form and never reclaim the
 space. See
-`docs/DESIGN_DECISIONS.md` (2026-08-18) for the two axes that frames, and why the trade is
+`notes/DESIGN_DECISIONS.md` (2026-08-18) for the two axes that frames, and why the trade is
 deliberate.
 
 **The compression is often enormous.** `PARSEC/Ga41As41H72` factors to 7.22 billion entries and the

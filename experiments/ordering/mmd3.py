@@ -128,7 +128,7 @@
 # a sort per clique in a routine whose design is built on not having one.
 #
 # Everything below this header is mmd2, unchanged. Section 5.11 of
-# archive/sparse_factorization.md, plus the vendored routine itself.
+# notes/SPARSE_FACTORIZATION.md, plus the vendored routine itself.
 
 # PASS 1, THE PREPASS. genmmd numbers every vertex in the degree-1 list before the
 # main loop starts, marks each marker[mn] = maxint, and never refreshes a

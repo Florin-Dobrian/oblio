@@ -3,7 +3,7 @@
 // Naive minimum degree, nothing else. Eliminate the vertex of least degree,
 // make its neighbors a clique, repeat. The new edges are FILL: the whole point
 // of the ordering is to keep them few. Section 5.1 of
-// archive/sparse_factorization.md as code. We build on it later.
+// notes/SPARSE_FACTORIZATION.md as code. We build on it later.
 //
 // It names each fill edge as it is created, so the ordering can be seen earning
 // (or wasting) its keep, iteration by iteration.

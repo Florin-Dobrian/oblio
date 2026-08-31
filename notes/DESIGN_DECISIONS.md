@@ -178,7 +178,7 @@ change with no observable content has to demonstrate.
 ### 2. `Buckets::refile` is deleted
 
 It had no caller anywhere in the built tree, only in comments and in `retired/Amd2.cpp` and
-`retired/Amd2B.cpp`, which are out of the build. `docs/NEXT.md` had it on the dead-code list since
+`retired/Amd2B.cpp`, which are out of the build. `notes/NEXT.md` had it on the dead-code list since
 2026-08-14 as one of three inherited-and-redundant constructs, alongside the evicted list and an
 inert ternary, and it outlived both.
 
@@ -417,7 +417,7 @@ flat                   mAdjIncSrc, mCliqueSrc   two stores, runs in one and cliq
 every class            srcPtr                   the position, one field, one name
 ```
 
-`srcPtr` is deliberately spelled the same in all three, because `docs/QUOTIENT_GRAPH_USAGE.md`'s
+`srcPtr` is deliberately spelled the same in all three, because `notes/QUOTIENT_GRAPH_USAGE.md`'s
 whole exercise is that the compacted class should read as the flat one with positions into a
 different layout. A field spelled differently in the two would put a difference in the diff that is
 not a real one.
@@ -461,7 +461,7 @@ as the fill sign error of 2026-08-21 two days earlier.
 
 **AND THE BODY IS A COINCIDENCE THAT IS RECORDED AT THE DECLARATION.** `numBornCliqueMembers`
 returns the store's length rather than reading a counter, and the two agree only because nothing is
-ever reclaimed: a contraction leaves the members it drops where they lie. `docs/NEXT.md` carries
+ever reclaimed: a contraction leaves the members it drops where they lie. `notes/NEXT.md` carries
 reclaiming as a standing item, and the day it lands the two part and this needs a counter of its
 own, incremented at the one site that bears a clique. The declaration says this so that the item
 cannot silently invalidate the figure.
@@ -636,7 +636,7 @@ published under.
 vendored routine's. A difference between the flat class and the compacted one should be traceable
 to arena against pool, and where it is not, it is an accident of how the two were written. The
 compacted class is the flat one with positions into a different layout and should not differ from
-it at an algorithmic level. `docs/QUOTIENT_GRAPH_USAGE.md` carries the tables, the ledger and the
+it at an algorithmic level. `notes/QUOTIENT_GRAPH_USAGE.md` carries the tables, the ledger and the
 baseline; this entry records what was learned.
 
 **FIVE ITEMS, ALL CLOSED, and three of them turned out to be something other than what they looked
@@ -696,7 +696,7 @@ comment recording its removal. `compactions` is excluded from every column, bein
 **So the mmd pair's call sequences are IDENTICAL and the amd pair's differ in one place**, which is
 better than this entry claimed rather than worse. The lesson is small and cheap: an instrument that
 reads source text has to know what is code, and this one was believed because its answer was
-plausible. `docs/QUOTIENT_GRAPH_USAGE.md` carries the corrected figures and what remains.
+plausible. `notes/QUOTIENT_GRAPH_USAGE.md` carries the corrected figures and what remains.
 
 **Every step left every permutation unmoved**, checked at each one by the digest, `test_order`,
 both alignment checks and the sanitizers. The grid ladder was rerun after each and stayed inside
@@ -1032,7 +1032,7 @@ then evolved apart for months. The SHARED class already serves `Amd3` and `Mmd3`
 two flags, so two vendored conventions provably coexist in one body. How much of the catalogued
 divergence is the references disagreeing and how much is drift between two unreconciled copies is
 NOT settled. A private copy is a fine instrument and a poor baseline: what it shows is where one
-line of work went, not what the problem requires. See docs/NEXT.md (2026-08-19) for the one
+line of work went, not what the problem requires. See notes/NEXT.md (2026-08-19) for the one
 experiment that separates the two.
 
 ## 2026-08-19: a derived counter is only as good as the sites it is funnelled through
@@ -1213,7 +1213,7 @@ changes for that field and the conclusion follows. **Nothing about the rule is b
 What has to be stated is when the premise is allowed to change, since otherwise "it would be handy
 to have a flag here" reopens every field in the tree.
 
-Four conditions, in `docs/CODING_RULES.md`: per FIELD and never per category; the encoding written
+Four conditions, in `CODING_RULES.md`: per FIELD and never per category; the encoding written
 out at the declaration; justified by MEASUREMENT rather than by tidiness; and no range lost, checked
 rather than assumed.
 
@@ -1263,9 +1263,9 @@ weight is never read, should one appear.
 
 ### What moves with this
 
-`docs/CODING_RULES.md`, whose one dimensional bullet now carries the exception and its four
+`CODING_RULES.md`, whose one dimensional bullet now carries the exception and its four
 conditions, and whose index bullet now says `NIL` is the common sentinel rather than the only one,
-`Buckets` having carried `UNFILED` and `OUTMATCHED` all along. `docs/NEXT.md` bucket 3 lists
+`Buckets` having carried `UNFILED` and `OUTMATCHED` all along. `notes/NEXT.md` bucket 3 lists
 `mWeight` among the arrays narrowed on 2026-08-11 and is now wrong about that one.
 
 ---
@@ -2028,7 +2028,7 @@ allocates five plus its 1-based copies. **That is the array-count finding of the
 moved from the loops into the constructor**, and the reason nobody saw it is that a grid amortizes
 it against real work while a diagonal has none to amortize against.
 
-It is recorded as an experiment rather than an optimization, `docs/NEXT.md` item 8, and the numbers
+It is recorded as an experiment rather than an optimization, `notes/NEXT.md` item 8, and the numbers
 say why: those matrices order in tenths of a millisecond and need no ordering at all. What the case
 is good for is isolating a question a grid conflates, what a container costs per ACCESS in a hot
 loop against what it costs per ARRAY at setup. The three failed attacks above were all aimed at the
@@ -2145,7 +2145,7 @@ arrays, so a walk of C[pivot] pulled three cache lines per member to use 4 or 8 
 Merged into a 16-byte `VertexRun`, four to a line. genmmd needs no such struct because `xadj[rn]`
 and `xadj[rn+1]` are adjacent entries of one array and the third fact rides in `fwd`.
 
-This is `docs/TODO.md` question 3, which predicted exactly 16 bytes and four to a line in
+This is `notes/TODO.md` question 3, which predicted exactly 16 bytes and four to a line in
 August and was never measured. Measured: 20446 of 129143 D1 read misses on its three lines,
 against genmmd's 4070 for the same three facts.
 
@@ -2293,7 +2293,7 @@ member: it can go stale where a vector's own length cannot, and it is an agreeme
 check. For it: it names a concept rather than a buffer's length, it survives a change of
 representation, and in the four factor-class cases the prefix sum computes the member BEFORE the
 array is sized from it, so the member is the source and the length is the copy. Taking it would move
-the headers' own reasoning, `docs/ARCHITECTURE.md`'s accessor table and `test_pipeline`'s seventeen
+the headers' own reasoning, `notes/ARCHITECTURE.md`'s accessor table and `test_pipeline`'s seventeen
 size assertions along with it.
 
 **One that looked like this and was not, now fixed.** `Vector::mSize` was not guaranteed to equal
@@ -2710,7 +2710,7 @@ tree between candidates.** It was removed with the fusion it carried, along with
 its dispatch, its fourteen `test_order` assertions, its `test_pipeline` sweep entry and its two
 benchmark columns, and it comes back when there is something to put in it. That keeps the public
 enum a statement about what Oblio offers rather than about what is being worked on, and it keeps
-`docs/TESTING_SPECIFICATION.md`'s counts from moving twice per experiment.
+`notes/TESTING_SPECIFICATION.md`'s counts from moving twice per experiment.
 
 **It should not have been an enumerator at all, which the revert is what made obvious.** Wiring a
 one-day experiment in as a full ordering touched ten files and missed an eleventh, three files
@@ -2904,7 +2904,7 @@ the pair moved together.
 **What this obliges elsewhere**, which is the same obligation the entry-4 fix incurred on
 2026-08-08 and is now owed a second time. Every AMD2 and AMD2B fill figure in
 `benchmarks/ordering/README.md`, `benchmarks/pipeline/README.md`,
-`experiments/ordering/README.md`, `REPORT.md`, `AMD3.md` and `docs/TODO.md` predates this, INCLUDING
+`experiments/ordering/README.md`, `REPORT.md`, `AMD3.md` and `notes/TODO.md` predates this, INCLUDING
 the corrected columns that entry produced: 11900, 199386 and 444191 at 32, 100 and 140 a side become
 11900, 199591 and 450190. Each carries a superseding note rather than being rewritten, since a dated
 measurement is a record of a run. The claims those tables support are unaffected, which is worth
@@ -3502,7 +3502,7 @@ files; those are deleted and `experiments/ordering/Makefile` compiles straight f
 
 **Test counts now depend on the build**, 252 with and 238 without, the difference being fourteen
 assertions in `test_order` that check the vendored routines themselves. That is recorded in
-`docs/TESTING_SPECIFICATION.md`. Everything else asserts the same thing either way.
+`notes/TESTING_SPECIFICATION.md`. Everything else asserts the same thing either way.
 
 **Not settled here: the licenses.** AMD carries a BSD-3-Clause notice, which permits redistribution
 provided the copyright, the conditions and the disclaimer are retained; the file has the copyright
@@ -3730,7 +3730,7 @@ The order within our run is forced rather than chosen: the prune compacts the ad
 the incidence in two passes, and only adjacency-first keeps the write cursor behind the read one.
 
 **The correction this forced is worth more than the change.** Section 5.15 of
-`archive/sparse_factorization.md` had filed the whole of `Iw` under archaeology, alongside the
+`notes/SPARSE_FACTORIZATION.md` had filed the whole of `Iw` under archaeology, alongside the
 compaction, on the grounds that a flat workspace is what a language without allocation forces. That
 is right about the pool and wrong about the run. `Iw` answers two questions at once and only one is
 about Fortran: where a vertex's sources live, which the bound settles for any language, and where
@@ -6192,7 +6192,7 @@ the file separate and editable.
 
 Split:
 - **Always-on** (in CLAUDE.md or imported): invariants (inline), conventions
-  (`@docs/CODING_RULES.md`), and a distilled *Active design constraints* summary.
+  (`@CODING_RULES.md`), and a distilled *Active design constraints* summary.
 - **On demand**: the full DECISIONS log (this file, grows over time, so importing
   it would erode context), PORTING_LEDGER (porting-specific; read after a gap),
   README, archive history.

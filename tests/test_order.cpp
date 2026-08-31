@@ -113,7 +113,7 @@ static SparseMatrix<double> tridiagFull(std::size_t size){
     return SparseMatrix<double>(size,cp,ri,v); }
 int main(){
         // The vendored MMD and AMD are checked only when private/ supplies them; see
-    // docs/TESTING_SPECIFICATION.md. Fourteen assertions here are theirs, one pair on each of the
+    // notes/TESTING_SPECIFICATION.md. Fourteen assertions here are theirs, one pair on each of the
     // arrow, the diagonal and the complex arrow and one pair per size in the tridiagonal loop, so
     // the total is 59 with that directory and 45 without. Nothing else changes.
     //

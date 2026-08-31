@@ -32,7 +32,7 @@
 // The third term is cheap because it is SHARED: |C[c] - C[pivot]| depends on the
 // clique and not on the vertex, so it is one number read by every member of C[pivot]
 // whose incidence list names c. See the README section "Zooming in on md2", and 5.13
-// of archive/sparse_factorization.md.
+// of notes/SPARSE_FACTORIZATION.md.
 //
 // What follows is mdm2's own description of maintained degrees, unchanged.
 //
@@ -79,7 +79,7 @@
 //
 // So an elimination adds nothing and removes something. Each A[u] only ever
 // shrinks, which is why this representation never needs more room than the
-// original graph. Section 5.3 of archive/sparse_factorization.md.
+// original graph. Section 5.3 of notes/SPARSE_FACTORIZATION.md.
 //
 // A live vertex u is stored as A[u], its remaining explicit vertex neighbors, and
 // I[u], the ids of the cliques that contain u; C[c] holds the members of clique c,

@@ -3,7 +3,7 @@
 // Every version so far has recomputed a reachable set for EVERY live vertex at
 // EVERY iteration, just to find the smallest, then thrown all but one away. On a 3D
 // grid that is roughly ten times the necessary work, and the ratio grows with n.
-// Section 5.7 of archive/sparse_factorization.md.
+// Section 5.7 of notes/SPARSE_FACTORIZATION.md.
 //
 // The waste is easy to see once stated: eliminating a pivot can only change the
 // degrees of the vertices it REACHED. Every other vertex has the same A, the same

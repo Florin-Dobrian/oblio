@@ -33,7 +33,7 @@
 // every iteration, touched or not. What makes the tighter form available is MAINTAINED
 // degrees, which narrow the refresh set to exactly C[pivot]'s members: that is
 // mdam2. See the README section "Zooming in on md2", and 5.13 of
-// archive/sparse_factorization.md.
+// notes/SPARSE_FACTORIZATION.md.
 //
 // The trace prints bound and degree side by side, so the looseness is visible
 // rather than argued. Computing the exact degree costs the very union the bound
@@ -52,7 +52,7 @@
 //
 // So an elimination adds nothing and removes something. Each A[u] only ever
 // shrinks, which is why this representation never needs more room than the
-// original graph. Section 5.3 of archive/sparse_factorization.md.
+// original graph. Section 5.3 of notes/SPARSE_FACTORIZATION.md.
 //
 // A live vertex u is stored as A[u], its remaining explicit vertex neighbors, and
 // I[u], the ids of the cliques that contain u; C[c] holds the members of clique c,

@@ -1,7 +1,7 @@
 #pragma once
 
 // Mmd2.h - multiple minimum degree with the mechanisms that ride with the batch, over the shared
-// quotient graph. Section 5.11 of archive/sparse_factorization.md, and the mmd2 layer of
+// quotient graph. Section 5.11 of notes/SPARSE_FACTORIZATION.md, and the mmd2 layer of
 // experiments/ordering.
 //
 // MMD1 is the batch idea alone. This adds the four things genmmd does around it, and on a grid

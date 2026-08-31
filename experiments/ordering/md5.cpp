@@ -7,7 +7,7 @@
 //
 // The fix is to file each supervariable in a bucket indexed by its degree, so
 // the minimum can be found by walking UP from the last known minimum rather than
-// looking at everything. Section 5.9 of archive/sparse_factorization.md describes
+// looking at everything. Section 5.9 of notes/SPARSE_FACTORIZATION.md describes
 // this as common ground: both MMD and AMD do it, neither invented it.
 //
 // Two things make the walk cheap:

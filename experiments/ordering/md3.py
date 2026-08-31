@@ -6,7 +6,7 @@
 # INDISTINGUISHABLE from it: their whole remaining neighborhood lies inside the
 # new clique, so eliminating them next costs no fill at all. Rather than let the
 # picker rediscover them one at a time, we merge them into the pivot on the spot
-# and give the group a WEIGHT. Section 5.5 of archive/sparse_factorization.md.
+# and give the group a WEIGHT. Section 5.5 of notes/SPARSE_FACTORIZATION.md.
 #
 # What changes from md2, and it is only these three things:
 #

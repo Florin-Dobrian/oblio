@@ -32,7 +32,7 @@
 #:                                       per pivot on a cube
 #:
 #: Prefix any of these with OBLIO_PUBLIC=1 to build as everyone else does, without the vendored
-#: orderings; see docs/DESIGN_DECISIONS.md. The same word works in the repo root, both benchmarks
+#: orderings; see notes/DESIGN_DECISIONS.md. The same word works in the repo root, both benchmarks
 #: and experiments/ordering.
 #
 # Not part of the main Oblio build, and unlike experiments/ this is not a frozen study: a
@@ -113,7 +113,7 @@ endif
 # Bare `make` prints the target list rather than building. Stated explicitly because the default
 # goal is otherwise the FIRST target in the file, so moving a rule would silently change it and the
 # header above would stop being true with nothing to catch it. Every Makefile in this tree answers
-# `make` the same way; see docs/CODING_RULES.md.
+# `make` the same way; see CODING_RULES.md.
 .DEFAULT_GOAL := help
 
 # Print the target list from this file's header. Those lines are marked with #: so there is one

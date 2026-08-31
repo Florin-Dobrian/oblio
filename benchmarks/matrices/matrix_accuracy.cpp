@@ -16,7 +16,7 @@
 // OOM killer under amd where mmd factors it, at a 232-fold fill increase from delayed pivots, and
 // amd's PREDICTED fill on that matrix is lower than mmd's. So the loss is the delayed-pivot
 // cascade rather than the ordering's fill, and it is an open question rather than a reason to
-// prefer mmd generally. See docs/NEXT.md.
+// prefer mmd generally. See notes/NEXT.md.
 //
 //   ./matrix_accuracy_cpp ../../data/*/*.mtx
 //

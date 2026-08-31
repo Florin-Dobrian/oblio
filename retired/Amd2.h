@@ -1,7 +1,7 @@
 #pragma once
 
 // Amd2.h - approximate minimum degree with the mechanisms that ride with the bound, over the
-// shared quotient graph. Section 5.13 of archive/sparse_factorization.md, and the amd2 layer of
+// shared quotient graph. Section 5.13 of notes/SPARSE_FACTORIZATION.md, and the amd2 layer of
 // experiments/ordering.
 //
 // AMD1 is the bound alone. This adds the two mechanisms that make the vendored routine what it
@@ -31,7 +31,7 @@
 //
 //   DENSE ROW AND COLUMN REMOVAL. This one is a real capability rather than an artifact, a hub
 //   row wrecking an approximate degree, and it is left out for want of evidence rather than on
-//   principle: every matrix measured so far is a grid. See docs/TODO.md.
+//   principle: every matrix measured so far is a grid. See notes/TODO.md.
 //
 #include "oblio/QuotientGraph.h"
 

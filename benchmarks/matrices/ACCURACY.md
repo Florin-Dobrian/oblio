@@ -44,7 +44,7 @@ re-runs. `MmdCompacted` returns `MmdFlat`'s permutation exactly, so the change o
 **THAT PERMUTATION MOVED ON 2026-08-23 AND THE FIGURES BELOW ARE THE RE-RUN.** The mmd branch left
 genmmd's degree scale: genmmd files a vertex under its degree in `mmdint` and under its degree PLUS
 ONE in `mmdupd`, so the minimum it selects is not always the minimum, and our drivers now file at
-the true degree throughout. `docs/DESIGN_DECISIONS.md` (2026-08-23) has the account. The
+the true degree throughout. `notes/DESIGN_DECISIONS.md` (2026-08-23) has the account. The
 classification is unchanged, 106 solved and the same 30/18/56/2, and Cholesky still agrees with the
 inertia on every row; individual residuals and delay counts moved, and the largest movement is on
 `LFAT5000` and is reported below rather than smoothed over.
@@ -58,7 +58,7 @@ the ordering's fill.
 **That comparison was made against the older mmd ordering** and has not been repeated since the
 branch changed. What the new run adds is a third reading of the same phenomenon and it points the
 same way; see below. It remains an open question rather than a reason to prefer mmd generally;
-`docs/NEXT.md` carries it.
+`notes/NEXT.md` carries it.
 
 | | |
 |---|---|

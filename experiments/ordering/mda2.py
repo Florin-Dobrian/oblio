@@ -75,7 +75,7 @@
 # So the pivot-free bound is not a stage on the way to the other one. It is what a
 # recomputing picker is left with, and mda2 is the only file in the ladder that
 # uses it. See the section "Zooming in on md2" in README.md, and 5.13 of
-# archive/sparse_factorization.md.
+# notes/SPARSE_FACTORIZATION.md.
 
 # %%
 import sys

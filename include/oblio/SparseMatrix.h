@@ -60,7 +60,7 @@ public:
     // What this cannot do is change VALUES while keeping the structure, which is the
     // refactorization case, one analyze serving many factor calls. Assignment discards the
     // structure the symbolic phase was computed from, which is the thing that case needs to
-    // keep. See docs/TODO.md.
+    // keep. See notes/TODO.md.
 
     std::size_t size() const;   // matrix dimension (number of rows / columns)
     std::size_t nnz()  const;   // number of stored entries

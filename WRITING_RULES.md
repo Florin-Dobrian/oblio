@@ -193,7 +193,7 @@ entry; it is noise wearing a document's clothes.
 - **Justification for the arrangement.** Why this file is laid out this way, why the class sits
   where it does, what the choice buys. This is the one that looks harmless because it contains no
   numbers, and it is the same defect: it is an argument about a decision, and arguments about
-  decisions live in `docs/DESIGN_DECISIONS.md`.
+  decisions live in `notes/DESIGN_DECISIONS.md`.
 
 **WHAT IS OFTEN HIDING BEHIND ALL FOUR IS AN INVARIANT, AND THAT DOES BELONG IN THE CODE.** The
 useful content of "the collector fires once per ordering at the shipped headroom" is that the
@@ -204,7 +204,7 @@ argument, and let the dated entry hold the reasoning:
 
 ```
 // Every out-of-class definition below is `inline`, and so is any variable defined here: several
-// translation units include this. See docs/CODING_RULES.md.
+// translation units include this. See CODING_RULES.md.
 ```
 
 not
@@ -221,7 +221,7 @@ not
 - **Does it tell a reader something they need in order not to break the code?** If not, it does
   not earn its place regardless of whether it is true.
 
-**And the reference goes the other way.** A comment may point at `docs/DESIGN_DECISIONS.md` for
+**And the reference goes the other way.** A comment may point at `notes/DESIGN_DECISIONS.md` for
 the reasoning, which is a free reference by the rule below, and must still read completely without
 it.
 
@@ -277,7 +277,7 @@ not inherited from the entry above.
 entry actually landed:
 
 ```
-git show <commit> -- docs/DESIGN_DECISIONS.md | grep "^+## "
+git show <commit> -- notes/DESIGN_DECISIONS.md | grep "^+## "
 ```
 
 lists the entry headings a commit introduced. If a heading's date and its commit's date disagree,

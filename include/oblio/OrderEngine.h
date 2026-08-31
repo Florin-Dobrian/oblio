@@ -43,7 +43,7 @@
 // orders in 4.25 s against the mmd branch's 50.7 s, and it is the decision that changes what a
 // caller sees, since the two branches return different permutations and different fill. Compacted
 // over flat is the store decision and changes nothing but time, the two returning one permutation.
-// See benchmarks/matrices/ORDERING.md and docs/DESIGN_DECISIONS.md.
+// See benchmarks/matrices/ORDERING.md and notes/DESIGN_DECISIONS.md.
 //
 // Two lineages sit behind these names. `MmdVendored`, `MmdCorrected` and `AmdVendored` operate on
 // raw int CSC arrays and live in private/. The first and third are vendored and untouched; the

@@ -262,7 +262,7 @@ private:
     //     |A[u]| + |I[u]| <= the number of off-diagonal entries in u's column of A
     //
     // holds for the whole run and u's block is sized once from the pattern and never grown.
-    // Section 5.3 of archive/sparse_factorization.md carries the argument.
+    // Section 5.3 of notes/SPARSE_FACTORIZATION.md carries the argument.
     //
     // THE ORDER WITHIN THE RUN IS FORCED. The prune compacts A[u] then I[u], and A[u] shrinks by
     // at least what I[u] gains, so the incidence write always trails the read cursor.

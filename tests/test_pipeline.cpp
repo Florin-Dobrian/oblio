@@ -25,7 +25,7 @@
 // Tier 2, heavy pivoting, comes later. Singular matrices are excluded on purpose: they have no
 // residual to hit, and asserting something weaker about them would only look like coverage.
 //
-// Every assertion here is listed in docs/TESTING_SPECIFICATION.md. The two are kept in sync: a
+// Every assertion here is listed in notes/TESTING_SPECIFICATION.md. The two are kept in sync: a
 // change to one is a change to the other.
 
 #include "oblio/DirectSolver.h"
@@ -70,7 +70,7 @@ void ck(bool ok, const std::string& what) {
 // Dense to CSC, full storage. **The diagonal is stored even when it is numerically zero**: a
 // direct solver needs it structurally present, since symbolic factorization builds a column's
 // index set from A's column structure and a column missing its own diagonal never enters it. See
-// the input-validation entry in docs/TODO.md; nothing enforces this yet.
+// the input-validation entry in notes/TODO.md; nothing enforces this yet.
 SparseMatrix<double> toSparse(const std::vector<std::vector<double>>& A) {
     const std::size_t n = A.size();
     std::vector<std::size_t>  colPtr(n + 1, 0);

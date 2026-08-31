@@ -12,7 +12,7 @@
 #   test_parallel_cpp          built with OpenMP
 #   test_parallel_serial_cpp   built without it, and still correct
 #
-# The serial build is the degradation claim in docs/DESIGN_DECISIONS.md made
+# The serial build is the degradation claim in notes/DESIGN_DECISIONS.md made
 # checkable. It also needs -Wno-unknown-pragmas: the pragmas are correctly ignored,
 # but -Wall reports every one of them, and the tree is otherwise -Wall -Wextra clean.
 
@@ -99,7 +99,7 @@ clean:
 # Bare `make` prints the target list rather than building. Stated explicitly because the default
 # goal is otherwise the FIRST target in the file, so moving a rule would silently change it and the
 # header above would stop being true with nothing to catch it. Every Makefile in this tree answers
-# `make` the same way; see docs/CODING_RULES.md.
+# `make` the same way; see CODING_RULES.md.
 .DEFAULT_GOAL := help
 
 # Print the target list from this file's header. Those lines are marked with #: so there is one

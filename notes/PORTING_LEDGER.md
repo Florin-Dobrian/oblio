@@ -77,8 +77,8 @@ this and does not have to re-derive it by reading.
 - **Raw owning arrays, manual `new` / `delete`** -> `std::vector`, the default container. This one
   is a CLAUDE.md invariant rather than a convention.
 
-The rules that came out of these live in `docs/CODING_RULES.md`, under C++; the reasoning and the
-two defects the sweep exposed are in the 2026-08-13 entry of `docs/DESIGN_DECISIONS.md`.
+The rules that came out of these live in `CODING_RULES.md`, under C++; the reasoning and the
+two defects the sweep exposed are in the 2026-08-13 entry of `notes/DESIGN_DECISIONS.md`.
 
 Nothing here is known to remain, which is weaker than nothing remains: the sweep followed an audit
 of four sites plus two idioms found while there, not a systematic search. A `clang-tidy` run with
@@ -198,7 +198,7 @@ obviated by lambdas).
   verification work.
 
 - **The input is not checked for Hermitian symmetry, and this is a correctness hole.** Moved to
-  docs/TODO.md, under "Validate the input matrix", where it joins the two other unchecked
+  notes/TODO.md, under "Validate the input matrix", where it joins the two other unchecked
   preconditions found since (a structurally present diagonal, and the absence of duplicate
   entries). All three want one validation pass, so they are one job rather than three, and it is
   not a porting job: neither reference validates its input either. The agreed fix, two flags on
@@ -248,7 +248,7 @@ obviated by lambdas).
   which is exactly what complex `LDL^H` needs to change.
 
   The selection loops stay separate, and that is a decision rather than unfinished work. See
-  docs/TODO.md.
+  notes/TODO.md.
 
 - **No `DenseMatrix`.** The ledger lists one as a unit. It has not been needed: a supernode's
   block is a raw pointer plus (rows, columns, leading dimension), handed straight to BLAS, which

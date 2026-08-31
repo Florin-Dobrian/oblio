@@ -15,7 +15,7 @@
 //     reach(u) = ( A[u] | C[c] for c in I[u] ) - {u}
 //
 // This is George and Liu's reachable set, and it equals the neighborhood the filled graph would
-// have. Section 5.3 of archive/sparse_factorization.md carries the derivation.
+// have. Section 5.3 of notes/SPARSE_FACTORIZATION.md carries the derivation.
 //
 // A[u] and I[u] are the two kinds of SOURCE the union is taken over, and their number falls
 // monotonically, so the two lists share one block sized once from u's column of A and never grown.
@@ -372,7 +372,7 @@ private:
     //     |A[u]| + |I[u]| <= the number of off-diagonal entries in u's column of A
     //
     // holds for the whole run and u's block is sized once from the pattern and never grown.
-    // Section 5.3 of archive/sparse_factorization.md carries the argument.
+    // Section 5.3 of notes/SPARSE_FACTORIZATION.md carries the argument.
     //
     // THE ORDER WITHIN THE RUN IS FORCED. The prune compacts A[u] then I[u], and A[u] shrinks by
     // at least what I[u] gains, so the incidence write always trails the read cursor. The other

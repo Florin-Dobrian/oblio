@@ -513,7 +513,7 @@ void NumFactorEngine::updateStaticUpdateBlock(const Factor& nf, std::int32_t jj,
     // internally and stores nothing; with the D hoisted per (row, column) it costs the same
     // arithmetic and no buffer. What it costs instead is the gemm below, which is a real library
     // call only because U12 exists in memory for it to read, and a second hand-written kernel to go
-    // with gemmLower. See "The scratch upper, and why it is not stored" in docs/ARCHITECTURE.md.
+    // with gemmLower. See "The scratch upper, and why it is not stored" in notes/ARCHITECTURE.md.
     //
     // Nothing of U12 is kept. It is consumed by the two multiplies and freed on return, and it is a
     // different object from U11 = D L11^H, which does persist, in the front's own upper triangle,
@@ -586,7 +586,7 @@ void NumFactorEngine::updateStaticUpdateMatrix(const Factor& nf, std::int32_t kk
 // popped exactly once, and a hop skips straight past ancestors jj has no rows in. What it buys is
 // that one supernode sits on one queue at a time, so the record costs O(N) in the number of
 // supernodes rather than O(pairs) -- peak storage, not operations, which are the same either way.
-// "The life of an update" in docs/ARCHITECTURE.md has the full account, including why right-looking
+// "The life of an update" in notes/ARCHITECTURE.md has the full account, including why right-looking
 // needs none of this.
 // =================================================================================================
 
@@ -1124,7 +1124,7 @@ void NumFactorEngine::factor2x2(NumFactorDynamic<Val>& nf, std::int32_t jj, std:
 //
 // The confusion is worth guarding against because the Duff literature writes its threshold as
 // `alpha` too, in the same position of the same inequality, where it means roughly 0.01 and not
-// 0.64. See Section 7 of archive/sparse_factorization.md for both algorithms side by side.
+// 0.64. See Section 7 of notes/SPARSE_FACTORIZATION.md for both algorithms side by side.
 
 // 0.9's factorDynamicLDL_ is one function with two passes selected by jjUpdateSize. The selector is
 // exactly "is this a root": the update rows are the parent edges (ElmForestEngine builds updateSize
@@ -1260,7 +1260,7 @@ void NumFactorEngine::factorDynamicRootSupernode(NumFactorDynamic<Val>& nf, std:
 // row has no column here and no diagonal, so it can be measured but not eliminated, which is why
 // scanNonRootPivotColumn stops tracking `q` once it passes jjFrontSize while `gamma` goes
 // to the full height. The two quantities are different on purpose, and 7.4 of
-// archive/sparse_factorization.md is where that distinction is argued.
+// notes/SPARSE_FACTORIZATION.md is where that distinction is argued.
 template<class Val>
 void NumFactorEngine::factorDynamicNonRootSupernode(NumFactorDynamic<Val>& nf, std::int32_t jj,
                                                     std::vector<std::int32_t>& gblToLcl) const {
@@ -1712,7 +1712,7 @@ bool NumFactorEngine::factorDynamicLeftLooking(const SparseMatrix<Val>& A, const
 // allocated and freed, plus a position write: O(1), but an allocation and a pointer chase.
 //
 // So it is O(1)-with-an-allocation against O(|Idx|)-with-locality, and which wins depends on how
-// large the index sets are. Empirical and unmeasured; see docs/TODO.md, which also notes that 0.9
+// large the index sets are. Empirical and unmeasured; see notes/TODO.md, which also notes that 0.9
 // pooled its queue nodes where this port uses std::list, so left-looking's side of the trade is
 // probably worse here than in the reference.
 // =================================================================================================

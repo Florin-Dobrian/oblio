@@ -440,7 +440,7 @@ MMD3                 0.0% exactly    1.03x to 1.49x
 
 MMD3 became the default ordering the same day, on the argument that reproducing a reference with
 decades of use behind it is a better bet on unseen inputs than a tie-break of our own tested on
-grids. Recorded in `docs/DESIGN_DECISIONS.md`.
+grids. Recorded in `notes/DESIGN_DECISIONS.md`.
 
 ---
 

@@ -6,7 +6,7 @@
 > grids to 1.02 to 1.19x, and to 0.81 at 32 cubed; `MMD2`, `AMD2` and `AmdFlat` all moved with it.
 > **Fill figures are unaffected**, nothing about what is computed having changed: every
 > permutation and every nnz(L) is identical. The tables are left as they stand because a dated
-> measurement is a record of a run. `docs/DESIGN_DECISIONS.md` (2026-08-15) has the account.
+> measurement is a record of a run. `notes/DESIGN_DECISIONS.md` (2026-08-15) has the account.
 
 > **AND THE COLUMNS CHANGED ON 2026-08-21.** `MMD1`, `MMD2`, `AMD1` and `AMD2` were retired to
 > `retired/` and are out of the build, so their rows here are a record of drivers that no longer
@@ -89,7 +89,7 @@ bound subtracts the vertex's own weight before the merge that grows it, where `A
 it after supervariable detection. Corrected, AMD2's fill is 11900 at 32 a side, 199386 at 100 and
 444191 at 140, against the 12364, 212496 and 487111 recorded here, so it now beats AMD1 at every
 size and the vendored AMD at the two larger ones. The figures below are kept as the record of the
-run that produced them. `docs/DESIGN_DECISIONS.md` (2026-08-08) and `docs/TODO.md` carry the
+run that produced them. `notes/DESIGN_DECISIONS.md` (2026-08-08) and `notes/TODO.md` carry the
 finding; nothing about MMD, AMD or AMD1 moved.
 
 **AND SUPERSEDED AGAIN, 2026-08-09, and this time the folder WAS re-run.** Ledger entry 8 fixed the
@@ -303,7 +303,7 @@ section was written against.
 
 **Multifrontal is about twice as fast as left-looking here**, 3.4 to 3.9 ms against 7.3 to 7.6, on
 every ordering and at every size. That is the largest single effect in the table.
-`docs/ARCHITECTURE.md` describes the traversal trade and says explicitly that it is not measured;
+`notes/ARCHITECTURE.md` describes the traversal trade and says explicitly that it is not measured;
 on grid Laplacians with Cholesky it now is, and multifrontal wins outright. What that section says
 about the trade depending on front size is untested by this, since a grid has fat fronts by
 construction, and a tree-like matrix with thin fronts is exactly the case predicted to go the other

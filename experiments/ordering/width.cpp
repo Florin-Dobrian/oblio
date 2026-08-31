@@ -4,7 +4,7 @@
 // std::int32_t would do: mSourcePtr, mAdjacencySize, mIncidenceSize, mCliquePtr, mCliqueSize,
 // mWeight, and the drivers' degrees, outside and cliqueDegree. Every one is a count, one
 // dimensional and bounded by n, not a position into an n x n object. Widening them was a
-// deliberate decision recorded in docs/DESIGN_DECISIONS.md, taken for uniformity and for the
+// deliberate decision recorded in notes/DESIGN_DECISIONS.md, taken for uniformity and for the
 // reason that a count has no type of its own. The question this file answers is what that costs,
 // and it cannot be answered by changing our own code: retyping ours would change the code AND the
 // width at once, so a slowdown could be either.

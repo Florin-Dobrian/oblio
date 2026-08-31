@@ -1,7 +1,7 @@
 #pragma once
 
 // Mmd1.h - multiple minimum degree, Oblio's own implementation of the idea, over the shared
-// quotient graph. Section 5.11 of archive/sparse_factorization.md, and the mmd1 layer of
+// quotient graph. Section 5.11 of notes/SPARSE_FACTORIZATION.md, and the mmd1 layer of
 // experiments/ordering, which is the specification this is pulled from.
 //
 // The idea is Liu's (1985) and it is the M in MMD. Refreshing degrees is the expensive step, so

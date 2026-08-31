@@ -5,7 +5,7 @@
 // returns, only far faster. Everything left costs something.
 //
 // This is the first layer that changes the ANSWER. Section 5.11 of
-// archive/sparse_factorization.md.
+// notes/SPARSE_FACTORIZATION.md.
 //
 // The idea, from Liu (1985), is the M in MMD. Refreshing degrees is the expensive
 // iteration, so do it less often: eliminate a whole INDEPENDENT SET of least-degree

@@ -1,6 +1,6 @@
 // amd1.cpp -- approximate minimum degree, the idea alone.
 //
-// The other fork from md5. Section 5.13 of archive/sparse_factorization.md.
+// The other fork from md5. Section 5.13 of notes/SPARSE_FACTORIZATION.md.
 //
 // md5 has the quotient graph, supervariables, maintained degrees and buckets, and
 // returns exactly md1's ordering. What is left costing anything is the refresh

@@ -492,7 +492,7 @@ MmdCompacted   0.986 to 1.023
 
 So the floor is 4 to 8 per cent on most columns, which is wider than the 3 per cent this file has
 been quoting, and the vendored columns are among the noisiest, which is the standing caution in
-`docs/NEXT.md` about quoting `AmdFlat / AMD` per row. `AmdFlat`'s one per cent is the outlier and
+`notes/NEXT.md` about quoting `AmdFlat / AMD` per row. `AmdFlat`'s one per cent is the outlier and
 should not be read as the general case.
 
 **A RATIO BETWEEN TWO OF OUR OWN DRIVERS IS THE THING TO WATCH**, since both move together with the

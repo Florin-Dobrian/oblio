@@ -3,7 +3,7 @@ project(oblio VERSION 0.1.0 LANGUAGES C CXX)
 # C is enabled (alongside CXX) because the BLAS underscore probe below uses
 # check_c_source_compiles, a bare extern avoids C++ name-mangling of dpotrf_.
 # NOTE: VERSION is a placeholder, reconcile with the version-identity decision
-# (oblio 11 vs a fresh 1.0) recorded in docs/DESIGN_DECISIONS.md before first release.
+# (oblio 11 vs a fresh 1.0) recorded in notes/DESIGN_DECISIONS.md before first release.
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -128,7 +128,7 @@ endforeach()
 # hand, one per scalar type. The sources carry the example_ prefix, as tests/
 # carry test_, so the target names come out prefixed here with no edit. Note that
 # none of them is run by anything, here or in the Makefile, which is its own item
-# in docs/TODO.md.
+# in notes/TODO.md.
 file(GLOB EXAMPLE_SRCS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/examples/*.cpp)
 foreach(src ${EXAMPLE_SRCS})
     get_filename_component(e ${src} NAME_WE)
